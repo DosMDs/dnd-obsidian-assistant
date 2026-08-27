@@ -1,0 +1,12 @@
+# Local GigaCode instructions
+
+This file is an example only. Copy it to `.gigacode/GIGACODE.local.md` and keep that file untracked.
+
+Suitable local-only information:
+- preferred local test commands;
+- temporary WIP notes;
+- local fixture/Vault paths used only for development;
+- local Ollama endpoint names that are not secrets.
+
+Do not put passwords, API keys, bearer tokens or other secrets here.
+Do not use local instructions to override project safety/architecture rules.

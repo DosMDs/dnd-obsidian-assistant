@@ -1,0 +1,10 @@
+{
+  "$schema": "https://app.tmp_not_exist_for_test.ru/config.json",
+  // VS Code-specific GigaCode MCP configuration.
+  // Keep empty for the initial MVP development stage.
+  //
+  // Do NOT add unrestricted filesystem or shell MCP servers.
+  // If an MCP server is added later, keep trust/auto-approval disabled
+  // and allow-list only the minimum read-only tools required.
+  "mcpServers": {}
+}

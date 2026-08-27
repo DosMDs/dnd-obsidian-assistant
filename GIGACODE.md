@@ -1,0 +1,125 @@
+# D&D Session Assistant — GigaCode Project Instructions
+
+## Project purpose
+
+D&D Session Assistant is a local, offline-first Python application for long-term D&D/RPG campaign memory.
+
+The durable campaign state lives in an Obsidian Vault. Python owns trusted domain logic, validation, filesystem operations, search, calendar calculations and tool execution. Local LLMs accessed through Ollama are replaceable operators used for language understanding, tool selection, extraction, summaries and recaps.
+
+## Non-negotiable architecture
+
+1. Obsidian Vault is the only canonical Source of Truth.
+2. LLM output is never trusted until validated by Python.
+3. LLM code must never get arbitrary filesystem or shell access to the Vault.
+4. Every Vault write must flow through ToolExecutor/domain services/VaultRepository.
+5. Domain and storage layers must not depend on Ollama or any concrete model.
+6. SQLite, FTS indexes, cache and embeddings are derived data and must be rebuildable from the Vault.
+7. Game-time arithmetic is deterministic Python logic in CalendarService using canonical `world_tick`.
+8. Raw session logs are append-only and immutable after session end.
+9. Model-generated post-session changes use `ChangeSet -> validate -> review -> apply`.
+10. Ambiguous entity resolution must prefer clarification over speculative writes.
+11. Stable IDs, revisions, provenance, visibility, atomic writes and audit logging are core requirements.
+12. Do not introduce vector DB, embeddings, LoRA, voice, Web UI, graph DB, combat automation or complex RAG before MVP need is demonstrated.
+
+## Dependency order
+
+Develop in this order unless the user explicitly changes the roadmap:
+
+`Environment -> Project contracts -> Domain schemas -> VaultRepository -> Calendar -> Retrieval/EntityResolver -> Session runtime -> Tool layer -> ModelGateway/Ollama -> Fast Agent -> ChangeSet -> Post-session processing -> Campaign State -> Bootstrap -> Evals/hardening`
+
+Tests are implemented together with each stage.
+
+## Technology baseline
+
+- Python 3.12+
+- `uv`
+- Typer + Rich
+- Pydantic
+- ruamel.yaml
+- httpx
+- watchfiles
+- RapidFuzz
+- SQLite FTS5 as derived lexical index
+- pytest
+- Hypothesis
+- pytest-cov
+- respx
+- Ruff
+- Ollama as the first ModelGateway provider
+
+## Cross-platform requirements
+
+The application must run natively on Windows and macOS.
+
+- Use `pathlib.Path`.
+- Use UTF-8 explicitly for project-controlled text files.
+- Do not hard-code `C:\...`, `/Users/...`, drive letters or shell-specific paths.
+- Do not require Bash, Make, WSL or GNU-only utilities.
+- Prefer Python implementations and `uv run ...` commands.
+- Avoid `shell=True` and platform-specific shell syntax in application code.
+- Tests that touch files must use temporary directories.
+- Filesystem semantics that differ between Windows and macOS must be covered by tests when relevant.
+
+## Package boundaries
+
+Expected top-level package layout:
+
+- `cli/`: Typer commands and presentation only.
+- `application/`: orchestration/use cases.
+- `domain/`: pure domain models and deterministic business rules.
+- `storage/`: Vault Markdown/YAML persistence, atomic writes, audit, locks.
+- `retrieval/`: exact/fuzzy/FTS search and entity resolution.
+- `tools/`: ToolRegistry, ToolExecutor and safe read/write/calendar tools.
+- `models/`: ModelGateway contracts and provider adapters.
+- `prompts/`: versioned model prompts.
+- `evals/`: deterministic model evaluation logic/data.
+
+Dependency direction must point inward toward domain contracts, never from domain/storage to model providers.
+
+## Development workflow for GigaCode
+
+Before editing:
+1. Inspect the relevant existing code and tests.
+2. Identify the current roadmap stage and architectural boundary.
+3. For multi-file or architectural changes, use Plan Mode and propose affected files, tests and risks.
+4. Do not invent missing APIs if existing code can answer the question.
+
+While editing:
+1. Make the smallest coherent change.
+2. Reuse existing abstractions.
+3. Do not add a dependency unless it is necessary and justified.
+4. Keep public contracts typed and explicit.
+5. Add/update tests in the same change.
+
+Before considering a task complete:
+1. Run targeted tests first.
+2. Run `uv run pytest` when feasible.
+3. Run `uv run ruff check .`.
+4. Run `uv run ruff format --check .`.
+5. Review the diff for boundary violations, accidental generated files, secrets and unrelated edits.
+6. State what was changed, tests executed and any remaining risk.
+
+## Safety for agent actions
+
+Never perform automatically:
+- destructive Git history operations;
+- deleting or rewriting a real campaign Vault;
+- modifying `.env`, credentials, tokens or secret files;
+- adding shell/filesystem MCP servers with unrestricted write access;
+- database/schema migrations without explicit user request;
+- publishing, pushing, releasing or uploading anything;
+- changing architecture merely to make implementation easier.
+
+If an operation is destructive, irreversible, credential-related or touches a real Vault, stop and require explicit user approval.
+
+## Useful commands
+
+```text
+uv sync
+uv run pytest
+uv run ruff check .
+uv run ruff format --check .
+uv run dnd --help
+```
+
+Prefer these commands over platform-specific wrappers.

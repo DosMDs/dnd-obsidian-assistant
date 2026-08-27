@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# uv / environment
+.venv/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+.hypothesis/
+
+# Ruff
+.ruff_cache/
+
+# IDE / OS
+.DS_Store
+Thumbs.db
+
+# Local machine secrets/config
+.env
+.env.*
+
+.gigacode/GIGACODE.local.md
