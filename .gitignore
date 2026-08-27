@@ -25,4 +25,5 @@ Thumbs.db
 
 # Local GigaCode context
 .gigacode/GIGACODE.local.md
+.gigacode_vsc
 
