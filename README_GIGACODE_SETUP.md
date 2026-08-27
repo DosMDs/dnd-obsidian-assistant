@@ -4,6 +4,9 @@
 
 ```text
 GIGACODE.md
+DEVELOPMENT_STATUS.md
+docs/adr/
+docs/stages/
 .gigacode/
   rules/
   skills/
@@ -48,6 +51,7 @@ Included:
 - `testing`
 - `bug-fix`
 - `code-review`
+- `stage-workflow`
 
 Descriptions are intentionally explicit so the agent can load a skill only when the task matches.
 
@@ -118,3 +122,20 @@ If needed:
 Initial state: no MCP.
 
 Later MCP may be useful for read-only documentation or issue tracking, but it must not become a back door around the project's architecture. In particular, an MCP filesystem writer or shell executor must never be used as a mechanism for the application's LLM to modify an Obsidian Vault.
+
+
+## Development status integration
+
+`DEVELOPMENT_STATUS.md` is the canonical current-stage tracker.
+
+GigaCode must read it before implementation planning and must not automatically move to a later roadmap stage.
+
+Use ADRs in `docs/adr/` for significant decisions and stage documents in `docs/stages/` for detailed execution plans.
+
+The current stage after this update is:
+
+```text
+Stage 1 — Project skeleton + contracts
+```
+
+The status file remains authoritative if this README becomes stale.

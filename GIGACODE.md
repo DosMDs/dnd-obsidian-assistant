@@ -29,6 +29,47 @@ Develop in this order unless the user explicitly changes the roadmap:
 
 Tests are implemented together with each stage.
 
+
+## Current development status
+
+Before planning or editing code, read:
+
+```text
+DEVELOPMENT_STATUS.md
+```
+
+It is the canonical source for the **current roadmap stage and task progress**.
+
+Current stage at the time these instructions were updated:
+
+```text
+Stage 1 — Project skeleton + contracts
+```
+
+Do not assume this line is newer than `DEVELOPMENT_STATUS.md`; the status file always wins.
+
+### Stage discipline
+
+- Work primarily inside the current stage.
+- Do not pull later-stage implementation forward merely because it is convenient.
+- Do not mark a task/stage `DONE` because code was generated.
+- Completion requires implementation, required tests, successful relevant quality gates, and final diff review.
+- Do not advance the roadmap stage automatically.
+- If the user explicitly changes stage or scope, update `DEVELOPMENT_STATUS.md` as part of that change.
+- Significant architecture/development-workflow decisions belong in `docs/adr/`.
+
+### Development assistant vs runtime LLM
+
+GigaCode is a **development coding assistant**, not part of the application runtime.
+
+It may edit the source repository in the approved development workflow. It must not be treated as:
+- a `ModelGateway`;
+- campaign memory;
+- a canonical data source;
+- a permitted back door for real Vault mutation.
+
+Do not expose a real campaign Vault to unrestricted agent filesystem/shell tooling.
+
 ## Technology baseline
 
 - Python 3.12+

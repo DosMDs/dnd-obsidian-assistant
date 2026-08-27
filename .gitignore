@@ -23,4 +23,6 @@ Thumbs.db
 .env
 .env.*
 
+# Local GigaCode context
 .gigacode/GIGACODE.local.md
+
