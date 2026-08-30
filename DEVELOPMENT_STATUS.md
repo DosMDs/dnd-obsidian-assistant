@@ -1683,3 +1683,124 @@ Reviewed Stage 1 deferred contracts against completed Stage 2 domain schemas (En
 - No production-code contract changes required.
 - No placeholder DTOs or speculative APIs introduced.
 - Existing deferred-contract documentation is accurate and not stale.
+
+### S4-00 completion record
+
+**Review range:** `a8e8177..2de1fb3`
+
+**Changes:**
+
+1. **domain/calendar.py** (rewritten) — canonical Stage 4 calendar domain module:
+
+   **WorldTick:**
+   - `Annotated[int, BeforeValidator, Field]` — strict signed integer minute scalar
+   - Negative, zero, positive int accepted; bool/str/float rejected
+   - No non-negative constraint (preserves Stage-2 signed tick semantics)
+
+   **CalendarMonth:**
+   - `name: str` — non-empty, printable, no surrounding whitespace
+   - `days: int` — >= 1, bool/string rejected
+   - `extra="forbid"`, `frozen=True`
+
+   **IntercalaryDay:**
+   - `name: str` — non-empty, printable, no surrounding whitespace
+   - `after_month: str` — must reference a declared month (validated by CalendarDefinition)
+   - `extra="forbid"`, `frozen=True`
+
+   **CalendarHoliday:**
+   - `name: str` — holiday label
+   - Two mutually exclusive target forms: `month+day` (regular) or `intercalary_day` (intercalary)
+   - Holidays are labels, NOT elapsed-time units
+   - `extra="forbid"`, `frozen=True`
+
+   **GameDate:**
+   - `year: int` — signed (negative/zero/positive accepted)
+   - `month: str | None`, `day: int | None` — regular date mode
+   - `intercalary_day: str | None` — intercalary date mode
+   - `hour: int = 0`, `minute: int = 0` — time-of-day (>= 0)
+   - Shape validation: regular (month+day) vs intercalary (intercalary_day), mixed rejected
+   - `extra="forbid"`, `frozen=True`
+
+   **CalendarDefinition:**
+   - `schema_version: Literal[1] = 1`
+   - `calendar_id: str` — non-empty printable identifier
+   - `epoch: GameDate` — campaign epoch (tick 0)
+   - `months: tuple[CalendarMonth, ...]` — at least one required
+   - `intercalary_days: tuple[IntercalaryDay, ...] = ()`
+   - `holidays: tuple[CalendarHoliday, ...] = ()`
+   - `hours_per_day: int = 24`, `minutes_per_hour: int = 60`
+   - Validation: unique month names (case-insensitive), unique intercalary names, no name collision, after_month references existing month, epoch validated against definition (month/day + time-of-day), holiday references validated
+   - `extra="forbid"`, `frozen=True`
+
+   **CalendarService Protocol:**
+   - `@runtime_checkable` Protocol with `definition` property and four method signatures
+   - `date_to_tick`, `tick_to_date` — deferred to S4-01
+   - `advance_world_time`, `time_until` — deferred to S4-02
+   - No TimelineEvent query APIs (deferred to S4-03)
+   - Stateless: no mutable `current_world_tick`, no `set_world_time`/`get_world_time`
+
+2. **domain/session.py** — `world_tick_start` and `world_tick_end` now reference `WorldTick` instead of bare `int`
+
+3. **domain/events.py** — `world_tick`, `world_tick_min`, `world_tick_max` now reference `WorldTick` instead of bare `int`
+
+4. **domain/__init__.py** — exports `WorldTick`, `CalendarMonth`, `IntercalaryDay`, `CalendarHoliday`, `GameDate`, `CalendarDefinition`, `CalendarService`
+
+5. **docs/adr/0003-calendar-service-state-ownership.md** (new) — documents the decision that CalendarService is deterministic/stateless and does not own campaign current-time persistence
+
+6. **tests/unit/test_calendar_contracts.py** (new) — 102 tests covering:
+   - WorldTick: int acceptance, bool/str/float rejection (9 tests)
+   - CalendarMonth: valid, Unicode, edge days, validation, extra, frozen (14 tests)
+   - IntercalaryDay: valid, Unicode, empty/whitespace rejection, extra, frozen (8 tests)
+   - CalendarHoliday: regular, intercalary, shape validation, extra, frozen (9 tests)
+   - GameDate: regular, intercalary, year bounds, shape validation, time validation, extra, frozen (20 tests)
+   - CalendarDefinition: minimal, multi-month, Unicode, intercalary, holiday, custom time units, duplicate/collision names, after_month reference, epoch validation (month/day/time), holiday validation, empty months, bool/zero time units, extra, frozen (25 tests)
+   - CalendarService Protocol: runtime_checkable, required methods, definition property, no event-query methods yet (6 tests)
+   - Stage-2 compatibility: Session/TimelineEvent world_tick serialization as int, negative tick acceptance, bool/string rejection (11 tests)
+   - Import boundaries: no storage/models imports (3 tests)
+
+7. **DEVELOPMENT_STATUS.md** — transitioned to Stage 4 IN PROGRESS, added S4-00 task inventory
+
+**Decisions made:**
+- WorldTick is canonical strict signed integer minute scalar
+- GameDate supports regular and named intercalary dates
+- CalendarDefinition is generic and Gregorian-independent
+- Holidays are labels, not elapsed-time units
+- Intercalary days are explicit named calendar days
+- CalendarService core is stateless
+- Current-world-time persistence is NOT CalendarService-owned
+- Date conversion deferred to S4-01
+- Time arithmetic deferred to S4-02
+- TimelineEvent queries deferred to S4-03
+- No Stage-5 work
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_contracts.py` — 102 passed
+- `uv run pytest tests/unit/test_session.py tests/unit/test_timeline_event.py tests/contract/test_boundaries.py` — 266 passed
+- `uv run pytest` (full suite) — 1224 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 161 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Final diff review:**
+- No Gregorian datetime leakage
+- No stateful current_world_tick in CalendarService
+- No filesystem/storage imports
+- No LLM/model imports
+- No calendar arithmetic implemented
+- No event-query semantics invented prematurely
+- WorldTick serialized as integer (not object)
+- No new >=0 restriction breaking Stage-2 tick semantics
+- No silent month-name normalization
+- No mutable list leakage in frozen definitions
+- No Stage-5 Retrieval scope creep
+- No unrelated changes
+
+**Branch:** `main`
+**Commit SHA:** `2de1fb3a71375790a7dc78ae324ff8c52a331e4d`
+**Commit message:** `feat: define calendar domain contracts (S4-00)`
+**Push result:** Successful — `HEAD == origin/main`
+**Stage 4 status:** IN PROGRESS
+**S4-00:** Complete
+**S4-01:** NOT started
+**Stage 5:** NOT started
