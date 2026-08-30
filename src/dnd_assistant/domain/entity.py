@@ -198,7 +198,6 @@ class Entity(BaseModel):
 
     model_config = {
         "extra": "forbid",
-        "frozen": True,
     }
     """``extra="forbid"``: unknown fields are rejected.
 

@@ -443,16 +443,6 @@ class TestExtraFields:
             )
 
 
-# ── immutability ───────────────────────────────────────────────────────────
-
-
-class TestImmutability:
-    def test_model_is_frozen(self) -> None:
-        entity = _make()
-        with pytest.raises(ValidationError):
-            entity.name = "New Name"  # type: ignore[misc]
-
-
 # ── serialisation ──────────────────────────────────────────────────────────
 
 
