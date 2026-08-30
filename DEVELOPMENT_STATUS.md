@@ -306,7 +306,98 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 **Scope exclusions confirmed:**
 - No filesystem access, path validation, atomic writes, audit, repository CRUD, patch, append, locks, migrations, Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet.
 
-**Stage 3 status:** IN PROGRESS — S3-01 complete, S3-02 not started.
+### S3-02 completion record
+
+**Review range:** S3-01 completion through S3-02
+
+**Changes:**
+
+1. **storage/paths.py** (new) — Vault path safety and entity-file discovery:
+   - `DiscoveredEntityFile` — immutable result type with `entity_type` and `path` properties; supports equality, hashing, repr; no EntityId or file contents
+   - `entity_directory(vault_root, entity_type)` — resolves canonical entity directory path under vault root
+   - `resolve_entity_path(vault_root, entity_type, relative_path)` — safe relative-path resolution with:
+     - `..` traversal rejection (structural check, not resolved-path)
+     - absolute path rejection
+     - containment checks via `pathlib.relative_to` (inside entity directory AND inside vault root)
+     - Markdown-only suffix enforcement (case-insensitive)
+   - `discover_entity_files(vault_root, entity_type=None)` — recursive Markdown discovery:
+     - scans only approved MVP entity directories (Characters/NPCs, Locations, Quests, Items)
+     - ignores non-Markdown files, symlinked files, symlinked directories
+     - missing entity directory yields zero candidates (no directory creation)
+     - canonical entity path that exists as a file raises `StorageError`
+     - deterministic ordering by Vault-relative POSIX path (casefold)
+     - filesystem `OSError` translated to `StorageError` with cause preserved
+   - Internal `_resolve_vault_root` — normalises to canonical absolute resolved path; rejects missing/non-directory roots
+   - Internal `_has_traversal` — structural check for `..` components and absolute paths
+   - No Markdown parsing, no EntityId inference from filenames, no file reading
+2. **storage/__init__.py** — exports `DiscoveredEntityFile`, `discover_entity_files`, `entity_directory`, `resolve_entity_path`
+3. **tests/unit/test_storage_paths.py** (new) — 58 tests (55 pass, 3 symlink tests skipped on Windows without symlink privileges):
+   - `TestDiscoveredEntityFile` — 7 tests: construct, equality, inequality, hashable, repr, non-Discovered comparison
+   - `TestHasTraversal` — 8 tests: simple, nested, `..` rejection, nested `..`, absolute, Windows absolute, Unicode, spaces
+   - `TestResolveVaultRoot` — 5 tests: existing dir, missing, file, string path, canonical resolution
+   - `TestEntityDirectoryFn` — 6 tests (4 parametrized): all four EntityTypes, rooted under vault, invalid root
+   - `TestResolveEntityPath` — 12 tests: simple, nested, Unicode, spaces, `..` rejection, nested `..`, absolute, wrong directory escape, non-Markdown, missing root, uppercase `.MD`
+   - `TestDiscoverEntityFiles` — 12 tests: finds `.md`, ignores non-Markdown, nested subdirs, scoped to type, all-types, ignores unrelated dirs, missing dir yields empty, file-as-dir error, deterministic ordering (single type + across types), filename-not-entity-id
+   - `TestSymlinkSafety` — 3 tests (skipped when `_can_symlink()` is False): directory symlink not traversed, file symlink not returned, symlink doesn't escape entity directory
+   - `TestFilesystemErrors` — 1 test: monkeypatched `iterdir` failure raises `StorageError`
+   - Import/boundary — 6 tests: module importable, API re-exported, no model/retrieval/tool imports, no markdown codec import
+
+**Path safety invariants established:**
+- Vault root must exist and be a directory; normalised to canonical absolute resolved path
+- `..` traversal is rejected structurally (not after resolution) — presence of `..` in any path component is sufficient for rejection
+- Absolute paths are rejected at the structural check level
+- Every accepted path is contained within its canonical entity directory AND within the vault root (verified via `pathlib.relative_to`)
+- Entity paths must have `.md` suffix (case-insensitive)
+
+**Discovery policy established:**
+- Only four MVP entity directories are scanned: Characters/NPCs, Locations, Quests, Items
+- Other Vault directories (Campaign, Sessions, Lore, etc.) are NOT scanned
+- Discovery is recursive within each entity directory
+- Symlinked directories are NOT traversed
+- Symlinked files are NOT returned
+- Missing entity directories yield zero candidates (no directory creation)
+- Canonical entity path that exists as a non-directory raises `StorageError`
+- Results are deterministically ordered by Vault-relative POSIX path (casefold)
+
+**Symlink policy established:**
+- Discovery does NOT follow symlinked directories
+- Symlinked files are NOT treated as entity-file candidates
+- A symlink must never allow discovery to escape the vault root or an approved entity directory
+- Tests use `_can_symlink()` runtime check to skip when OS/environment cannot create symlinks
+
+**Filesystem error behaviour:**
+- `OSError` during directory iteration is translated to `StorageError` with original cause preserved
+- `_resolve_vault_root` translates `OSError`/`RuntimeError` to `StorageError`
+- `resolve_entity_path` uses `from None` for containment-check `ValueError` (programmer errors, not filesystem)
+
+**Confirmed: discovery does NOT read/parse Markdown or infer EntityId from filename:**
+- `DiscoveredEntityFile` has no `entity_id` attribute
+- `paths.py` does not import from `storage.markdown`
+- No file contents are read during discovery
+- Test `test_filename_not_entity_id` explicitly verifies the absence of `entity_id`
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_paths.py` — 55 passed, 3 skipped
+- `uv run pytest tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py` — 162 passed, 3 skipped
+- `uv run pytest` (full suite) — 713 passed, 3 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 72 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-02:** None
+
+**Code/test changes during S3-02:** 4 files (2 modified, 2 new), focused on path safety and entity discovery only.
+
+**Scope exclusions confirmed:**
+- No Markdown parsing changes
+- No create_entity, get_entity, list_entities, patch_entity, append_entity_fact
+- No duplicate EntityId checks, repository ID index/cache, SQLite
+- No filename generation or directory creation for entity persistence
+- No atomic write, fsync, audit JSONL, revision increments, locks, migrations
+- No Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, or ChangeSet
+
+**Stage 3 status:** IN PROGRESS — S3-02 complete, S3-03 not started.
 
 ## Current blockers
 
