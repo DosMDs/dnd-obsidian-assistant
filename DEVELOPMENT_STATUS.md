@@ -2,8 +2,8 @@
 
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
-**Current stage:** `Stage 2 — Domain schemas`  
-**Status:** `DONE`
+**Current stage:** `Stage 3 — Vault Repository`  
+**Status:** `IN PROGRESS`
 
 ## Status model
 
@@ -19,11 +19,11 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 ## Stage progress
 
 | Stage | Status | Started | Completed |
-|---|---|---:|---:|
+|---|---|---|---:|---:|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
-| 3. Vault Repository | NOT STARTED | — | — |
+| 3. Vault Repository | IN PROGRESS | 2026-08-30 | — |
 | 4. Calendar | NOT STARTED | — | — |
 | 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
 | 6. Session Runtime without LLM | NOT STARTED | — | — |
@@ -165,7 +165,74 @@ If a contract requires a domain type whose semantics belong to Stage 2, define t
 
 **Code/test changes during S2-07:** None (only DEVELOPMENT_STATUS.md updated)
 
-**Stage 3 status:** NOT STARTED — no Stage 3 implementation has been started.
+**Stage 3 status:** IN PROGRESS — S3-00 (kickoff + storage contracts) is the active task.
+
+## Stage 3 — Vault Repository
+
+### Goal
+
+Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entities, providing create, read, update, and append operations with atomic writes, optimistic concurrency, path safety, Markdown body preservation, and audit logging.
+
+### Tasks
+
+- [x] `S3-00` Stage kickoff + repository/storage contracts
+- [ ] `S3-01` Markdown/YAML document codec
+- [ ] `S3-02` Vault path safety + entity directory/discovery policy
+- [ ] `S3-03` Atomic write primitive
+- [ ] `S3-04` AuditRecord + AuditService
+- [ ] `S3-05` create_entity / get_entity / list_entities
+- [ ] `S3-06` patch_entity + optimistic concurrency
+- [ ] `S3-07` append_entity_fact
+- [ ] `S3-08` integration/failure tests
+- [ ] `S3-09` full Stage 3 verification/diff/status
+
+### S3-00 completion record
+
+**Review range:** `22a21d3..HEAD` (Stage 2 completion through S3-00)
+
+**Changes:**
+
+1. **DEVELOPMENT_STATUS.md** — transitioned to Stage 3 IN PROGRESS, added S3-00 task inventory
+2. **storage/types.py** (new) — storage-level types:
+   - `VaultDocument` — wraps validated domain `Entity` + `extra_frontmatter` dict + Markdown `body`
+   - `EntityDirectory` — StrEnum mapping EntityType to Vault subdirectories (Characters/NPCs, Locations, Quests, Items)
+   - `VaultRepository` — runtime-checkable Protocol with create/get/list/patch/append signatures
+3. **storage/__init__.py** — exports EntityDirectory, VaultDocument, VaultRepository
+4. **storage/audit.py** — updated docstring to reflect Stage 3 ownership (implementation deferred to S3-04)
+5. **tests/unit/test_storage_types.py** (new) — 27 tests covering VaultDocument construction/properties, EntityDirectory mapping, VaultRepository protocol structure, import smoke tests, and boundary checks
+
+**Decisions made:**
+- `VaultDocument` lives in `storage/` (not `domain/`) — persistence concern, not a domain concept
+- Extra frontmatter preserved as `dict[str, object]` — no weakening of `Entity.extra="forbid"`
+- `VaultRepository` is a `Protocol` (not ABC) — follows Stage 1 deferred-contract pattern
+- `EntityDirectory` is a `StrEnum` — simple, serializable, no premature path abstraction
+- Patch/fact DTOs explicitly deferred to S3-06/S3-07 — no placeholder APIs invented
+
+**Decisions intentionally deferred to later S3 tasks:**
+- Markdown/YAML parser/serializer (S3-01)
+- Filesystem entity scanning and path safety (S3-02)
+- Atomic write primitive (S3-03)
+- AuditRecord + AuditService (S3-04)
+- create/get/list persistence (S3-05)
+- patch_entity semantics and revision ownership (S3-06)
+- append_entity_fact semantics (S3-07)
+- Integration/failure tests (S3-08)
+- Full Stage 3 verification (S3-09)
+
+**ADR assessment:** No ADR required. All architectural decisions follow established project patterns (Protocol for deferred contracts, storage-level wrapper for persistence concerns, StrEnum for typed mappings).
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_types.py` — 27 passed
+- `uv run pytest` (full suite) — 578 passed
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 68 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Defects discovered during S3-00:** None
+
+**Code/test changes during S3-00:** 5 files (3 modified, 2 new), focused on storage contracts only.
+
+**Stage 3 status:** IN PROGRESS — S3-00 complete, S3-01 not started.
 
 ## Current blockers
 
