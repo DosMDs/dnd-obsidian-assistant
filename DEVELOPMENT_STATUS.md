@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-30  
-**Current milestone:** `v0.1-dev — Vault Core`  
-**Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-08 final correction)
+**Last updated:** 2026-08-30
+**Current milestone:** `v0.1-dev — Vault Core`
+**Current stage:** `Stage 3 — Vault Repository`
+**Status:** `DONE`
 
 ## Status model
 
@@ -23,7 +23,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
-| 3. Vault Repository | IN PROGRESS | 2026-08-30 | — |
+| 3. Vault Repository | DONE | 2026-08-30 | 2026-08-30 |
 | 4. Calendar | NOT STARTED | — | — |
 | 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
 | 6. Session Runtime without LLM | NOT STARTED | — | — |
@@ -184,7 +184,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - [x] `S3-06` patch_entity + optimistic concurrency
 - [x] `S3-07` append_entity_fact
 - [x] `S3-08` integration/failure tests (corrected: race safety + mutation-time reauthorization)
-- [ ] `S3-09` full Stage 3 verification/diff/status
+- [x] `S3-09` full Stage 3 verification/diff/status
 
 ### S3-00 completion record
 
@@ -1542,6 +1542,64 @@ Focused on stable-target identity enforcement only.
 - No locks/CAS/transaction manager
 - No Stage 4 Calendar implementation
 - No Retrieval, EntityResolver, Session runtime, ToolRegistry, ToolExecutor, ModelGateway, ChangeSet
+
+### S3-09 Stage 3 completion record
+
+**Review boundary:**
+- base: `22a21d3f34e6d3d028c644e4fadc7c7e1dd393a8`
+- implementation review head: `f4142483e16a06f0238384fbf103a7826d9881a4`
+- range: `22a21d3..f414248`
+
+**Historical classification:**
+- 17 Stage-3 implementation/correction commits
+- 1 concurrent auxiliary commit `a557386` (add golden test vault) inside range — auxiliary fixture content excluded from Stage-3 implementation accounting
+
+**Final implemented components:**
+- storage contracts (`VaultDocument`, `EntityDirectory`, `VaultRepository` Protocol)
+- Markdown/YAML codec (`parse`, `serialize`)
+- Vault path safety and entity discovery (`paths.py`)
+- Atomic write primitive (`atomic_write_text`)
+- Append-only audit (`AuditRecord`, `AuditContext`, `AuditService`)
+- Repository create/read/list (`ObsidianVaultRepository`)
+- Optimistic entity patching (`EntityPatch`, `patch_entity`)
+- Append entity fact (`append_entity_fact`)
+- Integration/failure hardening (race safety, mutation-time reauthorization, stable-target identity)
+
+**Final invariants confirmed:**
+- Source-of-Truth safe Vault persistence
+- Stable IDs (EntityId, not filename)
+- Revision-based optimistic concurrency
+- Markdown body preservation character-for-character
+- Extra-frontmatter semantic preservation
+- Atomic replacement (temp sibling → fsync → validator → os.replace)
+- Append-only audit with intent/committed two-phase lifecycle
+- Write-ahead intent before any filesystem mutation
+- SHA-256 exact content hashes (before/after)
+- Mutation-time path reauthorization (environment + stable-target identity)
+- Global duplicate EntityId detection
+- Failure/recovery semantics (no mutation before intent, intent remains on failure, no rollback after committed write)
+
+**Review findings:** None
+
+**Code/test/doc corrections during S3-09:**
+- Fixed trailing whitespace in DEVELOPMENT_STATUS.md line 5
+- Updated DEVELOPMENT_STATUS.md to Stage 3 DONE state
+
+**Quality gates:**
+- `uv run pytest tests/contract/test_boundaries.py` — 26 passed
+- `uv run pytest tests/unit/test_storage_*.py` — 519 passed, 19 skipped
+- `uv run pytest tests/integration/` — 52 passed, 15 skipped
+- `uv run pytest` (full suite) — 1122 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 159 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors (after trailing-whitespace fix)
+
+**Known intentional limitations:**
+- No cross-process lock/CAS — residual TOCTOU before final `os.replace`
+- Uncertain audit append may leave detectable partial tail
+- No automatic audit intent reconciliation/repair
+- Symlink tests skipped on Windows without symlink privileges (19 of 34 skipped tests are symlink-dependent)
 
 ## Current blockers
 
