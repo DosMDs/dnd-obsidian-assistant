@@ -118,7 +118,55 @@ def _resolve_vault_root(vault_root: str | Path) -> Path:
     return resolved
 
 
-# ── Entity directory resolution ─────────────────────────────────────────────
+# ── Safe canonical entity-directory resolution ──────────────────────────────
+
+
+def _resolve_entity_directory(root: Path, entity_type: EntityType) -> Path:
+    """Safely resolve a canonical entity directory path.
+
+    Derives the relative path from ``EntityDirectory``, checks that no
+    existing path component beneath ``root`` is a symlink, resolves the
+    resulting path, and verifies containment within ``root``.
+
+    Missing path components are acceptable — the check only applies to
+    components that already exist on the filesystem.
+
+    Args:
+        root: An already-resolved canonical Vault root path.
+        entity_type: The entity type whose canonical directory to resolve.
+
+    Returns:
+        The safe canonical absolute path to the entity directory.
+
+    Raises:
+        StorageError: An existing path component beneath ``root`` is a
+            symlink, or the resolved path escapes ``root``.
+    """
+    directory = EntityDirectory.for_type(entity_type)
+    relative = Path(directory.value)
+
+    # Inspect each existing path component beneath root before resolving.
+    # This catches symlinks that would be erased by .resolve().
+    accumulated = root
+    for part in relative.parts:
+        accumulated = accumulated / part
+        if accumulated.exists() and accumulated.is_symlink():
+            raise StorageError(
+                f"Canonical entity directory path component is a symlink, "
+                f"rejected for safety: {accumulated}"
+            )
+
+    resolved = accumulated.resolve(strict=False)
+
+    # Verify containment within vault root
+    try:
+        resolved.relative_to(root)
+    except ValueError:
+        raise StorageError(
+            f"Entity directory resolves outside the Vault root: {resolved}"
+        ) from None
+
+    return resolved
 
 
 def entity_directory(
@@ -131,12 +179,11 @@ def entity_directory(
     ``vault_root``.
 
     Raises:
-        StorageError: The vault_root is invalid or the entity directory
-            cannot be resolved.
+        StorageError: The vault_root is invalid, the entity directory
+            contains a symlink, or the path cannot be resolved.
     """
     root = _resolve_vault_root(vault_root)
-    directory = EntityDirectory.for_type(entity_type)
-    return (root / directory).resolve(strict=False)
+    return _resolve_entity_directory(root, entity_type)
 
 
 # ── Path traversal safety ───────────────────────────────────────────────────
@@ -189,8 +236,7 @@ def resolve_entity_path(
             Vault root, or is not a Markdown file.
     """
     root = _resolve_vault_root(vault_root)
-    entity_dir = EntityDirectory.for_type(entity_type)
-    canonical_dir = (root / entity_dir).resolve(strict=False)
+    canonical_dir = _resolve_entity_directory(root, entity_type)
 
     supplied = Path(relative_path)
 
@@ -210,7 +256,7 @@ def resolve_entity_path(
         candidate.relative_to(canonical_dir)
     except ValueError:
         raise StorageError(
-            f"Path resolves outside the '{entity_dir}' entity directory: {relative_path}"
+            f"Path resolves outside the canonical entity directory: {relative_path}"
         ) from None
 
     # Must be inside the Vault root
@@ -307,21 +353,29 @@ def discover_entity_files(
 
     if entity_type is not None:
         directories: list[tuple[EntityType, Path]] = [
-            (entity_type, (root / EntityDirectory.for_type(entity_type)).resolve(strict=False)),
+            (entity_type, _resolve_entity_directory(root, entity_type)),
         ]
     else:
         directories = []
         for ed in EntityDirectory:
             # Map EntityDirectory member back to EntityType by name
             et = EntityType[ed.name]
-            directories.append((et, (root / ed.value).resolve(strict=False)))
+            directories.append((et, _resolve_entity_directory(root, et)))
 
     all_candidates: list[DiscoveredEntityFile] = []
 
     for et, directory in directories:
         all_candidates.extend(_discover_in_directory(directory, et, root))
 
-    # Deterministic ordering: sort by Vault-relative POSIX path
-    all_candidates.sort(key=lambda c: c.path.relative_to(root).as_posix().casefold())
+    # Deterministic ordering: sort by Vault-relative POSIX path.
+    # Primary key: casefolded path (case-insensitive).
+    # Secondary key: exact path (deterministic tie-breaker for
+    # case-distinct paths on case-sensitive filesystems).
+    all_candidates.sort(
+        key=lambda c: (
+            c.path.relative_to(root).as_posix().casefold(),
+            c.path.relative_to(root).as_posix(),
+        )
+    )
 
     return all_candidates

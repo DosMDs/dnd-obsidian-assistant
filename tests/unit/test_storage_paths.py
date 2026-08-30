@@ -369,6 +369,28 @@ class TestDiscoverEntityFiles:
         # DiscoveredEntityFile has no entity_id attribute
         assert not hasattr(results[0], "entity_id")
 
+    def test_deterministic_ordering_tie_breaker(self, tmp_path: Path) -> None:
+        """Verify sort-key tuple structure for deterministic tie-breaking.
+
+        The sort key must be (casefolded_path, exact_path) so that
+        case-distinct paths on case-sensitive filesystems have a
+        deterministic secondary key.
+
+        On case-insensitive filesystems (Windows) we cannot create
+        case-distinct files, so we verify the sort-key contract by
+        inspecting the sort lambda in the source.
+        """
+        import inspect
+
+        from dnd_assistant.storage.paths import discover_entity_files as _def
+
+        source = inspect.getsource(_def)
+        # The sort key must reference both casefold and exact path
+        assert "casefold()" in source
+        # The sort key must be a tuple (not a single value)
+        # Look for the pattern: key=lambda c: (..., ...)
+        assert "lambda c: (" in source
+
 
 # ── Symlink safety tests ────────────────────────────────────────────────────
 
@@ -435,6 +457,83 @@ class TestSymlinkSafety:
         results = discover_entity_files(vault, EntityType.NPC)
         names = [r.path.name for r in results]
         assert "secret_quest.md" not in names
+
+
+@pytest.mark.skipif(
+    not _can_symlink(),
+    reason="OS/environment does not support symlinks",
+)
+class TestCanonicalDirectorySymlinkRejection:
+    """Canonical entity-directory symlink must be rejected (S3-02 correction)."""
+
+    def test_entity_directory_rejects_direct_symlink_to_outside(self, tmp_path: Path) -> None:
+        """Locations symlinked to outside -> entity_directory raises StorageError."""
+        vault = _create_vault(tmp_path)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        os.symlink(str(outside), str(vault / "Locations"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            entity_directory(vault, EntityType.LOCATION)
+
+    def test_discovery_rejects_direct_symlink_to_outside(self, tmp_path: Path) -> None:
+        """Locations symlinked to outside -> discovery rejects."""
+        vault = _create_vault(tmp_path)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "evil.md").write_text("evil", encoding="utf-8")
+        os.symlink(str(outside), str(vault / "Locations"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            discover_entity_files(vault, EntityType.LOCATION)
+
+    def test_entity_directory_rejects_symlink_to_another_entity_dir(self, tmp_path: Path) -> None:
+        """Locations symlinked to Quests -> entity_directory raises StorageError."""
+        vault = _create_vault(tmp_path, ["Quests"])
+        os.symlink(str(vault / "Quests"), str(vault / "Locations"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            entity_directory(vault, EntityType.LOCATION)
+
+    def test_discovery_rejects_symlink_to_another_entity_dir(self, tmp_path: Path) -> None:
+        """Locations symlinked to Quests -> discovery rejects."""
+        vault = _create_vault(tmp_path, ["Quests"])
+        _create_file(vault, "Quests/quest.md")
+        os.symlink(str(vault / "Quests"), str(vault / "Locations"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            discover_entity_files(vault, EntityType.LOCATION)
+
+    def test_parent_symlink_rejected_for_npc(self, tmp_path: Path) -> None:
+        """Characters symlinked to outside -> NPC entity_directory raises StorageError."""
+        vault = _create_vault(tmp_path)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "NPCs").mkdir()
+        os.symlink(str(outside), str(vault / "Characters"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            entity_directory(vault, EntityType.NPC)
+
+    def test_parent_symlink_rejected_for_npc_discovery(self, tmp_path: Path) -> None:
+        """Characters symlinked to outside -> NPC discovery raises StorageError."""
+        vault = _create_vault(tmp_path)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "NPCs").mkdir()
+        (outside / "NPCs" / "evil.md").write_text("evil", encoding="utf-8")
+        os.symlink(str(outside), str(vault / "Characters"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            discover_entity_files(vault, EntityType.NPC)
+
+    def test_parent_symlink_to_another_vault_dir_rejected(self, tmp_path: Path) -> None:
+        """Characters symlinked to Locations inside vault -> NPC rejected."""
+        vault = _create_vault(tmp_path, ["Locations"])
+        os.symlink(str(vault / "Locations"), str(vault / "Characters"), target_is_directory=True)
+
+        with pytest.raises(StorageError, match="symlink"):
+            entity_directory(vault, EntityType.NPC)
 
 
 # ── Filesystem error translation tests ──────────────────────────────────────

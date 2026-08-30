@@ -308,9 +308,9 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 
 ### S3-02 completion record
 
-**Review range:** S3-01 completion through S3-02
+**Review range:** S3-01 completion through S3-02 (including S3-02 correction)
 
-**Changes:**
+**Changes (original S3-02):**
 
 1. **storage/paths.py** (new) — Vault path safety and entity-file discovery:
    - `DiscoveredEntityFile` — immutable result type with `entity_type` and `path` properties; supports equality, hashing, repr; no EntityId or file contents
@@ -331,16 +331,27 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
    - Internal `_has_traversal` — structural check for `..` components and absolute paths
    - No Markdown parsing, no EntityId inference from filenames, no file reading
 2. **storage/__init__.py** — exports `DiscoveredEntityFile`, `discover_entity_files`, `entity_directory`, `resolve_entity_path`
-3. **tests/unit/test_storage_paths.py** (new) — 58 tests (55 pass, 3 symlink tests skipped on Windows without symlink privileges):
-   - `TestDiscoveredEntityFile` — 7 tests: construct, equality, inequality, hashable, repr, non-Discovered comparison
-   - `TestHasTraversal` — 8 tests: simple, nested, `..` rejection, nested `..`, absolute, Windows absolute, Unicode, spaces
-   - `TestResolveVaultRoot` — 5 tests: existing dir, missing, file, string path, canonical resolution
-   - `TestEntityDirectoryFn` — 6 tests (4 parametrized): all four EntityTypes, rooted under vault, invalid root
-   - `TestResolveEntityPath` — 12 tests: simple, nested, Unicode, spaces, `..` rejection, nested `..`, absolute, wrong directory escape, non-Markdown, missing root, uppercase `.MD`
-   - `TestDiscoverEntityFiles` — 12 tests: finds `.md`, ignores non-Markdown, nested subdirs, scoped to type, all-types, ignores unrelated dirs, missing dir yields empty, file-as-dir error, deterministic ordering (single type + across types), filename-not-entity-id
-   - `TestSymlinkSafety` — 3 tests (skipped when `_can_symlink()` is False): directory symlink not traversed, file symlink not returned, symlink doesn't escape entity directory
-   - `TestFilesystemErrors` — 1 test: monkeypatched `iterdir` failure raises `StorageError`
-   - Import/boundary — 6 tests: module importable, API re-exported, no model/retrieval/tool imports, no markdown codec import
+3. **tests/unit/test_storage_paths.py** (new) — 58 tests (55 pass, 3 symlink tests skipped on Windows without symlink privileges)
+
+**S3-02 correction (canonical-directory symlink hardening):**
+
+1. **storage/paths.py** — added `_resolve_entity_directory(root, entity_type)` internal helper that:
+   - inspects each existing path component beneath the vault root for symlinks before resolving
+   - rejects any symlinked canonical path component with `StorageError`
+   - verifies the resolved path remains inside the vault root
+   - is reused by `entity_directory()`, `resolve_entity_path()`, and `discover_entity_files()`
+   - also fixed stale `entity_dir` variable reference in `resolve_entity_path` error message
+2. **storage/paths.py** — strengthened discovery sort key to `(casefolded_path, exact_path)` tuple for deterministic tie-breaking on case-sensitive filesystems
+3. **tests/unit/test_storage_paths.py** — added 8 new tests (7 symlink-dependent, 1 source-inspection):
+   - `TestCanonicalDirectorySymlinkRejection` class with 7 tests:
+     - `test_entity_directory_rejects_direct_symlink_to_outside`
+     - `test_discovery_rejects_direct_symlink_to_outside`
+     - `test_entity_directory_rejects_symlink_to_another_entity_dir`
+     - `test_discovery_rejects_symlink_to_another_entity_dir`
+     - `test_parent_symlink_rejected_for_npc`
+     - `test_parent_symlink_rejected_for_npc_discovery`
+     - `test_parent_symlink_to_another_vault_dir_rejected`
+   - `test_deterministic_ordering_tie_breaker` — verifies sort-key tuple contract via source inspection
 
 **Path safety invariants established:**
 - Vault root must exist and be a directory; normalised to canonical absolute resolved path
@@ -357,12 +368,13 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - Symlinked files are NOT returned
 - Missing entity directories yield zero candidates (no directory creation)
 - Canonical entity path that exists as a non-directory raises `StorageError`
-- Results are deterministically ordered by Vault-relative POSIX path (casefold)
+- Results are deterministically ordered by Vault-relative POSIX path (casefold primary, exact path secondary)
 
 **Symlink policy established:**
 - Discovery does NOT follow symlinked directories
 - Symlinked files are NOT treated as entity-file candidates
 - A symlink must never allow discovery to escape the vault root or an approved entity directory
+- **Canonical entity-directory path components beneath the vault root must not be symlinks** — any symlink in the canonical path (e.g. `Vault/Locations` → outside, `Vault/Characters` → outside/NPCs, `Vault/Locations` → `Vault/Quests`) is rejected with `StorageError` before any resolution or discovery occurs
 - Tests use `_can_symlink()` runtime check to skip when OS/environment cannot create symlinks
 
 **Filesystem error behaviour:**
@@ -376,18 +388,20 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - No file contents are read during discovery
 - Test `test_filename_not_entity_id` explicitly verifies the absence of `entity_id`
 
-**Quality-gate results:**
-- `uv run pytest tests/unit/test_storage_paths.py` — 55 passed, 3 skipped
-- `uv run pytest tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py` — 162 passed, 3 skipped
-- `uv run pytest` (full suite) — 713 passed, 3 skipped
+**Quality-gate results (after S3-02 correction):**
+- `uv run pytest tests/unit/test_storage_paths.py` — 56 passed, 10 skipped
+- `uv run pytest tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py` — 163 passed, 10 skipped
+- `uv run pytest` (full suite) — 714 passed, 10 skipped
 - `uv run ruff check .` — All checks passed
 - `uv run ruff format --check .` — 72 files already formatted
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
 - `git diff --check` — no whitespace errors
 
-**Defects discovered during S3-02:** None
+**Defects discovered during S3-02:** Canonical entity-directory resolution (`entity_directory`, `resolve_entity_path`, `discover_entity_files`) did not check whether the canonical directory path itself contained symlinks before calling `.resolve()`, which could allow symlink-based escape or cross-type redirection. Fixed by introducing `_resolve_entity_directory()` with pre-resolution symlink inspection of each existing path component beneath the vault root.
 
-**Code/test changes during S3-02:** 4 files (2 modified, 2 new), focused on path safety and entity discovery only.
+**Code/test changes during S3-02 (original):** 4 files (2 modified, 2 new), focused on path safety and entity discovery only.
+
+**Code/test changes during S3-02 correction:** 2 files modified (storage/paths.py, tests/unit/test_storage_paths.py), focused on canonical-directory symlink hardening and deterministic sort tie-breaker.
 
 **Scope exclusions confirmed:**
 - No Markdown parsing changes
@@ -397,7 +411,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - No atomic write, fsync, audit JSONL, revision increments, locks, migrations
 - No Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, or ChangeSet
 
-**Stage 3 status:** IN PROGRESS — S3-02 complete, S3-03 not started.
+**Stage 3 status:** IN PROGRESS — S3-02 complete (with correction), S3-03 not started.
 
 ## Current blockers
 
