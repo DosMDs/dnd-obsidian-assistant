@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-03 complete)
+**Status:** `IN PROGRESS` (S3-03 complete after correction)
 
 ## Status model
 
@@ -178,7 +178,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - [x] `S3-00` Stage kickoff + repository/storage contracts
 - [x] `S3-01` Markdown/YAML document codec
 - [ ] `S3-02` Vault path safety + entity directory/discovery policy
-- [ ] `S3-03` Atomic write primitive
+- [x] `S3-03` Atomic write primitive (corrected: symlink, BaseException, validator transparency, lifecycle)
 - [ ] `S3-04` AuditRecord + AuditService
 - [ ] `S3-05` create_entity / get_entity / list_entities
 - [ ] `S3-06` patch_entity + optimistic concurrency
@@ -411,7 +411,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - No atomic write, fsync, audit JSONL, revision increments, locks, migrations
 - No Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, or ChangeSet
 
-**Stage 3 status:** IN PROGRESS — S3-02 complete (with correction), S3-03 complete.
+**Stage 3 status:** IN PROGRESS — S3-02 complete (with correction), S3-03 complete (with correction).
 
 ### S3-03 completion record
 
@@ -519,6 +519,120 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - Module-level monkeypatches (`atomic_mod._create_temp`, `atomic_mod._write_content`) failed when running in the full test suite due to module identity issues. Fixed by patching `tempfile.mkstemp` via `unittest.mock.patch`.
 
 **Code/test changes during S3-03:** 4 files (2 modified, 2 new), focused on atomic write primitive only.
+
+**Scope exclusions confirmed:**
+- No VaultRepository concrete class
+- No create_entity, get_entity, list_entities, patch_entity, append_entity_fact
+- No revision increment or optimistic concurrency
+- No audit JSONL or AuditService
+- No locks, migrations, directory creation
+- No filename generation or stable-ID lookup
+- No Markdown codec changes
+- No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet
+- S3-04 was NOT started
+
+### S3-03 correction (exception and symlink handling)
+
+**Review range:** S3-03 original through S3-03 correction
+
+**Changes:**
+
+1. **storage/atomic.py** — four corrections:
+
+   **1a. Dangling/broken symlink rejection (Correction 1):**
+   - `_validate_target()` now checks `target_path.is_symlink()` **before** `target_path.exists()`.
+   - `Path.exists()` follows symlinks and returns `False` for dangling/broken destinations, so the old ordering allowed dangling symlinks to pass through undetected.
+   - A dangling symlink is now correctly rejected with `StorageError` (same as any other symlink).
+
+   **1b. `BaseException` removed (Correction 2):**
+   - The old `except BaseException: cleanup; raise` block is removed.
+   - Cleanup is now structured via `finally:` which runs for all exit paths including `KeyboardInterrupt` and `SystemExit`.
+   - `except StorageError: raise` (re-raise without cleanup duplication) + `except Exception: cleanup; raise` + `finally: cleanup` — the `finally` call to `_cleanup_temp` is safe because `_cleanup_temp` already performs best-effort cleanup without masking the active exception.
+   - `KeyboardInterrupt` and `SystemExit` now propagate immediately while still getting best-effort temp cleanup from `finally`.
+
+   **1c. Validator exception transparency (Correction 3):**
+   - `validator(content)` runs **outside** any `OSError`-translation boundary.
+   - Implementation-owned filesystem operations (`_write_and_fsync`, `_os_replace`) each have their own narrow `OSError → StorageError` translation.
+   - The validator is called between these operations, so any exception it raises (including `OSError`) propagates unchanged — never translated to `StorageError`.
+   - `ValidationError` import removed from `atomic.py` since the module no longer needs to reference it for exception handling.
+
+   **1d. Simplified lifecycle (Correction 4):**
+   - `_write_content` + `_flush_and_fsync` + `_close_temp` replaced by single `_write_and_fsync(temp_path, content)` helper.
+   - New helper: `open → write → flush → fsync → close` in one context manager — no reopening for fsync, no ceremonial `_close_temp`.
+   - `_os_replace(src, dst)` added as a narrow `OSError → StorageError` wrapper for `os.replace`.
+   - Final lifecycle: `create temp → write+flush+fsync+close → validate → os.replace`.
+   - File descriptor is closed before validation and replacement (Windows-safe).
+
+2. **tests/unit/test_storage_atomic.py** — new tests:
+
+   **TestDanglingSymlink (4 tests, skipped on Windows without symlink privileges):**
+   - `test_dangling_symlink_rejected` — dangling symlink raises `StorageError`
+   - `test_dangling_symlink_remains_unmodified` — symlink still exists, still dangling after rejection
+   - `test_dangling_symlink_no_temp_left` — no temp files remain
+   - `test_dangling_symlink_dest_not_created` — nonexistent destination is not created
+
+   **TestValidatorExceptionTransparency (8 tests):**
+   - `test_custom_validator_exception_propagates` — `CustomValidationError` escapes unchanged
+   - `test_custom_validator_exception_target_unchanged` — existing target preserved
+   - `test_custom_validator_exception_temp_cleaned` — temp cleaned after custom exception
+   - `test_validator_oserror_propagates_unchanged` — `OSError` from validator is NOT `StorageError`
+   - `test_validator_oserror_target_unchanged` — target preserved after validator `OSError`
+   - `test_validator_oserror_temp_cleaned` — temp cleaned after validator `OSError`
+   - `test_validator_keyboardinterrupt_propagates` — `KeyboardInterrupt` propagates (no `BaseException` catch)
+   - `test_validator_keyboardinterrupt_temp_cleaned` — temp cleaned after `KeyboardInterrupt`
+
+**Final exact atomic lifecycle:**
+
+```
+create temp
+    ↓
+open for UTF-8 text writing (newline="")
+    ↓
+write content
+    ↓
+flush
+    ↓
+os.fsync(fd)
+    ↓
+close (context-manager exit)
+    ↓
+validator(content)
+    ↓
+os.replace(temp, target)
+```
+
+**Invariant:** `fsync < validate < replace` — file descriptor closed before validate and replace.
+
+**Validator exception semantics:**
+- ANY exception from validator propagates unchanged (not translated to `StorageError`)
+- This includes `ValidationError`, `OSError`, `KeyboardInterrupt`, `SystemExit`, custom exceptions
+- Temp cleanup occurs via `finally` for all paths
+
+**Filesystem OSError translation boundaries:**
+- `_create_temp()` — own `OSError → StorageError`
+- `_write_and_fsync()` — own `OSError → StorageError`
+- `_os_replace()` — own `OSError → StorageError`
+- `validator(content)` — NO translation boundary
+
+**`BaseException` confirmation:**
+- No `except BaseException` in the codebase
+- `KeyboardInterrupt` and `SystemExit` propagate through `finally` cleanup
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_atomic.py` — 44 passed, 5 skipped
+- `uv run pytest tests/unit/test_storage_atomic.py tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py` — 207 passed, 15 skipped
+- `uv run pytest` (full suite) — 758 passed, 15 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 74 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-03 correction:** Three defects in the original S3-03 implementation:
+1. Dangling/broken symlinks were not rejected (symlink check after `exists()` which follows links)
+2. `except BaseException` caught `KeyboardInterrupt`/`SystemExit`
+3. Validator exceptions (including `OSError`) could be caught by broad `except OSError` and translated to `StorageError`
+
+**Code/test changes during S3-03 correction:** 2 files modified (storage/atomic.py, tests/unit/test_storage_atomic.py), focused on exception and symlink correctness only.
 
 **Scope exclusions confirmed:**
 - No VaultRepository concrete class

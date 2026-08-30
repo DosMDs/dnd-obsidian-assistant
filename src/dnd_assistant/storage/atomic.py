@@ -2,21 +2,17 @@
 
 This module provides the low-level ``atomic_write_text`` function that
 writes a UTF-8 text string to a target file using an atomic-replacement
-lifecycle:
+lifecycle::
 
     candidate content
         ↓
     create unique temporary sibling
         ↓
-    write UTF-8 text (exact newline preservation)
+    write UTF-8 text + flush + fsync
         ↓
-    flush
-        ↓
-    fsync temporary file
+    close file descriptor
         ↓
     validate candidate content
-        ↓
-    close temporary file
         ↓
     os.replace(temp, target)
         ↓
@@ -42,7 +38,8 @@ filesystem assumptions only:
 * ``target`` must resolve to a ``Path`` value;
 * target parent directory must already exist and be a directory;
 * target itself must not be an existing directory;
-* an existing target symlink is rejected with ``StorageError``;
+* an existing target symlink (including dangling/broken) is rejected with
+  ``StorageError``;
 * ``target`` must be an absolute path.
 
 Validator contract
@@ -50,15 +47,14 @@ Validator contract
 
 ``atomic_write_text`` accepts a required ``validator`` callback that:
 
-* runs AFTER the temporary file has been flushed and fsynced;
+* runs AFTER the temporary file has been flushed, fsynced and closed;
 * runs BEFORE ``os.replace``;
 * may return any value (the return value is ignored);
-* may raise a validation/domain exception.
+* may raise any exception.
 
-If the validator raises ``dnd_assistant.errors.ValidationError`` (or any
-other deliberate caller-supplied exception), the temporary file is cleaned
-up and the exception propagates unchanged — it is **not** translated to
-``StorageError``.
+If the validator raises any exception, the temporary file is cleaned up and
+the exception propagates **unchanged** — it is never translated to
+``StorageError``, even if the exception is an ``OSError``.
 
 Usage::
 
@@ -78,7 +74,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from dnd_assistant.errors import StorageError, ValidationError
+from dnd_assistant.errors import StorageError
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
@@ -95,49 +91,38 @@ def atomic_write_text(
 
     1. Create a unique temporary file in the same directory as ``target``.
     2. Write ``content`` encoded as UTF-8 with exact newline preservation.
-    3. Flush Python's buffered writer.
-    4. ``os.fsync`` the temporary file descriptor.
+    3. Flush Python's buffered writer and ``os.fsync`` the file descriptor.
+    4. Close the temporary file (via context-manager exit).
     5. Call ``validator(content)`` — may raise to abort replacement.
-    6. Close the temporary file.
-    7. ``os.replace(temp_path, target)`` — atomic replacement.
+    6. ``os.replace(temp_path, target_path)`` — atomic replacement.
 
     Args:
         target: The destination file path (must be absolute).
         content: The UTF-8 text content to write.
         validator: A callable that receives the full ``content`` string
-            after the temporary file has been flushed and fsynced but
-            before ``os.replace``.  Raise to abort the write.
+            after the temporary file has been flushed, fsynced and closed
+            but before ``os.replace``.  Raise to abort the write.
 
     Raises:
         StorageError: A filesystem or path precondition error occurred.
-        ValidationError: Propagated unchanged from ``validator``.
+        *: Propagated unchanged from ``validator``.
     """
     target_path = _validate_target(target)
     temp_path: Path | None = None
 
     try:
         temp_path = _create_temp(target_path)
-        _write_content(temp_path, content)
-        _flush_and_fsync(temp_path)
+        _write_and_fsync(temp_path, content)
+        # validator runs outside any OSError-translation boundary so its
+        # exceptions (including OSError) propagate unchanged.
         validator(content)
-        _close_temp(temp_path)
-        os.replace(str(temp_path), str(target_path))
+        _os_replace(str(temp_path), str(target_path))
     except StorageError:
+        raise
+    except Exception:
         _cleanup_temp(temp_path)
         raise
-    except ValidationError:
-        _cleanup_temp(temp_path)
-        raise
-    except OSError as exc:
-        _cleanup_temp(temp_path)
-        raise StorageError(
-            f"Failed to atomically write {target_path}",
-            cause=exc,
-        ) from exc
-    except BaseException:
-        _cleanup_temp(temp_path)
-        raise
-    else:
+    finally:
         _cleanup_temp(temp_path)
 
 
@@ -171,13 +156,17 @@ def _validate_target(target: str | Path) -> Path:
     if not parent.is_dir():
         raise StorageError(f"Target parent is not a directory: {parent}")
 
+    # Check symlink identity BEFORE exists() — Path.exists() follows the
+    # link and returns False for dangling/broken symlinks, so a dangling
+    # symlink would otherwise pass through undetected.
+    if target_path.is_symlink():
+        raise StorageError(f"Target path is a symlink, refusing to replace: {target_path}")
+
     if target_path.exists():
         if target_path.is_dir():
             raise StorageError(
                 f"Target path is an existing directory, refusing to replace: {target_path}"
             )
-        if target_path.is_symlink():
-            raise StorageError(f"Target path is a symlink, refusing to replace: {target_path}")
 
     return target_path
 
@@ -205,61 +194,46 @@ def _create_temp(target: Path) -> Path:
         ) from exc
 
 
-def _write_content(temp_path: Path, content: str) -> None:
-    """Write ``content`` to ``temp_path`` with UTF-8 and exact newline preservation.
+def _write_and_fsync(temp_path: Path, content: str) -> None:
+    """Write ``content`` to ``temp_path``, flush and fsync.
 
     Uses ``newline=""`` to prevent Python from translating ``\\n`` to
-    ``\\r\\n`` on Windows.
+    ``\\r\\n`` on Windows.  The file descriptor is closed by the
+    context manager on exit, making the temp file safe for
+    ``os.replace`` on Windows.
+
+    Lifecycle within this helper::
+
+        open → write → flush → fsync → close
 
     Raises:
-        StorageError: Write failed.
+        StorageError: Write, flush or fsync failed.
     """
     try:
         with open(temp_path, mode="w", encoding="utf-8", newline="") as f:
             f.write(content)
-    except OSError as exc:
-        raise StorageError(
-            f"Failed to write content to temporary file: {temp_path}",
-            cause=exc,
-        ) from exc
-
-
-def _flush_and_fsync(temp_path: Path) -> None:
-    """Flush and fsync the temporary file.
-
-    Opens the file, flushes the Python buffer, then calls ``os.fsync``
-    on the file descriptor.
-
-    Raises:
-        StorageError: Flush or fsync failed.
-    """
-    try:
-        with open(temp_path, mode="ab") as f:
             f.flush()
             os.fsync(f.fileno())
     except OSError as exc:
         raise StorageError(
-            f"Failed to flush/fsync temporary file: {temp_path}",
+            f"Failed to write/flush/fsync temporary file: {temp_path}",
             cause=exc,
         ) from exc
 
 
-def _close_temp(temp_path: Path) -> None:
-    """Ensure the temporary file is closed before replacement.
+def _os_replace(src: str, dst: str) -> None:
+    """Atomic ``os.replace`` with ``OSError`` → ``StorageError`` translation.
 
-    On Windows, ``os.replace`` fails if the file is still open.
-    This is a no-op guard; the file should already be closed by
-    context-manager exit in previous steps, but we explicitly
-    re-open and close to be safe.
+    Raises:
+        StorageError: Replacement failed.
     """
-    # The file is already closed by context-manager exit in
-    # _write_content and _flush_and_fsync.  This is a safety
-    # measure for any edge case where a descriptor might remain.
     try:
-        fd = os.open(str(temp_path), os.O_RDONLY)
-        os.close(fd)
-    except OSError:
-        pass  # Best-effort; the file may already be closed
+        os.replace(src, dst)
+    except OSError as exc:
+        raise StorageError(
+            f"Failed to atomically replace {dst} with {src}",
+            cause=exc,
+        ) from exc
 
 
 def _cleanup_temp(temp_path: Path | None) -> None:

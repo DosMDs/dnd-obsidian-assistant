@@ -436,3 +436,168 @@ def test_atomic_does_not_import_tools() -> None:
 
     mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
     assert not mod_names, f"atomic imported tool modules: {mod_names}"
+
+
+class TestDanglingSymlink:
+    """Regression: dangling/broken target symlink must be rejected."""
+
+    def test_dangling_symlink_rejected(self, tmp_path: Path) -> None:
+        if not _can_symlink():
+            pytest.skip("Environment does not support symlinks")
+        parent = tmp_path / "vault"
+        parent.mkdir()
+        nonexistent = parent / "nonexistent.md"
+        symlink = parent / "link.md"
+        os.symlink(str(nonexistent), str(symlink))
+        assert not symlink.exists()  # dangling
+        assert symlink.is_symlink()  # but is a symlink
+
+        with pytest.raises(StorageError, match="symlink"):
+            atomic_write_text(symlink, "content", validator=lambda c: None)
+
+    def test_dangling_symlink_remains_unmodified(self, tmp_path: Path) -> None:
+        if not _can_symlink():
+            pytest.skip("Environment does not support symlinks")
+        parent = tmp_path / "vault"
+        parent.mkdir()
+        nonexistent = parent / "nonexistent.md"
+        symlink = parent / "link.md"
+        os.symlink(str(nonexistent), str(symlink))
+
+        with pytest.raises(StorageError):
+            atomic_write_text(symlink, "content", validator=lambda c: None)
+
+        # Symlink itself must still exist and still be dangling
+        assert symlink.is_symlink()
+        assert not symlink.exists()
+
+    def test_dangling_symlink_no_temp_left(self, tmp_path: Path) -> None:
+        if not _can_symlink():
+            pytest.skip("Environment does not support symlinks")
+        parent = tmp_path / "vault"
+        parent.mkdir()
+        nonexistent = parent / "nonexistent.md"
+        symlink = parent / "link.md"
+        os.symlink(str(nonexistent), str(symlink))
+
+        with pytest.raises(StorageError):
+            atomic_write_text(symlink, "content", validator=lambda c: None)
+
+        parent_files = list(parent.iterdir())
+        assert len(parent_files) == 1
+        assert parent_files[0] == symlink
+
+    def test_dangling_symlink_dest_not_created(self, tmp_path: Path) -> None:
+        if not _can_symlink():
+            pytest.skip("Environment does not support symlinks")
+        parent = tmp_path / "vault"
+        parent.mkdir()
+        nonexistent = parent / "nonexistent.md"
+        symlink = parent / "link.md"
+        os.symlink(str(nonexistent), str(symlink))
+
+        with pytest.raises(StorageError):
+            atomic_write_text(symlink, "content", validator=lambda c: None)
+
+        # The nonexistent destination must not have been created
+        assert not nonexistent.exists()
+
+
+class CustomValidationError(Exception):
+    """Custom exception used to test validator transparency."""
+
+
+class TestValidatorExceptionTransparency:
+    """Validator exceptions (including OSError) must propagate unchanged."""
+
+    def test_custom_validator_exception_propagates(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+
+        def validator(_c: str) -> None:
+            raise CustomValidationError("custom error")
+
+        with pytest.raises(CustomValidationError, match="custom error"):
+            atomic_write_text(target, "content", validator=validator)
+
+    def test_custom_validator_exception_target_unchanged(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        target.write_text("ORIGINAL", encoding="utf-8")
+
+        def validator(_c: str) -> None:
+            raise CustomValidationError("custom error")
+
+        with pytest.raises(CustomValidationError):
+            atomic_write_text(target, "new content", validator=validator)
+
+        assert target.read_text(encoding="utf-8") == "ORIGINAL"
+
+    def test_custom_validator_exception_temp_cleaned(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+
+        def validator(_c: str) -> None:
+            raise CustomValidationError("custom error")
+
+        with pytest.raises(CustomValidationError):
+            atomic_write_text(target, "content", validator=validator)
+
+        parent_files = list(target.parent.iterdir())
+        assert all(f == target for f in parent_files)
+
+    def test_validator_oserror_propagates_unchanged(self, tmp_path: Path) -> None:
+        """Validator raising OSError must NOT be translated to StorageError."""
+        target = _make_target(tmp_path)
+
+        def validator(_c: str) -> None:
+            raise OSError(99, "validator oserror")
+
+        with pytest.raises(OSError) as exc_info:
+            atomic_write_text(target, "content", validator=validator)
+
+        assert "validator oserror" in str(exc_info.value)
+        assert not isinstance(exc_info.value, StorageError)
+
+    def test_validator_oserror_target_unchanged(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        target.write_text("ORIGINAL", encoding="utf-8")
+
+        def validator(_c: str) -> None:
+            raise OSError(99, "validator oserror")
+
+        with pytest.raises(OSError):
+            atomic_write_text(target, "new content", validator=validator)
+
+        assert target.read_text(encoding="utf-8") == "ORIGINAL"
+
+    def test_validator_oserror_temp_cleaned(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+
+        def validator(_c: str) -> None:
+            raise OSError(99, "validator oserror")
+
+        with pytest.raises(OSError):
+            atomic_write_text(target, "content", validator=validator)
+
+        parent_files = list(target.parent.iterdir())
+        assert all(f == target for f in parent_files)
+
+    def test_validator_keyboardinterrupt_propagates(self, tmp_path: Path) -> None:
+        """KeyboardInterrupt from validator must propagate (no BaseException catch)."""
+        target = _make_target(tmp_path)
+
+        def validator(_c: str) -> None:
+            raise KeyboardInterrupt()
+
+        with pytest.raises(KeyboardInterrupt):
+            atomic_write_text(target, "content", validator=validator)
+
+    def test_validator_keyboardinterrupt_temp_cleaned(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+
+        def validator(_c: str) -> None:
+            raise KeyboardInterrupt()
+
+        with pytest.raises(KeyboardInterrupt):
+            atomic_write_text(target, "content", validator=validator)
+
+        parent_files = list(target.parent.iterdir())
+        assert all(f == target for f in parent_files)
