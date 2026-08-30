@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-08 corrected)
+**Status:** `IN PROGRESS` (S3-08 final correction)
 
 ## Status model
 
@@ -1414,6 +1414,134 @@ os.replace(temp, target)
 - No audit schema change (no `phase="aborted"`)
 - No change to `atomic_write_text` replacement semantics
 - S3-09 was NOT started
+
+### S3-08 final correction (stable-target identity)
+
+**Review range:** `473981c` through HEAD
+
+**Root cause of remaining target-identity defect:**
+
+The mutation-time reauthorization helper `_reauthorize_entity_path()` used
+`resolve_entity_path()` to verify the target path was still inside the
+approved canonical entity directory (containment check).  This is necessary
+but not sufficient — an external actor could replace a parent directory
+with a symlink to another directory inside the same canonical entity type
+directory.  The containment check would pass, but the mutation would
+target a different physical file.
+
+Additionally, `_StoredEntity._relative_path` had a silent basename fallback
+when the entity-relative path could not be derived from the canonical
+entity directory, which could hide failures for nested entities.
+
+**Exact stable-target reauthorization invariant:**
+
+```
+current_authorized_path == original_snapshot_path
+```
+
+where `original_snapshot_path = target.path`.  Equality of canonical
+`Path` values is enforced, not merely containment.
+
+**Production code changes (storage/vault_repository.py):**
+
+1. **`_reauthorize_entity_path()` strengthened:**
+   - New `expected_path` parameter (the originally selected entity path
+     from the clean snapshot).
+   - After `resolve_entity_path()` confirms containment, the resolved
+     current path is compared against `expected_path` with `==`.
+   - Mismatch raises `StorageError` with both paths in the diagnostic.
+   - Path comparison uses canonical `Path` equality (not string).
+
+2. **`_commit_entity_mutation()` updated:**
+   - Calls `_reauthorize_entity_path()` with `expected_path=target.path`.
+
+3. **`_StoredEntity.relative_path` derivation hardened:**
+   - Silent `Path(path.name)` basename fallback removed.
+   - If `path.relative_to(canon_dir)` fails, a `StorageError` is raised
+     with the canonical directory path and cause preserved.
+   - Every `_StoredEntity` produced by a clean snapshot now has a
+     correctly derived entity-relative path.
+
+**Create stable-target check preserved unchanged:**
+`create_entity` already performs `reauthorized != target` comparison
+after intent.  No changes to create logic.
+
+**Audit revalidation preserved unchanged:**
+`_validate_mutation_environment()` and audit parent symlink protection
+are unchanged.
+
+**atomic_write_text unchanged:**
+No changes to the atomic write primitive.
+
+**No locks/CAS/transaction manager added.**
+
+**Test changes (tests/integration/test_vault_repository_path_races.py):**
+
+| Test class | Tests | Status |
+|---|---|---|
+| TestStableTargetIdentity | 3 tests (NEW) | 3 passed |
+| TestNestedParentRedirectStableTarget | 2 tests (NEW) | 2 skipped (symlink) |
+| TestTargetFileSymlinkRedirect | 2 tests (NEW) | 2 skipped (symlink) |
+
+**TestStableTargetIdentity (cross-platform, no symlinks):**
+- `test_different_file_under_same_directory_rejected` — two valid normal
+  files under the same entity directory; `relative_path` resolves to a
+  different file than `expected_path`; expects `StorageError`.
+- `test_same_file_under_same_directory_accepted` — same file resolves to
+  itself; must succeed.
+- `test_nested_entity_relative_path_preserved` — nested path like
+  `Allies/Subgroup/entity.md` is preserved exactly and works for
+  reauthorization.
+
+**TestNestedParentRedirectStableTarget (symlink-capable):**
+- `test_nested_parent_redirect_to_same_type_dir_rejected` — parent
+  `Allies/` replaced by symlink to `Other/` (same canonical type dir);
+  `Other/entity.md` has identical bytes so revision/hash would match;
+  expects `StorageError` from stable-target identity check (not
+  `ConflictError`).  Verifies redirected target unchanged, no committed
+  audit, intent remains.
+- `test_nested_parent_redirect_blocks_append` — same scenario for
+  `append_entity_fact`.
+
+**TestTargetFileSymlinkRedirect (symlink-capable):**
+- `test_target_file_symlink_redirect_after_intent` — target file replaced
+  after intent by a symlink to another file inside the same canonical
+  type directory; expects `StorageError` or `ConflictError`; verifies
+  redirect target unchanged, no committed audit.
+- `test_target_file_symlink_redirect_after_intent_append` — same scenario
+  for `append_entity_fact`.
+
+**Residual race statement:**
+After target reauthorization + revision/hash second check, there remains
+a small TOCTOU window before `os.replace`.  No cross-process lock,
+filesystem CAS, or transaction manager is claimed.  Fully race-free
+multiprocess writes are not within S3-08 scope.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/integration/test_vault_repository_path_races.py` — 9 passed, 15 skipped
+- `uv run pytest tests/integration/` — 52 passed, 15 skipped
+- `uv run pytest tests/unit/test_storage_paths.py` — 56 passed, 10 skipped
+- `uv run pytest tests/unit/test_storage_vault_repository.py` — 62 passed, 2 skipped
+- `uv run pytest tests/unit/test_storage_patch_repository.py` — 56 passed
+- `uv run pytest tests/unit/test_storage_append_fact.py` — 77 passed
+- `uv run pytest` (full suite) — 1122 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 159 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Code/test changes during S3-08 final correction:**
+3 files modified (storage/vault_repository.py, tests/integration/test_vault_repository_path_races.py, DEVELOPMENT_STATUS.md).
+Focused on stable-target identity enforcement only.
+
+**Scope exclusions confirmed:**
+- No new public API
+- No S3-09 changes
+- No atomic primitive changes
+- No locks/CAS/transaction manager
+- No Stage 4 Calendar implementation
+- No Retrieval, EntityResolver, Session runtime, ToolRegistry, ToolExecutor, ModelGateway, ChangeSet
 
 ## Current blockers
 

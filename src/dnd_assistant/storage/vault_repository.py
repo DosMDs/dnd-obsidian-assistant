@@ -78,14 +78,19 @@ class _StoredEntity:
         self._hash = _content_hash(exact_text)
         # Store entity-relative path for mutation-time reauthorization.
         # The path is relative to the canonical entity directory for this type.
+        # This must succeed — a silent basename fallback would hide failures
+        # that could later allow mutation of the wrong file.
         if vault_root is not None:
             from dnd_assistant.storage.paths import entity_directory
 
+            canon_dir = entity_directory(vault_root, directory_type)
             try:
-                canon_dir = entity_directory(vault_root, directory_type)
                 self._relative_path = path.relative_to(canon_dir)
-            except (ValueError, StorageError):
-                self._relative_path = Path(path.name)
+            except ValueError as exc:
+                raise StorageError(
+                    f"Entity path {path} is not inside canonical entity directory {canon_dir}",
+                    cause=exc,
+                ) from exc
         else:
             self._relative_path = Path(path.name)
 
@@ -411,28 +416,44 @@ def _reauthorize_entity_path(
     vault_root: Path,
     directory_type: EntityType,
     relative_path: Path,
+    expected_path: Path,
 ) -> Path:
     """Reauthorize a stored entity path against current filesystem topology.
 
     Uses ``storage.paths.resolve_entity_path`` to verify the path is still
-    a valid, authorized entity path of the expected type under the Vault.
+    a valid, authorized entity path of the expected type under the Vault,
+    and that the resolved path is the **same physical storage location**
+    as the originally selected path.
 
     Args:
         vault_root: The resolved Vault root path.
         directory_type: The expected ``EntityType``.
         relative_path: The entity-relative path within the canonical type
             directory (as stored in ``_StoredEntity._relative_path``).
+        expected_path: The originally selected entity path (from the
+            clean snapshot).  The resolved current path must equal this
+            value; containment alone is not sufficient.
 
     Returns:
-        The resolved absolute path.
+        The resolved absolute path (guaranteed equal to ``expected_path``).
 
     Raises:
         StorageError: The path is no longer authorized (symlink redirect,
-            traversal, outside entity directory, etc.).
+            traversal, outside entity directory, etc.), or the resolved
+            path differs from ``expected_path``.
     """
     from dnd_assistant.storage.paths import resolve_entity_path
 
-    return resolve_entity_path(vault_root, directory_type, relative_path)
+    current = resolve_entity_path(vault_root, directory_type, relative_path)
+
+    if current != expected_path:
+        raise StorageError(
+            f"Entity path resolved to a different storage location: "
+            f"expected {expected_path}, got {current} "
+            f"(relative={relative_path}, type={directory_type.value!r})"
+        )
+
+    return current
 
 
 # ── Audit path validation ────────────────────────────────────────────────────
@@ -646,12 +667,14 @@ def _commit_entity_mutation(
     if vault_root is not None:
         _validate_mutation_environment(vault_root, audit_service)
 
-    # b. Reauthorize target path against current filesystem topology
+    # b. Reauthorize target path against current filesystem topology.
+    #    The resolved current path must equal the originally selected path.
     if vault_root is not None:
         _reauthorize_entity_path(
             vault_root,
             target.directory_type,
             target.relative_path,
+            expected_path=target.path,
         )
 
     # Second optimistic check — re-read target file
