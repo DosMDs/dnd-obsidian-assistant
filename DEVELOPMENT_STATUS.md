@@ -127,7 +127,7 @@ None recorded.
 
 ### Goal
 
-Design and implement the core domain entity schemas (NPC, location, quest, item) with Pydantic models, including stable IDs, revisions, provenance, visibility, and knowledge status.
+Design and implement the core domain schemas and deterministic validation contracts for Entity, foundational domain types, Session, TimelineEvent, and CampaignState, without persistence, calendar arithmetic, model-provider, or tool-layer dependencies.
 
 ### Tasks
 

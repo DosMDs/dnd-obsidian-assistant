@@ -12,7 +12,6 @@ This module defines the primitive value types used across the domain layer:
 
 from __future__ import annotations
 
-import re
 from enum import StrEnum
 from typing import Annotated
 
@@ -70,12 +69,6 @@ class Provenance(StrEnum):
 
 # ── EntityId ──────────────────────────────────────────────────────────────
 
-# Pattern: one or more non-whitespace printable ASCII characters.
-# This accepts single-character IDs like "a" and multi-character IDs.
-# It rejects empty strings, whitespace-only, leading/trailing whitespace,
-# and control characters.
-_VALID_ID_RE = re.compile(r"^[^\s][\x20-\x7E]*[^\s]$|^[^\s]$")
-
 
 def _validate_entity_id(value: str) -> str:
     if not isinstance(value, str):
@@ -84,8 +77,8 @@ def _validate_entity_id(value: str) -> str:
         raise ValueError("EntityId must not be empty")
     if value.strip() != value:
         raise ValueError("EntityId must not have leading or trailing whitespace")
-    if not _VALID_ID_RE.match(value):
-        raise ValueError("EntityId must contain only printable ASCII characters")
+    if not value.isprintable():
+        raise ValueError("EntityId must not contain non-printable characters")
     return value
 
 
@@ -102,7 +95,8 @@ EntityId is a validated string that:
 - must not be empty;
 - must not consist only of whitespace;
 - must not have leading or trailing whitespace;
-- must contain only printable ASCII characters;
+- must not contain non-printable characters;
+- accepts printable Unicode characters;
 - is independent of display name, filename, and filesystem path.
 
 Usage in a Pydantic model::

@@ -109,7 +109,8 @@ class TestEntityId:
     """EntityId validation tests.
 
     Policy: reject empty, whitespace-only, leading/trailing whitespace,
-    and control characters. Accept any non-empty printable string.
+    and non-printable characters. Accept any non-empty printable string
+    including printable Unicode.
     """
 
     @pytest.mark.parametrize(
@@ -123,6 +124,8 @@ class TestEntityId:
             "abc123",
             "npc-01",
             "entity.with.dots",
+            "npc_Варос",
+            "локация_01",
         ],
     )
     def test_accepts_valid_ids(self, valid_id: str) -> None:
