@@ -19,7 +19,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 ## Stage progress
 
 | Stage | Status | Started | Completed |
-|---|---|---|---:|---:|
+|---|---|---|---|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |

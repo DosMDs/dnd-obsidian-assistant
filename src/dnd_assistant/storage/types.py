@@ -74,7 +74,10 @@ class VaultDocument:
 
     This separation ensures that domain validation (``extra="forbid"``)
     is never weakened for persistence convenience.  Extra frontmatter
-    keys are preserved verbatim during read/write cycles.
+    keys and their values are preserved semantically (key/value pairs)
+    during read/write cycles.  YAML presentation metadata (comments,
+    scalar style/quoting, anchors, key ordering) is not guaranteed to
+    be preserved; that decision is deferred to S3-01.
     """
 
     def __init__(
@@ -185,34 +188,20 @@ class VaultRepository(Protocol):
         """
         ...
 
-    def patch_entity(
-        self,
-        entity_id: EntityId,
-        *,
-        expected_revision: Revision,
-        document: VaultDocument,
-    ) -> VaultDocument:
-        """Replace an entity document, subject to optimistic concurrency.
-
-        The caller provides the full replacement ``VaultDocument`` and
-        the ``expected_revision`` that the caller last read.  If the
-        stored revision does not match, the operation is rejected.
-
-        Args:
-            entity_id: The stable domain identifier of the entity to patch.
-            expected_revision: The revision the caller last observed.
-            document: The replacement document (with an incremented revision).
-
-        Returns:
-            The updated document as stored.
-
-        Raises:
-            NotFoundError: No entity with the given ID exists.
-            ConflictError: The stored revision does not match
-                ``expected_revision``.
-            StorageError: The write operation failed.
-        """
-        ...
+    # patch_entity — deferred to S3-06
+    #
+    # The typed signature for patch_entity cannot be finalised until
+    # S3-06 establishes:
+    #   - the patch DTO shape (field-level vs full-document);
+    #   - revision increment ownership (caller vs storage).
+    #
+    # Stable requirements documented now:
+    #   - targets an EntityId;
+    #   - uses expected_revision for optimistic concurrency;
+    #   - mismatch raises ConflictError;
+    #   - successful revision-update semantics are finalised in S3-06.
+    #
+    # See S3-00 completion record and S3-06 task for the deferral rationale.
 
     def append_entity_fact(
         self,
@@ -233,7 +222,8 @@ class VaultRepository(Protocol):
             fact: The fact text to append.
 
         Returns:
-            The updated document as stored (with incremented revision).
+            The updated document as stored (revision-update semantics
+            are finalised in S3-07).
 
         Raises:
             NotFoundError: No entity with the given ID exists.

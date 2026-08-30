@@ -96,6 +96,26 @@ class TestVaultDocument:
         doc = VaultDocument(entity=sample_entity)
         assert doc.body == ""
 
+    def test_docstring_does_not_claim_verbatim_preservation(self) -> None:
+        """VaultDocument does not claim 'verbatim' YAML preservation.
+
+        S3-00 preserves extra frontmatter key/value pairs semantically,
+        not YAML presentation metadata.  The 'verbatim' claim was
+        corrected to 'semantically' with an explicit S3-01 deferral.
+        """
+        import inspect
+
+        class_source = inspect.getdoc(VaultDocument) or ""
+        assert "verbatim" not in class_source, (
+            "VaultDocument must not claim 'verbatim' YAML preservation"
+        )
+        assert "semantically" in class_source, (
+            "VaultDocument should describe preservation as 'semantically'"
+        )
+        assert "S3-01" in class_source, (
+            "YAML presentation metadata decision should be deferred to S3-01"
+        )
+
 
 # ── EntityDirectory tests ──────────────────────────────────────────────────
 
@@ -148,22 +168,56 @@ class TestVaultRepositoryProtocol:
         assert hasattr(VaultRepository, "__instancecheck__")
 
     def test_protocol_methods_exist(self) -> None:
-        """VaultRepository defines all expected method names."""
+        """VaultRepository defines all expected executable method names.
+
+        ``patch_entity`` is intentionally deferred to S3-06 and does
+        not have an executable Protocol signature in S3-00.
+        """
         methods = {
             "create_entity",
             "get_entity",
             "list_entities",
-            "patch_entity",
             "append_entity_fact",
         }
         protocol_methods = {name for name in dir(VaultRepository) if not name.startswith("_")}
         assert methods.issubset(protocol_methods), f"Missing methods: {methods - protocol_methods}"
+        assert "patch_entity" not in protocol_methods, (
+            "patch_entity should be deferred to S3-06, not an executable protocol method"
+        )
 
     def test_error_types_importable(self) -> None:
         """The error types referenced in the protocol are importable."""
         assert ConflictError is not None
         assert NotFoundError is not None
         assert StorageError is not None
+
+    def test_patch_entity_deferred_to_s3_06(self) -> None:
+        """patch_entity is documented as a deferred responsibility, not an executable method.
+
+        The deferral comment must exist in the source and reference S3-06.
+        """
+        import inspect
+
+        from dnd_assistant.storage import types as storage_types
+
+        source = inspect.getsource(storage_types.VaultRepository)
+        assert "patch_entity — deferred to S3-06" in source
+        assert "S3-06" in source
+
+    def test_append_entity_fact_revision_deferred_to_s3_07(self) -> None:
+        """append_entity_fact does not guarantee incremented revision.
+
+        The revision-update semantics are deferred to S3-07.
+        """
+        import inspect
+
+        from dnd_assistant.storage import types as storage_types
+
+        source = inspect.getsource(storage_types.VaultRepository)
+        assert "incremented revision" not in source, (
+            "append_entity_fact must not claim incremented revision in S3-00"
+        )
+        assert "S3-07" in source, "append_entity_fact should defer revision semantics to S3-07"
 
 
 # ── Import / boundary tests ────────────────────────────────────────────────
