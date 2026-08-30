@@ -15,6 +15,7 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, BeforeValidator, Field
 from pydantic.types import AwareDatetime
 
+from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.domain.types import Revision
 
 # ── Field-level validators ────────────────────────────────────────────────
@@ -143,10 +144,10 @@ class Session(BaseModel):
     ``None`` when the session is still active / unfinished.
     """
 
-    world_tick_start: int = Field(strict=True)
+    world_tick_start: WorldTick
     """Game-world tick at session start (strict integer, no coercion)."""
 
-    world_tick_end: int | None = Field(default=None, strict=True)
+    world_tick_end: WorldTick | None = None
     """Game-world tick at session end.
 
     ``None`` when the session is still active / unfinished.

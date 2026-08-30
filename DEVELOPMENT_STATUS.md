@@ -2,8 +2,8 @@
 
 **Last updated:** 2026-08-30
 **Current milestone:** `v0.1-dev — Vault Core`
-**Current stage:** `Stage 3 — Vault Repository`
-**Status:** `DONE`
+**Current stage:** `Stage 4 — Calendar`
+**Status:** `IN PROGRESS`
 
 ## Status model
 
@@ -24,7 +24,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
 | 3. Vault Repository | DONE | 2026-08-30 | 2026-08-30 |
-| 4. Calendar | NOT STARTED | — | — |
+| 4. Calendar | IN PROGRESS | 2026-08-30 | — |
 | 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
 | 6. Session Runtime without LLM | NOT STARTED | — | — |
 | 7. Tool Registry / Executor | NOT STARTED | — | — |
@@ -165,7 +165,36 @@ If a contract requires a domain type whose semantics belong to Stage 2, define t
 
 **Code/test changes during S2-07:** None (only DEVELOPMENT_STATUS.md updated)
 
-**Stage 3 status:** IN PROGRESS — S3-04 complete.
+**Stage 3 status:** DONE.
+
+## Stage 4 — Calendar
+
+### Goal
+
+Implement the deterministic fantasy calendar system: `WorldTick` canonical scalar, `CalendarDefinition` schema, `GameDate` display model, and `CalendarService` protocol for world_tick ↔ date conversion, date arithmetic, and relative-time operations.
+
+### Tasks
+
+- [x] `S4-00` Calendar kickoff + canonical domain contracts
+- [ ] `S4-01` Deterministic date ↔ world_tick conversion
+- [ ] `S4-02` World-time arithmetic + relative-time operations
+- [ ] `S4-03` TimelineEvent calendar queries
+- [ ] `S4-04` Custom-calendar/intercalary hardening + property tests
+- [ ] `S4-05` Full Stage 4 verification/diff/status
+
+### Definition of Done
+
+- `WorldTick` is the canonical strict signed integer minute scalar
+- `GameDate` supports regular and named intercalary dates
+- `CalendarDefinition` is generic and Gregorian-independent
+- holidays are labels, not elapsed-time units
+- intercalary days are explicit named calendar days
+- `CalendarService` core is stateless
+- current-world-time persistence is NOT CalendarService-owned
+- date conversion deferred to S4-01
+- time arithmetic deferred to S4-02
+- TimelineEvent queries deferred to S4-03
+- no Stage-5 work
 
 ## Stage 3 — Vault Repository
 

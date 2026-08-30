@@ -16,6 +16,7 @@ from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
+from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.domain.types import EntityId, Revision, Visibility
 
 # ── TemporalCertainty ───────────────────────────────────────────────────────
@@ -139,20 +140,20 @@ class TimelineEvent(BaseModel):
     that the value is a non-empty printable string.
     """
 
-    world_tick: int | None = Field(default=None, strict=True)
+    world_tick: WorldTick | None = None
     """Exact game-world tick when the event occurred.
 
     Required when certainty is ``exact``.  Must be None otherwise.
     """
 
-    world_tick_min: int | None = Field(default=None, strict=True)
+    world_tick_min: WorldTick | None = None
     """Earliest possible game-world tick (inclusive).
 
     Required when certainty is ``approximate`` or ``range``.
     Must be None when certainty is ``exact`` or ``unknown``.
     """
 
-    world_tick_max: int | None = Field(default=None, strict=True)
+    world_tick_max: WorldTick | None = None
     """Latest possible game-world tick (inclusive).
 
     Required when certainty is ``approximate`` or ``range``.
