@@ -162,6 +162,52 @@ class TestRepositoryConstruction:
         with pytest.raises(StorageError, match="does not exist"):
             ObsidianVaultRepository(vault_root, audit_service)
 
+    # ── Audit path traversal rejection ─────────────────────────────────
+
+    def test_audit_path_traversal_inside_vault_rejected(self, tmp_path: Path) -> None:
+        """Escape from _system/audit while remaining inside Vault: .. must be rejected."""
+        vault_root, _, _ = _setup_vault(tmp_path)
+        # Create a path like vault/_system/audit/../other/audit.jsonl
+        other_dir = vault_root / "_system" / "other"
+        other_dir.mkdir()
+        # Construct a path with literal .. in it
+        audit_dir = vault_root / "_system" / "audit"
+        traversal_path = audit_dir / ".." / "other" / "audit.jsonl"
+        # AuditService validates its own path — we need to create the
+        # parent that the traversal path resolves to
+        bad_service = AuditService(traversal_path)
+        with pytest.raises(StorageError, match="parent-directory traversal"):
+            ObsidianVaultRepository(vault_root, bad_service)
+
+    def test_audit_path_escape_from_vault_rejected(self, tmp_path: Path) -> None:
+        """Escape from Vault via .. traversal must be rejected."""
+        vault_root, _, _ = _setup_vault(tmp_path)
+        # Create a directory outside vault
+        outside_dir = tmp_path / "outside"
+        outside_dir.mkdir()
+        # Path: vault/_system/audit/../../../outside/audit.jsonl
+        audit_dir = vault_root / "_system" / "audit"
+        traversal_path = audit_dir / ".." / ".." / ".." / "outside" / "audit.jsonl"
+        bad_service = AuditService(traversal_path)
+        with pytest.raises(StorageError, match="parent-directory traversal"):
+            ObsidianVaultRepository(vault_root, bad_service)
+
+    def test_audit_path_normal_canonical_accepted(self, tmp_path: Path) -> None:
+        """Normal canonical path under _system/audit/ must still be accepted."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        assert repo.vault_root == vault_root.resolve()
+
+    def test_audit_path_nested_real_directory_accepted(self, tmp_path: Path) -> None:
+        """Nested real subdirectory under _system/audit/ may be valid."""
+        vault_root, _, _ = _setup_vault(tmp_path)
+        nested_dir = vault_root / "_system" / "audit" / "repository"
+        nested_dir.mkdir()
+        nested_log = nested_dir / "audit.jsonl"
+        nested_service = AuditService(nested_log)
+        repo = ObsidianVaultRepository(vault_root, nested_service)
+        assert repo.audit_service is nested_service
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Read / list — success
@@ -298,6 +344,44 @@ class TestReadListSuccess:
 
         with pytest.raises(ValidationError):
             repo.get_entity("")
+
+    def test_get_entity_empty_rejected(self, tmp_path: Path) -> None:
+        """Empty string must be rejected via canonical EntityId validation."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        with pytest.raises(ValidationError):
+            repo.get_entity("")
+
+    def test_get_entity_whitespace_rejected(self, tmp_path: Path) -> None:
+        """Leading/trailing whitespace must be rejected via canonical EntityId."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        with pytest.raises(ValidationError):
+            repo.get_entity("  spaced  ")
+
+    def test_get_entity_non_printable_rejected(self, tmp_path: Path) -> None:
+        """Control characters must be rejected via canonical EntityId."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        with pytest.raises(ValidationError):
+            repo.get_entity("npc\x00gandalf")
+
+    def test_get_entity_unicode_accepted(self, tmp_path: Path) -> None:
+        """Printable Unicode must be accepted via canonical EntityId."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        doc = _make_document(entity_id="персонаж-гэндальф")
+        repo.create_entity(doc, audit=_make_audit_context("op-unicode"))
+        result = repo.get_entity("персонаж-гэндальф")
+        assert result.entity.id == "персонаж-гэндальф"
+
+    def test_get_entity_validation_error_has_cause(self, tmp_path: Path) -> None:
+        """ValidationError from EntityId must preserve the Pydantic cause."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        with pytest.raises(ValidationError) as exc:
+            repo.get_entity("")
+        assert exc.value.__cause__ is not None
 
     def test_no_filename_lookup(self, tmp_path: Path) -> None:
         vault_root, audit_service, _ = _setup_vault(tmp_path)
@@ -632,6 +716,105 @@ class TestCreateEntityFilename:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Create entity — filename symlink collision
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestCreateEntityFilenameSymlink:
+    """Filename collision detection must treat symlinks as occupied."""
+
+    def test_dangling_symlink_skipped(self, tmp_path: Path) -> None:
+        if not _can_symlink():
+            pytest.skip("OS does not support symlinks")
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        npc_dir = entity_directory(vault_root, EntityType.NPC)
+
+        # Pre-create a dangling symlink with the first generated UUID filename
+        import dnd_assistant.storage.vault_repository as vr_mod
+
+        first_filename = vr_mod._generate_entity_filename()
+        dangling_link = npc_dir / first_filename
+        os.symlink(str(npc_dir / "nonexistent.md"), str(dangling_link))
+        assert dangling_link.is_symlink()
+        assert not dangling_link.exists()  # dangling
+
+        # Create an entity — must skip the dangling symlink and use a
+        # different filename
+        repo.create_entity(
+            _make_document(entity_id="npc-gandalf"),
+            audit=_make_audit_context("op-001"),
+        )
+
+        # The dangling symlink must remain untouched
+        assert dangling_link.is_symlink()
+        assert not dangling_link.exists()
+
+        # The entity file must exist as a separate file
+        files = list(npc_dir.iterdir())
+        assert len(files) == 2  # dangling symlink + created entity
+        # The created file must be a regular file, not a symlink
+        created = [f for f in files if f.name != first_filename]
+        assert len(created) == 1
+        assert not created[0].is_symlink()
+
+    def test_live_symlink_skipped(self, tmp_path: Path) -> None:
+        if not _can_symlink():
+            pytest.skip("OS does not support symlinks")
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        npc_dir = entity_directory(vault_root, EntityType.NPC)
+
+        # Pre-create a valid entity file and a symlink to it with the
+        # first generated UUID filename
+        import dnd_assistant.storage.vault_repository as vr_mod
+
+        first_filename = vr_mod._generate_entity_filename()
+        real_target = npc_dir / "real_target.md"
+        real_target.write_text("dummy", encoding="utf-8")
+        live_link = npc_dir / first_filename
+        os.symlink(str(real_target), str(live_link))
+        assert live_link.is_symlink()
+        assert live_link.exists()  # live symlink
+
+        # Create an entity — must skip the live symlink
+        repo.create_entity(
+            _make_document(entity_id="npc-gandalf"),
+            audit=_make_audit_context("op-001"),
+        )
+
+        # The live symlink must remain untouched
+        assert live_link.is_symlink()
+        assert live_link.exists()
+
+        # The entity file must exist as a separate regular file
+        files = list(npc_dir.iterdir())
+        assert len(files) == 3  # real_target + live_link + created entity
+
+    def test_exhausted_attempts_raises_storage_error(self, tmp_path: Path) -> None:
+        """When all generated names are occupied by files/symlinks, raise."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        npc_dir = entity_directory(vault_root, EntityType.NPC)
+
+        # Pre-create a single valid entity file.
+        doc = _make_document(entity_id="npc-filler")
+        text = serialize(doc)
+        (npc_dir / "entity-pre-existing.md").write_text(text, encoding="utf-8")
+
+        # Mock uuid.uuid4 to return the same hex value every time, so all
+        # 32 generated filenames collide with the pre-existing file.
+        fake_uuid = mock.MagicMock()
+        fake_uuid.hex = "pre-existing"
+        with mock.patch("uuid.uuid4", return_value=fake_uuid):
+            with pytest.raises(StorageError, match="unique filename"):
+                repo.create_entity(
+                    _make_document(entity_id="npc-gandalf"),
+                    audit=_make_audit_context("op-001"),
+                )
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Create entity — audit lifecycle
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -855,6 +1038,29 @@ class TestCreateEntityFailureSemantics:
         # Entity is still readable
         result = repo.get_entity("npc-gandalf")
         assert result.entity.id == "npc-gandalf"
+
+    def test_committed_audit_failure_preserves_cause(self, tmp_path: Path) -> None:
+        """The original audit StorageError must be preserved as __cause__."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+
+        original_append = audit_service.append
+        original_storage_error = StorageError("committed append failed")
+
+        def _fail_on_second_append(record: object) -> None:
+            if getattr(record, "phase", None) == "committed":
+                raise original_storage_error
+            original_append(record)
+
+        with mock.patch.object(audit_service, "append", side_effect=_fail_on_second_append):
+            with pytest.raises(StorageError) as exc:
+                repo.create_entity(
+                    _make_document(entity_id="npc-gandalf"),
+                    audit=_make_audit_context("op-001"),
+                )
+
+        # The raised StorageError must have the original as __cause__
+        assert exc.value.__cause__ is original_storage_error
 
 
 # ═════════════════════════════════════════════════════════════════════════════

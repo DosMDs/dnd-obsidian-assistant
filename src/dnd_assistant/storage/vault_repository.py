@@ -18,13 +18,20 @@ import hashlib
 import uuid
 from pathlib import Path
 
-from dnd_assistant.domain.types import EntityType
+from pydantic import TypeAdapter
+
+from dnd_assistant.domain.types import EntityId, EntityType
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.markdown import parse, serialize
 from dnd_assistant.storage.paths import discover_entity_files, entity_directory
 from dnd_assistant.storage.types import VaultDocument
+
+# ── EntityId runtime validator ────────────────────────────────────────────────
+
+_ENTITY_ID_ADAPTER = TypeAdapter(EntityId)
+"""TypeAdapter for canonical EntityId runtime validation."""
 
 # ── Constants ───────────────────────────────────────────────────────────────
 
@@ -202,9 +209,20 @@ def _build_snapshot(vault_root: Path) -> list[_StoredEntity]:
 def _validate_audit_path(vault_root: Path, audit_log_path: Path) -> None:
     """Verify the audit log path belongs beneath ``<vault_root>/_system/audit/``.
 
-    Checks that no existing path component beneath ``vault_root`` is a
-    symlink, and that the audit log's parent chain resolves inside the
-    expected ``_system/audit/`` directory.
+    Validation ordering:
+
+    1. vault_root is already canonical/resolved.
+    2. Verify the audit log is lexically beneath vault_root enough to
+       derive its raw relative components.
+    3. Reject ANY raw relative component equal to ``..`` before resolving.
+    4. Establish canonical ``expected_audit_dir = vault_root / _system / audit``.
+    5. Inspect all existing components beneath vault_root that lead to the
+       audit log parent — reject symlinked components BEFORE ``.resolve()``
+       erases symlink identity.
+    6. Resolve the audit log path with ``strict=False``.
+    7. Verify the resolved path is inside the resolved Vault root.
+    8. Verify the resolved path is inside the resolved canonical
+       ``_system/audit/`` directory.
 
     Args:
         vault_root: The resolved Vault root path.
@@ -214,25 +232,27 @@ def _validate_audit_path(vault_root: Path, audit_log_path: Path) -> None:
         StorageError: The audit log is outside the Vault, outside
             ``_system/audit/``, or a symlink is detected in the path.
     """
-    # Verify the audit log is beneath vault_root
+    # 1. vault_root is already canonical/resolved (set in __init__).
+
+    # 2. Verify lexical containment — enough to extract raw relative components.
     try:
-        audit_log_path.relative_to(vault_root)
+        relative = audit_log_path.relative_to(vault_root)
     except ValueError:
         raise StorageError(f"Audit log path is outside the Vault root: {audit_log_path}") from None
 
-    # Verify the audit log is beneath _system/audit/
-    expected_audit_dir = vault_root / _AUDIT_SYSTEM_DIR / _AUDIT_DIR
-    try:
-        audit_log_path.relative_to(expected_audit_dir)
-    except ValueError:
-        raise StorageError(
-            f"Audit log path must be beneath {expected_audit_dir}, got: {audit_log_path}"
-        ) from None
+    # 3. Reject ANY raw relative component equal to ".." before resolving.
+    for part in relative.parts:
+        if part == "..":
+            raise StorageError(
+                f"Audit log path contains parent-directory traversal ('..'): {audit_log_path}"
+            )
 
-    # Check no existing path component beneath vault_root is a symlink
-    # (excluding the audit log file itself, which is already checked by
-    # AuditService).
-    relative = audit_log_path.relative_to(vault_root)
+    # 4. Establish canonical expected audit directory.
+    expected_audit_dir = vault_root / _AUDIT_SYSTEM_DIR / _AUDIT_DIR
+
+    # 5. Inspect all existing path components beneath vault_root that lead
+    #    to the audit log parent.  Reject symlinked components BEFORE
+    #    .resolve() erases symlink identity.
     accumulated = vault_root
     for part in relative.parts[:-1]:  # exclude the filename itself
         accumulated = accumulated / part
@@ -241,30 +261,55 @@ def _validate_audit_path(vault_root: Path, audit_log_path: Path) -> None:
                 f"Audit path component is a symlink, rejected for safety: {accumulated}"
             )
 
+    # 6. Resolve the audit log path with strict=False.
+    resolved = audit_log_path.resolve(strict=False)
+
+    # 7. Verify resolved path is inside resolved Vault root.
+    try:
+        resolved.relative_to(vault_root)
+    except ValueError:
+        raise StorageError(
+            f"Audit log path resolves outside the Vault root: {audit_log_path}"
+        ) from None
+
+    # 8. Verify resolved path is inside resolved canonical _system/audit/.
+    resolved_audit_dir = expected_audit_dir.resolve(strict=False)
+    try:
+        resolved.relative_to(resolved_audit_dir)
+    except ValueError:
+        raise StorageError(
+            f"Audit log path must be beneath {expected_audit_dir}, "
+            f"got: {audit_log_path} (resolved: {resolved})"
+        ) from None
+
 
 # ── EntityId runtime validation ─────────────────────────────────────────────
 
 
-def _validate_entity_id_input(entity_id: str) -> None:
+def _validate_entity_id_input(entity_id: str) -> str:
     """Validate an externally supplied entity_id at runtime.
 
-    Uses the same rules as the domain ``EntityId`` type.  Invalid input
-    raises ``ValidationError`` rather than producing a fake ``NotFoundError``.
+    Delegates to the canonical ``EntityId`` type via ``TypeAdapter``.
+    Invalid input raises ``ValidationError`` rather than producing a fake
+    ``NotFoundError``.
 
     Args:
         entity_id: The identifier to validate.
 
+    Returns:
+        The validated identifier (same value).
+
     Raises:
         ValidationError: The value is not a valid ``EntityId``.
     """
-    if not isinstance(entity_id, str):
-        raise ValidationError("EntityId must be a string")
-    if not entity_id:
-        raise ValidationError("EntityId must not be empty")
-    if entity_id.strip() != entity_id:
-        raise ValidationError("EntityId must not have leading or trailing whitespace")
-    if not entity_id.isprintable():
-        raise ValidationError("EntityId must not contain non-printable characters")
+    try:
+        validated = _ENTITY_ID_ADAPTER.validate_python(entity_id)
+    except Exception as exc:
+        raise ValidationError(
+            f"Invalid EntityId: {entity_id}",
+            cause=exc,
+        ) from exc
+    return validated
 
 
 # ── ObsidianVaultRepository ─────────────────────────────────────────────────
@@ -348,14 +393,14 @@ class ObsidianVaultRepository:
                 type/directory mismatch, or a duplicate ``EntityId``
                 is detected.
         """
-        _validate_entity_id_input(entity_id)
+        validated_id = _validate_entity_id_input(entity_id)
 
         snapshot = self._snapshot()
         for se in snapshot:
-            if se.entity_id == entity_id:
+            if se.entity_id == validated_id:
                 return se.document
 
-        raise NotFoundError(f"Entity not found: {entity_id}")
+        raise NotFoundError(f"Entity not found: {validated_id}")
 
     # ── list_entities ───────────────────────────────────────────────────
 
@@ -401,7 +446,9 @@ class ObsidianVaultRepository:
         for _attempt in range(_MAX_FILENAME_ATTEMPTS):
             filename = _generate_entity_filename()
             candidate = target_dir / filename
-            if not candidate.exists():
+            # A filename is NOT free if it exists OR if it is a symlink
+            # (including dangling/broken symlinks where exists() returns False).
+            if not candidate.exists() and not candidate.is_symlink():
                 return candidate
 
         raise StorageError(
@@ -509,15 +556,11 @@ class ObsidianVaultRepository:
         self._audit_service.append(intent_record)
 
         # 7. Atomic write
-        try:
-            atomic_write_text(
-                target=target,
-                content=serialized,
-                validator=lambda c: parse(c),
-            )
-        except Exception:
-            # Intent is already durable; propagate the error
-            raise
+        atomic_write_text(
+            target=target,
+            content=serialized,
+            validator=lambda c: parse(c),
+        )
 
         # 8. Re-read and verify
         try:
@@ -561,13 +604,14 @@ class ObsidianVaultRepository:
         )
         try:
             self._audit_service.append(committed_record)
-        except StorageError:
+        except StorageError as exc:
             raise StorageError(
                 f"Entity mutation committed but audit finalization failed "
                 f"for operation {audit.operation_id}.  "
                 f"The entity file exists at {target}.  "
-                f"An intent audit record is present."
-            ) from None
+                f"An intent audit record is present.",
+                cause=exc,
+            ) from exc
 
         # 10. Return persisted document
         return persisted_doc

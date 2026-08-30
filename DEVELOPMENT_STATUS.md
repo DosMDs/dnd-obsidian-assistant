@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-04 complete)
+**Status:** `IN PROGRESS` (S3-05 complete after correction)
 
 ## Status model
 
@@ -951,9 +951,74 @@ os.replace(temp, target)
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
 - `git diff --check` — no whitespace errors
 
-**Defects discovered during S3-05:** None
+**Defects discovered during S3-05:** None at original implementation.
 
-**Code/test changes during S3-05:** 7 files (4 modified, 3 new), focused on vault repository create/read/list.
+**S3-05 correction (audit-path hardening, EntityId validation, filename symlinks, cause preservation):**
+
+1. **storage/vault_repository.py** — six corrections:
+
+   **1a. Audit-path structural traversal rejection (Corrections 1-3):**
+   - `_validate_audit_path()` now rejects ANY raw relative component equal to `..` before resolution (structural check, not resolved-path).
+   - After symlink inspection of existing components, the audit log path is resolved with `strict=False`.
+   - Resolved path is verified to be inside the resolved Vault root (via `relative_to`).
+   - Resolved path is verified to be inside the resolved canonical `_system/audit/` directory.
+   - No string-prefix containment checks (`str(path).startswith(...)` is never used).
+   - The `_system/audit/` directory itself must exist and be a real directory (unchanged).
+
+   **1b. Canonical EntityId runtime validation (Corrections 5-6):**
+   - `_validate_entity_id_input()` now delegates to `pydantic.TypeAdapter(EntityId)` instead of duplicating the domain grammar.
+   - Invalid input raises `dnd_assistant.errors.ValidationError` with the Pydantic validation failure preserved as `__cause__`.
+   - The helper returns the validated value; `get_entity()` compares using that validated result.
+   - `EntityId` import added to the module; `TypeAdapter` import added from pydantic.
+
+   **1c. Filename symlink collision (Corrections 7-8):**
+   - `_generate_unique_path()` now checks `not candidate.exists() and not candidate.is_symlink()`.
+   - A dangling/broken symlink (where `exists()` returns `False`) is correctly treated as occupied.
+   - A live symlink to an existing file is also treated as occupied.
+   - The symlink is never unlinked or replaced.
+
+   **1d. Committed-audit cause preservation (Correction 9):**
+   - The `except StorageError` branch now uses `from exc` and passes `cause=exc` to the new `StorageError`.
+   - The original audit `StorageError` is preserved as `__cause__`.
+
+   **1e. Redundant try/except removed (Correction 12):**
+   - The `try: atomic_write_text(...) except Exception: raise` wrapper removed — exceptions from `atomic_write_text` propagate naturally.
+
+2. **tests/unit/test_storage_vault_repository.py** — 13 new tests:
+
+   **Audit-path traversal (4 tests):**
+   - `test_audit_path_traversal_inside_vault_rejected` — `..` from `_system/audit/` to `_system/other/` rejected
+   - `test_audit_path_escape_from_vault_rejected` — `../../../outside/` rejected
+   - `test_audit_path_normal_canonical_accepted` — normal path still accepted
+   - `test_audit_path_nested_real_directory_accepted` — nested subdirectory under `_system/audit/` accepted
+
+   **Canonical EntityId validation (6 tests):**
+   - `test_get_entity_empty_rejected` — empty string rejected
+   - `test_get_entity_whitespace_rejected` — leading/trailing whitespace rejected
+   - `test_get_entity_non_printable_rejected` — control characters rejected
+   - `test_get_entity_unicode_accepted` — printable Unicode accepted
+   - `test_get_entity_validation_error_has_cause` — Pydantic cause preserved
+   - (Existing `test_get_entity_invalid_id_rejected` unchanged — validates empty via new path)
+
+   **Filename symlink collision (3 tests):**
+   - `test_dangling_symlink_skipped` — dangling symlink skipped, entity created with different filename
+   - `test_live_symlink_skipped` — live symlink skipped, entity created with different filename
+   - `test_exhausted_attempts_raises_storage_error` — all 32 attempts exhausted raises `StorageError`
+
+   **Committed-audit cause preservation (1 test):**
+   - `test_committed_audit_failure_preserves_cause` — `exc_info.value.__cause__ is original audit StorageError`
+
+**Quality-gate results (after S3-05 correction):**
+- `uv run pytest tests/unit/test_storage_vault_repository.py` — 62 passed, 2 skipped
+- `uv run pytest tests/unit/test_storage_audit.py` — 78 passed, 2 skipped
+- `uv run pytest tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py tests/unit/test_storage_atomic.py tests/unit/test_storage_audit.py tests/unit/test_storage_vault_repository.py` — 347 passed, 19 skipped
+- `uv run pytest` (full suite) — 898 passed, 19 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 77 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Code/test changes during S3-05 correction:** 2 files modified (storage/vault_repository.py, tests/unit/test_storage_vault_repository.py), focused on audit-path safety, canonical EntityId validation, filename symlink handling, and cause preservation.
 
 **Scope exclusions confirmed:**
 - No patch_entity, Patch DTO, expected_revision, revision increment, timestamp mutation (S3-06)
@@ -963,7 +1028,7 @@ os.replace(temp, target)
 - No directory/bootstrap initialization, Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, ChangeSet
 - S3-06 was NOT started
 
-**Stage 3 status:** IN PROGRESS — S3-05 complete.
+**Stage 3 status:** IN PROGRESS — S3-05 complete after correction.
 
 ## Current blockers
 
