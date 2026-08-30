@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS`
+**Status:** `IN PROGRESS` (S3-01 complete, S3-02 not started)
 
 ## Status model
 
@@ -176,7 +176,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 ### Tasks
 
 - [x] `S3-00` Stage kickoff + repository/storage contracts
-- [ ] `S3-01` Markdown/YAML document codec
+- [x] `S3-01` Markdown/YAML document codec
 - [ ] `S3-02` Vault path safety + entity directory/discovery policy
 - [ ] `S3-03` Atomic write primitive
 - [ ] `S3-04` AuditRecord + AuditService
@@ -232,7 +232,81 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 
 **Code/test changes during S3-00:** 5 files (3 modified, 2 new), focused on storage contracts only.
 
-**Stage 3 status:** IN PROGRESS — S3-00 complete, S3-01 not started.
+### S3-01 completion record
+
+**Review range:** S3-00 completion through S3-01
+
+**Changes:**
+
+1. **storage/markdown.py** (new) — pure-text Markdown/YAML document codec:
+   - `parse(text: str) -> VaultDocument` — parses Obsidian Markdown with YAML frontmatter
+   - `serialize(document: VaultDocument) -> str` — serializes back to Obsidian Markdown
+   - Frontmatter delimiter: standalone `---` at start of document, closing `---` as standalone line
+   - CRLF/LF delimiter support; body preservation character-for-character
+   - Canonical Entity fields extracted via `Entity.model_validate()`; extras stored in `extra_frontmatter`
+   - Collision detection: extra keys overlapping canonical Entity fields rejected with `ValidationError`
+   - Non-string YAML keys rejected
+   - Uses `ruamel.yaml` with `typ="safe"`, `default_flow_style=False`, `allow_unicode=True`
+   - All errors translated to `dnd_assistant.errors.ValidationError` with original cause preserved
+2. **storage/__init__.py** — exports `parse`, `serialize`
+3. **tests/unit/test_storage_markdown.py** (new) — 71 tests covering:
+   - Frontmatter boundary detection (7 tests)
+   - Canonical parse (6 tests: minimal, all EntityTypes, tags, session refs, empty body, import)
+   - Extra frontmatter (9 tests: scalar, list, nested, boolean, number, null, multiple keys, semantic round trip)
+   - Body preservation (11 tests: empty, heading, blank lines, trailing newline, no trailing newline, CRLF source, `---` in body, code fences, wikilinks, Unicode, round trip, only newlines)
+   - Invalid documents (15 tests: not a string, missing opener/closer, malformed YAML, sequence/scalar root, missing required fields, invalid type/revision/datetime, non-string keys, empty document, only opener, empty frontmatter)
+   - Serialization (9 tests: round trips, collision rejection, canonical-first order, delimiter structure, import)
+   - Round-trip integration (9 parametrized cases)
+   - Import/boundary tests (5 tests: module importable, re-exported, no model/retrieval/tool imports)
+
+**Codec API established:**
+- `parse(text: str) -> VaultDocument`
+- `serialize(document: VaultDocument) -> str`
+
+**Frontmatter delimiter rules:**
+- Opening `---` must be at position 0 of the document
+- Closing `---` must be a standalone line (only whitespace allowed after `---`)
+- A `---` inside YAML content (e.g. block scalars) does not terminate frontmatter
+- A `---` inside Markdown body is not confused with frontmatter
+
+**Canonical vs extra field split:**
+- Canonical fields: `Entity.model_fields.keys()` (derived dynamically from Pydantic model)
+- Extra fields: all other YAML mapping keys stored in `VaultDocument.extra_frontmatter`
+- Collision during serialization: raises `ValidationError`
+
+**YAML preservation guarantee:**
+- Guaranteed: key/value semantic preservation through parse/serialize
+- NOT guaranteed: YAML comments, anchors/aliases, scalar quote style, flow/block formatting, exact whitespace, key ordering, byte-identical output
+
+**Markdown body preservation invariant:**
+- `VaultDocument.body` is preserved character-for-character through `parse → serialize`
+- No `.strip()`, `.rstrip()`, or whitespace normalisation applied
+
+**Validation/error behaviour:**
+- All parse/serialize failures produce `dnd_assistant.errors.ValidationError`
+- Original parser/Pydantic exception preserved as `cause`
+- Malformed documents never produce partially-valid Entity
+
+**Round-trip guarantees:**
+- `parse(serialize(document))` preserves: `entity` equality, `extra_frontmatter` semantic equality, `body` exact equality
+- `serialize(parse(source))` preserves: semantic frontmatter equivalence, exact body
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_markdown.py` — 71 passed
+- `uv run pytest tests/unit/test_storage_types.py` — 27 passed
+- `uv run pytest` (full suite) — 652 passed
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 70 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Defects discovered during S3-01:** None
+
+**Code/test changes during S3-01:** 3 files (1 modified, 2 new), focused on Markdown/YAML codec only.
+
+**Scope exclusions confirmed:**
+- No filesystem access, path validation, atomic writes, audit, repository CRUD, patch, append, locks, migrations, Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet.
+
+**Stage 3 status:** IN PROGRESS — S3-01 complete, S3-02 not started.
 
 ## Current blockers
 
