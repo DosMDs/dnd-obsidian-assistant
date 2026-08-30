@@ -1,5 +1,6 @@
 """Domain models and deterministic business rules."""
 
+from dnd_assistant.domain.campaign_state import CampaignState
 from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.events import TemporalCertainty, TimelineEvent
 from dnd_assistant.domain.session import Session
@@ -13,6 +14,7 @@ from dnd_assistant.domain.types import (
 )
 
 __all__: list[str] = [
+    "CampaignState",
     "Entity",
     "EntityId",
     "EntityType",
