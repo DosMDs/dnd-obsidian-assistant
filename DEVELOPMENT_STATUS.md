@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-05 complete after correction)
+**Status:** `IN PROGRESS` (S3-06 complete)
 
 ## Status model
 
@@ -181,7 +181,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - [x] `S3-03` Atomic write primitive (corrected: symlink, BaseException, validator transparency, lifecycle)
 - [x] `S3-04` AuditRecord + AuditService
 - [x] `S3-05` create_entity / get_entity / list_entities
-- [ ] `S3-06` patch_entity + optimistic concurrency
+- [x] `S3-06` patch_entity + optimistic concurrency
 - [ ] `S3-07` append_entity_fact
 - [ ] `S3-08` integration/failure tests
 - [ ] `S3-09` full Stage 3 verification/diff/status
@@ -1029,6 +1029,115 @@ os.replace(temp, target)
 - S3-06 was NOT started
 
 **Stage 3 status:** IN PROGRESS — S3-05 complete after correction.
+
+### S3-06 completion record
+
+**Review range:** S3-05 correction through S3-06
+
+**Changes:**
+
+1. **storage/patch.py** (new) — `EntityPatch` DTO:
+   - Editable fields: `name`, `status`, `visibility`, `knowledge_status`, `created_session`, `last_seen_session`, `tags`
+   - Immutable fields rejected: `schema_version`, `id`, `type`, `created_at`, `updated_at`, `revision`, `body`, `extra_frontmatter`
+   - Empty patch rejected (at least one field required)
+   - Explicit `None` allowed for nullable fields (`created_session`, `last_seen_session`)
+   - Explicit `None` rejected for non-nullable fields (`name`, `status`, `visibility`, `knowledge_status`, `tags`)
+   - Unknown fields rejected (`extra="forbid"`)
+   - Frozen immutability
+   - Canonical domain field validation reused (`NameStr`, `StatusStr`, `SessionRef`, `TagStr`, `Visibility`, `KnowledgeStatus`)
+
+2. **storage/types.py** — `VaultRepository` Protocol:
+   - Added `patch_entity(entity_id, patch, *, expected_revision, audit) -> VaultDocument` typed signature
+   - Removed deferred-comment placeholder
+
+3. **storage/vault_repository.py** — `ObsidianVaultRepository.patch_entity`:
+   - `_StoredEntity` extended with `exact_text` and `content_hash` properties for before-hash computation without re-reading
+   - `_REVISION_ADAPTER` TypeAdapter for canonical `Revision` runtime validation
+   - `_validate_revision_input()` helper with Pydantic cause preservation
+   - Full patch lifecycle:
+     1. Validate inputs (EntityId, Revision, EntityPatch)
+     2. Validate audit health + operation_id uniqueness
+     3. Build clean global snapshot
+     4. Find target entity by exact EntityId
+     5. Check `expected_revision` against stored revision → `ConflictError` on mismatch
+     6. Construct patched Entity through `Entity.model_validate()` (full validation)
+     7. Serialize patched document
+     8. Compute `before_hash` (from snapshot) and `after_hash`
+     9. Append audit `intent` record
+     10. Second optimistic check: re-read target file, verify revision + hash unchanged
+     11. `atomic_write_text` with parse validator
+     12. Re-read and verify persisted content (hash, id, type, revision, updated_at, body)
+     13. Append audit `committed` record
+     14. Return persisted `VaultDocument`
+
+4. **storage/__init__.py** — exports `EntityPatch`
+
+5. **tests/unit/test_storage_patch.py** (new) — 40 EntityPatch DTO tests:
+   - Allowed fields (8 tests)
+   - Empty patch rejection (2 tests)
+   - Forbidden/immutable fields (9 tests)
+   - Explicit None semantics (7 tests)
+   - Canonical validation (9 tests)
+   - Frozen behaviour (2 tests)
+   - model_fields_set introspection (3 tests)
+
+6. **tests/unit/test_storage_patch_repository.py** (new) — 56 repository-level patch tests:
+   - Optimistic concurrency (10 tests: 1→2, N→N+1, stale, zero audit, bool/string/zero/negative rejection, cause preservation)
+   - Field changes (10 tests: name, status, visibility, knowledge_status, created_session, clear created, last_seen_session, clear last_seen, tags, tags replace)
+   - Immutable fields unchanged (4 tests: id, type, created_at, schema_version)
+   - Body preservation (6 tests: LF, CRLF, mixed, Unicode, no trailing, trailing)
+   - Extra frontmatter preservation (2 tests)
+   - Filename/path preservation (3 tests)
+   - updated_at/revision metadata (3 tests)
+   - Audit lifecycle (8 tests: 2 records, operation, operation_id, entity_id, before_hash, after_hash, hash differs, context metadata)
+   - Failure semantics (7 tests: invalid id, not found, operation_id reuse, corrupt audit, intent failure, write failure, committed-audit failure with cause)
+   - Concurrent/manual edit detection (2 tests: content change, revision change)
+   - Integration cycle (1 test: create → get → patch → get)
+
+7. **tests/unit/test_storage_types.py** — updated protocol test to include `patch_entity` in expected methods, removed deferred-assertion test
+
+**Decisions made:**
+- `EntityPatch` — strict Pydantic DTO, `extra="forbid"`, `frozen=True`
+- Editable fields: name, status, visibility, knowledge_status, created_session, last_seen_session, tags
+- Immutable fields: schema_version, id, type, created_at, updated_at, revision, body, extra_frontmatter
+- Omitted vs explicit None: `model_fields_set` determines supplied fields; nullable fields accept explicit None (clear); non-nullable fields reject explicit None
+- Empty patch rejected at model-validation level
+- Repository owns revision increment: `new_revision = stored_revision + 1`
+- Repository owns `updated_at`: set to `audit.real_time`
+- First concurrency check: before audit intent (no intent on stale)
+- Second pre-write check: after durable intent, re-read target, verify revision + hash
+- Body preserved character-for-character through patch
+- Extra frontmatter preserved semantically through patch
+- Same file/path preserved (no rename, no move)
+- Audit: `operation="patch_entity"`, two phases (intent, committed), same operation_id
+- Before/after hash: SHA-256 of exact UTF-8 persisted text
+- No rollback after committed atomic write
+- No cross-process CAS/lock guarantee
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_patch.py` — 40 passed
+- `uv run pytest tests/unit/test_storage_patch_repository.py` — 56 passed
+- `uv run pytest tests/unit/test_storage_vault_repository.py` — 62 passed, 2 skipped
+- `uv run pytest` (full suite) — 993 passed, 19 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 80 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-06:** None
+
+**Code/test changes during S3-06:** 8 files (4 modified, 4 new), focused on EntityPatch DTO and patch_entity implementation only.
+
+**Scope exclusions confirmed:**
+- No append_entity_fact (S3-07)
+- No arbitrary Markdown replacement
+- No arbitrary extra-frontmatter patching
+- No entity type migration, ID change, file rename, file move, delete
+- No locks, compare-and-swap filesystem primitive, transaction framework
+- No automatic intent reconciliation, audit repair
+- No FTS, fuzzy lookup, SQLite, indexes, embeddings, migrations
+- No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, ChangeSet
+- S3-07 was NOT started
 
 ## Current blockers
 

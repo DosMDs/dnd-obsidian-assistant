@@ -170,39 +170,23 @@ class TestVaultRepositoryProtocol:
     def test_protocol_methods_exist(self) -> None:
         """VaultRepository defines all expected executable method names.
 
-        ``patch_entity`` is intentionally deferred to S3-06 and does
-        not have an executable Protocol signature in S3-00.
+        ``patch_entity`` is now finalised in S3-06 with a typed signature.
         """
         methods = {
             "create_entity",
             "get_entity",
             "list_entities",
+            "patch_entity",
             "append_entity_fact",
         }
         protocol_methods = {name for name in dir(VaultRepository) if not name.startswith("_")}
         assert methods.issubset(protocol_methods), f"Missing methods: {methods - protocol_methods}"
-        assert "patch_entity" not in protocol_methods, (
-            "patch_entity should be deferred to S3-06, not an executable protocol method"
-        )
 
     def test_error_types_importable(self) -> None:
         """The error types referenced in the protocol are importable."""
         assert ConflictError is not None
         assert NotFoundError is not None
         assert StorageError is not None
-
-    def test_patch_entity_deferred_to_s3_06(self) -> None:
-        """patch_entity is documented as a deferred responsibility, not an executable method.
-
-        The deferral comment must exist in the source and reference S3-06.
-        """
-        import inspect
-
-        from dnd_assistant.storage import types as storage_types
-
-        source = inspect.getsource(storage_types.VaultRepository)
-        assert "patch_entity — deferred to S3-06" in source
-        assert "S3-06" in source
 
     def test_append_entity_fact_revision_deferred_to_s3_07(self) -> None:
         """append_entity_fact does not guarantee incremented revision.

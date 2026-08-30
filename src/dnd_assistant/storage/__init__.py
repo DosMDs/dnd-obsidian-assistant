@@ -3,6 +3,7 @@
 from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.markdown import parse, serialize
+from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.paths import (
     DiscoveredEntityFile,
     discover_entity_files,
@@ -18,6 +19,7 @@ __all__: list[str] = [
     "AuditService",
     "DiscoveredEntityFile",
     "EntityDirectory",
+    "EntityPatch",
     "ObsidianVaultRepository",
     "VaultDocument",
     "VaultRepository",

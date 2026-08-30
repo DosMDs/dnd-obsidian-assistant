@@ -29,6 +29,7 @@ if TYPE_CHECKING:
     from dnd_assistant.domain.entity import Entity
     from dnd_assistant.domain.types import EntityId, Revision
     from dnd_assistant.storage.audit import AuditContext
+    from dnd_assistant.storage.patch import EntityPatch
 
 
 # ── Entity directory mapping ───────────────────────────────────────────────
@@ -196,20 +197,43 @@ class VaultRepository(Protocol):
         """
         ...
 
-    # patch_entity — deferred to S3-06
-    #
-    # The typed signature for patch_entity cannot be finalised until
-    # S3-06 establishes:
-    #   - the patch DTO shape (field-level vs full-document);
-    #   - revision increment ownership (caller vs storage).
-    #
-    # Stable requirements documented now:
-    #   - targets an EntityId;
-    #   - uses expected_revision for optimistic concurrency;
-    #   - mismatch raises ConflictError;
-    #   - successful revision-update semantics are finalised in S3-06.
-    #
-    # See S3-00 completion record and S3-06 task for the deferral rationale.
+    def patch_entity(
+        self,
+        entity_id: EntityId,
+        patch: EntityPatch,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        """Patch an existing entity's editable fields.
+
+        Applies the supplied ``EntityPatch`` fields to the entity
+        identified by ``entity_id``.  The operation is guarded by
+        optimistic concurrency: the stored revision must match
+        ``expected_revision`` or a ``ConflictError`` is raised.
+
+        The repository owns revision increment (exactly +1) and
+        ``updated_at`` (set to ``audit.real_time``).
+
+        Args:
+            entity_id: The stable domain identifier of the entity to patch.
+            patch: The typed partial update DTO.
+            expected_revision: The revision the caller last observed.
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``VaultDocument`` after the patch.
+
+        Raises:
+            ValidationError: The ``entity_id``, ``expected_revision``, or
+                ``patch`` is invalid.
+            NotFoundError: No entity with the given ID exists.
+            ConflictError: The stored revision does not match
+                ``expected_revision``, or the ``operation_id`` has already
+                been used.
+            StorageError: A filesystem or audit operation failed.
+        """
+        ...
 
     def append_entity_fact(
         self,
