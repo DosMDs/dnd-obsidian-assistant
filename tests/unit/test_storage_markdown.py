@@ -120,6 +120,24 @@ class TestFindFrontmatter:
         assert text[closer_start:closer_end].startswith("---")
         assert text[closer_end:] == "Body"
 
+    # ── Negative opener tests (S3-01 correction 1) ─────────────────────
+
+    def test_four_hyphens_rejected(self) -> None:
+        """``----`` must not be accepted as an opener."""
+        assert _find_frontmatter("----\nkey: value\n---\nbody") is None
+
+    def test_opener_with_trailing_text_rejected(self) -> None:
+        """``--- text`` must not be accepted as an opener."""
+        assert _find_frontmatter("--- text\nkey: value\n---\nbody") is None
+
+    def test_opener_with_leading_space_rejected(self) -> None:
+        """`` ---`` (leading space) must not be accepted."""
+        assert _find_frontmatter(" ---\nkey: value\n---\nbody") is None
+
+    def test_opener_with_leading_tab_rejected(self) -> None:
+        """``\\t---`` (leading tab) must not be accepted."""
+        assert _find_frontmatter("\t---\nkey: value\n---\nbody") is None
+
 
 # ── Canonical parse tests ───────────────────────────────────────────────────
 
@@ -436,8 +454,10 @@ class TestSerialize:
         with pytest.raises(ValidationError, match="collide"):
             serialize(doc)
 
-    def test_canonical_fields_first_in_output(self) -> None:
-        """Canonical Entity fields appear before extra frontmatter in output."""
+    def test_canonical_fields_in_declaration_order(self) -> None:
+        """Canonical Entity fields appear in Entity.model_fields declaration order."""
+        from dnd_assistant.domain.entity import Entity as _Entity
+
         entity = _make_entity()
         doc = VaultDocument(
             entity=entity,
@@ -450,9 +470,38 @@ class TestSerialize:
         fm_end = output.index("\n---\n", fm_start)
         fm_section = output[fm_start:fm_end]
         fm_lines = fm_section.split("\n")
-        # The first line should be a canonical field, not faction
-        first_key = fm_lines[0].split(":")[0].strip()
-        assert first_key != "faction", "Extra field 'faction' appeared before canonical fields"
+
+        # Collect keys in order of appearance (skip empty/blank lines)
+        seen_keys: list[str] = []
+        for line in fm_lines:
+            stripped = line.strip()
+            if stripped and ":" in stripped:
+                key = stripped.split(":")[0].strip()
+                seen_keys.append(key)
+
+        # The canonical keys (non-None, non-empty-tags) must appear in
+        # Entity.model_fields order, before any extra keys.
+        expected_order = list(_Entity.model_fields.keys())
+        # Filter out keys that would be omitted (None values, empty tags)
+        expected_present = [
+            k
+            for k in expected_order
+            if getattr(entity, k) is not None and not (k == "tags" and getattr(entity, k) == [])
+        ]
+
+        # Verify canonical keys appear in declaration order
+        canonical_seen = [k for k in seen_keys if k in expected_present]
+        assert canonical_seen == expected_present, (
+            f"Canonical fields out of order: expected {expected_present}, got {canonical_seen}"
+        )
+
+        # Verify extra key appears after all canonical keys
+        assert "faction" in seen_keys
+        faction_idx = seen_keys.index("faction")
+        last_canonical_idx = max(seen_keys.index(k) for k in canonical_seen)
+        assert faction_idx > last_canonical_idx, (
+            "Extra field 'faction' appeared before canonical fields"
+        )
 
     def test_output_starts_and_ends_with_delimiters(self) -> None:
         entity = _make_entity()
@@ -464,6 +513,38 @@ class TestSerialize:
 
     def test_serialize_importable(self) -> None:
         from dnd_assistant.storage import serialize  # noqa: F401
+
+    # ── Serialize-side non-string key validation (S3-01 correction 3) ──
+
+    def test_serialize_rejects_non_string_extra_key(self) -> None:
+        """Serialization must reject non-string extra frontmatter keys."""
+        entity = _make_entity()
+        # Construct VaultDocument with an int key via type-ignore
+        extra: dict[str, object] = {"valid": "ok"}
+        extra[cast(str, 42)] = "numeric-key"  # type: ignore[assignment]
+        doc = VaultDocument(entity=entity, extra_frontmatter=extra)  # type: ignore[arg-type]
+        with pytest.raises(ValidationError, match="keys must be strings"):
+            serialize(doc)
+
+    # ── YAML serialization error wrapping (S3-01 correction 4) ─────────
+
+    def test_serialize_wraps_yaml_failure(self) -> None:
+        """YAML serialization failures must raise ValidationError with __cause__."""
+        entity = _make_entity()
+
+        # ruamel.yaml safe dumper cannot serialize arbitrary objects
+        class Unserializable:
+            pass
+
+        doc = VaultDocument(
+            entity=entity,
+            extra_frontmatter={"bad_value": Unserializable()},
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            serialize(doc)
+        assert exc_info.value.__cause__ is not None, (
+            "ValidationError must preserve original exception as __cause__"
+        )
 
 
 # ── Round-trip integration tests ────────────────────────────────────────────

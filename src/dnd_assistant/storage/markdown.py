@@ -78,19 +78,30 @@ from dnd_assistant.storage.types import VaultDocument
 FM_DELIMITER = "---"
 """Frontmatter delimiter line."""
 
-# ── Module-level YAML instance ──────────────────────────────────────────────
+# ── YAML instance factory ───────────────────────────────────────────────────
 
-_YAML = ruamel.yaml.YAML(typ="safe")
-_YAML.default_flow_style = False
-_YAML.allow_unicode = True
-_YAML.indent(mapping=2, sequence=2, offset=0)
+
+def _make_yaml() -> ruamel.yaml.YAML:
+    """Create a fresh YAML serializer instance.
+
+    Each call returns an independent instance so that a failed
+    serialization does not corrupt a shared module-level instance.
+    """
+    yaml = ruamel.yaml.YAML(typ="safe")
+    yaml.default_flow_style = False
+    yaml.allow_unicode = True
+    yaml.indent(mapping=2, sequence=2, offset=0)
+    yaml.sort_base_mapping_type_on_output = False
+    return yaml
+
 
 # ── Canonical Entity field names ────────────────────────────────────────────
 
-_ENTITY_FIELD_NAMES: frozenset[str] = frozenset(
-    Entity.model_fields.keys(),
-)
-"""Set of canonical field names defined by the Entity Pydantic model."""
+_ENTITY_FIELD_ORDER: tuple[str, ...] = tuple(Entity.model_fields.keys())
+"""Ordered canonical field names, matching the Entity Pydantic model declaration order."""
+
+_ENTITY_FIELD_NAMES: frozenset[str] = frozenset(_ENTITY_FIELD_ORDER)
+"""Set of canonical field names defined by the Entity Pydantic model (for membership checks)."""
 
 
 # ── Frontmatter boundary helpers ────────────────────────────────────────────
@@ -114,15 +125,17 @@ def _find_frontmatter(text: str) -> tuple[int, int, int] | None:
         Returns ``None`` if the frontmatter is missing or malformed
         (no opening delimiter at line 1, or no closing delimiter found).
     """
-    if not text.startswith(FM_DELIMITER):
+    # The opening delimiter must be exactly "---" at position 0, followed
+    # immediately by "\n" or "\r\n".  No leading whitespace, no extra
+    # hyphens, no trailing text on the delimiter line.
+    if not text.startswith("---\n") and not text.startswith("---\r\n"):
         return None
 
     # Skip the opening --- line
-    after_opener = text.find("\n", len(FM_DELIMITER))
-    if after_opener == -1:
-        # File is just "---" with no newline and no body
-        return None
-    opener_end = after_opener + 1  # include the newline
+    if text.startswith("---\r\n"):
+        opener_end = 5  # len("---\r\n")
+    else:
+        opener_end = 4  # len("---\n")
 
     # Search for the closing --- delimiter line
     # It must be a standalone line: start-of-line, "---", then optionally
@@ -187,7 +200,7 @@ def parse(text: str) -> VaultDocument:
 
     # Parse YAML
     try:
-        raw: object = _YAML.load(yaml_text)
+        raw: object = _make_yaml().load(yaml_text)
     except Exception as exc:
         raise ValidationError(
             "Failed to parse YAML frontmatter",
@@ -261,9 +274,10 @@ def serialize(document: VaultDocument) -> str:
     # Serialize Entity to YAML-compatible primitives
     entity_dict = document.entity.model_dump(mode="json")
 
-    # Build combined frontmatter: canonical fields first, then extras
+    # Build combined frontmatter: canonical fields first (in declaration
+    # order), then extras
     frontmatter: dict[str, object] = {}
-    for key in _ENTITY_FIELD_NAMES:
+    for key in _ENTITY_FIELD_ORDER:
         if key in entity_dict:
             value = entity_dict[key]
             # Omit None values and empty default lists for cleaner output
@@ -272,11 +286,21 @@ def serialize(document: VaultDocument) -> str:
 
     # Add extra frontmatter (already validated not to collide)
     for key, value in document.extra_frontmatter.items():
+        if not isinstance(key, str):
+            raise ValidationError(
+                f"Extra frontmatter keys must be strings, got {type(key).__name__}"
+            )
         frontmatter[key] = value
 
     # Serialize to YAML string
     buf = io.StringIO()
-    _YAML.dump(frontmatter, buf)
+    try:
+        _make_yaml().dump(frontmatter, buf)
+    except Exception as exc:
+        raise ValidationError(
+            "Failed to serialize frontmatter to YAML",
+            cause=exc,
+        ) from exc
     yaml_output = buf.getvalue()
 
     # Build final document
