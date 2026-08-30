@@ -10,10 +10,10 @@ import typer
 
 app = typer.Typer(
     name="dnd",
-    help="D&D Session Assistant — local, offline-first campaign memory.",
+    help="D&D Session Assistant — локальный помощник для долговременной памяти кампании.",
 )
 
 
 @app.callback()
 def _main() -> None:
-    """D&D Session Assistant CLI."""
+    """CLI D&D Session Assistant."""

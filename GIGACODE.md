@@ -20,6 +20,10 @@ The durable campaign state lives in an Obsidian Vault. Python owns trusted domai
 10. Ambiguous entity resolution must prefer clarification over speculative writes.
 11. Stable IDs, revisions, provenance, visibility, atomic writes and audit logging are core requirements.
 12. Do not introduce vector DB, embeddings, LoRA, voice, Web UI, graph DB, combat automation or complex RAG before MVP need is demonstrated.
+13. The application user interface is Russian-only for the MVP. All application-owned CLI/TUI help text, prompts, confirmations, status messages, warnings and user-facing error messages must be in Russian.
+14. Do not introduce i18n, locale selection, translation catalogs or additional interface languages unless the user explicitly expands the product scope.
+15. Campaign-facing text must use UTF-8 and fully support Cyrillic. Internal Python identifiers, module/file names, enum member names and serialized machine-readable enum values may remain English.
+16. Runtime LLM output intended for the user must be requested in Russian unless a later explicit requirement overrides this rule.
 
 ## Dependency order
 
@@ -94,7 +98,7 @@ The application must run natively on Windows and macOS.
 
 - Use `pathlib.Path`.
 - Use UTF-8 explicitly for project-controlled text files.
-- Do not hard-code `C:\...`, `/Users/...`, drive letters or shell-specific paths.
+- Do not hard-code `C:\\...`, `/Users/...`, drive letters or shell-specific paths.
 - Do not require Bash, Make, WSL or GNU-only utilities.
 - Prefer Python implementations and `uv run ...` commands.
 - Avoid `shell=True` and platform-specific shell syntax in application code.

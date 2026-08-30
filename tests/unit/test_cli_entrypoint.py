@@ -28,14 +28,14 @@ def test_app_name_is_dnd() -> None:
 
 
 def test_cli_help_via_runner() -> None:
-    """``--help`` via CliRunner should exit with code 0."""
+    """``--help`` via CliRunner should exit with code 0 and show Russian UI."""
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    assert "D&D Session Assistant" in result.stdout
+    assert "локальный помощник" in result.stdout
 
 
 def test_cli_entrypoint_help_exits_ok() -> None:
-    """``uv run dnd --help`` should exit with code 0."""
+    """``uv run dnd --help`` should exit with code 0 and show Russian UI."""
     project_root = Path(__file__).resolve().parents[2]
     result = subprocess.run(
         ["uv", "run", "dnd", "--help"],
@@ -44,4 +44,4 @@ def test_cli_entrypoint_help_exits_ok() -> None:
         cwd=str(project_root),
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
-    assert "D&D Session Assistant" in result.stdout
+    assert "локальный помощник" in result.stdout
