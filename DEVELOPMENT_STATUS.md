@@ -180,7 +180,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - [x] `S3-02` Vault path safety + entity directory/discovery policy
 - [x] `S3-03` Atomic write primitive (corrected: symlink, BaseException, validator transparency, lifecycle)
 - [x] `S3-04` AuditRecord + AuditService
-- [ ] `S3-05` create_entity / get_entity / list_entities
+- [x] `S3-05` create_entity / get_entity / list_entities
 - [ ] `S3-06` patch_entity + optimistic concurrency
 - [ ] `S3-07` append_entity_fact
 - [ ] `S3-08` integration/failure tests
@@ -792,7 +792,178 @@ os.replace(temp, target)
 - No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet
 - S3-05 was NOT started
 
-**Stage 3 status:** IN PROGRESS — S3-04 complete. S3-05 NOT STARTED.
+### S3-05 completion record
+
+**Review range:** S3-04 completion through S3-05
+
+**Changes:**
+
+1. **storage/audit.py** — two extensions:
+
+   **AuditRecord.phase field:**
+   - Added `phase: Literal["intent", "committed"] = "committed"` — backward-compatible default
+   - Old persisted JSON without `phase` loads as `"committed"` (default behavior)
+   - `schema_version` not incremented (same unreleased Stage-3 cycle)
+
+   **AuditContext model:**
+   - New strict Pydantic model: `operation_id`, `real_time` (AwareDatetime), `source` — required
+   - Optional: `session`, `model_profile`, `prompt_version`
+   - `extra="forbid"`, `frozen=True`
+   - Same validation semantics as corresponding AuditRecord fields
+   - Exported from `dnd_assistant.storage`
+
+2. **storage/types.py** — `VaultRepository` Protocol refinement:
+   - `create_entity` signature changed from `create_entity(document)` to `create_entity(document, *, audit: AuditContext)`
+   - Audit metadata is now required (not optional) for every mutation
+   - Read signatures (`get_entity`, `list_entities`) unchanged
+
+3. **storage/vault_repository.py** (new) — `ObsidianVaultRepository` concrete class:
+   - Constructor: `ObsidianVaultRepository(vault_root, audit_service)`
+   - Validates audit path belongs beneath `<vault_root>/_system/audit/`
+   - Rejects symlinked audit path components
+   - Requires `_system/audit/` directory to exist
+
+   **get_entity(entity_id):**
+   - Scans all entity directories, parses all candidates
+   - Detects global duplicate EntityIds (raises ConflictError)
+   - Detects directory/type mismatch (raises StorageError)
+   - Detects malformed persisted files (raises StorageError)
+   - Exact YAML ID lookup only (no filename, no fuzzy, no name)
+   - Runtime entity_id validation (invalid input → ValidationError, not NotFoundError)
+
+   **list_entities(entity_type=None):**
+   - Same global scan/validation as get_entity
+   - Optional type filter
+   - Deterministic discovery ordering (from S3-02 paths)
+   - Empty list when nothing matches
+
+   **create_entity(document, *, audit):**
+   - Full write-ahead audit lifecycle:
+     1. Validate audit log readable + operation_id unique
+     2. Global snapshot (duplicate EntityId check)
+     3. Serialize document
+     4. Compute SHA-256 after_hash
+     5. Generate opaque UUID filename (`entity-<uuid4hex>.md`)
+     6. Append audit `intent` record
+     7. `atomic_write_text` with parse validator
+     8. Re-read persisted bytes, verify hash
+     9. Append audit `committed` record
+     10. Return persisted VaultDocument
+
+   **Filename policy:**
+   - Opaque UUID-based: `entity-<uuid4hex>.md`
+   - ASCII-only, Windows/macOS safe
+   - NOT derived from EntityId or display name
+   - Collision detection with up to 32 retry attempts
+   - Manual user rename does not break get_entity
+
+   **Exact text read policy:**
+   - Uses `open(path, encoding="utf-8", newline="")` — no newline translation
+   - Invalid UTF-8 → StorageError
+
+   **Persisted corruption policy:**
+   - Malformed frontmatter → StorageError (not silently skipped)
+   - Invalid Entity schema → StorageError
+   - Directory/YAML type mismatch → StorageError
+   - Invalid UTF-8 → StorageError
+
+   **Global duplicate-ID policy:**
+   - All entity types scanned before any read/list/create
+   - Two files with same EntityId → ConflictError
+   - Applies even when list_entities has a type filter
+
+   **SHA-256 hash policy:**
+   - `hashlib.sha256(exact_text.encode("utf-8")).hexdigest()`
+   - Hashes exact serialized UTF-8 content
+   - `before_hash = None` for create
+
+   **Audit consistency strategy:**
+   - `intent` → atomic write → verified read-back → `committed`
+   - Same `operation_id` for both records
+   - operation_id reuse rejected with ConflictError
+
+   **Failure matrix:**
+   - Corrupt audit preflight → StorageError, no entity mutation
+   - Intent append failure → StorageError propagates, no entity mutation
+   - Entity write failure → StorageError propagates, intent remains, no entity file
+   - Read-back/hash failure → StorageError (entity may be committed), no committed audit
+   - Committed-audit failure → StorageError with explicit diagnostic, entity NOT rolled back
+
+   **No rollback/delete after committed mutation:**
+   - If entity write succeeds but committed audit fails, entity remains
+   - Intent record provides deterministic recoverability
+
+4. **storage/__init__.py** — exports `AuditContext`, `ObsidianVaultRepository`
+
+5. **tests/unit/test_storage_audit.py** — added:
+   - `TestAuditRecordPhase` — 6 tests (default, intent, committed, invalid, backward compat, round trip)
+   - `TestAuditContext` — 8 tests (minimal, full, naive rejected, empty/whitespace/extra/frozen/unicode)
+
+6. **tests/unit/test_storage_vault_repository.py** (new) — 51 tests:
+
+   **Repository construction (5 tests):**
+   - Valid vault + audit, missing vault root, audit outside vault, audit outside _system/audit/, missing _system/audit/
+
+   **Read/list success (12 tests):**
+   - Empty vault, empty by type, one NPC, all four types, type-filtered list, Unicode entity/body, extra frontmatter preserved, exact ID lookup, renamed file still found, not found, invalid ID rejected, no filename lookup
+
+   **Corruption handling (6 tests):**
+   - Malformed frontmatter, invalid entity schema, directory/type mismatch, duplicate ID across types, duplicate ID same type, type-filtered list still detects global duplicate
+
+   **Create duplicate (3 tests):**
+   - Duplicate YAML ID → ConflictError, no target overwritten, audit intent not written
+
+   **Filename policy (7 tests):**
+   - `.md` suffix, safe ASCII, not entity ID, not display name, starts with `entity-`, manual rename OK, collision regenerates
+
+   **Audit lifecycle (8 tests):**
+   - Exactly 2 records, same operation_id, operation is create_entity, intent then committed, same entity_id, before_hash is None, same after_hash, same context metadata
+
+   **Failure semantics (6 tests):**
+   - operation_id reuse rejected, corrupt audit preflight aborts, intent append failure aborts, entity write failure leaves intent, committed audit failure entity still exists
+
+   **Boundary tests (5 tests):**
+   - Module importable, re-exported, no models/retrieval/tools imports
+
+7. **DEVELOPMENT_STATUS.md** — updated task status, added S3-05 completion record
+
+**Decisions made:**
+- `ObsidianVaultRepository` — explicit concrete name, not `VaultRepository`
+- Full `VaultRepository` structural conformance deferred to S3-07 (append_entity_fact)
+- Filename: opaque UUID (`entity-<uuid4hex>.md`), not EntityId-derived
+- Exact text read: `open(path, encoding="utf-8", newline="")` — no newline translation
+- Persisted corruption: always StorageError, never silently skipped
+- Directory/type mismatch: StorageError, never silently accepted
+- Global duplicate ID: ConflictError, never first-win
+- SHA-256 of exact UTF-8 content for audit hashes
+- Write-ahead audit: intent before mutation, committed after verified read-back
+- No rollback after committed entity write
+- No cross-process duplicate-create guarantee (no file locks)
+- No patch/revision/append scope creep
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_vault_repository.py` — 51 passed
+- `uv run pytest tests/unit/test_storage_audit.py` — 78 passed, 2 skipped
+- `uv run pytest tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py tests/unit/test_storage_atomic.py tests/unit/test_storage_audit.py tests/unit/test_storage_vault_repository.py` — 353 passed, 17 skipped
+- `uv run pytest` (full suite) — 887 passed, 17 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 77 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-05:** None
+
+**Code/test changes during S3-05:** 7 files (4 modified, 3 new), focused on vault repository create/read/list.
+
+**Scope exclusions confirmed:**
+- No patch_entity, Patch DTO, expected_revision, revision increment, timestamp mutation (S3-06)
+- No append_entity_fact (S3-07)
+- No locks, rollback/delete transaction, automatic intent reconciliation, audit repair
+- No fuzzy search, name/alias lookup, SQLite, FTS, indexes, embeddings, migrations
+- No directory/bootstrap initialization, Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, ChangeSet
+- S3-06 was NOT started
+
+**Stage 3 status:** IN PROGRESS — S3-05 complete.
 
 ## Current blockers
 

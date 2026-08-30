@@ -28,6 +28,7 @@ from dnd_assistant.domain.types import EntityType
 if TYPE_CHECKING:
     from dnd_assistant.domain.entity import Entity
     from dnd_assistant.domain.types import EntityId, Revision
+    from dnd_assistant.storage.audit import AuditContext
 
 
 # ── Entity directory mapping ───────────────────────────────────────────────
@@ -139,12 +140,19 @@ class VaultRepository(Protocol):
     without waiting for the full implementation.
     """
 
-    def create_entity(self, document: VaultDocument) -> VaultDocument:
+    def create_entity(
+        self,
+        document: VaultDocument,
+        *,
+        audit: AuditContext,
+    ) -> VaultDocument:
         """Persist a new entity document in the Vault.
 
         Args:
             document: The entity document to create.  Must have a unique
                 ``EntityId`` that does not already exist in the Vault.
+            audit: Audit context for this mutation.  Every repository
+                mutation must carry explicit audit metadata.
 
         Returns:
             The persisted document as stored (may include storage-assigned

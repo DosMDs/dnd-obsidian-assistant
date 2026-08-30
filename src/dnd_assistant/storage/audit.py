@@ -68,8 +68,9 @@ class AuditRecord(BaseModel):
     """A single audited Vault operation.
 
     Each record captures one operation performed on the Vault, including
-    the actor (source), the affected entity (if any), and optional
-    before/after content hashes.
+    the actor (source), the affected entity (if any), optional before/after
+    content hashes, and the operation phase (``"intent"`` or
+    ``"committed"``).
     """
 
     schema_version: Literal[1] = 1
@@ -102,6 +103,17 @@ class AuditRecord(BaseModel):
     This is NOT domain ``Provenance``.  ``Provenance`` describes how
     campaign knowledge entered the system; ``source`` describes which
     application actor performed the Vault operation.
+    """
+
+    phase: Literal["intent", "committed"] = "committed"
+    """Operation phase.
+
+    ``"intent"`` means the mutation was durably announced before any
+    filesystem mutation.  ``"committed"`` means the repository write
+    completed and the final persisted state was verified.
+
+    Defaults to ``"committed"`` for backward compatibility with S3-04
+    records that do not contain this field.
     """
 
     model_profile: str | None = None
@@ -167,6 +179,67 @@ def _validate_printable_nonempty(value: str, field_name: str) -> str:
     if not value.isprintable():
         raise ValueError(f"{field_name} must not contain non-printable characters")
     return value
+
+
+# ── AuditContext ────────────────────────────────────────────────────────────
+
+
+class AuditContext(BaseModel):
+    """Strict audit context for a single Vault mutation operation.
+
+    This is the caller-supplied metadata that accompanies every repository
+    mutation.  It is NOT domain ``Provenance`` — ``source`` describes the
+    application actor that performed the Vault operation, not how campaign
+    knowledge entered the system.
+    """
+
+    operation_id: str
+    """Unique identifier for this logical operation (caller-supplied)."""
+
+    real_time: AwareDatetime
+    """Real-world timestamp when the operation occurred (caller-supplied)."""
+
+    source: str
+    """Actor/mechanism that performed the operation (e.g. ``\"model_tool\"``)."""
+
+    session: str | None = None
+    """Optional game-session identifier (e.g. ``\"S007\"``)."""
+
+    model_profile: str | None = None
+    """Optional model profile identifier used for this operation."""
+
+    prompt_version: str | None = None
+    """Optional prompt version identifier used for this operation."""
+
+    model_config = {
+        "extra": "forbid",
+        "frozen": True,
+    }
+    """``extra="forbid"``: unknown fields are rejected.
+
+    ``frozen=True``: context is immutable once created.
+    """
+
+    # ── Field validators ──────────────────────────────────────────────
+
+    @field_validator("operation_id", "source")
+    @classmethod
+    def _validate_required_string(cls, value: str) -> str:
+        return _validate_printable_nonempty(value, "operation_id/source")
+
+    @field_validator("session")
+    @classmethod
+    def _validate_optional_session(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_printable_nonempty(value, "session")
+
+    @field_validator("model_profile", "prompt_version")
+    @classmethod
+    def _validate_optional_metadata(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_printable_nonempty(value, "model_profile/prompt_version")
 
 
 # ── AuditService ────────────────────────────────────────────────────────────

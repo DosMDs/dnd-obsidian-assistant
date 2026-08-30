@@ -12,7 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from dnd_assistant.errors import StorageError
-from dnd_assistant.storage.audit import AuditRecord, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -557,7 +557,7 @@ class TestAuditBoundaries:
         import dnd_assistant.storage.audit  # noqa: F401
 
     def test_audit_re_exported(self) -> None:
-        from dnd_assistant.storage import AuditRecord, AuditService  # noqa: F401
+        from dnd_assistant.storage import AuditContext, AuditRecord, AuditService  # noqa: F401
 
     def test_no_entity_import(self) -> None:
         import dnd_assistant.storage.audit as mod
@@ -611,3 +611,133 @@ class TestAuditBoundaries:
         # import or reference it outside docstrings/comments.
         assert "from dnd_assistant.storage.atomic" not in content
         assert "atomic_write_text(" not in content
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# AuditRecord — phase field (S3-05 extension)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestAuditRecordPhase:
+    """AuditRecord phase field behaviour."""
+
+    def test_default_phase_is_committed(self) -> None:
+        record = _valid_record()
+        assert record.phase == "committed"
+
+    def test_explicit_intent_accepted(self) -> None:
+        record = _valid_record(phase="intent")
+        assert record.phase == "intent"
+
+    def test_explicit_committed_accepted(self) -> None:
+        record = _valid_record(phase="committed")
+        assert record.phase == "committed"
+
+    def test_invalid_phase_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            _valid_record(phase="invalid")
+
+    def test_old_json_without_phase_loads_as_committed(self) -> None:
+        """Backward compatibility: persisted records without 'phase' default to committed."""
+        data = {
+            "operation_id": "op-001",
+            "real_time": "2026-08-30T12:00:00+00:00",
+            "operation": "create",
+            "source": "model_tool",
+        }
+        record = AuditRecord.model_validate(data)
+        assert record.phase == "committed"
+
+    def test_phase_round_trip_via_json(self) -> None:
+        record = _valid_record(phase="intent")
+        dumped = record.model_dump(mode="json")
+        assert dumped["phase"] == "intent"
+        restored = AuditRecord.model_validate(dumped)
+        assert restored.phase == "intent"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# AuditContext schema (S3-05)
+# ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestAuditContext:
+    """AuditContext schema validation."""
+
+    def test_minimal_valid(self) -> None:
+        ctx = AuditContext(
+            operation_id="op-001",
+            real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+            source="model_tool",
+        )
+        assert ctx.operation_id == "op-001"
+        assert ctx.source == "model_tool"
+        assert ctx.session is None
+        assert ctx.model_profile is None
+        assert ctx.prompt_version is None
+
+    def test_full_context(self) -> None:
+        ctx = AuditContext(
+            operation_id="op-001",
+            real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+            source="model_tool",
+            session="S007",
+            model_profile="llama3",
+            prompt_version="v2.1",
+        )
+        assert ctx.session == "S007"
+        assert ctx.model_profile == "llama3"
+        assert ctx.prompt_version == "v2.1"
+
+    def test_naive_datetime_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AuditContext(
+                operation_id="op-001",
+                real_time=datetime(2026, 8, 30, 12, 0, 0),
+                source="model_tool",
+            )
+
+    def test_empty_operation_id_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AuditContext(
+                operation_id="",
+                real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+                source="model_tool",
+            )
+
+    def test_whitespace_source_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AuditContext(
+                operation_id="op-001",
+                real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+                source="  spaced  ",
+            )
+
+    def test_extra_fields_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            AuditContext(
+                operation_id="op-001",
+                real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+                source="model_tool",
+                unknown_field="bad",
+            )
+
+    def test_frozen_immutable(self) -> None:
+        ctx = AuditContext(
+            operation_id="op-001",
+            real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+            source="model_tool",
+        )
+        with pytest.raises(ValidationError):
+            ctx.operation_id = "changed"
+
+    def test_unicode_accepted(self) -> None:
+        ctx = AuditContext(
+            operation_id="оп-001",
+            real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+            source="инструмент",
+            session="Сессия-007",
+        )
+        assert ctx.operation_id == "оп-001"
+        assert ctx.source == "инструмент"
+        assert ctx.session == "Сессия-007"
