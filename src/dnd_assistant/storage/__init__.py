@@ -1,5 +1,6 @@
 """Storage layer: Vault persistence, audit logging, and document representation."""
 
+from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.markdown import parse, serialize
 from dnd_assistant.storage.paths import (
     DiscoveredEntityFile,
@@ -14,6 +15,7 @@ __all__: list[str] = [
     "EntityDirectory",
     "VaultDocument",
     "VaultRepository",
+    "atomic_write_text",
     "discover_entity_files",
     "entity_directory",
     "parse",

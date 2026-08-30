@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-01 complete, S3-02 not started)
+**Status:** `IN PROGRESS` (S3-03 complete)
 
 ## Status model
 
@@ -411,7 +411,125 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - No atomic write, fsync, audit JSONL, revision increments, locks, migrations
 - No Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, or ChangeSet
 
-**Stage 3 status:** IN PROGRESS — S3-02 complete (with correction), S3-03 not started.
+**Stage 3 status:** IN PROGRESS — S3-02 complete (with correction), S3-03 complete.
+
+### S3-03 completion record
+
+**Review range:** S3-02 correction through S3-03
+
+**Changes:**
+
+1. **storage/atomic.py** (new) — atomic text-write primitive:
+   - `atomic_write_text(target, content, *, validator)` — single public function
+   - Temporary sibling file created via `tempfile.mkstemp` in the same parent directory as target
+   - Temporary naming pattern: `.<target-name>.<random>.tmp`
+   - UTF-8 writing with `newline=""` to prevent Windows `\n` → `\r\n` translation
+   - Flush + `os.fsync` before validation
+   - Required `validator(content)` callback runs after fsync, before `os.replace`
+   - `os.replace(temp_path, target_path)` for atomic replacement
+   - Target must be absolute; relative paths rejected with `StorageError`
+   - Existing target symlink rejected with `StorageError`
+   - Existing target directory rejected with `StorageError`
+   - Missing parent directory rejected with `StorageError` (no directory creation)
+   - Filesystem `OSError` translated to `StorageError` with cause preserved
+   - `ValidationError` from validator propagates unchanged (not translated to `StorageError`)
+   - Temporary file cleaned up on failure (best-effort, does not mask primary error)
+   - No domain Entity import, no Markdown codec import, no audit import
+
+2. **storage/__init__.py** — exports `atomic_write_text`
+
+3. **tests/unit/test_storage_atomic.py** (new) — 36 tests + 1 skipped:
+
+   **Success (11 tests):**
+   - Create missing target, replace existing target
+   - Unicode preservation (Cyrillic, CJK, Arabic)
+   - LF preservation (no `\r\n` translation)
+   - CRLF preservation (exact bytes via `read_bytes()`)
+   - No trailing-newline modification
+   - Trailing newline preserved
+   - Mixed newlines preserved
+   - Validator called with content
+   - No temp files remain after success
+   - Validator return value ignored
+
+   **Operation ordering (1 test):**
+   - Behavioural verification: `fsync < validator < replace` via monkeypatched `os.fsync`/`os.replace`
+
+   **Validation failure (4 tests):**
+   - Existing target unchanged after validator raises `ValidationError`
+   - Missing target remains absent
+   - Validator exception propagates unchanged (not translated to `StorageError`)
+   - Temporary file removed after validation failure
+
+   **fsync failure (3 tests):**
+   - `StorageError` raised with `OSError` cause preserved
+   - Original target unchanged
+   - Temporary file cleaned
+
+   **os.replace failure (3 tests):**
+   - `StorageError` raised with `OSError` cause preserved
+   - Original target unchanged
+   - Temporary file cleaned
+
+   **Temp creation failure (2 tests):**
+   - `tempfile.mkstemp` patched to raise `OSError` → `StorageError` with cause
+   - Original target unchanged
+
+   **Path state (5 tests):**
+   - Missing parent rejected
+   - Parent regular file rejected
+   - Target directory rejected
+   - Target symlink rejected (skipped on Windows without symlink privileges)
+   - Relative path rejected
+
+   **Same-directory temp invariant (1 test):**
+   - Temp file parent == target parent (verified via `os.replace` interception)
+
+   **Public boundaries (7 tests):**
+   - Module importable
+   - `atomic_write_text` re-exported from `storage`
+   - No `domain.entity` import
+   - No `storage.markdown` import
+   - No `models` import
+   - No `retrieval` import
+   - No `tools` import
+
+**Atomic-write API established:**
+- `atomic_write_text(target, content, *, validator)` — single function, no classes
+- Target must be absolute; parent must exist; target must not be a directory or symlink
+- Temporary file created beside target (same filesystem for `os.replace`)
+- UTF-8 with `newline=""` — exact newline preservation
+- Lifecycle: `write → flush → fsync → validator → close → os.replace`
+- `ValidationError` propagates unchanged; `OSError` → `StorageError` with cause
+- Best-effort temp cleanup on failure; does not mask primary error
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_atomic.py` — 36 passed, 1 skipped
+- `uv run pytest tests/unit/test_storage_atomic.py tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py` — 199 passed, 11 skipped
+- `uv run pytest` (full suite) — 750 passed, 11 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 74 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-03:**
+- Initial `except Exception` block in `atomic_write_text` re-raised `OSError` directly instead of translating to `StorageError`. Fixed by adding explicit `except OSError` → `StorageError` translation.
+- `ValidationError` was not imported in `atomic.py`. Fixed by adding the import.
+- CRLF preservation tests used `read_text()` which translates `\r\n` to `\n` on Windows. Fixed by using `read_bytes().decode("utf-8")`.
+- Module-level monkeypatches (`atomic_mod._create_temp`, `atomic_mod._write_content`) failed when running in the full test suite due to module identity issues. Fixed by patching `tempfile.mkstemp` via `unittest.mock.patch`.
+
+**Code/test changes during S3-03:** 4 files (2 modified, 2 new), focused on atomic write primitive only.
+
+**Scope exclusions confirmed:**
+- No VaultRepository concrete class
+- No create_entity, get_entity, list_entities, patch_entity, append_entity_fact
+- No revision increment or optimistic concurrency
+- No audit JSONL or AuditService
+- No locks, migrations, directory creation
+- No filename generation or stable-ID lookup
+- No Markdown codec changes
+- No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet
+- S3-04 was NOT started
 
 ## Current blockers
 
