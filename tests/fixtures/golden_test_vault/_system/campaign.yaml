@@ -1,0 +1,9 @@
+schema_version: 1
+campaign_id: camp_golden_001
+campaign_name: Тени над Серым Бродом
+calendar_id: golden_calendar
+assistant:
+  perspective: player
+features:
+  embeddings: false
+  auto_apply_low_risk_changes: false

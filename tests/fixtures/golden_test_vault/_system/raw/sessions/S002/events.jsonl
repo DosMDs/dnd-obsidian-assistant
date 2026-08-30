@@ -1,0 +1,4 @@
+{"event_id":"raw_S002_001","real_time":"2026-01-17T18:20:00Z","world_tick":10880,"type":"note","text":"Найдены Северные руины и следы каравана."}
+{"event_id":"raw_S002_002","real_time":"2026-01-17T18:50:00Z","world_tick":10970,"type":"npc_interaction","text":"Получен амулет с символом Чёрного Солнца."}
+{"event_id":"raw_S002_003","real_time":"2026-01-17T19:20:00Z","world_tick":11090,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
+{"event_id":"raw_S002_004","real_time":"2026-01-17T19:50:00Z","world_tick":11210,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S002.","entity":"item_black_sun_amulet"}

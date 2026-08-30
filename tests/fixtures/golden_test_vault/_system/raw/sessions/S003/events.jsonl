@@ -1,0 +1,4 @@
+{"event_id":"raw_S003_001","real_time":"2026-01-24T18:20:00Z","world_tick":11680,"type":"note","text":"Раненый караванщик упомянул серебряную дверь."}
+{"event_id":"raw_S003_002","real_time":"2026-01-24T18:50:00Z","world_tick":11770,"type":"npc_interaction","text":"Партия получила серебряный ключ."}
+{"event_id":"raw_S003_003","real_time":"2026-01-24T19:20:00Z","world_tick":11890,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
+{"event_id":"raw_S003_004","real_time":"2026-01-24T19:50:00Z","world_tick":12010,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S003.","entity":"quest_silver_key"}

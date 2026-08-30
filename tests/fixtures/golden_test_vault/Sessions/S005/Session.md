@@ -1,0 +1,16 @@
+---
+schema_version: 1
+id: S005
+type: session
+status: completed
+real_started_at: '2026-02-07T18:00:00Z'
+real_finished_at: '2026-02-07T21:30:00Z'
+world_tick_start: 13200
+world_tick_end: 13800
+processed: true
+processed_model_profile: fixture_manual
+revision: 1
+---
+# Session S005
+
+Завершённая golden-fixture session.

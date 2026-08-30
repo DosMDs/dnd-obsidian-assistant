@@ -1,0 +1,31 @@
+{
+  "fixture": "golden_test_vault",
+  "schema_version": 1,
+  "counts": {
+    "npcs": 10,
+    "locations": 5,
+    "quests": 3,
+    "items": 5,
+    "sessions": 5,
+    "timeline_events": 20,
+    "raw_events": 20
+  },
+  "intentional_cases": {
+    "alias_ambiguity": [
+      "npc_varos",
+      "npc_varos_junior"
+    ],
+    "fuzzy_ambiguity": [
+      "npc_ender",
+      "npc_endrin"
+    ],
+    "non_player_visibility": [
+      "npc_archivist_kell",
+      "event_020"
+    ],
+    "active_quests": [
+      "quest_missing_caravan",
+      "quest_silver_key"
+    ]
+  }
+}
