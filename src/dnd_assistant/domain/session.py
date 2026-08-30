@@ -84,7 +84,7 @@ def _validate_processed_model_profile(value: str | None) -> str | None:
 # ── Annotated field types ─────────────────────────────────────────────────
 
 
-SessionId = Annotated[
+_SessionIdStr = Annotated[
     str,
     BeforeValidator(_validate_session_id),
     Field(description="Session identifier (e.g. S014)"),
@@ -120,7 +120,7 @@ class Session(BaseModel):
     schema_version: Literal[1] = 1
     """Schema version for migration detection.  Currently always 1."""
 
-    id: SessionId
+    id: _SessionIdStr
     """Session identifier (e.g. S014)."""
 
     type: Literal["session"] = "session"
