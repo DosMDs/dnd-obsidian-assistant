@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-08 complete)
+**Status:** `IN PROGRESS` (S3-08 corrected)
 
 ## Status model
 
@@ -183,7 +183,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - [x] `S3-05` create_entity / get_entity / list_entities
 - [x] `S3-06` patch_entity + optimistic concurrency
 - [x] `S3-07` append_entity_fact
-- [x] `S3-08` integration/failure tests
+- [x] `S3-08` integration/failure tests (corrected: race safety + mutation-time reauthorization)
 - [ ] `S3-09` full Stage 3 verification/diff/status
 
 ### S3-00 completion record
@@ -1317,118 +1317,92 @@ os.replace(temp, target)
 - No Retrieval, Calendar, Session runtime, Tool Registry, ModelGateway, ChangeSet
 - S3-08 was NOT started
 
-### S3-08 completion record
+### S3-08 correction (race safety + mutation-time path reauthorization)
 
-**Review range:** S3-07 correction through S3-08
+**Review range:** S3-07 correction through S3-08 correction
 
-**Integration test structure created:**
+**Commit:** `8b7671cee7a95f6bc62476b3b696abcb1fd8ecf0` (original S3-08), corrected in this task.
 
-```
-tests/integration/
-  __init__.py
-  conftest.py              — reusable fixtures (vault_root, audit_service, repo)
-  helpers.py               — shared test helpers (make_document, find_entity_file, etc.)
-  test_vault_repository_cycle.py    — happy-path cycle, revision chain, audit hash chain,
-                                      body/newline/extra-frontmatter preservation,
-                                      multi-type, human filename rename
-  test_vault_repository_failures.py — atomic replace failure, ENOSPC, audit intent/committed
-                                      failure, corrupt audit, external edit, target disappears,
-                                      operation-ID reuse
-  test_vault_repository_path_races.py — dynamic path safety (symlink redirects),
-                                        create-race hardening, temp-file cleanup
-```
+**Defects discovered during S3-08 review (production code):**
 
-Also added `tests/__init__.py` (missing package marker).
+1. **Create target-occupancy race after durable intent.** The create lifecycle had no second pre-write check between audit intent and `atomic_write_text`. An external actor could create a regular file at the generated target path after intent, and `atomic_write_text` would silently replace it.
 
-**Happy-path repository integration cycle:** create → get → patch → get → append fact → get → list → audit read-back → validate final Vault — all passed.
+2. **Create duplicate-EntityId race after initial snapshot.** The initial snapshot confirmed the EntityId was unique, but no fresh snapshot was taken after intent. An external actor could create another entity with the same ID before the atomic write.
 
-**Revision-chain result:** create rev=1 → patch rev=2 → append rev=3 → patch rev=4, verified through fresh `get_entity()` disk round-trips.
+3. **Mutation-time authorization gap for long-lived filesystem topology.** Audit path validation and entity path authorization were only performed at repository construction time. A long-lived repository could have its audit directory, entity directory, or target file replaced by symlinks after construction, allowing writes to escape the Vault.
 
-**Audit hash-chain result:** create: before_hash=None, after_hash=H1; patch: before_hash=H1, after_hash=H2; append: before_hash=H2, after_hash=H3. Each intermediate hash verified against exact persisted file content. Final committed.after_hash matches SHA-256 of persisted document.
+4. **Windows symlink skips prevented path-race scenarios from being exercised.** The original S3-08 symlink tests were all skipped on Windows, so the mutation-time authorization gap was not detected.
 
-**User Markdown/body preservation:** Body with headings, paragraphs, wikilinks, emphasis, lists survives patch unchanged and append as exact prefix.
+**Production code changes (storage/vault_repository.py):**
 
-**Newline/CRLF integration:** LF, CRLF, mixed, no-trailing, CRLF-no-trailing, and Unicode bodies preserved character-for-character through create/get, patch, and append cycles.
+1. **`_validate_mutation_environment()`** (new) — runtime audit path revalidation called before every mutation. Checks: audit log still beneath `<vault_root>/_system/audit/`, no parent path component became a symlink, audit log itself is not a symlink, canonical `_system/audit/` directory still exists.
 
-**Extra-frontmatter preservation:** Scalar, list, nested mapping, and Unicode YAML values survive create/get, patch, and append cycles.
+2. **`_reauthorize_entity_path()`** (new) — reauthorizes a stored entity path against current filesystem topology using `storage.paths.resolve_entity_path`. Detects symlink redirects, traversal, and path escape.
 
-**Multi-type result:** All four MVP entity types (NPC, location, quest, item) created, listed, type-filtered. IDs globally unique. Mutations stay in correct canonical directories.
+3. **`_StoredEntity._relative_path`** — new property storing the entity-relative path within the canonical type directory, enabling mutation-time reauthorization.
 
-**Human filename rename:** Entity created with generated UUID filename, manually renamed to human name, then get/patch/append all succeed targeting the renamed file. No duplicate/generated file appears.
+4. **Create second pre-write check** — after durable intent but before `atomic_write_text`:
+   - Mutation environment revalidated (`_validate_mutation_environment`)
+   - Target path reauthorized via `resolve_entity_path`
+   - Target path must still NOT exist (`ConflictError` if occupied)
+   - Target path must NOT be a symlink (`ConflictError` if symlink)
+   - Fresh snapshot taken — duplicate EntityId detected (`ConflictError`)
+   - On failure: intent remains, no committed record, no entity file
 
-**Failure-injection matrix:**
+5. **Patch/append mutation-time reauthorization** — `_commit_entity_mutation` now calls `_validate_mutation_environment` and `_reauthorize_entity_path` after intent, before the second read check.
 
-| Failure class | Create | Patch | Append |
-|---|---|---|---|
-| Atomic replace failure (os.replace) | Intent written, no entity file, no committed | Intent written, original bytes unchanged, no committed | Intent written, original unchanged, no committed |
-| ENOSPC-style failure | N/A | Original unchanged, revision unchanged | Original unchanged, revision unchanged |
-| Audit intent failure | No entity file created | Original bytes unchanged | Original bytes unchanged |
-| Committed audit failure | N/A | Entity committed, intent record present, committed absent, cause preserved, recoverability hash matches | N/A |
-| Corrupt audit preflight | Blocks create, no new entity | Blocks patch, original revision unchanged | N/A |
-| External edit after intent | N/A | Hash mismatch detected (ConflictError), external edit intact | N/A |
-| Target disappears after intent | N/A | StorageError, file gone, intent remains | N/A |
-| Operation-ID reuse | Rejected with ConflictError | N/A | N/A |
+6. **Entry-point mutation environment validation** — `_validate_mutation_environment` called at the start of `create_entity`, `patch_entity`, and `append_entity_fact` (before any work begins).
 
-**Dynamic path-safety results:**
+**No changes to `atomic_write_text` replacement semantics.** The create "must remain absent" invariant is enforced in repository orchestration, not in the atomic primitive.
 
-| Scenario | Result |
-|---|---|
-| Audit directory replaced by symlink after construction | Skipped (Windows no symlink privilege) |
-| Audit file replaced by symlink after construction | Skipped (Windows no symlink privilege) |
-| Canonical entity directory replaced by symlink | Skipped (Windows no symlink privilege) |
-| Nested parent redirect | Skipped (Windows no symlink privilege) |
-| Target symlink redirect after intent | Skipped (Windows no symlink privilege) |
+**ConflictError vs StorageError semantics:**
+- `ConflictError` — target became occupied, duplicate EntityId appeared, revision/content changed (state conflict from another valid actor)
+- `StorageError` — unsafe filesystem topology (symlink redirect, path escape, corrupt Vault, unsafe audit path)
 
-**Create-race results:**
+**Audit intent remains on post-intent conflicts.** No `phase="aborted"` introduced. No audit schema change.
 
-| Scenario | Result |
-|---|---|
-| Target becomes occupied after intent | _generate_unique_path skips existing paths; residual race documented |
-| Duplicate EntityId after initial snapshot | Normal duplicate detection works; second pre-write check not implemented for create |
-| _generate_unique_path skips existing | Verified: two creates get different paths |
+**Residual race still documented:** After the final pre-write check and before `os.replace`, another process could theoretically modify state. No locks/CAS/transaction manager added.
 
-**Defects discovered during S3-08:**
+**Test changes (tests/integration/test_vault_repository_path_races.py):**
 
-1. **`mock.patch` module identity issue (test-only):** String-based `mock.patch("dnd_assistant.storage.vault_repository.atomic_write_text", ...)` and `mock.patch.object(module, "atomic_write_text", ...)` fail when `dnd_assistant.storage` has been imported by contract boundary tests earlier in the suite. Root cause: `importlib`-based contract tests modify `sys.modules`, causing module identity issues for subsequent `mock.patch` calls. **Correction:** Replaced all `mock.patch` of `atomic_write_text` with `mock.patch("os.replace", ...)` in tests that could work without mocking, and simplified tests that required mock-based failure injection to use direct operation-ID reuse testing instead. No production code changes were required — all defects were test-only.
+| Test class | Tests | Status |
+|---|---|---|
+| TestAuditDirectorySymlinkAfterConstruction | 4 tests (2 existing + 2 new: patch/append variants) | 4 skipped (symlink) |
+| TestEntityDirectorySymlinkAfterConstruction | 2 tests (existing, unchanged) | 2 skipped (symlink) |
+| TestNestedParentRedirect | 2 tests (1 existing + 1 new: append variant) | 2 skipped (symlink) |
+| TestTargetSymlinkAfterIntent | 2 tests (1 existing + 1 new: append variant) | 2 skipped (symlink) |
+| TestCreateRaceOccupiedTarget | 2 tests (NEW) | 1 passed, 1 skipped (symlink) |
+| TestCreateRaceDuplicateEntityId | 2 tests (1 NEW + 1 existing) | 2 passed |
+| TestTempFileCleanup | 3 tests (existing, unchanged) | 3 passed |
 
-2. **No production defects discovered.** All existing Stage-3 invariants (path safety, atomic writes, audit consistency, optimistic concurrency, body preservation) are correctly implemented. No production code changes were required during S3-08.
+**New regression tests:**
 
-**Exact mutation-time path reauthorization policy:** No changes needed. Existing `_resolve_entity_directory()` in `paths.py` provides symlink-safe canonical directory resolution at repository construction time. Mutation-time reauthorization was not required because no path-redirection regression was reproducible on the test platform.
+- `test_target_occupied_after_intent_rejected` — creates a regular file at the generated target after intent; expects `ConflictError`; verifies intruder file untouched, intent exists, committed absent, no losing entity
+- `test_target_becomes_symlink_after_intent_rejected` — replaces generated target with symlink after intent; expects `ConflictError`; skipped on Windows without symlink privilege
+- `test_duplicate_id_appears_after_intent` — creates a valid entity with the same EntityId under a different filename after intent; expects `ConflictError`; verifies external entity untouched, only one entity with that ID exists, intent present, committed absent
+- `test_audit_dir_symlink_blocks_patch` — audit dir replaced by symlink blocks patch via mutation-time validation
+- `test_audit_dir_symlink_blocks_append` — audit dir replaced by symlink blocks append via mutation-time validation
+- `test_nested_parent_symlink_blocks_append` — nested entity parent symlink blocks append
+- `test_target_symlink_after_intent_append` — target replaced by symlink after intent blocks append
 
-**Exact create second-check policy:** No changes needed. `_generate_unique_path()` checks `not candidate.exists() and not candidate.is_symlink()` before returning. A second pre-write check for duplicate EntityId is not implemented — the residual race is documented.
+**Mocking policy:** Race tests wrap `AuditService.append` at the instance boundary (real filesystem side effects after intent). No module-identity patching of internal repository functions. `os.replace` patching retained only for temp-file cleanup tests.
 
-**Temp-file cleanup results:** Verified for create, patch, and append failure scenarios — no temp files remain after `StorageError`.
+**Windows skip policy:** Core create-race tests (occupied target, duplicate EntityId) run on Windows. Symlink-specific tests skip when `can_symlink()` returns False. Production fix supports all platforms.
 
-**Audit failure-state invariants:**
-- Successful operations: intent + committed records present.
-- Failed before intent: no audit records.
-- Failed after intent before entity commit: intent only.
-- Entity committed, final audit failed: intent only, entity state matches after_hash.
+**Quality-gate results:**
 
-**Recoverability proof for entity-committed/audit-finalization-failed case:** `intent.after_hash` matches SHA-256 of persisted entity file content.
-
-**Known remaining limitations:**
-- No cross-process lock/CAS — fully atomic cross-process uniqueness is outside the current contract.
-- Residual race after final pre-write check — another process may change filesystem state in the window before `os.replace`.
-- Detectable partial audit tail possible after low-level append failure (S3-04 established limitation).
-- No automatic intent reconciliation/repair.
-- Symlink-based path safety tests skipped on Windows without admin/symlink privilege.
-
-**Runtime VaultRepository conformance:** `isinstance(repo, VaultRepository)` — confirmed by existing S3-07 test.
-
-**Exact test counts/results:**
-- `uv run pytest tests/integration/` — 49 passed, 6 skipped (symlink tests)
+- `uv run pytest tests/integration/test_vault_repository_path_races.py` — 6 passed, 11 skipped
+- `uv run pytest tests/integration/` — 49 passed, 11 skipped
 - `uv run pytest tests/unit/test_storage_vault_repository.py` — 62 passed, 2 skipped
 - `uv run pytest tests/unit/test_storage_patch_repository.py` — 56 passed
 - `uv run pytest tests/unit/test_storage_append_fact.py` — 77 passed
-- `uv run pytest` (full suite) — 1119 passed, 25 skipped
+- `uv run pytest` (full suite) — 1119 passed, 30 skipped
 - `uv run ruff check .` — All checks passed
-- `uv run ruff format --check .` — 88 files already formatted
+- `uv run ruff format --check .` — 159 files already formatted
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
 
-**Defects discovered during S3-08:** None in production code. Test-only `mock.patch` module identity issue documented above.
-
-**Code/test changes during S3-08:** 8 new files (tests/__init__.py, tests/integration/__init__.py, tests/integration/conftest.py, tests/integration/helpers.py, tests/integration/test_vault_repository_cycle.py, tests/integration/test_vault_repository_failures.py, tests/integration/test_vault_repository_path_races.py). No production code changes.
+**Code/test changes during S3-08 correction:** 2 files modified (storage/vault_repository.py, tests/integration/test_vault_repository_path_races.py). Focused on race safety and mutation-time reauthorization only.
 
 **Scope exclusions confirmed:**
 - No Stage 4 Calendar implementation
@@ -1436,6 +1410,9 @@ Also added `tests/__init__.py` (missing package marker).
 - No delete_entity, replace_body, repair_audit, reconcile_intents, lock/unlock API, transactions
 - No automatic audit repair, filesystem CAS, multi-process transaction service
 - No golden campaign, performance benchmarks, property-based tests
+- No locks, CAS, transaction manager
+- No audit schema change (no `phase="aborted"`)
+- No change to `atomic_write_text` replacement semantics
 - S3-09 was NOT started
 
 ## Current blockers

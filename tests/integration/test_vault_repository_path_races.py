@@ -1,13 +1,15 @@
-"""S3-08 integration tests: dynamic path safety and create-race hardening.
+"""S3-08 integration tests: dynamic path safety, create-race hardening,
+and mutation-time reauthorization.
 
 Covers:
 - Audit directory replaced by symlink after construction
+- Audit file replaced by symlink after construction
 - Canonical entity directory replaced by symlink before mutation
 - Nested parent redirect
 - Target symlink redirect after intent
-- Create race: target becomes occupied after intent
-- Create race: target becomes symlink after intent
-- Create race: duplicate EntityId appears after initial snapshot
+- Create race: target becomes occupied after intent (ConflictError)
+- Create race: duplicate EntityId appears after intent (ConflictError)
+- Patch/append: mutation-time environment revalidation
 - Temp-file cleanup verification
 """
 
@@ -85,6 +87,70 @@ class TestAuditDirectorySymlinkAfterConstruction:
             repo.create_entity(
                 make_document(entity_id="npc-gandalf"),
                 audit=make_audit_context("op-001"),
+            )
+
+    def test_audit_dir_symlink_blocks_patch(self, vault_root, audit_service) -> None:
+        """Patch also detects audit dir symlink via mutation-time validation."""
+        if not can_symlink():
+            pytest.skip("Symlinks not supported on this platform")
+
+        from dnd_assistant.storage.vault_repository import (
+            ObsidianVaultRepository,
+        )
+
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            make_document(entity_id="npc-gandalf"),
+            audit=make_audit_context("op-001"),
+        )
+
+        audit_dir = vault_root / "_system" / "audit"
+        outside_dir = vault_root.parent / "outside_audit2"
+        outside_dir.mkdir()
+
+        import shutil
+
+        shutil.rmtree(audit_dir)
+        os.symlink(str(outside_dir), str(audit_dir), target_is_directory=True)
+
+        with pytest.raises(StorageError):
+            repo.patch_entity(
+                "npc-gandalf",
+                EntityPatch(name="Gandalf v2"),
+                expected_revision=1,
+                audit=make_audit_context("op-002"),
+            )
+
+    def test_audit_dir_symlink_blocks_append(self, vault_root, audit_service) -> None:
+        """Append also detects audit dir symlink via mutation-time validation."""
+        if not can_symlink():
+            pytest.skip("Symlinks not supported on this platform")
+
+        from dnd_assistant.storage.vault_repository import (
+            ObsidianVaultRepository,
+        )
+
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            make_document(entity_id="npc-gandalf"),
+            audit=make_audit_context("op-001"),
+        )
+
+        audit_dir = vault_root / "_system" / "audit"
+        outside_dir = vault_root.parent / "outside_audit3"
+        outside_dir.mkdir()
+
+        import shutil
+
+        shutil.rmtree(audit_dir)
+        os.symlink(str(outside_dir), str(audit_dir), target_is_directory=True)
+
+        with pytest.raises(StorageError):
+            repo.append_entity_fact(
+                "npc-gandalf",
+                expected_revision=1,
+                fact="New fact",
+                audit=make_audit_context("op-002"),
             )
 
 
@@ -187,6 +253,38 @@ class TestNestedParentRedirect:
                 audit=make_audit_context("op-002"),
             )
 
+    def test_nested_parent_symlink_blocks_append(self, vault_root, audit_service) -> None:
+        if not can_symlink():
+            pytest.skip("Symlinks not supported on this platform")
+
+        nested_dir = vault_root / "Characters" / "NPCs" / "Fellowship"
+        nested_dir.mkdir(parents=True)
+
+        from dnd_assistant.storage.vault_repository import (
+            ObsidianVaultRepository,
+        )
+
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+
+        doc = make_document(entity_id="npc-frodo")
+        repo.create_entity(doc, audit=make_audit_context("op-001"))
+
+        outside_dir = vault_root.parent / "outside_fellowship"
+        outside_dir.mkdir()
+
+        import shutil
+
+        shutil.rmtree(nested_dir)
+        os.symlink(str(outside_dir), str(nested_dir), target_is_directory=True)
+
+        with pytest.raises(StorageError):
+            repo.append_entity_fact(
+                "npc-frodo",
+                expected_revision=1,
+                fact="Ring bearer",
+                audit=make_audit_context("op-002"),
+            )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 4. Target symlink redirect after intent
@@ -232,6 +330,42 @@ class TestTargetSymlinkAfterIntent:
                     audit=make_audit_context("op-002"),
                 )
 
+    def test_target_symlink_after_intent_append(self, repo, audit_service) -> None:
+        if not can_symlink():
+            pytest.skip("Symlinks not supported on this platform")
+
+        doc = make_document(entity_id="npc-gandalf", body="Body\n")
+        repo.create_entity(doc, audit=make_audit_context("op-001"))
+
+        entity_file = find_entity_file(repo, "npc-gandalf")
+
+        from dnd_assistant.storage.vault_repository import (
+            _read_exact_text as real_read,
+        )
+
+        call_count = [0]
+
+        def _replace_with_symlink(path):
+            call_count[0] += 1
+            if call_count[0] == 2:
+                other_file = entity_file.parent / "other_append.md"
+                other_file.write_text("other content", encoding="utf-8")
+                entity_file.unlink()
+                os.symlink(str(other_file), str(entity_file))
+            return real_read(path)
+
+        with mock.patch(
+            "dnd_assistant.storage.vault_repository._read_exact_text",
+            side_effect=_replace_with_symlink,
+        ):
+            with pytest.raises((StorageError, ConflictError)):
+                repo.append_entity_fact(
+                    "npc-gandalf",
+                    expected_revision=1,
+                    fact="New fact",
+                    audit=make_audit_context("op-002"),
+                )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 5. Create race: target becomes occupied after intent
@@ -241,60 +375,185 @@ class TestTargetSymlinkAfterIntent:
 class TestCreateRaceOccupiedTarget:
     """Generated target becomes occupied after intent.
 
-    Note: Without filesystem locks, a true cross-process race between
-    intent and atomic write cannot be eliminated.  The existing protection
-    is that _generate_unique_path checks candidate.exists() before
-    returning, and atomic_write_text rejects symlinks and directories.
+    The second pre-write check must detect that the target path became
+    a regular file after the intent was durably appended.
     """
 
-    def test_generate_unique_path_skips_existing(self, repo) -> None:
-        """_generate_unique_path never returns an existing path."""
-        doc = make_document(entity_id="npc-gandalf")
-        repo.create_entity(doc, audit=make_audit_context("op-001"))
+    def test_target_occupied_after_intent_rejected(self, repo, audit_service, vault_root) -> None:
+        """Create detects target occupied after intent via second pre-write check.
 
-        # The second create gets a different path
-        doc2 = make_document(entity_id="npc-frod")
-        result = repo.create_entity(doc2, audit=make_audit_context("op-002"))
-        assert result.entity.id == "npc-frod"
+        Strategy: wrap AuditService.append to intercept the intent phase,
+        then create a regular file at the generated target path.
+        """
+        doc = make_document(entity_id="npc-race-occupy")
 
-        # Both entities exist
-        assert repo.get_entity("npc-gandalf")
-        assert repo.get_entity("npc-frod")
+        # Track the generated target path
+        target_paths: list = []
+        original_gen_path = repo._generate_unique_path
+
+        def _wrapped_gen_path(target_dir):
+            path = original_gen_path(target_dir)
+            target_paths.append(path)
+            return path
+
+        # Wrap audit_service.append to create file after intent
+        real_append = audit_service.append
+        after_intent = [False]
+
+        def _append_and_occupy(record):
+            real_append(record)
+            if record.phase == "intent" and not after_intent[0]:
+                after_intent[0] = True
+                if target_paths:
+                    target_paths[-1].write_text("---\nid: intruder\n---\n", encoding="utf-8")
+
+        with (
+            mock.patch.object(repo, "_generate_unique_path", side_effect=_wrapped_gen_path),
+            mock.patch.object(audit_service, "append", side_effect=_append_and_occupy),
+        ):
+            with pytest.raises(ConflictError):
+                repo.create_entity(doc, audit=make_audit_context("op-race-occupy"))
+
+        # Verify: unrelated file is untouched
+        npc_dir = vault_root / "Characters" / "NPCs"
+        intruder_file = None
+        for p in npc_dir.iterdir():
+            if p.name.startswith("entity-") and p.suffix == ".md":
+                text = p.read_text(encoding="utf-8")
+                if "id: intruder" in text:
+                    intruder_file = p
+                    break
+        assert intruder_file is not None, "Intruder entity should exist on disk"
+        assert intruder_file.read_text(encoding="utf-8") == ("---\nid: intruder\n---\n"), (
+            "Intruder file must be unchanged"
+        )
+
+        # Verify: intent exists, committed absent
+        records = audit_service.read_all()
+        intents = [r for r in records if r.phase == "intent"]
+        assert len(intents) == 1
+        assert intents[0].entity_id == "npc-race-occupy"
+        committed = [r for r in records if r.phase == "committed"]
+        assert len(committed) == 0
+
+        # Verify: no entity with the losing ID exists
+        from dnd_assistant.storage.markdown import parse
+
+        for p in npc_dir.iterdir():
+            if p.suffix == ".md" and p != intruder_file:
+                text = p.read_text(encoding="utf-8")
+                parsed = parse(text)
+                assert parsed.entity.id != "npc-race-occupy", (
+                    f"Losing entity should not exist, found at {p}"
+                )
+
+    def test_target_becomes_symlink_after_intent_rejected(
+        self, repo, audit_service, vault_root
+    ) -> None:
+        """Create detects target became a symlink after intent."""
+        if not can_symlink():
+            pytest.skip("Symlinks not supported on this platform")
+
+        doc = make_document(entity_id="npc-race-symlink")
+
+        target_paths: list = []
+        original_gen_path = repo._generate_unique_path
+
+        def _wrapped_gen_path(target_dir):
+            path = original_gen_path(target_dir)
+            target_paths.append(path)
+            return path
+
+        real_append = audit_service.append
+        after_intent = [False]
+
+        def _append_and_symlink(record):
+            real_append(record)
+            if record.phase == "intent" and not after_intent[0]:
+                after_intent[0] = True
+                if target_paths:
+                    # Create a real file, then replace with symlink
+                    real_file = target_paths[-1].parent / "real_target.md"
+                    real_file.write_text("real content", encoding="utf-8")
+                    os.symlink(str(real_file), str(target_paths[-1]))
+
+        with (
+            mock.patch.object(repo, "_generate_unique_path", side_effect=_wrapped_gen_path),
+            mock.patch.object(audit_service, "append", side_effect=_append_and_symlink),
+        ):
+            with pytest.raises(ConflictError):
+                repo.create_entity(doc, audit=make_audit_context("op-race-symlink"))
+
+        # Verify: intent exists, committed absent
+        records = audit_service.read_all()
+        intents = [r for r in records if r.phase == "intent" and r.entity_id == "npc-race-symlink"]
+        assert len(intents) == 1
+        committed = [
+            r for r in records if r.phase == "committed" and r.entity_id == "npc-race-symlink"
+        ]
+        assert len(committed) == 0
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# 6. Create race: duplicate EntityId after initial snapshot
+# 6. Create race: duplicate EntityId after intent
 # ═════════════════════════════════════════════════════════════════════════════
 
 
 class TestCreateRaceDuplicateEntityId:
-    """Duplicate EntityId appears after initial snapshot."""
+    """Duplicate EntityId appears after intent.
 
-    def test_duplicate_id_appears_after_snapshot(self, repo, audit_service, vault_root) -> None:
-        # Patch _snapshot to return empty on first call (simulating race),
-        # then create the entity externally, then let the real snapshot run.
-        call_count = [0]
-        original_snapshot = repo._snapshot
+    The second pre-write check must detect that another entity with the
+    same EntityId appeared after the intent was durably appended.
+    """
 
-        def _race_snapshot():
-            call_count[0] += 1
-            if call_count[0] == 1:
-                # First call: return empty (no duplicate detected)
-                return []
-            # Second call: let real snapshot run (will find the entity
-            # we create externally)
-            return original_snapshot()
+    def test_duplicate_id_appears_after_intent(self, repo, audit_service, vault_root) -> None:
+        """Create detects duplicate EntityId via fresh snapshot after intent."""
+        doc = make_document(entity_id="npc-dup-race")
 
-        with mock.patch.object(repo, "_snapshot", side_effect=_race_snapshot):
-            # The create will proceed past the initial duplicate check
-            # but then fail at the second check (which doesn't exist for create)
-            # Actually, create_entity only calls _snapshot once.
-            # Let's use a different approach.
+        real_append = audit_service.append
+        after_intent = [False]
 
-            # We need to inject the duplicate AFTER the initial snapshot
-            # but BEFORE the atomic write. The cleanest way is to patch
-            # atomic_write_text to create the duplicate entity first.
-            pass
+        def _append_and_create_duplicate(record):
+            real_append(record)
+            if record.phase == "intent" and not after_intent[0]:
+                after_intent[0] = True
+                # Create another entity with the SAME EntityId under a different filename
+                from dnd_assistant.storage.markdown import serialize
+
+                npc_dir = vault_root / "Characters" / "NPCs"
+                dup_file = npc_dir / "entity-dup-other.md"
+                dup_doc = make_document(entity_id="npc-dup-race", name="Duplicate")
+                dup_text = serialize(dup_doc)
+                dup_file.write_text(dup_text, encoding="utf-8")
+
+        with mock.patch.object(audit_service, "append", side_effect=_append_and_create_duplicate):
+            with pytest.raises(ConflictError):
+                repo.create_entity(doc, audit=make_audit_context("op-dup-race"))
+
+        # Verify: external entity remains untouched
+        npc_dir = vault_root / "Characters" / "NPCs"
+        dup_file = npc_dir / "entity-dup-other.md"
+        assert dup_file.exists(), "External entity must still exist"
+        assert "id: npc-dup-race" in dup_file.read_text(encoding="utf-8")
+
+        # Verify: planned create target does NOT exist (no second file with same ID)
+        from dnd_assistant.storage.markdown import parse
+
+        count = 0
+        for p in npc_dir.iterdir():
+            if p.suffix == ".md":
+                text = p.read_text(encoding="utf-8")
+                parsed = parse(text)
+                if parsed.entity.id == "npc-dup-race":
+                    count += 1
+        assert count == 1, f"Expected exactly 1 entity with ID npc-dup-race, found {count}"
+
+        # Verify: intent exists, committed absent
+        records = audit_service.read_all()
+        intents = [r for r in records if r.phase == "intent" and r.entity_id == "npc-dup-race"]
+        assert len(intents) == 1
+        committed = [r for r in records if r.phase == "committed" and r.entity_id == "npc-dup-race"]
+        assert len(committed) == 0
 
     def test_duplicate_id_detected_at_create_time(self, repo) -> None:
         """Normal duplicate detection still works."""

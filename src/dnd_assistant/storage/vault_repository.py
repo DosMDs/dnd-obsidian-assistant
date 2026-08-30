@@ -27,7 +27,7 @@ from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.markdown import parse, serialize
 from dnd_assistant.storage.patch import EntityPatch
-from dnd_assistant.storage.paths import discover_entity_files, entity_directory
+from dnd_assistant.storage.paths import discover_entity_files, entity_directory, resolve_entity_path
 from dnd_assistant.storage.types import VaultDocument
 
 # ── EntityId runtime validator ────────────────────────────────────────────────
@@ -56,6 +56,11 @@ class _StoredEntity:
     Retains the exact text and its SHA-256 hash so that callers
     (e.g. ``patch_entity``) can compute before-hashes without
     re-reading the file.
+
+    Also retains the entity-relative path within the canonical type
+    directory so that mutation-time path reauthorization can verify
+    the stored location is still authorised under current filesystem
+    topology.
     """
 
     def __init__(
@@ -64,12 +69,25 @@ class _StoredEntity:
         directory_type: EntityType,
         document: VaultDocument,
         exact_text: str,
+        vault_root: Path | None = None,
     ) -> None:
         self._path = path
         self._directory_type = directory_type
         self._document = document
         self._exact_text = exact_text
         self._hash = _content_hash(exact_text)
+        # Store entity-relative path for mutation-time reauthorization.
+        # The path is relative to the canonical entity directory for this type.
+        if vault_root is not None:
+            from dnd_assistant.storage.paths import entity_directory
+
+            try:
+                canon_dir = entity_directory(vault_root, directory_type)
+                self._relative_path = path.relative_to(canon_dir)
+            except (ValueError, StorageError):
+                self._relative_path = Path(path.name)
+        else:
+            self._relative_path = Path(path.name)
 
     @property
     def path(self) -> Path:
@@ -96,6 +114,14 @@ class _StoredEntity:
     def content_hash(self) -> str:
         """SHA-256 hex digest of the exact persisted text."""
         return self._hash
+
+    @property
+    def relative_path(self) -> Path:
+        """Entity-relative path within the canonical type directory.
+
+        Used for mutation-time path reauthorization.
+        """
+        return self._relative_path
 
 
 # ── Hash helper ─────────────────────────────────────────────────────────────
@@ -291,6 +317,7 @@ def _build_snapshot(vault_root: Path) -> list[_StoredEntity]:
                 directory_type=candidate.entity_type,
                 document=document,
                 exact_text=text,
+                vault_root=vault_root,
             )
         )
 
@@ -310,6 +337,102 @@ def _build_snapshot(vault_root: Path) -> list[_StoredEntity]:
         raise ConflictError(f"Duplicate EntityId(s) detected: {'; '.join(parts)}")
 
     return stored
+
+
+# ── Mutation environment validation ──────────────────────────────────────────
+
+
+def _validate_mutation_environment(
+    vault_root: Path,
+    audit_service: AuditService,
+) -> None:
+    """Validate the current mutation environment is still safe.
+
+    Called before every mutation to ensure the audit path topology has
+    not been compromised since repository construction.
+
+    Required checks:
+
+    1. audit log path still belongs beneath ``<vault_root>/_system/audit/``;
+    2. no parent path component of the audit log has become a symlink;
+    3. audit log itself is not a symlink (including dangling);
+    4. canonical ``_system/audit/`` directory still exists and is a real
+       directory.
+
+    Reads (``get_entity``, ``list_entities``) are intentionally independent
+    of audit availability and do NOT call this helper.
+
+    Args:
+        vault_root: The resolved Vault root path.
+        audit_service: The audit service whose log path to validate.
+
+    Raises:
+        StorageError: The mutation environment is unsafe.
+    """
+    audit_log_path = audit_service.log_path
+
+    # 1. Verify audit log path is still lexically beneath vault_root
+    try:
+        relative = audit_log_path.relative_to(vault_root)
+    except ValueError:
+        raise StorageError(f"Audit log path is outside the Vault root: {audit_log_path}") from None
+
+    # Reject parent traversal
+    for part in relative.parts:
+        if part == "..":
+            raise StorageError(
+                f"Audit log path contains parent-directory traversal ('..'): {audit_log_path}"
+            )
+
+    # 2. Inspect each existing path component beneath vault_root for symlinks
+    expected_audit_dir = vault_root / _AUDIT_SYSTEM_DIR / _AUDIT_DIR
+    accumulated = vault_root
+    for part in relative.parts[:-1]:  # exclude filename
+        accumulated = accumulated / part
+        if accumulated.exists() and accumulated.is_symlink():
+            raise StorageError(
+                f"Audit path component became a symlink after construction, "
+                f"rejected for safety: {accumulated}"
+            )
+
+    # 3. Audit log itself must not be a symlink
+    if audit_log_path.is_symlink():
+        raise StorageError(f"Audit log path became a symlink after construction: {audit_log_path}")
+
+    # 4. Canonical _system/audit/ directory must still exist and be a real dir
+    if not expected_audit_dir.is_dir():
+        raise StorageError(f"Canonical audit directory no longer exists: {expected_audit_dir}")
+
+
+# ── Entity path reauthorization ──────────────────────────────────────────────
+
+
+def _reauthorize_entity_path(
+    vault_root: Path,
+    directory_type: EntityType,
+    relative_path: Path,
+) -> Path:
+    """Reauthorize a stored entity path against current filesystem topology.
+
+    Uses ``storage.paths.resolve_entity_path`` to verify the path is still
+    a valid, authorized entity path of the expected type under the Vault.
+
+    Args:
+        vault_root: The resolved Vault root path.
+        directory_type: The expected ``EntityType``.
+        relative_path: The entity-relative path within the canonical type
+            directory (as stored in ``_StoredEntity._relative_path``).
+
+    Returns:
+        The resolved absolute path.
+
+    Raises:
+        StorageError: The path is no longer authorized (symlink redirect,
+            traversal, outside entity directory, etc.).
+    """
+    from dnd_assistant.storage.paths import resolve_entity_path
+
+    return resolve_entity_path(vault_root, directory_type, relative_path)
 
 
 # ── Audit path validation ────────────────────────────────────────────────────
@@ -457,6 +580,7 @@ def _commit_entity_mutation(
     audit: AuditContext,
     operation: str,
     audit_service: AuditService,
+    vault_root: Path | None = None,
 ) -> VaultDocument:
     """Commit an entity mutation with audit intent, second check, atomic write,
     verified read-back, and committed audit.
@@ -513,6 +637,22 @@ def _commit_entity_mutation(
         phase="intent",
     )
     audit_service.append(intent_record)
+
+    # ── Mutation-time reauthorization ────────────────────────────────
+    # After durable intent, revalidate environment and target path before
+    # any filesystem operation on the entity.
+
+    # a. Mutation environment is still safe (if vault_root provided)
+    if vault_root is not None:
+        _validate_mutation_environment(vault_root, audit_service)
+
+    # b. Reauthorize target path against current filesystem topology
+    if vault_root is not None:
+        _reauthorize_entity_path(
+            vault_root,
+            target.directory_type,
+            target.relative_path,
+        )
 
     # Second optimistic check — re-read target file
     try:
@@ -831,6 +971,9 @@ class ObsidianVaultRepository:
         entity_type = document.entity.type
         entity_id = document.entity.id
 
+        # 0. Validate mutation environment is still safe
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
         # 1. Validate audit log is readable and operation_id is unique
         self._check_audit_health(audit.operation_id)
 
@@ -868,6 +1011,56 @@ class ObsidianVaultRepository:
             phase="intent",
         )
         self._audit_service.append(intent_record)
+
+        # ── Second create pre-write check ──────────────────────────────
+        # After durable intent but before atomic write, re-verify all
+        # preconditions that could have changed since the initial snapshot.
+
+        # a. Mutation environment is still safe
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # b. Target path is still authorized under the canonical entity dir
+        try:
+            reauthorized = resolve_entity_path(
+                self._vault_root,
+                entity_type,
+                target.relative_to(entity_directory(self._vault_root, entity_type)),
+            )
+        except (ValueError, StorageError) as exc:
+            raise StorageError(
+                f"Create target path is no longer authorized for "
+                f"operation {audit.operation_id}: {target}",
+                cause=exc,
+            ) from exc
+
+        if reauthorized != target:
+            raise StorageError(
+                f"Create target path resolved to a different location for "
+                f"operation {audit.operation_id}: expected {target}, got {reauthorized}"
+            )
+
+        # c. Target path must still NOT exist
+        if target.exists():
+            raise ConflictError(
+                f"Create target path became occupied after intent for "
+                f"operation {audit.operation_id}: {target}"
+            )
+
+        # d. Target path must NOT be a symlink (including dangling)
+        if target.is_symlink():
+            raise ConflictError(
+                f"Create target path became a symlink after intent for "
+                f"operation {audit.operation_id}: {target}"
+            )
+
+        # e. Fresh snapshot — no duplicate EntityId appeared
+        fresh_snapshot = self._snapshot()
+        for se in fresh_snapshot:
+            if se.entity_id == entity_id:
+                raise ConflictError(
+                    f"Entity with ID {entity_id!r} appeared after intent for "
+                    f"operation {audit.operation_id}"
+                )
 
         # 7. Atomic write
         atomic_write_text(
@@ -981,7 +1174,10 @@ class ObsidianVaultRepository:
         validated_id = _validate_entity_id_input(entity_id)
         validated_revision = _validate_revision_input(expected_revision)
 
-        # 2. Validate audit log is readable and operation_id is unique
+        # 2. Validate mutation environment is still safe
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # 3. Validate audit log is readable and operation_id is unique
         self._check_audit_health(audit.operation_id)
 
         # 3. Build snapshot (detects duplicates/corruption globally)
@@ -1048,6 +1244,7 @@ class ObsidianVaultRepository:
             audit=audit,
             operation="patch_entity",
             audit_service=self._audit_service,
+            vault_root=self._vault_root,
         )
 
     # ── append_entity_fact ─────────────────────────────────────────────
@@ -1097,7 +1294,10 @@ class ObsidianVaultRepository:
         validated_revision = _validate_revision_input(expected_revision)
         validated_fact = _validate_fact(fact)
 
-        # 2. Validate audit log is readable and operation_id is unique
+        # 2. Validate mutation environment is still safe
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # 3. Validate audit log is readable and operation_id is unique
         self._check_audit_health(audit.operation_id)
 
         # 3. Build snapshot (detects duplicates/corruption globally)
@@ -1152,4 +1352,5 @@ class ObsidianVaultRepository:
             audit=audit,
             operation="append_entity_fact",
             audit_service=self._audit_service,
+            vault_root=self._vault_root,
         )
