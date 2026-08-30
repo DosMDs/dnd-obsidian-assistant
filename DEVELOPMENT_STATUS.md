@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
-**Current stage:** `Stage 1 — Project skeleton + contracts`  
+**Current stage:** `Stage 2 — Domain schemas`  
 **Status:** `IN PROGRESS`
 
 ## Status model
@@ -21,7 +21,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 | Stage | Status | Started | Completed |
 |---|---|---:|---:|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 |
-| 1. Project skeleton + contracts | IN PROGRESS | 2026-08-27 | — |
+| 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
 | 2. Domain schemas | NOT STARTED | — | — |
 | 3. Vault Repository | NOT STARTED | — | — |
 | 4. Calendar | NOT STARTED | — | — |
@@ -98,6 +98,13 @@ DndAssistantError
 - [x] `CTR-007` Run targeted tests and project quality gates.
 - [x] `CTR-008` Review the diff and update this status file.
 
+### Completion record
+
+- [x] `S2-00` Fix CLI entrypoint: `dnd-assistant = "dnd_assistant:main"` → `dnd = "dnd_assistant.cli.main:app"`.
+- [x] `S2-00` Add `cli/main.py` with minimal Typer application.
+- [x] `S2-00` Add automated smoke test for console entrypoint (`test_cli_entrypoint.py`).
+- [x] `S2-00` All quality gates pass (`pytest`, `ruff check`, `ruff format --check`, `dnd --help`).
+
 ### Important constraint
 
 Do **not** use `dict[str, Any]` or placeholder provider-specific types merely to force every future method signature into Stage 1.
@@ -123,8 +130,20 @@ If a contract requires a domain type whose semantics belong to Stage 2, define t
 
 None recorded.
 
-## Next stage
+## Stage 2 — Domain schemas
 
-`Stage 2 — Domain schemas`
+### Goal
 
-Do not start it automatically. Stage transition is a deliberate project decision after Stage 1 completion.
+Design and implement the core domain entity schemas (NPC, location, quest, item) with Pydantic models, including stable IDs, revisions, provenance, visibility, and knowledge status.
+
+### Tasks
+
+- [ ] `DOM-001` Define base entity schema with stable ID, revision, provenance, visibility.
+- [ ] `DOM-002` Define NPC schema.
+- [ ] `DOM-003` Define Location schema.
+- [ ] `DOM-004` Define Quest schema.
+- [ ] `DOM-005` Define Item schema.
+- [ ] `DOM-006` Add schema tests (construction, validation, serialization).
+- [ ] `DOM-007` Verify no dependency on storage, models, or retrieval.
+- [ ] `DOM-008` Run targeted tests and project quality gates.
+- [ ] `DOM-009` Review the diff and update this status file.
