@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-03 complete after correction)
+**Status:** `IN PROGRESS` (S3-04 complete)
 
 ## Status model
 
@@ -165,7 +165,7 @@ If a contract requires a domain type whose semantics belong to Stage 2, define t
 
 **Code/test changes during S2-07:** None (only DEVELOPMENT_STATUS.md updated)
 
-**Stage 3 status:** IN PROGRESS — S3-00 (kickoff + storage contracts) is the active task.
+**Stage 3 status:** IN PROGRESS — S3-04 complete.
 
 ## Stage 3 — Vault Repository
 
@@ -177,9 +177,9 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 
 - [x] `S3-00` Stage kickoff + repository/storage contracts
 - [x] `S3-01` Markdown/YAML document codec
-- [ ] `S3-02` Vault path safety + entity directory/discovery policy
+- [x] `S3-02` Vault path safety + entity directory/discovery policy
 - [x] `S3-03` Atomic write primitive (corrected: symlink, BaseException, validator transparency, lifecycle)
-- [ ] `S3-04` AuditRecord + AuditService
+- [x] `S3-04` AuditRecord + AuditService
 - [ ] `S3-05` create_entity / get_entity / list_entities
 - [ ] `S3-06` patch_entity + optimistic concurrency
 - [ ] `S3-07` append_entity_fact
@@ -411,7 +411,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - No atomic write, fsync, audit JSONL, revision increments, locks, migrations
 - No Calendar, Retrieval/EntityResolver, Session runtime, Tool layer, ModelGateway, or ChangeSet
 
-**Stage 3 status:** IN PROGRESS — S3-02 complete (with correction), S3-03 complete (with correction).
+**Stage 3 status:** IN PROGRESS — S3-04 complete.
 
 ### S3-03 completion record
 
@@ -644,6 +644,155 @@ os.replace(temp, target)
 - No Markdown codec changes
 - No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet
 - S3-04 was NOT started
+
+### S3-04 completion record
+
+**Review range:** S3-03 correction through S3-04
+
+**Changes:**
+
+1. **storage/audit.py** (rewritten) — `AuditRecord` schema + `AuditService` implementation:
+
+   **AuditRecord schema:**
+   - `schema_version: Literal[1] = 1` — fixed at 1
+   - `operation_id: str` — required, validated non-empty printable string
+   - `real_time: AwareDatetime` — required, timezone-aware (naive rejected)
+   - `session: str | None = None` — optional, validated when present
+   - `operation: str` — required, validated non-empty printable string
+   - `entity_id: EntityId | None = None` — optional, validated as domain EntityId
+   - `before_hash: str | None = None` — optional, validated when present
+   - `after_hash: str | None = None` — optional, validated when present
+   - `source: str` — required, validated non-empty printable string (NOT domain Provenance)
+   - `model_profile: str | None = None` — optional, validated when present
+   - `prompt_version: str | None = None` — optional, validated when present
+   - `model_config = {"extra": "forbid", "frozen": True}`
+
+   **AuditService public API:**
+   - `AuditService(log_path)` — constructor validates path preconditions
+   - `.append(record)` — serializes record as JSONL, appends with flush+fsync
+   - `.read_all()` — reads all persisted records in append order
+   - `.log_path` — property returning the absolute log path
+
+   **JSONL format:**
+   - One JSON object per line, followed by `\n`
+   - UTF-8 encoding, Unicode preserved, no pretty printing
+   - Deterministic serialization via `model_dump(mode="json")` + `json.dumps(ensure_ascii=False, separators=(",", ":"))`
+
+   **Append lifecycle:**
+   ```
+   open (append mode) → write → flush → fsync → close
+   ```
+
+   **Append-only guarantees:**
+   - Never truncates or rewrites existing bytes
+   - Existing bytes remain exact prefix after append
+   - Does NOT use `atomic_write_text` for JSONL append
+
+   **Explicit partial-failure limitation:**
+   - Once bytes reach the filesystem, a later failure (e.g. fsync) may leave a complete or partial line
+   - No rollback/truncation of uncertain appends
+   - Corrupted tails detected during `read_all()`
+
+   **read_all corruption behaviour:**
+   - Missing file → empty list
+   - Malformed JSON → `StorageError` with line number and cause
+   - Invalid AuditRecord → `StorageError` with line number and cause
+   - Blank line → `StorageError` with line number
+   - Unknown fields in persisted record → `StorageError`
+   - No silent skipping of bad records
+
+   **Filesystem error translation:**
+   - `OSError` during open/write/flush/fsync → `StorageError` with cause preserved
+   - No `except BaseException`
+   - `KeyboardInterrupt`/`SystemExit` propagate unchanged
+
+   **Path preconditions:**
+   - Must be absolute
+   - Parent must exist and be a directory
+   - Must not be an existing directory
+   - Must not be a symlink (including dangling/broken)
+   - No parent directory creation (caller responsibility)
+   - Documented: path validation != Vault authorization
+
+   **Architectural boundaries confirmed:**
+   - AuditService does NOT touch entity files
+   - Does NOT compute entity hashes
+   - Does NOT use `atomic_write_text`
+   - Does NOT implement repository write/audit orchestration
+   - Does NOT import from `models`, `retrieval`, `tools`, `storage.markdown`, `domain.entity`
+   - `source` is a validated string, NOT domain `Provenance`
+
+2. **storage/__init__.py** — exports `AuditRecord`, `AuditService`
+
+3. **tests/unit/test_storage_audit.py** (new) — 66 tests (64 passed, 2 skipped):
+
+   **AuditRecord schema (30 tests):**
+   - Minimal valid record (1 test)
+   - schema_version default and fixed (2 tests)
+   - Timezone-aware accepted, naive rejected (2 tests)
+   - Full record with all optional fields (1 test)
+   - EntityId validation and Unicode (2 tests)
+   - Required string validation: empty, whitespace, non-printable for operation_id/operation/source (9 tests)
+   - Optional string validation: empty, whitespace, None for session/hash/metadata (9 tests)
+   - Unicode allowed in all string fields (1 test)
+   - Unknown fields rejected (1 test)
+   - Source not restricted to Provenance values (1 test)
+   - Frozen immutability (1 test)
+
+   **Service path validation (8 tests):**
+   - Absolute accepted, relative rejected, missing parent, parent file, directory, symlink, dangling symlink, log_path property
+
+   **Append (10 tests):**
+   - Missing file created, one JSON line, exactly one `\n`, Unicode round-trip, multiple appends preserve order, existing bytes remain prefix, no truncation, fsync called, file closed
+
+   **read_all (8 tests):**
+   - Missing file → [], one record, multiple records preserve order, malformed JSON, schema-invalid record, blank line, unknown fields, no silent skip
+
+   **Failure injection (3 tests):**
+   - Open/write failure → StorageError with cause
+   - fsync failure → StorageError with cause
+   - fsync failure does not rewrite history
+
+   **Boundary tests (7 tests):**
+   - Module importable, re-exported, no entity/model/retrieval/tools/markdown import, no atomic_write_text usage
+
+**Decisions made:**
+- `source` is a validated string (NOT domain `Provenance`) — describes the actor/mechanism that performed the Vault operation, not how campaign knowledge entered the system
+- `real_time` is caller-supplied `AwareDatetime` — AuditService does not own the system clock
+- JSONL format: one record per line, UTF-8, no pretty printing
+- Log path is injected by caller — no hardcoded audit filename
+- Append-only: never truncate/rewrite, no rollback on partial failure
+- `fsync` after every append
+- Corruption detected on read, no automatic repair
+
+**Decisions intentionally deferred to S3-05/S3-06:**
+- Entity write + audit consistency semantics must be explicitly designed before repository write operations are accepted. The ordering between `entity atomic write` and `audit append` (and the consequences of one succeeding while the other fails) is not solved by this task.
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_audit.py` — 64 passed, 2 skipped
+- `uv run pytest tests/unit/test_storage_audit.py tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py tests/unit/test_storage_atomic.py` — 271 passed, 17 skipped
+- `uv run pytest` (full suite) — 822 passed, 17 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 75 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-04:** None
+
+**Code/test changes during S3-04:** 4 files (2 modified, 2 new), focused on AuditRecord schema and AuditService only.
+
+**Scope exclusions confirmed:**
+- No VaultRepository concrete class
+- No create_entity, get_entity, list_entities, patch_entity, append_entity_fact
+- No revision increment or optimistic concurrency
+- No entity hash computation
+- No locks, migrations, directory creation
+- No filename generation or stable-ID lookup
+- No Markdown codec changes
+- No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, or ChangeSet
+- S3-05 was NOT started
+
+**Stage 3 status:** IN PROGRESS — S3-04 complete. S3-05 NOT STARTED.
 
 ## Current blockers
 
