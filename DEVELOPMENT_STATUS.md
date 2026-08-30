@@ -22,7 +22,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 |---|---|---:|---:|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
-| 2. Domain schemas | NOT STARTED | — | — |
+| 2. Domain schemas | IN PROGRESS | 2026-08-30 | — |
 | 3. Vault Repository | NOT STARTED | — | — |
 | 4. Calendar | NOT STARTED | — | — |
 | 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
@@ -98,13 +98,6 @@ DndAssistantError
 - [x] `CTR-007` Run targeted tests and project quality gates.
 - [x] `CTR-008` Review the diff and update this status file.
 
-### Completion record
-
-- [x] `S2-00` Fix CLI entrypoint: `dnd-assistant = "dnd_assistant:main"` → `dnd = "dnd_assistant.cli.main:app"`.
-- [x] `S2-00` Add `cli/main.py` with minimal Typer application.
-- [x] `S2-00` Add automated smoke test for console entrypoint (`test_cli_entrypoint.py`).
-- [x] `S2-00` All quality gates pass (`pytest`, `ruff check`, `ruff format --check`, `dnd --help`).
-
 ### Important constraint
 
 Do **not** use `dict[str, Any]` or placeholder provider-specific types merely to force every future method signature into Stage 1.
@@ -138,12 +131,17 @@ Design and implement the core domain entity schemas (NPC, location, quest, item)
 
 ### Tasks
 
-- [ ] `DOM-001` Define base entity schema with stable ID, revision, provenance, visibility.
-- [ ] `DOM-002` Define NPC schema.
-- [ ] `DOM-003` Define Location schema.
-- [ ] `DOM-004` Define Quest schema.
-- [ ] `DOM-005` Define Item schema.
-- [ ] `DOM-006` Add schema tests (construction, validation, serialization).
-- [ ] `DOM-007` Verify no dependency on storage, models, or retrieval.
-- [ ] `DOM-008` Run targeted tests and project quality gates.
-- [ ] `DOM-009` Review the diff and update this status file.
+- [x] `S2-00` Fix CLI entrypoint, add `cli/main.py`, add smoke test, verify quality gates.
+- [x] `S2-01` Core domain types:
+    - EntityId
+    - EntityType
+    - KnowledgeStatus
+    - Visibility
+    - Provenance
+    - Revision
+- [ ] `S2-02` Base Entity schema
+- [ ] `S2-03` Session schema
+- [ ] `S2-04` TimelineEvent schema
+- [ ] `S2-05` CampaignState schema
+- [ ] `S2-06` Review deferred Stage 1 contracts against real domain types
+- [ ] `S2-07` Full Stage 2 verification, diff review and status update
