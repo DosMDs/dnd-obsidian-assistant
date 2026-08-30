@@ -143,5 +143,32 @@ Design and implement the core domain schemas and deterministic validation contra
 - [x] `S2-03` Session schema
 - [x] `S2-04` TimelineEvent schema
 - [x] `S2-05` CampaignState schema
-- [ ] `S2-06` Review deferred Stage 1 contracts against real domain types
+- [x] `S2-06` Review deferred Stage 1 contracts against real domain types
 - [ ] `S2-07` Full Stage 2 verification, diff review and status update
+
+### S2-06 deferred contract review
+
+Reviewed Stage 1 deferred contracts against completed Stage 2 domain schemas (EntityId, EntityType, KnowledgeStatus, Visibility, Provenance, Revision, Entity, Session, TimelineEvent, TemporalCertainty, CampaignState).
+
+**Contracts with docstring-only files reviewed:**
+- `CalendarService` (`domain/calendar.py`) — deferred to Stage 4
+- `ModelGateway` (`models/gateway.py`) — deferred to Stage 8
+- `AuditService` (`storage/audit.py`) — deferred to Stage 3
+- `ToolRegistry` (`tools/registry.py`) — deferred to Stage 7
+
+**Contracts with no source file (inventoried in Stage 1 scope only):**
+- `VaultRepository` — deferred to Stage 3
+- `SearchService` — deferred to Stage 5
+- `EntityResolver` — deferred to Stage 5
+- `SessionService` — deferred to Stage 6
+- `ToolExecutor` — deferred to Stage 7
+- `PostSessionProcessor` — deferred to Stage 11
+- `BootstrapService` — deferred to Stage 13
+
+**Result:**
+- All current deferrals confirmed correct.
+- No Stage 2 domain type provides sufficient semantics to finalize any deferred typed signature without inventing placeholder DTOs, persistence semantics, calendar types, tool metadata, provider types, or sync/async decisions that belong to later stages.
+- `models/gateway.py` correctly avoids importing domain types; adding typed signatures with domain models would reverse the intended dependency direction.
+- No production-code contract changes required.
+- No placeholder DTOs or speculative APIs introduced.
+- Existing deferred-contract documentation is accurate and not stale.
