@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-27  
+**Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 1 — Project skeleton + contracts`  
 **Status:** `IN PROGRESS`
@@ -89,14 +89,14 @@ DndAssistantError
 
 ### Tasks
 
-- [ ] `CTR-001` Verify/create the package skeleton and importable modules.
-- [ ] `CTR-002` Add the shared project error hierarchy.
-- [ ] `CTR-003` Define boundary protocols/interfaces where signatures can be expressed without inventing premature domain models.
-- [ ] `CTR-004` Document responsibilities and dependency direction for every core interface.
-- [ ] `CTR-005` Add smoke/contract tests for imports and boundary assumptions.
-- [ ] `CTR-006` Verify that domain/storage modules do not depend on Ollama/provider implementations.
-- [ ] `CTR-007` Run targeted tests and project quality gates.
-- [ ] `CTR-008` Review the diff and update this status file.
+- [x] `CTR-001` Verify/create the package skeleton and importable modules.
+- [x] `CTR-002` Add the shared project error hierarchy.
+- [x] `CTR-003` Define boundary protocols/interfaces where signatures can be expressed without inventing premature domain models.
+- [x] `CTR-004` Document responsibilities and dependency direction for every core interface.
+- [x] `CTR-005` Add smoke/contract tests for imports and boundary assumptions.
+- [x] `CTR-006` Verify that domain/storage modules do not depend on Ollama/provider implementations.
+- [x] `CTR-007` Run targeted tests and project quality gates.
+- [x] `CTR-008` Review the diff and update this status file.
 
 ### Important constraint
 
