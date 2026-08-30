@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 2 — Domain schemas`  
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ## Status model
 
@@ -22,7 +22,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 |---|---|---:|---:|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
-| 2. Domain schemas | IN PROGRESS | 2026-08-30 | — |
+| 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
 | 3. Vault Repository | NOT STARTED | — | — |
 | 4. Calendar | NOT STARTED | — | — |
 | 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
@@ -119,6 +119,54 @@ If a contract requires a domain type whose semantics belong to Stage 2, define t
 - final diff is reviewed;
 - `DEVELOPMENT_STATUS.md` is updated.
 
+### S2-07 Stage 2 completion record
+
+**Review range:** `5a38ea0..HEAD` (pre-Stage-2 boundary through S2-06)
+
+**Implemented domain types/models:**
+- `EntityId` — validated printable-Unicode string identifier
+- `EntityType` — MVP-only: npc, location, quest, item
+- `KnowledgeStatus` — epistemic: confirmed, reported, rumor, inferred, unknown
+- `Visibility` — player, dm, system
+- `Provenance` — manual, session, bootstrap, import, model_inference
+- `Revision` — strict int >= 1, no bool/string coercion
+- `Entity` — base schema with schema_version, id, type, name, status, visibility, knowledge_status, session refs, timestamps, revision, tags; `extra="forbid"`
+- `Session` — schema with id, type discriminator, status, real timestamps, world_tick range, processed flag, model profile, revision; `extra="forbid"`
+- `TemporalCertainty` — exact, approximate, range, unknown (separate from KnowledgeStatus)
+- `TimelineEvent` — schema with id, type discriminator, name, status, certainty, importance, world_tick fields with model-level temporal consistency validation, location, visibility, revision; `extra="forbid"`
+- `CampaignState` — compact snapshot with EntityId references (current_location, active_quests, important_npcs, upcoming_deadlines) and printable-string lists (party_goals, unresolved_threads); `extra="forbid"`
+
+**Architectural boundaries confirmed:**
+- `EntityType` is MVP-only (no timeline_event, campaign_state, session added)
+- `TemporalCertainty` is separate from `KnowledgeStatus`
+- No Stage 4 calendar implementation (no WorldTick value object, GameDate, CalendarDefinition, CalendarService)
+- No storage implementation (no VaultRepository, AuditService, atomic writes)
+- No retrieval implementation (no SearchService, EntityResolver)
+- No session runtime implementation (no SessionService)
+- No tool-layer implementation (no ToolRegistry, ToolExecutor)
+- No ModelGateway implementation/provider coupling
+- No CampaignState processing implementation (no state generation, ChangeSet application)
+- All deferred contracts remain correctly assigned to later stages
+- Domain dependency direction is clean (no imports from storage, models, retrieval, tools, application, cli)
+
+**Final quality-gate results:**
+- `uv run pytest tests/unit/test_domain_types.py` — 53 passed
+- `uv run pytest tests/unit/test_entity.py` — 119 passed
+- `uv run pytest tests/unit/test_session.py` — 103 passed
+- `uv run pytest tests/unit/test_timeline_event.py` — 137 passed
+- `uv run pytest tests/unit/test_campaign_state.py` — 89 passed
+- `uv run pytest tests/unit/test_imports.py tests/unit/test_gateway_protocol.py tests/unit/test_audit_protocol.py tests/unit/test_tool_registry_protocol.py` — 13 passed
+- `uv run pytest` (full suite) — 551 passed
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 66 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Defects discovered during S2-07:** None
+
+**Code/test changes during S2-07:** None (only DEVELOPMENT_STATUS.md updated)
+
+**Stage 3 status:** NOT STARTED — no Stage 3 implementation has been started.
+
 ## Current blockers
 
 None recorded.
@@ -144,7 +192,7 @@ Design and implement the core domain schemas and deterministic validation contra
 - [x] `S2-04` TimelineEvent schema
 - [x] `S2-05` CampaignState schema
 - [x] `S2-06` Review deferred Stage 1 contracts against real domain types
-- [ ] `S2-07` Full Stage 2 verification, diff review and status update
+- [x] `S2-07` Full Stage 2 verification, diff review and status update
 
 ### S2-06 deferred contract review
 
