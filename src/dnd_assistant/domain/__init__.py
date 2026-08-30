@@ -1,5 +1,6 @@
 """Domain models and deterministic business rules."""
 
+from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.types import (
     EntityId,
     EntityType,
@@ -10,6 +11,7 @@ from dnd_assistant.domain.types import (
 )
 
 __all__: list[str] = [
+    "Entity",
     "EntityId",
     "EntityType",
     "KnowledgeStatus",

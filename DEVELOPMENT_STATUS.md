@@ -139,7 +139,7 @@ Design and implement the core domain schemas and deterministic validation contra
     - Visibility
     - Provenance
     - Revision
-- [ ] `S2-02` Base Entity schema
+- [x] `S2-02` Base Entity schema
 - [ ] `S2-03` Session schema
 - [ ] `S2-04` TimelineEvent schema
 - [ ] `S2-05` CampaignState schema
