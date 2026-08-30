@@ -141,7 +141,7 @@ Design and implement the core domain schemas and deterministic validation contra
     - Revision
 - [x] `S2-02` Base Entity schema
 - [x] `S2-03` Session schema
-- [ ] `S2-04` TimelineEvent schema
+- [x] `S2-04` TimelineEvent schema
 - [ ] `S2-05` CampaignState schema
 - [ ] `S2-06` Review deferred Stage 1 contracts against real domain types
 - [ ] `S2-07` Full Stage 2 verification, diff review and status update
