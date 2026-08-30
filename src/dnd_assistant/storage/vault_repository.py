@@ -185,10 +185,12 @@ def _append_fact_to_body(body: str, fact: str) -> str:
         return f"{body}{bullet}\r"
 
     # No trailing line ending — infer separator from most recent line ending
-    # Search backwards for the last line ending
-    last_crlf = body.rfind("\r\n")
+    # The rightmost \n represents the most recent LF-capable line ending.
+    # If it is immediately preceded by \r, the actual sequence is CRLF.
     last_lf = body.rfind("\n")
-    if last_crlf > last_lf:
+    if last_lf == -1:
+        separator = "\n"
+    elif last_lf > 0 and body[last_lf - 1] == "\r":
         separator = "\r\n"
     else:
         separator = "\n"
@@ -452,7 +454,6 @@ def _commit_entity_mutation(
     target: _StoredEntity,
     candidate_document: VaultDocument,
     *,
-    expected_revision: int,
     audit: AuditContext,
     operation: str,
     audit_service: AuditService,
@@ -475,7 +476,6 @@ def _commit_entity_mutation(
     Args:
         target: The ``_StoredEntity`` to mutate (must already be validated).
         candidate_document: The desired new ``VaultDocument``.
-        expected_revision: The validated expected revision.
         audit: Audit context for this mutation.
         operation: The operation name for audit records.
         audit_service: The audit service for persisting records.
@@ -1045,7 +1045,6 @@ class ObsidianVaultRepository:
         return _commit_entity_mutation(
             target=target,
             candidate_document=patched_document,
-            expected_revision=validated_revision,
             audit=audit,
             operation="patch_entity",
             audit_service=self._audit_service,
@@ -1150,7 +1149,6 @@ class ObsidianVaultRepository:
         return _commit_entity_mutation(
             target=target,
             candidate_document=candidate_document,
-            expected_revision=validated_revision,
             audit=audit,
             operation="append_entity_fact",
             audit_service=self._audit_service,

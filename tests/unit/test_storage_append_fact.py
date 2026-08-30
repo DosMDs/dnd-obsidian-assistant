@@ -343,6 +343,117 @@ class TestAppendFactBodyRendering:
         )
         assert result.body.count("Single fact.") == 1
 
+    # ── No-trailing-newline inference (CRLF/LF/mixed) ────────────────────
+
+    def test_crlf_history_no_trailing_newline(self, tmp_path: Path) -> None:
+        """CRLF history with no trailing newline → CRLF separator."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            _make_document(body="Line 1\r\nLine 2"),
+            audit=_make_audit_context("op-001"),
+        )
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body == "Line 1\r\nLine 2\r\n- Fact\r\n"
+
+    def test_lf_history_no_trailing_newline(self, tmp_path: Path) -> None:
+        """LF history with no trailing newline → LF separator."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            _make_document(body="Line 1\nLine 2"),
+            audit=_make_audit_context("op-001"),
+        )
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body == "Line 1\nLine 2\n- Fact\n"
+
+    def test_mixed_history_most_recent_crlf(self, tmp_path: Path) -> None:
+        """Mixed history where most recent actual newline is CRLF → CRLF."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            _make_document(body="A\nB\r\nC"),
+            audit=_make_audit_context("op-001"),
+        )
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body == "A\nB\r\nC\r\n- Fact\r\n"
+
+    def test_mixed_history_most_recent_lf(self, tmp_path: Path) -> None:
+        """Mixed history where most recent actual newline is LF → LF."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            _make_document(body="A\r\nB\nC"),
+            audit=_make_audit_context("op-001"),
+        )
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body == "A\r\nB\nC\n- Fact\n"
+
+    def test_no_previous_newline_fallback_lf(self, tmp_path: Path) -> None:
+        """No prior newline at all → LF fallback."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            _make_document(body="Single line"),
+            audit=_make_audit_context("op-001"),
+        )
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body == "Single line\n- Fact\n"
+
+    def test_old_body_exact_prefix_for_crlf_no_trailing(self, tmp_path: Path) -> None:
+        """Prefix invariant for CRLF history with no trailing newline."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        body = "Line 1\r\nLine 2"
+        repo.create_entity(_make_document(body=body), audit=_make_audit_context("op-001"))
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body[: len(body)] == body
+
+    def test_old_body_exact_prefix_for_lf_no_trailing(self, tmp_path: Path) -> None:
+        """Prefix invariant for LF history with no trailing newline."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        body = "Line 1\nLine 2"
+        repo.create_entity(_make_document(body=body), audit=_make_audit_context("op-001"))
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body[: len(body)] == body
+
+    def test_old_body_exact_prefix_for_mixed_crlf_last(self, tmp_path: Path) -> None:
+        """Prefix invariant for mixed history ending with CRLF."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        body = "A\nB\r\nC"
+        repo.create_entity(_make_document(body=body), audit=_make_audit_context("op-001"))
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body[: len(body)] == body
+
+    def test_old_body_exact_prefix_for_mixed_lf_last(self, tmp_path: Path) -> None:
+        """Prefix invariant for mixed history ending with LF."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        body = "A\r\nB\nC"
+        repo.create_entity(_make_document(body=body), audit=_make_audit_context("op-001"))
+        result = repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        assert result.body[: len(body)] == body
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # Entity metadata preservation
@@ -592,6 +703,25 @@ class TestAppendFactFilenamePreservation:
             "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
         )
         assert len(list(npc_dir.iterdir())) == 1
+
+    def test_crlf_body_no_trailing_persisted_crlf(self, tmp_path: Path) -> None:
+        """CRLF body with no trailing newline persists with CRLF after append."""
+        vault_root, audit_service, _ = _setup_vault(tmp_path)
+        repo = ObsidianVaultRepository(vault_root, audit_service)
+        repo.create_entity(
+            _make_document(body="Line 1\r\nLine 2"),
+            audit=_make_audit_context("op-001"),
+        )
+        repo.append_entity_fact(
+            "npc-gandalf", expected_revision=1, fact="Fact", audit=_make_audit_context("op-002")
+        )
+        # Re-read from disk to verify persisted content
+        result = repo.get_entity("npc-gandalf")
+        assert result.body == "Line 1\r\nLine 2\r\n- Fact\r\n"
+        # Verify original body is exact prefix
+        assert result.body[: len("Line 1\r\nLine 2")] == "Line 1\r\nLine 2"
+        # Verify revision incremented
+        assert result.entity.revision == 2
 
 
 # ═════════════════════════════════════════════════════════════════════════════

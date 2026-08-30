@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-07 complete)
+**Status:** `IN PROGRESS` (S3-07 complete after correction)
 
 ## Status model
 
@@ -1245,6 +1245,68 @@ os.replace(temp, target)
 - `git diff --check` — no whitespace errors
 
 **Defects discovered during S3-07:** None
+
+**S3-07 correction (CRLF inference defect):**
+
+**Review range:** S3-07 original through S3-07 correction
+
+**Root cause:** `_append_fact_to_body()` compared `last_crlf = body.rfind("\r\n")` (start index of `\r\n`) with `last_lf = body.rfind("\n")` (start index of `\n`). For a CRLF sequence, `\n` is at index `last_crlf + 1`, so `last_lf > last_crlf` was always true, causing the code to incorrectly select LF instead of CRLF when the body had no trailing newline but the most recent line ending was CRLF.
+
+**Corrected no-trailing-newline inference algorithm:**
+- Find the rightmost `\n` via `body.rfind("\n")`.
+- If none exists → default LF.
+- If the `\n` is immediately preceded by `\r` → CRLF.
+- Otherwise → LF.
+- This correctly handles: CRLF history, LF history, mixed history where the most recent actual newline is CRLF, mixed history where the most recent actual newline is LF, and no prior newline at all.
+
+**Changes:**
+
+1. **storage/vault_repository.py** — `_append_fact_to_body()`:
+   - Replaced `last_crlf > last_lf` comparison with correct `body[last_lf - 1] == "\r"` check.
+   - Added explicit `last_lf == -1` guard for bodies with no prior newline.
+   - Removed unused `expected_revision` parameter from `_commit_entity_mutation()` (optional cleanup — the parameter was accepted but never referenced in the body; the helper uses the snapshot's stored revision for its second check).
+
+2. **tests/unit/test_storage_append_fact.py** — 13 new tests:
+   - `test_crlf_history_no_trailing_newline` — CRLF body → CRLF separator (exact equality)
+   - `test_lf_history_no_trailing_newline` — LF body → LF separator (exact equality)
+   - `test_mixed_history_most_recent_crlf` — `"A\nB\r\nC"` → CRLF separator (exact equality)
+   - `test_mixed_history_most_recent_lf` — `"A\r\nB\nC"` → LF separator (exact equality)
+   - `test_no_previous_newline_fallback_lf` — `"Single line"` → LF fallback (exact equality)
+   - `test_old_body_exact_prefix_for_crlf_no_trailing` — prefix invariant for CRLF history
+   - `test_old_body_exact_prefix_for_lf_no_trailing` — prefix invariant for LF history
+   - `test_old_body_exact_prefix_for_mixed_crlf_last` — prefix invariant for mixed CRLF-last
+   - `test_old_body_exact_prefix_for_mixed_lf_last` — prefix invariant for mixed LF-last
+   - `test_crlf_body_no_trailing_persisted_crlf` — repository-level CRLF persistence regression (verifies persisted body uses CRLF, original body is exact prefix, revision increments)
+
+**Preserved semantics confirmed:**
+- Empty body → `"- Fact\n"`
+- Trailing CRLF → CRLF append
+- Trailing LF → LF append
+- Trailing lone CR → CR append
+- No prior newline → LF fallback
+- Old body remains exact prefix in every case
+- No platform newline conversion
+- All other S3-07 semantics unchanged (fact validation, bullet rendering, one fact per call, repository-owned revision +1, updated_at = audit.real_time, extra-frontmatter preservation, exact Entity metadata preservation, same-file atomic replacement, shared `_commit_entity_mutation`, audit intent → second check → atomic write → verified read-back → committed)
+
+**Quality-gate results (after S3-07 correction):**
+- `uv run pytest tests/unit/test_storage_append_fact.py` — 77 passed
+- `uv run pytest tests/unit/test_storage_patch_repository.py` — 56 passed
+- `uv run pytest tests/unit/test_storage_vault_repository.py` — 62 passed, 2 skipped
+- `uv run pytest tests/unit/test_storage_types.py tests/unit/test_storage_markdown.py tests/unit/test_storage_paths.py tests/unit/test_storage_atomic.py tests/unit/test_storage_audit.py tests/unit/test_storage_vault_repository.py tests/unit/test_storage_patch_repository.py tests/unit/test_storage_append_fact.py` — 479 passed, 19 skipped
+- `uv run pytest` (full suite) — 1070 passed, 19 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 81 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Code/test changes during S3-07 correction:** 2 files modified (storage/vault_repository.py, tests/unit/test_storage_append_fact.py), focused on CRLF inference correction and regression tests only.
+
+**Scope exclusions confirmed:**
+- No S3-08 integration hardening
+- No S3-09 Stage-3 completion
+- No new CRUD operations, delete, generic body editing, fact deduplication, provenance body syntax, locks, filesystem CAS, audit reconciliation, migrations
+- No Retrieval, Calendar, Session runtime, Tool layer, ModelGateway, ChangeSet
+- S3-08 was NOT started
 
 **Code/test changes during S3-07:** 5 files (3 modified, 2 new), focused on append_entity_fact implementation and shared mutation-core refactoring only.
 
