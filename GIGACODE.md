@@ -33,7 +33,6 @@ Develop in this order unless the user explicitly changes the roadmap:
 
 Tests are implemented together with each stage.
 
-
 ## Current development status
 
 Before planning or editing code, read:
@@ -47,7 +46,7 @@ It is the canonical source for the **current roadmap stage and task progress**.
 Current stage at the time these instructions were updated:
 
 ```text
-Stage 1 — Project skeleton + contracts
+Stage 2 — Domain schemas
 ```
 
 Do not assume this line is newer than `DEVELOPMENT_STATUS.md`; the status file always wins.
@@ -135,6 +134,22 @@ While editing:
 3. Do not add a dependency unless it is necessary and justified.
 4. Keep public contracts typed and explicit.
 5. Add/update tests in the same change.
+6. Use built-in GigaCode/IDE file-edit tools for repository text files. A JSON parsing error, oversized payload, timeout, or similar edit/write-tool failure is not permission to switch automatically to shell/PowerShell/Python file generation.
+7. After an edit/write-tool failure, inspect the working tree first, preserve already-correct partial work, and retry with smaller atomic create/edit/patch operations. For oversized tests, reduce needless duplication with parametrization/helpers without weakening required coverage.
+
+### File-edit recovery policy
+
+When a built-in file edit/write operation fails for a technical reason such as JSON parsing, payload size, timeout, or transport limits:
+
+1. Treat it as a tooling failure, not an implementation failure.
+2. Inspect `git status`/`git diff` or the relevant file before retrying so correct partial work is not overwritten.
+3. Retry using smaller repository-edit operations: create a small initial file, then add or patch logical sections incrementally.
+4. Prefer compact parametrized tests/helpers over duplicated test bodies when file size itself contributes to the problem, while preserving the task's acceptance criteria and regression coverage.
+5. Do not use Bash, PowerShell, Python one-off scripts, base64, shell redirection, or equivalent source-file generation as an automatic fallback.
+6. Shell-based file mutation is allowed only when built-in file tools are genuinely unavailable or objectively cannot support the required operation independently of payload size. Report the reason to the user and obtain explicit approval before using that fallback.
+7. After recovery, inspect the final diff for truncation, partial writes, duplicated sections, or unrelated changes.
+
+The detailed always-on rule is `.gigacode/rules/06-tool-usage.md`. The rationale is recorded in `docs/adr/0002-agent-file-edit-recovery-policy.md`.
 
 Before considering a task complete:
 1. Run targeted tests first.
