@@ -176,7 +176,7 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 ### Tasks
 
 - [x] `S4-00` Calendar kickoff + canonical domain contracts
-- [ ] `S4-01` Deterministic date ↔ world_tick conversion
+- [x] `S4-01` Deterministic date ↔ world_tick conversion
 - [ ] `S4-02` World-time arithmetic + relative-time operations
 - [ ] `S4-03` TimelineEvent calendar queries
 - [ ] `S4-04` Custom-calendar/intercalary hardening + property tests
@@ -191,10 +191,91 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - intercalary days are explicit named calendar days
 - `CalendarService` core is stateless
 - current-world-time persistence is NOT CalendarService-owned
-- date conversion deferred to S4-01
+- date conversion implemented in S4-01 (``DeterministicCalendarService``)
 - time arithmetic deferred to S4-02
 - TimelineEvent queries deferred to S4-03
 - no Stage-5 work
+
+### S4-01 completion record
+
+**Review range:** S4-00 completion through S4-01
+
+**Implementation:**
+- `_CalendarLayout` — immutable precomputed lookup structure derived from `CalendarDefinition`:
+  - `minutes_per_day`, `days_per_year` — derived constants
+  - Chronological day index: month days + intercalary days in correct interleaved order
+  - `validate_date()` — definition-dependent `GameDate` validation (month, day, intercalary name, hour, minute)
+  - `_day_index_offset()` — zero-based day offset within a year
+- `DeterministicCalendarService` — concrete `CalendarService` implementation:
+  - `date_to_tick(date)` — direct ordinal arithmetic: absolute-minute(date) − absolute-minute(epoch)
+  - `tick_to_date(tick)` — divmod-based inverse: absolute-minute = epoch + tick, then floor-divide into year/day/time components
+  - Complexity proportional to calendar-definition size only (not year or tick magnitude)
+- Public export from `dnd_assistant.domain`
+
+**Conversion semantics:**
+- `world_tick == 0` ↔ `CalendarDefinition.epoch` exactly (including non-midnight epochs)
+- Signed proleptic years: `... -1, 0, 1, 2, ...` with no missing year zero
+- Negative ticks for dates before epoch
+- `divmod` floor-division for correct negative-tick/year handling
+- Intercalary days occupy exactly one elapsed calendar day
+- Multiple intercalary days after the same month preserve declaration order
+- Intercalary days are interleaved chronologically: month days → IC days → next month days
+- Holidays are labels only and do not affect elapsed time
+
+**Epoch behavior:**
+- `date_to_tick(definition.epoch) == 0`
+- `tick_to_date(0) == definition.epoch`
+- Arbitrary epoch time-of-day: e.g. `13:17` works correctly (not silently normalized to midnight)
+
+**Calendar-name matching semantics:**
+- Exact declared names for month and intercalary day matching
+- No fuzzy search, aliases, or case-insensitive runtime matching
+- Case-folding used only for CalendarDefinition duplicate-name validation
+
+**S4-00 defect corrected:**
+- `_validate_date_against_definition()` had a bare `pass` for intercalary dates, skipping intercalary day name validation
+- An intercalary `GameDate` referencing a non-existent intercalary day was accepted without error
+- Fixed: added `intercalary_names: set[str] | None` parameter; intercalary day name is now validated against declared intercalary days
+- Regression test: `TestInvalidIntercalaryEpochRegression.test_invalid_intercalary_epoch_rejected` in `test_calendar_conversion.py`
+
+**Tests added (65 tests in `tests/unit/test_calendar_conversion.py`):**
+1. Epoch → zero (2 tests: regular, intercalary)
+2. Zero → epoch (2 tests: regular, intercalary)
+3. Non-midnight epoch (3 tests: round trip, one minute before/after)
+4. Minute offsets (3 tests)
+5. Hour boundary (1 test)
+6. Day boundary (1 test)
+7. Month boundary (1 test)
+8. Variable month lengths (4 tests)
+9-10. Intercalary conversion (7 tests: single IC, multiple IC ordering, boundaries, full day consumption)
+11-12. Year boundaries (3 tests: year boundary, -1→0, 0→1)
+13. Negative years (3 tests: regular, intercalary, round trip)
+14-15. Negative/positive tick round trips (8 parametrized tests)
+16-17. Custom time units (3 tests: adjacent minutes, day boundary, hour boundary)
+18-23. Validation rejection (7 tests: unknown month, day overflow, hour overflow, minute overflow, custom hour, custom minute, unknown intercalary)
+24. Invalid intercalary epoch regression (1 test — S4-00 defect)
+25. Holidays do not affect ticks (1 test)
+26. Date round trips (7 parametrized tests: regular, intercalary, negative year, year zero, large year)
+27. Large signed year/tick regression (4 tests: ±100000 year, ±10^12 tick)
+28. Import boundaries (4 tests: module importable, exported, no storage/models imports)
+
+**Targeted quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py` — 167 passed
+- `uv run pytest` (full suite) — 1289 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 162 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- S4-02 not started (no advance_world_time, time_until, relative-time parsing)
+- S4-03 not started (no TimelineEvent calendar queries)
+- Stage 5 not started (no retrieval/entity resolution)
+- No session-runtime work
+- No ToolRegistry/ToolExecutor work
+- No ModelGateway/Ollama work
+
+**ADR assessment:** No ADR required. All architectural decisions follow established patterns (Protocol for contracts, immutable derived layout data per ADR-0003, direct ordinal arithmetic).
 
 ## Stage 3 — Vault Repository
 

@@ -18,9 +18,9 @@ Responsibility
 - CalendarService: deterministic, stateless Protocol for world_tick ↔ date
   conversion and time arithmetic.
 
-Deferred to S4-01
-─────────────────
-- date_to_tick / tick_to_date implementation.
+S4-01 — implemented in DeterministicCalendarService
+────────────────────────────────────────────────────
+- date_to_tick / tick_to_date.
 
 Deferred to S4-02
 ─────────────────
@@ -491,6 +491,7 @@ class CalendarDefinition(BaseModel):
 
         # Build lookup maps
         month_map = {m.name: m for m in self.months}
+        intercalary_names = {d.name for d in self.intercalary_days}
 
         # IntercalaryDay.after_month must reference an existing month exactly
         for ic in self.intercalary_days:
@@ -504,6 +505,7 @@ class CalendarDefinition(BaseModel):
         self._validate_date_against_definition(
             self.epoch,
             month_map,
+            intercalary_names=intercalary_names,
             hours_per_day=self.hours_per_day,
             minutes_per_hour=self.minutes_per_hour,
             label="epoch",
@@ -535,17 +537,22 @@ class CalendarDefinition(BaseModel):
         date: GameDate,
         month_map: dict[str, CalendarMonth],
         *,
+        intercalary_names: set[str] | None = None,
         hours_per_day: int = 24,
         minutes_per_hour: int = 60,
         label: str,
     ) -> None:
         """Validate a GameDate against this calendar definition.
 
-        Validates month/day (regular dates), time-of-day components.
-        Intercalary dates skip month/day checks but still validate time.
+        Validates month/day (regular dates), intercalary day name
+        (intercalary dates), and time-of-day components.
         """
         if date.intercalary_day is not None:
-            pass  # no month/day checks for intercalary dates
+            if intercalary_names is not None and date.intercalary_day not in intercalary_names:
+                raise ValueError(
+                    f"{label} intercalary_day '{date.intercalary_day}' "
+                    f"does not match any declared intercalary day"
+                )
         else:
             assert date.month is not None
             if date.month not in month_map:
@@ -582,10 +589,8 @@ class CalendarService(Protocol):
     ``CalendarService`` owns world_tick ↔ date conversion and time
     arithmetic.  It does NOT own campaign current-time persistence.
 
-    S4-00 defines these signatures but does NOT implement them.
-
-    Deferred to S4-01:
-    - ``date_to_tick`` / ``tick_to_date``
+    S4-00 defines these signatures.  S4-01 implements
+    ``date_to_tick`` / ``tick_to_date`` in ``DeterministicCalendarService``.
 
     Deferred to S4-02:
     - ``advance_world_time`` / ``time_until``
@@ -602,14 +607,14 @@ class CalendarService(Protocol):
     def date_to_tick(self, date: GameDate) -> WorldTick:
         """Convert a ``GameDate`` to its canonical ``WorldTick``.
 
-        Implemented in S4-01.
+        Implemented in ``DeterministicCalendarService`` (S4-01).
         """
         ...
 
     def tick_to_date(self, tick: WorldTick) -> GameDate:
         """Convert a ``WorldTick`` to its canonical ``GameDate``.
 
-        Implemented in S4-01.
+        Implemented in ``DeterministicCalendarService`` (S4-01).
         """
         ...
 
@@ -635,3 +640,211 @@ class CalendarService(Protocol):
         Implemented in S4-02.
         """
         ...
+
+
+# ── DeterministicCalendarService ────────────────────────────────────────────
+
+
+class _CalendarLayout:
+    """Immutable precomputed layout derived from a CalendarDefinition.
+
+    Computed once at construction time.  All fields are derived from the
+    definition and do not represent mutable campaign state.
+    """
+
+    __slots__ = (
+        "minutes_per_day",
+        "days_per_year",
+        "_hours_per_day",
+        "_minutes_per_hour",
+        "_month_offsets",
+        "_intercalary_offsets",
+        "_day_index",
+        "_month_map",
+        "_intercalary_set",
+        "_month_names_ordered",
+        "_ic_names_ordered",
+    )
+
+    def __init__(self, definition: CalendarDefinition) -> None:
+        self.minutes_per_day: int = definition.hours_per_day * definition.minutes_per_hour
+        self.days_per_year: int = sum(m.days for m in definition.months) + len(
+            definition.intercalary_days
+        )
+        self._hours_per_day: int = definition.hours_per_day
+        self._minutes_per_hour: int = definition.minutes_per_hour
+
+        # Build month map and intercalary set for validation
+        self._month_map: dict[str, CalendarMonth] = {m.name: m for m in definition.months}
+        self._intercalary_set: set[str] = {d.name for d in definition.intercalary_days}
+        self._month_names_ordered: tuple[str, ...] = tuple(m.name for m in definition.months)
+        self._ic_names_ordered: tuple[str, ...] = tuple(d.name for d in definition.intercalary_days)
+
+        # Build the chronological day index for one year.
+        # For each month in order: emit its numbered days, then emit any
+        # intercalary days declared after that month (in declaration order).
+        # This correctly handles multiple intercalary days after the same month.
+        lookup: list[tuple[bool, str, int]] = []
+        month_offsets: list[int] = []
+        ic_offsets: list[int] = []
+        for m in definition.months:
+            month_offsets.append(len(lookup))
+            for d in range(m.days):
+                lookup.append((False, m.name, d + 1))
+            # Emit intercalary days declared after this month
+            for ic in definition.intercalary_days:
+                if ic.after_month == m.name:
+                    ic_offsets.append(len(lookup))
+                    lookup.append((True, ic.name, 1))
+
+        self._month_offsets: tuple[int, ...] = tuple(month_offsets)
+        self._intercalary_offsets: tuple[int, ...] = tuple(ic_offsets)
+        self._day_index: tuple[tuple[bool, str, int], ...] = tuple(lookup)
+
+    def validate_date(self, date: GameDate, label: str = "date") -> None:
+        """Validate a GameDate against the calendar definition."""
+        if date.intercalary_day is not None:
+            if date.intercalary_day not in self._intercalary_set:
+                raise ValueError(
+                    f"{label} intercalary_day '{date.intercalary_day}' "
+                    f"does not match any declared intercalary day"
+                )
+        else:
+            assert date.month is not None
+            if date.month not in self._month_map:
+                raise ValueError(f"{label} month '{date.month}' does not match any declared month")
+            month = self._month_map[date.month]
+            if date.day is None or date.day < 1:
+                raise ValueError(f"{label} day must be >= 1")
+            if date.day > month.days:
+                raise ValueError(
+                    f"{label} day {date.day} exceeds month '{date.month}' length ({month.days})"
+                )
+
+        # Time-of-day validation
+        if date.hour < 0:
+            raise ValueError(f"{label} hour must be >= 0")
+        if date.hour >= self._hours_per_day:
+            raise ValueError(
+                f"{label} hour {date.hour} must be < hours_per_day ({self._hours_per_day})"
+            )
+        if date.minute < 0:
+            raise ValueError(f"{label} minute must be >= 0")
+        if date.minute >= self._minutes_per_hour:
+            raise ValueError(
+                f"{label} minute {date.minute} must be < minutes_per_hour ({self._minutes_per_hour})"
+            )
+
+    def _day_index_offset(self, date: GameDate) -> int:
+        """Return zero-based day offset of date within its year."""
+        if date.intercalary_day is not None:
+            ic_idx = self._ic_names_ordered.index(date.intercalary_day)
+            return self._intercalary_offsets[ic_idx]
+        # Regular date
+        month_idx = self._month_names_ordered.index(date.month)  # type: ignore[arg-type]
+        return self._month_offsets[month_idx] + (date.day - 1)  # type: ignore[operator]
+
+
+class DeterministicCalendarService:
+    """Deterministic, stateless calendar conversion service.
+
+    Converts between ``GameDate`` and ``WorldTick`` using direct ordinal
+    arithmetic.  Complexity depends only on calendar-definition size, not
+    on year or tick magnitude.
+
+    The service is stateless with respect to campaign current time.
+    Mutable world-tick persistence belongs to the application layer.
+    """
+
+    def __init__(self, definition: CalendarDefinition) -> None:
+        self._definition = definition
+        self._layout = _CalendarLayout(definition)
+        self._minutes_per_day = self._layout.minutes_per_day
+        self._days_per_year = self._layout.days_per_year
+
+        # Precompute epoch reference
+        self._epoch_year = definition.epoch.year
+        self._epoch_day_offset = self._layout._day_index_offset(definition.epoch)
+        self._epoch_minute_of_day = (
+            definition.epoch.hour * definition.minutes_per_hour + definition.epoch.minute
+        )
+
+    @property
+    def definition(self) -> CalendarDefinition:
+        """Return the calendar definition this service is configured with."""
+        return self._definition
+
+    def date_to_tick(self, date: GameDate) -> WorldTick:
+        """Convert a ``GameDate`` to its canonical ``WorldTick``.
+
+        Uses direct ordinal arithmetic: computes the absolute minute
+        for the given date and subtracts the epoch absolute minute.
+
+        Complexity: O(number of months + number of intercalary days),
+        not O(abs(year)) or O(abs(tick)).
+        """
+        self._layout.validate_date(date, label="date")
+
+        day_offset = self._layout._day_index_offset(date)
+        minute_of_day = date.hour * self._definition.minutes_per_hour + date.minute
+
+        # Absolute minute = year * days_per_year * minutes_per_day
+        #                 + day_offset * minutes_per_day
+        #                 + minute_of_day
+        abs_minute = (
+            date.year * self._days_per_year * self._minutes_per_day
+            + day_offset * self._minutes_per_day
+            + minute_of_day
+        )
+
+        epoch_abs_minute = (
+            self._epoch_year * self._days_per_year * self._minutes_per_day
+            + self._epoch_day_offset * self._minutes_per_day
+            + self._epoch_minute_of_day
+        )
+
+        return WorldTick(abs_minute - epoch_abs_minute)
+
+    def tick_to_date(self, tick: WorldTick) -> GameDate:
+        """Convert a ``WorldTick`` to its canonical ``GameDate``.
+
+        Uses divmod-based inverse ordinal arithmetic.
+
+        Complexity: O(number of months + number of intercalary days),
+        not O(abs(year)) or O(abs(tick)).
+        """
+        # Absolute minute = epoch absolute minute + tick
+        epoch_abs_minute = (
+            self._epoch_year * self._days_per_year * self._minutes_per_day
+            + self._epoch_day_offset * self._minutes_per_day
+            + self._epoch_minute_of_day
+        )
+        abs_minute = epoch_abs_minute + tick
+
+        # Floor-divide to get year and remainder
+        minutes_per_year = self._days_per_year * self._minutes_per_day
+        year, remainder = divmod(abs_minute, minutes_per_year)
+
+        # remainder is minutes within the year
+        day_offset, minute_of_day = divmod(remainder, self._minutes_per_day)
+
+        # Look up day in the day index
+        is_intercalary, name, day = self._layout._day_index[day_offset]
+
+        hour, minute = divmod(minute_of_day, self._definition.minutes_per_hour)
+
+        if is_intercalary:
+            return GameDate(
+                year=year,
+                intercalary_day=name,
+                hour=hour,
+                minute=minute,
+            )
+        else:
+            return GameDate(
+                year=year,
+                month=name,
+                day=day,
+                hour=hour,
+                minute=minute,
+            )
