@@ -152,7 +152,8 @@ Never perform automatically:
 - modifying `.env`, credentials, tokens or secret files;
 - adding shell/filesystem MCP servers with unrestricted write access;
 - database/schema migrations without explicit user request;
-- publishing, pushing, releasing or uploading anything;
+- publishing releases or uploading artifacts;
+- force-pushing or rewriting published Git history;
 - changing architecture merely to make implementation easier.
 
 If an operation is destructive, irreversible, credential-related or touches a real Vault, stop and require explicit user approval.
@@ -166,5 +167,37 @@ uv run ruff check .
 uv run ruff format --check .
 uv run dnd --help
 ```
+
+## Git commit and push policy
+
+После успешного завершения каждой задачи агент обязан самостоятельно:
+
+1. Запустить требуемые quality gates.
+2. Проверить `git status` и `git diff`.
+3. Убедиться, что в commit не попали:
+   - секреты;
+   - `.env`;
+   - временные файлы;
+   - случайные/generated файлы;
+   - изменения вне текущей задачи.
+4. Выполнить `git add` только относящихся к задаче файлов.
+5. Создать commit.
+6. Сразу выполнить push текущей ветки в настроенный `origin`.
+
+Не спрашивать отдельного подтверждения для обычного commit/push после успешно завершённой задачи.
+
+Запрещено автоматически:
+
+- `git push --force`;
+- `git push --force-with-lease`;
+- переписывать историю;
+- `git reset --hard`;
+- rebase опубликованной истории;
+- удалять remote branches;
+- пушить при проваленных тестах или quality gates.
+
+Если push не удался из-за authentication, conflicts, branch protection или remote changes — остановиться и сообщить пользователю, не обходить защиту автоматически.
+
+Commit должен содержать только изменения текущей задачи.
 
 Prefer these commands over platform-specific wrappers.
