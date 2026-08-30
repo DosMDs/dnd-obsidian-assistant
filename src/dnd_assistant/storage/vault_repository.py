@@ -113,6 +113,89 @@ def _content_hash(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+# ── Fact validation ─────────────────────────────────────────────────────────
+
+
+def _validate_fact(fact: object) -> str:
+    """Validate a fact string for ``append_entity_fact``.
+
+    Contract:
+    - must be a ``str``;
+    - non-empty;
+    - no leading/trailing whitespace;
+    - printable Unicode (no control characters, no newlines);
+    - no embedded newline/control characters.
+
+    Args:
+        fact: The fact value to validate.
+
+    Returns:
+        The validated fact string.
+
+    Raises:
+        ValidationError: The value does not satisfy the fact contract.
+    """
+    if not isinstance(fact, str):
+        raise ValidationError(f"Fact must be a string, got {type(fact).__name__}")
+    if not fact:
+        raise ValidationError("Fact must not be empty")
+    if fact.strip() != fact:
+        raise ValidationError("Fact must not have leading or trailing whitespace")
+    if not fact.isprintable():
+        raise ValidationError("Fact must not contain non-printable characters")
+    return fact
+
+
+# ── Body fact appender ──────────────────────────────────────────────────────
+
+
+def _append_fact_to_body(body: str, fact: str) -> str:
+    """Append one Markdown bullet fact to an existing body.
+
+    Policy:
+    - Existing body remains an exact character-for-character prefix.
+    - If body is empty: return ``"- <fact>\\n"`` (LF).
+    - If body ends with ``\\r\\n``: append using ``\\r\\n``.
+    - If body ends with ``\\n``: append using ``\\n``.
+    - If body ends with lone ``\\r``: append using ``\\r``.
+    - If body has no trailing line ending: infer separator from the
+      most recently observable line ending (CRLF wins over LF), then
+      ``separator + "- <fact>" + separator``.
+    - No extra blank paragraph unless already present.
+
+    Args:
+        body: The existing Markdown body text.
+        fact: The validated fact string.
+
+    Returns:
+        The new body with the fact appended.
+    """
+    bullet = f"- {fact}"
+
+    if not body:
+        return f"{bullet}\n"
+
+    if body.endswith("\r\n"):
+        return f"{body}{bullet}\r\n"
+
+    if body.endswith("\n"):
+        return f"{body}{bullet}\n"
+
+    if body.endswith("\r"):
+        return f"{body}{bullet}\r"
+
+    # No trailing line ending — infer separator from most recent line ending
+    # Search backwards for the last line ending
+    last_crlf = body.rfind("\r\n")
+    last_lf = body.rfind("\n")
+    if last_crlf > last_lf:
+        separator = "\r\n"
+    else:
+        separator = "\n"
+
+    return f"{body}{separator}{bullet}{separator}"
+
+
 # ── Filename generation ─────────────────────────────────────────────────────
 
 
@@ -360,6 +443,187 @@ def _validate_revision_input(revision: object) -> int:
             cause=exc,
         ) from exc
     return validated
+
+
+# ── Shared mutation commit helper ───────────────────────────────────────────
+
+
+def _commit_entity_mutation(
+    target: _StoredEntity,
+    candidate_document: VaultDocument,
+    *,
+    expected_revision: int,
+    audit: AuditContext,
+    operation: str,
+    audit_service: AuditService,
+) -> VaultDocument:
+    """Commit an entity mutation with audit intent, second check, atomic write,
+    verified read-back, and committed audit.
+
+    This is the shared mutation core used by both ``patch_entity`` and
+    ``append_entity_fact``.  It owns:
+
+    - serialization;
+    - before/after hashes;
+    - audit intent;
+    - second optimistic check (re-read target, verify revision + hash);
+    - ``atomic_write_text`` with parse validator;
+    - verified read-back (hash, id, type, revision, updated_at, body);
+    - committed audit;
+    - common failure semantics.
+
+    Args:
+        target: The ``_StoredEntity`` to mutate (must already be validated).
+        candidate_document: The desired new ``VaultDocument``.
+        expected_revision: The validated expected revision.
+        audit: Audit context for this mutation.
+        operation: The operation name for audit records.
+        audit_service: The audit service for persisting records.
+
+    Returns:
+        The persisted ``VaultDocument`` after the mutation.
+
+    Raises:
+        ConflictError: Revision or content changed between intent and write.
+        StorageError: A filesystem or audit operation failed.
+    """
+    validated_id = target.entity_id
+    stored_revision = target.document.entity.revision
+    stored_entity = target.document.entity
+
+    # Serialize
+    serialized = serialize(candidate_document)
+
+    # Compute before/after hashes
+    before_hash = target.content_hash
+    after_hash = _content_hash(serialized)
+
+    # Append audit intent record
+    intent_record = AuditRecord(
+        operation_id=audit.operation_id,
+        real_time=audit.real_time,
+        operation=operation,
+        entity_id=validated_id,
+        before_hash=before_hash,
+        after_hash=after_hash,
+        source=audit.source,
+        session=audit.session,
+        model_profile=audit.model_profile,
+        prompt_version=audit.prompt_version,
+        phase="intent",
+    )
+    audit_service.append(intent_record)
+
+    # Second optimistic check — re-read target file
+    try:
+        current_text = _read_exact_text(target.path)
+    except StorageError as exc:
+        raise StorageError(
+            f"Target file became unreadable for operation {audit.operation_id}: {target.path}",
+            cause=exc,
+        ) from exc
+
+    current_hash = _content_hash(current_text)
+
+    try:
+        current_doc = parse(current_text)
+    except ValidationError as exc:
+        raise StorageError(
+            f"Target file became unparseable for operation {audit.operation_id}: {target.path}",
+            cause=exc,
+        ) from exc
+
+    current_revision = current_doc.entity.revision
+    if current_revision != stored_revision:
+        raise ConflictError(
+            f"Entity {validated_id!r} revision changed after intent: "
+            f"expected {stored_revision}, got {current_revision}"
+        )
+
+    if current_hash != before_hash:
+        raise ConflictError(
+            f"Entity {validated_id!r} content changed after intent "
+            f"(hash mismatch) for operation {audit.operation_id}"
+        )
+
+    # Atomic write with parse validator
+    target_path = target.path
+    atomic_write_text(
+        target=target_path,
+        content=serialized,
+        validator=lambda c: parse(c),
+    )
+
+    # Re-read and verify persisted content
+    try:
+        persisted_text = _read_exact_text(target_path)
+    except StorageError as exc:
+        raise StorageError(
+            f"Mutation committed but read-back failed for operation {audit.operation_id}: {exc}"
+        ) from exc
+
+    persisted_hash = _content_hash(persisted_text)
+    if persisted_hash != after_hash:
+        raise StorageError(
+            f"Mutation committed but hash verification failed for "
+            f"operation {audit.operation_id}: "
+            f"expected {after_hash}, got {persisted_hash}"
+        )
+
+    try:
+        persisted_doc = parse(persisted_text)
+    except ValidationError as exc:
+        raise StorageError(
+            f"Mutation committed but re-parsed document is invalid "
+            f"for operation {audit.operation_id}",
+            cause=exc,
+        ) from exc
+
+    # Verify id, type, revision, updated_at
+    if persisted_doc.entity.id != validated_id:
+        raise StorageError(
+            f"Mutation committed but entity ID changed for operation {audit.operation_id}"
+        )
+    if persisted_doc.entity.type != stored_entity.type:
+        raise StorageError(
+            f"Mutation committed but entity type changed for operation {audit.operation_id}"
+        )
+    if persisted_doc.entity.revision != stored_revision + 1:
+        raise StorageError(
+            f"Mutation committed but revision is {persisted_doc.entity.revision}, "
+            f"expected {stored_revision + 1} for operation {audit.operation_id}"
+        )
+    if persisted_doc.entity.updated_at != audit.real_time:
+        raise StorageError(
+            f"Mutation committed but updated_at mismatch for operation {audit.operation_id}"
+        )
+
+    # Append committed audit record
+    committed_record = AuditRecord(
+        operation_id=audit.operation_id,
+        real_time=audit.real_time,
+        operation=operation,
+        entity_id=validated_id,
+        before_hash=before_hash,
+        after_hash=after_hash,
+        source=audit.source,
+        session=audit.session,
+        model_profile=audit.model_profile,
+        prompt_version=audit.prompt_version,
+        phase="committed",
+    )
+    try:
+        audit_service.append(committed_record)
+    except StorageError as exc:
+        raise StorageError(
+            f"Entity mutation committed but audit finalization failed "
+            f"for operation {audit.operation_id}.  "
+            f"The mutated entity file exists at {target_path}.  "
+            f"An intent audit record is present.",
+            cause=exc,
+        ) from exc
+
+    return persisted_doc
 
 
 # ── ObsidianVaultRepository ─────────────────────────────────────────────────
@@ -770,148 +1034,124 @@ class ObsidianVaultRepository:
                 cause=exc,
             ) from exc
 
-        # 7. Construct and serialize the patched document
+        # 7. Construct the patched document
         patched_document = VaultDocument(
             entity=new_entity,
             extra_frontmatter=target.document.extra_frontmatter,
             body=target.document.body,
         )
-        serialized = serialize(patched_document)
 
-        # 8. Compute before/after hashes
-        before_hash = target.content_hash
-        after_hash = _content_hash(serialized)
-
-        # 9. Append audit intent record
-        intent_record = AuditRecord(
-            operation_id=audit.operation_id,
-            real_time=audit.real_time,
+        # 8-14. Delegate to shared mutation commit helper
+        return _commit_entity_mutation(
+            target=target,
+            candidate_document=patched_document,
+            expected_revision=validated_revision,
+            audit=audit,
             operation="patch_entity",
-            entity_id=validated_id,
-            before_hash=before_hash,
-            after_hash=after_hash,
-            source=audit.source,
-            session=audit.session,
-            model_profile=audit.model_profile,
-            prompt_version=audit.prompt_version,
-            phase="intent",
+            audit_service=self._audit_service,
         )
-        self._audit_service.append(intent_record)
 
-        # 10. Second optimistic check — re-read target file
-        try:
-            current_text = _read_exact_text(target.path)
-        except StorageError as exc:
-            raise StorageError(
-                f"Target file became unreadable for operation {audit.operation_id}: {target.path}",
-                cause=exc,
-            ) from exc
+    # ── append_entity_fact ─────────────────────────────────────────────
 
-        current_hash = _content_hash(current_text)
+    def append_entity_fact(
+        self,
+        entity_id: str,
+        *,
+        expected_revision: object,
+        fact: str,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        """Append a fact/note to an entity's Markdown body.
 
-        # Parse current document to check revision
-        try:
-            current_doc = parse(current_text)
-        except ValidationError as exc:
-            raise StorageError(
-                f"Target file became unparseable for operation {audit.operation_id}: {target.path}",
-                cause=exc,
-            ) from exc
+        The append lifecycle:
 
-        current_revision = current_doc.entity.revision
-        if current_revision != stored_revision:
+        1. Validate inputs (entity_id, expected_revision, fact).
+        2. Validate repository/audit state (audit log readable).
+        3. Build clean global snapshot.
+        4. Find target entity by exact EntityId.
+        5. Check expected_revision against stored revision.
+        6. Construct the new body by appending one Markdown bullet.
+        7. Construct the candidate Entity through full validation.
+        8-14. Delegate to shared mutation commit helper.
+
+        Args:
+            entity_id: The stable domain identifier of the entity.
+            expected_revision: The revision the caller last observed.
+            fact: The fact text to append (validated: non-empty, printable,
+                no leading/trailing whitespace, no newlines/controls).
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``VaultDocument`` after the append.
+
+        Raises:
+            ValidationError: The ``entity_id``, ``expected_revision``, or
+                ``fact`` is invalid.
+            NotFoundError: No entity with the given ID exists.
+            ConflictError: The stored revision does not match
+                ``expected_revision``, or the ``operation_id`` has already
+                been used.
+            StorageError: A filesystem or audit operation failed.
+        """
+        # 1. Validate inputs
+        validated_id = _validate_entity_id_input(entity_id)
+        validated_revision = _validate_revision_input(expected_revision)
+        validated_fact = _validate_fact(fact)
+
+        # 2. Validate audit log is readable and operation_id is unique
+        self._check_audit_health(audit.operation_id)
+
+        # 3. Build snapshot (detects duplicates/corruption globally)
+        snapshot = self._snapshot()
+
+        # 4. Find target entity by exact EntityId
+        target: _StoredEntity | None = None
+        for se in snapshot:
+            if se.entity_id == validated_id:
+                target = se
+                break
+
+        if target is None:
+            raise NotFoundError(f"Entity not found: {validated_id}")
+
+        stored_entity = target.document.entity
+        stored_revision = stored_entity.revision
+
+        # 5. Check expected_revision against stored revision
+        if stored_revision != validated_revision:
             raise ConflictError(
-                f"Entity {validated_id!r} revision changed after intent: "
-                f"expected {stored_revision}, got {current_revision}"
+                f"Revision mismatch for entity {validated_id!r}: "
+                f"expected {validated_revision}, stored {stored_revision}"
             )
 
-        if current_hash != before_hash:
-            raise ConflictError(
-                f"Entity {validated_id!r} content changed after intent "
-                f"(hash mismatch) for operation {audit.operation_id}"
-            )
+        # 6. Construct the new body by appending one Markdown bullet
+        new_body = _append_fact_to_body(target.document.body, validated_fact)
 
-        # 11. Atomic write with parse validator
-        target_path = target.path
-        atomic_write_text(
-            target=target_path,
-            content=serialized,
-            validator=lambda c: parse(c),
-        )
-
-        # 12. Re-read and verify persisted content
-        try:
-            persisted_text = _read_exact_text(target_path)
-        except StorageError as exc:
-            raise StorageError(
-                f"Patch committed but read-back failed for operation {audit.operation_id}: {exc}"
-            ) from exc
-
-        persisted_hash = _content_hash(persisted_text)
-        if persisted_hash != after_hash:
-            raise StorageError(
-                f"Patch committed but hash verification failed for "
-                f"operation {audit.operation_id}: "
-                f"expected {after_hash}, got {persisted_hash}"
-            )
+        # 7. Construct the candidate Entity through full validation
+        entity_data = stored_entity.model_dump()
+        entity_data["revision"] = stored_revision + 1
+        entity_data["updated_at"] = audit.real_time
 
         try:
-            persisted_doc = parse(persisted_text)
-        except ValidationError as exc:
-            raise StorageError(
-                f"Patch committed but re-parsed document is invalid "
-                f"for operation {audit.operation_id}",
+            new_entity = Entity.model_validate(entity_data)
+        except Exception as exc:
+            raise ValidationError(
+                f"Appended entity validation failed for {validated_id!r}",
                 cause=exc,
             ) from exc
 
-        # Verify id, type, revision, updated_at
-        if persisted_doc.entity.id != validated_id:
-            raise StorageError(
-                f"Patch committed but entity ID changed for operation {audit.operation_id}"
-            )
-        if persisted_doc.entity.type != stored_entity.type:
-            raise StorageError(
-                f"Patch committed but entity type changed for operation {audit.operation_id}"
-            )
-        if persisted_doc.entity.revision != new_revision:
-            raise StorageError(
-                f"Patch committed but revision is {persisted_doc.entity.revision}, "
-                f"expected {new_revision} for operation {audit.operation_id}"
-            )
-        if persisted_doc.entity.updated_at != audit.real_time:
-            raise StorageError(
-                f"Patch committed but updated_at mismatch for operation {audit.operation_id}"
-            )
-        # Verify body preserved
-        if persisted_doc.body != target.document.body:
-            raise StorageError(
-                f"Patch committed but body changed for operation {audit.operation_id}"
-            )
-
-        # 13. Append committed audit record
-        committed_record = AuditRecord(
-            operation_id=audit.operation_id,
-            real_time=audit.real_time,
-            operation="patch_entity",
-            entity_id=validated_id,
-            before_hash=before_hash,
-            after_hash=after_hash,
-            source=audit.source,
-            session=audit.session,
-            model_profile=audit.model_profile,
-            prompt_version=audit.prompt_version,
-            phase="committed",
+        candidate_document = VaultDocument(
+            entity=new_entity,
+            extra_frontmatter=target.document.extra_frontmatter,
+            body=new_body,
         )
-        try:
-            self._audit_service.append(committed_record)
-        except StorageError as exc:
-            raise StorageError(
-                f"Entity mutation committed but audit finalization failed "
-                f"for operation {audit.operation_id}.  "
-                f"The patched entity file exists at {target_path}.  "
-                f"An intent audit record is present.",
-                cause=exc,
-            ) from exc
 
-        # 14. Return persisted document
-        return persisted_doc
+        # 8-14. Delegate to shared mutation commit helper
+        return _commit_entity_mutation(
+            target=target,
+            candidate_document=candidate_document,
+            expected_revision=validated_revision,
+            audit=audit,
+            operation="append_entity_fact",
+            audit_service=self._audit_service,
+        )

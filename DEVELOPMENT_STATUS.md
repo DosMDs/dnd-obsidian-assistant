@@ -3,7 +3,7 @@
 **Last updated:** 2026-08-30  
 **Current milestone:** `v0.1-dev — Vault Core`  
 **Current stage:** `Stage 3 — Vault Repository`  
-**Status:** `IN PROGRESS` (S3-06 complete)
+**Status:** `IN PROGRESS` (S3-07 complete)
 
 ## Status model
 
@@ -182,7 +182,7 @@ Implement the trusted Vault persistence layer for Obsidian Markdown/YAML entitie
 - [x] `S3-04` AuditRecord + AuditService
 - [x] `S3-05` create_entity / get_entity / list_entities
 - [x] `S3-06` patch_entity + optimistic concurrency
-- [ ] `S3-07` append_entity_fact
+- [x] `S3-07` append_entity_fact
 - [ ] `S3-08` integration/failure tests
 - [ ] `S3-09` full Stage 3 verification/diff/status
 
@@ -1138,6 +1138,122 @@ os.replace(temp, target)
 - No FTS, fuzzy lookup, SQLite, indexes, embeddings, migrations
 - No Calendar, Retrieval, Session runtime, Tool layer, ModelGateway, ChangeSet
 - S3-07 was NOT started
+
+### S3-07 completion record
+
+**Review range:** S3-06 completion through S3-07
+
+**Changes:**
+
+1. **storage/vault_repository.py** — three additions and one refactor:
+
+   **1a. Fact validation (`_validate_fact`):**
+   - New private function validating fact contract: must be `str`, non-empty, no leading/trailing whitespace, printable Unicode, no embedded newline/control characters
+   - Invalid input raises `ValidationError` with descriptive message
+
+   **1b. Body fact appender (`_append_fact_to_body`):**
+   - New private function appending one Markdown bullet (`"- <fact>"`) to existing body
+   - Existing body remains exact character-for-character prefix
+   - Line-ending policy: empty body → LF; trailing CRLF → CRLF; trailing LF → LF; lone CR → CR; no trailing newline → infer separator from most recent line ending (CRLF wins)
+   - No extra blank paragraph unless already present
+   - No platform-default newline conversion
+
+   **1c. Shared mutation commit helper (`_commit_entity_mutation`):**
+   - New private function owning the common mutation core: serialization, before/after hashes, audit intent, second optimistic check (re-read target, verify revision + hash), `atomic_write_text` with parse validator, verified read-back (hash, id, type, revision, updated_at), committed audit, common failure semantics
+   - Used by both `patch_entity` and `append_entity_fact`
+
+   **1d. `patch_entity` refactored to use shared helper:**
+   - Steps 7-14 (serialize → committed audit) replaced by single call to `_commit_entity_mutation`
+   - All existing patch behaviour preserved (verified by 56 existing patch tests passing unchanged)
+   - No change to EntityPatch semantics, revision ownership, updated_at ownership, patch allowed fields, hashes, operation name, audit ordering, second conflict check, filename/path, return semantics
+
+   **1e. `append_entity_fact` implementation:**
+   - Full lifecycle: validate inputs → audit health → snapshot → find target → revision check → construct new body → construct candidate Entity → delegate to `_commit_entity_mutation`
+   - Same audit two-phase strategy as `patch_entity` with `operation="append_entity_fact"`
+   - Same second pre-write revision/hash check
+   - Same atomic replacement (no direct file append for entity Markdown)
+   - Same failure semantics (no audit intent for invalid input/not found/stale; intent remains on write failure; no rollback after successful atomic write; committed-audit failure preserves cause)
+
+2. **storage/types.py** — `VaultRepository` Protocol:
+   - `append_entity_fact` signature updated to require `audit: AuditContext` parameter
+   - Docstring updated to describe fact validation contract, Markdown bullet rendering, revision increment, and `updated_at` ownership
+
+3. **tests/unit/test_storage_types.py** — updated protocol test:
+   - `test_append_entity_fact_revision_deferred_to_s3_07` replaced by `test_append_entity_fact_revision_semantics` verifying docstring now claims revision increment
+
+4. **tests/unit/test_storage_append_fact.py** (new) — 67 tests:
+
+   **Fact validation (11 tests):**
+   - Normal ASCII, Unicode, special characters accepted
+   - Empty, whitespace-only, leading whitespace, trailing whitespace, newline, CRLF, tab, non-string rejected
+
+   **Body rendering (8 tests):**
+   - Empty body → `"- Fact\n"`, LF trailing, CRLF trailing, no trailing newline, existing blank line, Unicode body/fact, old body exact prefix, fact appears exactly once
+
+   **Entity metadata preservation (13 tests):**
+   - id, type, name, status, visibility, knowledge_status, created_session, last_seen_session, created_at, schema_version, tags unchanged
+   - revision incremented by 1, updated_at = audit.real_time, updated_at differs from created_at
+
+   **Extra frontmatter preservation (2 tests):**
+   - Simple extra keys survive, nested extra keys survive
+
+   **File/path preservation (3 tests):**
+   - Same path remains, custom filename preserved, no new file created
+
+   **Audit lifecycle (8 tests):**
+   - Exactly 2 records, operation is `append_entity_fact`, same operation_id, same entity_id, same before_hash, same after_hash, before_hash != after_hash, same context metadata
+
+   **Optimistic concurrency (9 tests):**
+   - Revision 1→2, N→N+1, stale raises ConflictError, stale produces zero audit records, bool/string/zero/negative revision rejected, repeated append with new revision
+
+   **Failure semantics (7 tests):**
+   - Invalid entity_id, not found, operation_id reuse, corrupt audit preflight, intent append failure, entity write failure leaves intent, committed-audit failure entity still has fact, committed-audit failure preserves cause
+
+   **Concurrent/manual edit detection (2 tests):**
+   - Manual edit without revision change detected, manual edit with revision change detected
+
+   **Cross-operation integration (1 test):**
+   - create → append → patch → append cycle verifies revision compatibility and body content
+
+   **Protocol conformance (1 test):**
+   - `isinstance(repo, VaultRepository)` — runtime structural conformance
+
+5. **DEVELOPMENT_STATUS.md** — updated task status, added S3-07 completion record
+
+**Decisions made:**
+- `append_entity_fact` requires `audit: AuditContext` (no unaudited overload)
+- Fact validation: non-empty, printable, no leading/trailing whitespace, no embedded newlines/controls
+- Markdown rendering: `"- <fact>"` bullet, no `## Facts` heading, no timestamps/source labels/operation IDs in body
+- Line-ending policy: deterministic, never modifies old body, CRLF-aware
+- Existing body remains exact character-for-character prefix
+- Entity metadata: only revision (+1) and updated_at (= audit.real_time) change
+- Extra frontmatter preserved semantically unchanged
+- Same file/path preserved (atomic replacement, not direct file append)
+- Shared mutation core (`_commit_entity_mutation`) used by both `patch_entity` and `append_entity_fact`
+- `patch_entity` behaviour unchanged by refactoring
+- No generic body patch DTO, no fact removal/deduplication/IDs/timestamps, no Provenance blocks
+- No S3-08 scope creep
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_storage_append_fact.py` — 67 passed
+- `uv run pytest tests/unit/test_storage_patch_repository.py` — 56 passed
+- `uv run pytest tests/unit/test_storage_vault_repository.py` — 62 passed, 2 skipped
+- `uv run pytest` (full suite) — 1060 passed, 19 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 81 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Defects discovered during S3-07:** None
+
+**Code/test changes during S3-07:** 5 files (3 modified, 2 new), focused on append_entity_fact implementation and shared mutation-core refactoring only.
+
+**Scope exclusions confirmed:**
+- No generic body patch DTO, body delete/edit, fact removal, fact deduplication, fact IDs, fact timestamps in Markdown, Provenance blocks, Markdown heading management, arbitrary extra-frontmatter update, entity deletion, file rename/move, locks, filesystem CAS, automatic audit reconciliation
+- No S3-08 broad hardening
+- No S3-09 Stage-3 completion
+- No Retrieval, Calendar, Session runtime, Tool Registry, ModelGateway, ChangeSet
+- S3-08 was NOT started
 
 ## Current blockers
 

@@ -188,20 +188,16 @@ class TestVaultRepositoryProtocol:
         assert NotFoundError is not None
         assert StorageError is not None
 
-    def test_append_entity_fact_revision_deferred_to_s3_07(self) -> None:
-        """append_entity_fact does not guarantee incremented revision.
-
-        The revision-update semantics are deferred to S3-07.
-        """
+    def test_append_entity_fact_revision_semantics(self) -> None:
+        """append_entity_fact now guarantees incremented revision (S3-07)."""
         import inspect
 
         from dnd_assistant.storage import types as storage_types
 
         source = inspect.getsource(storage_types.VaultRepository)
-        assert "incremented revision" not in source, (
-            "append_entity_fact must not claim incremented revision in S3-00"
+        assert "incremented by 1" in source, (
+            "append_entity_fact should claim revision increment after S3-07"
         )
-        assert "S3-07" in source, "append_entity_fact should defer revision semantics to S3-07"
 
 
 # ── Import / boundary tests ────────────────────────────────────────────────

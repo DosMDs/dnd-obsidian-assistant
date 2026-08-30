@@ -241,6 +241,7 @@ class VaultRepository(Protocol):
         *,
         expected_revision: Revision,
         fact: str,
+        audit: AuditContext,
     ) -> VaultDocument:
         """Append a fact/note to an entity's Markdown body.
 
@@ -248,19 +249,28 @@ class VaultRepository(Protocol):
         information to the entity's body without requiring the caller
         to read, modify, and write the entire document.
 
+        The fact is rendered as a single Markdown bullet (``"- <fact>\\n"``)
+        appended to the existing body.  The existing body remains an exact
+        character-for-character prefix of the new body.
+
         Args:
             entity_id: The stable domain identifier of the entity.
             expected_revision: The revision the caller last observed.
-            fact: The fact text to append.
+            fact: The fact text to append.  Must be non-empty, printable,
+                with no leading/trailing whitespace or embedded newlines.
+            audit: Audit context for this mutation.  Every repository
+                mutation must carry explicit audit metadata.
 
         Returns:
-            The updated document as stored (revision-update semantics
-            are finalised in S3-07).
+            The updated document as stored (revision incremented by 1,
+            ``updated_at`` set to ``audit.real_time``).
 
         Raises:
+            ValidationError: The ``entity_id``, ``expected_revision``, or
+                ``fact`` is invalid.
             NotFoundError: No entity with the given ID exists.
             ConflictError: The stored revision does not match
                 ``expected_revision``.
-            StorageError: The write operation failed.
+            StorageError: A filesystem or audit operation failed.
         """
         ...
