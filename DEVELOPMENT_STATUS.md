@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C11)
+**Last updated:** 2026-08-31 (S5-06)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ## Status model
 
@@ -25,7 +25,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
 | 3. Vault Repository | DONE | 2026-08-30 | 2026-08-30 |
 | 4. Calendar | DONE | 2026-08-30 | 2026-08-31 |
-| 5. Retrieval + Entity Resolution | IN PROGRESS | 2026-08-31 | — |
+| 5. Retrieval + Entity Resolution | DONE | 2026-08-31 | 2026-08-31 |
 | 6. Session Runtime without LLM | NOT STARTED | — | — |
 | 7. Tool Registry / Executor | NOT STARTED | — | — |
 | 8. Model Gateway / Ollama | NOT STARTED | — | — |
@@ -879,7 +879,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - [x] `S5-03` SQLite FTS5 derived index + rebuild path
 - [x] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
 - [x] `S5-05` Golden-Vault integration + retrieval/resolver hardening
-- [ ] `S5-06` Full Stage 5 historical review / verification / status
+- [x] `S5-06` Full Stage 5 historical review / verification / status
 
 ### Definition of Done
 
@@ -2688,10 +2688,139 @@ work have NOT started.  S5-06 = [ ].
 - Golden fixture unchanged
 - No generated SQLite artifact staged
 
-**Scope review:**
-- S5-06 remains NOT STARTED
-- No Session Runtime, recent-context, embeddings, vector, or semantic-search work
-- No Stage 6+ work
+### S5-06 completion record
+
+**Review date:** 2026-08-31
+
+**Pre-Stage-5 base SHA:** `06adf016bacb0103736b7ecc7f723df2224d8773`
+
+**Captured implementation review-head SHA:** `a1247eb7dfa496ed6cab39ff9f08e9b8ddbe7ae4`
+
+**Exact historical review range:** `06adf016bacb0103736b7ecc7f723df2224d8773..a1247eb7dfa496ed6cab39ff9f08e9b8ddbe7ae4`
+
+**Commit count:** 22
+
+**Full commit inventory:**
+
+```
+0f3b986  feat: establish retrieval-layer canonical contracts (S5-00)
+ee086a3  docs: add S5-00 completion record to development status
+7fde172  fix: correct retrieval contracts and boundary tests (S5-C00)
+bf68b45  test: fix retrieval dependency boundary verification (S5-C01)
+a933b90  docs: record S5-C01 commit SHA in development status
+bb86a39  test: handle relative imports in retrieval boundary checks (S5-C02)
+2dce8a0  test: close retrieval ImportFrom boundary gap (S5-C03)
+fa7b48c  docs: align retrieval contract semantics (S5-C04)
+09cc649  feat: implement exact entity retrieval (S5-01)
+c75d77e  fix: harden exact alias parsing and stage status (S5-C05)
+c8504f6  feat: add fuzzy entity name retrieval (S5-02)
+f99fe05  feat: add rebuildable SQLite FTS5 derived index (S5-03)
+c1a5ecb  fix: harden FTS index contracts and safety (S5-C06)
+cf8e232  fix: finalize FTS runtime path safety (S5-C07)
+26c6228  fix: close late FTS rebuild race (S5-C08)
+03f5bb7  test: correct late FTS parent-race regression (S5-C09)
+1ad2a38  feat: add deterministic entity resolver (S5-04)
+052d36f  update gigacode rules
+9e274a2  docs: harden GigaCode incremental edit policy
+c640d73  fix: align entity resolver validation contract (S5-C10)
+7a91159  test: harden retrieval with Golden Vault integration (S5-05)
+a1247eb  test: strengthen Golden retrieval regressions (S5-C11)
+```
+
+**Commit classification:**
+- 20 Stage-5 implementation/correction/test/documentation commits
+- 2 concurrent development-workflow policy commits (`052d36f` update gigacode rules, `9e274a2` docs: harden GigaCode incremental edit policy)
+
+**Production files reviewed:**
+- `src/dnd_assistant/retrieval/__init__.py` — public API exports
+- `src/dnd_assistant/retrieval/types.py` — MatchKind, SearchQuery, SearchHit, Resolved, Ambiguous, NotFound, ResolutionOutcome
+- `src/dnd_assistant/retrieval/service.py` — SearchService and EntityResolver protocols
+- `src/dnd_assistant/retrieval/search.py` — VaultSearchService concrete implementation
+- `src/dnd_assistant/retrieval/lexical.py` — LexicalIndex protocol, LexicalHit
+- `src/dnd_assistant/retrieval/index.py` — SqliteFtsIndex with FTS5, path safety, atomic rebuild
+- `src/dnd_assistant/retrieval/resolver.py` — SearchEntityResolver deterministic resolver
+- `src/dnd_assistant/cli/main.py` — CLI index rebuild command
+
+**Test files reviewed:**
+- `tests/unit/test_retrieval_contracts.py` — 160 tests (contracts, boundaries, AST import checker)
+- `tests/unit/test_exact_search.py` — 63 tests (exact ID/name/alias, visibility, tier precedence)
+- `tests/unit/test_fuzzy_search.py` — 31 tests (fuzzy name, ranking, no-threshold)
+- `tests/unit/test_fts_index.py` — 70 passed, 22 skipped (FTS5 schema, rebuild, symlink safety, races)
+- `tests/unit/test_fts_search.py` — 12 tests (FTS tier precedence, eligibility, freshness)
+- `tests/unit/test_entity_resolver.py` — 42 tests (resolved/ambiguous/not-found, validation, error propagation)
+- `tests/unit/test_cli_index.py` — 5 tests (CLI help, rebuild smoke)
+- `tests/integration/test_retrieval_golden_vault.py` — 58 tests (real stack integration)
+
+**Correction mapping C00-C11:**
+
+| Correction | Intent | Verified |
+|---|---|---|
+| S5-C00 | Contract semantics/model validation/boundaries | PASS — score validators, empty-candidates rejection, search_by_type removed, boundary tests rewritten |
+| S5-C01 | Dependency boundary verification | PASS — AST import checker preserves full dotted paths |
+| S5-C02 | Relative-import boundary handling | PASS — relative ImportFrom resolved to absolute paths |
+| S5-C03 | ImportFrom alias gap | PASS — `from pkg import sub` produces `pkg.sub` candidate |
+| S5-C04 | Retrieval semantic documentation | PASS — docstrings clarified |
+| S5-C05 | Alias parsing hardening | PASS — control chars rejected, non-printable-before-strip fixed |
+| S5-C06 | FTS index contract/path safety | PASS — verify_freshness in protocol, symlink rejection, SQLite cause preservation |
+| S5-C07 | Runtime FTS path safety | PASS — operation-time path revalidation |
+| S5-C08 | Late rebuild race | PASS — late full-path validation before os.replace |
+| S5-C09 | Parent-race regression | PASS — structurally correct parent-directory race test |
+| S5-C10 | Resolver validation translation | PASS — PydanticValidationError → DndValidationError with __cause__ |
+| S5-C11 | Golden resolver ordering + no-threshold proof | PASS — exact sequence assertion, independent fuzzy candidate calculation |
+
+**Architecture-boundary result:** PASS — domain/storage do not import retrieval; retrieval contracts do not import models/tools/application/session/ollama; retrieval/search.py imports only storage read contracts (types); retrieval/index.py imports only storage types, not internals.
+
+**Source-of-truth result:** PASS — Obsidian Vault is the only canonical source; SQLite FTS is derived storage only, fully disposable and rebuildable.
+
+**Visibility result:** PASS — DM/SYSTEM entities excluded from all retrieval tiers (EXACT_ID, EXACT_NAME, EXACT_ALIAS, FUZZY_NAME, FTS). Golden Vault confirms npc_archivist_kell never appears in player results.
+
+**Exact search result:** PASS — EXACT_ID (literal), EXACT_NAME (strip→NFC→casefold), EXACT_ALIAS (same normalisation). Tier precedence: EXACT_ID > EXACT_NAME > EXACT_ALIAS.
+
+**Fuzzy search result:** PASS — canonical name only (not aliases/ID/body), strip→NFC→casefold, rapidfuzz.fuzz.ratio, score > 0.0, no arbitrary cutoff, ranking score desc then EntityId asc.
+
+**FTS index/result:** PASS — SQLite FTS5, player-visible only, bm25 ranking, source fingerprint, atomic rebuild, stale/missing/corrupt detection.
+
+**FTS path/race-safety result:** PASS — symlink rejection (directory components, final path, dangling), operation-time revalidation, late pre-replace validation, temp cleanup. 22 symlink tests skipped on Windows (expected — platform does not support symlinks).
+
+**FTS late-race result:** PASS — S5-C08 late full-path validation, S5-C09 structurally correct parent-directory race regression.
+
+**Resolver result:** PASS — deterministic, LLM-free. 0 candidates → NotFound, 1 exact → Resolved, 1 fuzzy/FTS → Ambiguous, 2+ → Ambiguous. No numeric threshold. Order preserved from SearchService.
+
+**Golden Vault result:** PASS — 58 integration tests pass against real stack (ObsidianVaultRepository → SqliteFtsIndex → VaultSearchService → SearchEntityResolver). All semantic cases verified.
+
+**Stage-boundary result:** PASS — no Stage-6+ functionality pulled forward. No Session Runtime, tools, ModelGateway, Ollama, ChangeSet, embeddings, vector search.
+
+**Focused gate results:**
+- `tests/unit/test_retrieval_contracts.py` — 160 passed
+- `tests/unit/test_exact_search.py` — 63 passed
+- `tests/unit/test_fuzzy_search.py` — 31 passed
+- `tests/unit/test_fts_index.py` — 70 passed, 22 skipped
+- `tests/unit/test_fts_search.py` — 12 passed
+- `tests/unit/test_entity_resolver.py` — 42 passed
+- `tests/unit/test_cli_index.py` — 5 passed
+- `tests/integration/test_retrieval_golden_vault.py` — 58 passed
+
+**Storage integration regressions:**
+- `tests/integration/test_vault_repository_cycle.py` — 27 passed
+- `tests/integration/test_vault_repository_failures.py` — 16 passed
+- `tests/integration/test_vault_repository_path_races.py` — 9 passed, 15 skipped
+
+**Full gate results:**
+- `uv run pytest` — 1940 passed, 56 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 183 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd index --help` — CLI smoke test OK
+- `uv run dnd index rebuild --help` — CLI smoke test OK (--vault option exposed)
+- `git diff --check` — no whitespace errors
+
+**Golden fixture cleanliness:** PASS — `git diff -- tests/fixtures/golden_test_vault` empty. No generated SQLite DB or temp artifact in repository paths.
+
+**ADR assessment:** No new ADR required. S5-06 is historical verification of already accepted decisions.
+
+**Final Stage-5 status:** DONE
+**S5-06 status:** Complete
+**Stage-6 status:** NOT STARTED
 
 **Resulting Stage-5 status:**
 - S5-00 = [x]
@@ -2700,11 +2829,13 @@ work have NOT started.  S5-06 = [ ].
 - S5-03 = [x]
 - S5-04 = [x]
 - S5-05 = [x]
-- S5-06 = [ ]
-- Stage 5 = IN PROGRESS
+- S5-06 = [x]
+- Stage 5 = DONE
+
+**Stage 5 completion date:** 2026-08-31
 
 **Explicit confirmation:**
-S5-06 / Stage 6 / recent-context / embeddings / vector work have NOT started.
+Stage 6 has NOT started.
 
 
 ---
