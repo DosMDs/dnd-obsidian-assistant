@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C10)
+**Last updated:** 2026-08-31 (S5-05)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -878,7 +878,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - [x] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
 - [x] `S5-03` SQLite FTS5 derived index + rebuild path
 - [x] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
-- [ ] `S5-05` Golden-Vault integration + retrieval/resolver hardening
+- [x] `S5-05` Golden-Vault integration + retrieval/resolver hardening
 - [ ] `S5-06` Full Stage 5 historical review / verification / status
 
 ### Definition of Done
@@ -2455,9 +2455,191 @@ No ADR required. All changes are local corrections to documentation and exceptio
 - S5-02 = [x]
 - S5-03 = [x]
 - S5-04 = [x]
-- S5-05 = [ ]
+- S5-05 = [x]
 - S5-06 = [ ]
 - Stage 5 = IN PROGRESS
+
+
+### S5-05 completion record
+
+**Starting branch:** `main`
+**Starting local SHA:** `c640d73692989d323ab87afa3a56cf46409430a1`
+**Starting upstream SHA:** `c640d73692989d323ab87afa3a56cf46409430a1`
+
+**Golden fixture source path:** `tests/fixtures/golden_test_vault/`
+
+**Golden fixture temporary-copy strategy:**
+Every mutation test operates on a ``tmp_path`` copy via ``shutil.copytree``.
+The committed fixture at ``tests/fixtures/golden_test_vault/`` is never used
+as a writable index root.  No generated SQLite DB exists in the committed
+fixture.
+
+**Real concrete stack composed:**
+```text
+golden_vault_root (tmp_path copy)
+    → AuditService
+    → ObsidianVaultRepository
+    → SqliteFtsIndex
+    → VaultSearchService (with/without FTS)
+    → SearchEntityResolver (with/without FTS)
+```
+
+**MVP entity count discovered:** 23 (10 NPC + 5 Location + 3 Quest + 5 Item)
+
+**Player-visible entity count:** 22 (1 DM entity: npc_archivist_kell)
+
+**Exact-ID Golden result:** `npc_varos` → 1 EXACT_ID hit
+
+**Exact-name Golden result:** `Магистр Варос` → 1 EXACT_NAME hit (npc_varos)
+
+**Exact-name-vs-alias precedence result:** `Магистр Варос` matches both
+canonical name and alias of npc_varos → EXACT_NAME (name tier wins)
+
+**Alias-collision search result:** `Варос` with `entity_types={NPC}` → 2
+EXACT_ALIAS hits (npc_varos, npc_varos_junior), EntityId ascending order
+
+**Alias-collision resolver result:** `resolve("Варос", entity_type=NPC)` →
+`Ambiguous` with candidates npc_varos, npc_varos_junior
+
+**Unique alias result:** `Лорд Варос` → `Resolved(npc_varos, EXACT_ALIAS)`
+
+**Fuzzy query chosen:** `Эндр` — partial query that does NOT hit exact ID,
+exact name, or exact alias; reaches FUZZY_NAME tier
+
+**Fuzzy candidate result/order:** Both npc_ender (`Маг Эндер`) and
+npc_endrin (`Эндрин`) appear; sorted by score descending then EntityId
+ascending
+
+**Fuzzy resolver result:** `Ambiguous` (single or multiple fuzzy candidates
+never auto-resolved)
+
+**Numeric fuzzy-threshold status:** NOT introduced.  All positive fuzzy
+scores are preserved, including low scores.  No arbitrary cutoff exists.
+
+**Entity-type integration result:** Type filtering works for NPC, LOCATION,
+QUEST, ITEM through the real stack.  Non-matching types excluded correctly.
+
+**DM exact-ID visibility result:** `get_by_id("npc_archivist_kell")` → None
+
+**DM search candidate exclusion result:** `search("npc_archivist_kell")` →
+no EXACT_ID hit; `npc_archivist_kell` not in candidate IDs
+
+**DM FTS exclusion result:** `rebuilt_index.search("Келл")` → no
+npc_archivist_kell in results; DM entity absent from player FTS index
+
+**Golden query used to reach real FTS tier:** `S005` — appears in
+npc_varos Markdown body but not in any entity name, ID, or alias
+
+**Real FTS search result:** `search("S005")` → 1+ FTS hits including
+npc_varos; all match_kind == FTS; scores are finite
+
+**FTS resolver result:** `resolve("S005")` → `Ambiguous` (FTS relevance is
+not identity confidence)
+
+**Fresh-after-rebuild result:** `verify_freshness(repo.list_entities())`
+passes immediately after rebuild
+
+**DM-only mutation freshness result:** Modifying only npc_archivist_kell
+body → index still fresh (DM content excluded from player fingerprint)
+
+**PLAYER mutation stale-index result:** Modifying npc_varos body →
+`verify_freshness()` raises `StorageError`
+
+**Rebuild recovery result:** After stale index, `rebuild()` restores
+freshness; `verify_freshness()` passes again
+
+**Stale FTS SearchService error result:** FTS-only query after player
+mutation → `StorageError` propagates from `search()`
+
+**Stale FTS resolver error result:** `resolve("S005")` after player
+mutation → `StorageError` propagates
+
+**Cyrillic/Unicode result:** `Магистр Варос`, `Серый Брод`,
+`Серебряный ключ` all preserved correctly through repository → search →
+resolver
+
+**Alias-extra-frontmatter result:** Aliases confirmed in
+`VaultDocument.extra_frontmatter["aliases"]`; `Entity` model has no
+`aliases` field
+
+**Production code changed:** No
+
+**Production defect discovered:** None — all S5-00 through S5-04 contracts
+work correctly against the real Golden Vault
+
+**Exact production correction:** N/A
+
+**Golden integration focused test result:** 58 passed
+
+**Entity-resolver unit regression:** 42 passed
+
+**Retrieval-contract regression:** 160 passed
+
+**Exact-search regression:** 63 passed
+
+**Fuzzy-search regression:** 31 passed
+
+**FTS-search regression:** 12 passed
+
+**FTS-index regression:** 70 passed, 22 skipped
+
+**Repository-cycle integration regression:** 28 passed
+
+**Repository-failures integration regression:** 15 passed
+
+**Path-race regression:** not separately run (no production path code
+changed)
+
+**Full pytest:** 1940 passed, 56 skipped
+
+**Ruff check:** All checks passed
+
+**Ruff format:** 183 files already formatted
+
+**CLI smoke gates:**
+- `uv run dnd --help` — OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — `--vault` present
+
+**`git diff --check`:** No whitespace errors
+
+**Golden fixture final diff result:** Empty (no changes to committed fixture)
+
+**Generated SQLite/temp artifact check:** No SQLite DB, no temp artifacts
+staged
+
+**Architecture review:**
+- Real stack composes correctly without application-layer composition code
+- Domain/storage do not depend on retrieval
+- Contract modules remain storage-independent
+- No recent-context ranking, embeddings, or vector work
+- No Session/Event/State retrieval expansion
+- No CLI feature broadening
+
+**Scope review:**
+- No Session Runtime work (Stage 6)
+- No recent-context ranking
+- No embeddings/vector/semantic-search work
+- No CLI entity-resolution commands added
+- No new production code added (only integration tests)
+
+**ADR assessment:** No ADR required.  All integration tests exercise
+already-accepted contracts.  No new durable architectural decision was
+required.
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [x]
+- S5-05 = [x]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+Session Runtime, recent-context ranking, embeddings/vector/semantic-search
+work have NOT started.  S5-06 = [ ].
 
 
 ---
