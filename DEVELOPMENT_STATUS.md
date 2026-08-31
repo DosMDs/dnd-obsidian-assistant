@@ -25,7 +25,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
 | 3. Vault Repository | DONE | 2026-08-30 | 2026-08-30 |
 | 4. Calendar | DONE | 2026-08-30 | 2026-08-31 |
-| 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
+| 5. Retrieval + Entity Resolution | IN PROGRESS | 2026-08-31 | — |
 | 6. Session Runtime without LLM | NOT STARTED | — | — |
 | 7. Tool Registry / Executor | NOT STARTED | — | — |
 | 8. Model Gateway / Ollama | NOT STARTED | — | — |
@@ -864,6 +864,51 @@ All repository files were read and edited only through built-in GigaCode/IDE fil
 
 **Tool-usage compliance:**
 All repository files were read and edited only through built-in GigaCode/IDE file tools (Read, Write, Edit). Shell was used only for permitted development commands (git, pytest, ruff, dnd --help).
+
+## Stage 5 — Retrieval + Entity Resolution
+
+### Goal
+
+Establish the retrieval and entity-resolution layer with canonical typed contracts, then implement exact, fuzzy, and FTS-based search with explicit resolved/ambiguous/not-found resolution outcomes.
+
+### Tasks
+
+- [ ] `S5-00` Retrieval kickoff + canonical contracts
+- [ ] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
+- [ ] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
+- [ ] `S5-03` SQLite FTS5 derived index + rebuild path
+- [ ] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
+- [ ] `S5-05` Golden-Vault integration + retrieval/resolver hardening
+- [ ] `S5-06` Full Stage 5 historical review / verification / status
+
+### Definition of Done
+
+- retrieval-layer public types/contracts are explicit and tested (S5-00)
+- exact ID/name/alias retrieval works with player-visibility filtering (S5-01)
+- fuzzy name retrieval works with entity-type filtering (S5-02)
+- SQLite FTS5 index is rebuildable from Vault (S5-03)
+- EntityResolver produces explicit resolved/ambiguous/not-found outcomes (S5-04)
+- golden Vault integration tests exist (S5-05)
+- full Stage 5 verification complete (S5-06)
+- no Stage-6+ work pulled forward
+
+### S5-00 completion record
+
+**Review range:** TBD
+
+**Implementation:**
+
+TBD
+
+**Quality-gate results:**
+
+TBD
+
+**Scope exclusions confirmed:**
+
+TBD
+
+---
 
 ## Stage 3 — Vault Repository
 
