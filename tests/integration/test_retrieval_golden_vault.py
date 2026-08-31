@@ -17,9 +17,11 @@ is never used as a writable index root.
 from __future__ import annotations
 
 import shutil
+import unicodedata
 from pathlib import Path
 
 import pytest
+from rapidfuzz import fuzz
 
 from dnd_assistant.domain.types import EntityType
 from dnd_assistant.errors import StorageError
@@ -326,11 +328,20 @@ class TestGoldenAmbiguity:
         assert hits[0].entity_id < hits[1].entity_id
 
     def test_alias_collision_varos_resolver(self, resolver: SearchEntityResolver) -> None:
-        """Resolver returns Ambiguous for the colliding alias ``Варос``."""
+        """Resolver returns Ambiguous for the colliding alias ``Варос``.
+
+        Candidate order from SearchService is preserved unchanged by the
+        resolver.  The resolver does NOT reorder or rescore candidates.
+        """
         outcome = resolver.resolve("Варос", entity_type=EntityType.NPC)
         assert isinstance(outcome, Ambiguous)
-        candidate_ids = {c.entity_id for c in outcome.candidates}
-        assert candidate_ids == {"npc_varos", "npc_varos_junior"}
+        # Assert exact candidate order (not set): EntityId ascending
+        assert [c.entity_id for c in outcome.candidates] == [
+            "npc_varos",
+            "npc_varos_junior",
+        ]
+        for c in outcome.candidates:
+            assert c.match_kind == MatchKind.EXACT_ALIAS
 
     def test_unique_alias_lord_varos_resolver(self, resolver: SearchEntityResolver) -> None:
         """Unique alias ``Лорд Варос`` resolves to npc_varos."""
@@ -408,13 +419,66 @@ class TestGoldenFuzzyRetrieval:
             else:
                 assert fuzzy_hits[i].score > fuzzy_hits[i + 1].score
 
-    def test_no_arbitrary_fuzzy_threshold(self, search_service: VaultSearchService) -> None:
-        """No numeric fuzzy threshold is introduced.  Low-score candidates
-        are preserved."""
-        hits = search_service.search(SearchQuery(text="Эндр"))
+    def test_no_arbitrary_fuzzy_threshold(
+        self, search_service: VaultSearchService, repo: ObsidianVaultRepository
+    ) -> None:
+        """No numeric fuzzy threshold is introduced.
+
+        Every eligible PLAYER-visible canonical name with
+        ``fuzz.ratio(normalised_query, normalised_name) > 0.0`` is
+        returned.  No hidden confidence cutoff exists.
+
+        The explicit ``limit=100`` ensures the Golden Vault size (22
+        player-visible entities) does not truncate eligible candidates.
+        """
+        query = "Эндр"
+        limit = 100
+
+        # Independently compute expected fuzzy candidates from the real
+        # repository using the same normalisation policy as the production
+        # SearchService (strip → NFC → casefold).
+        def _normalized(text: str) -> str:
+            return unicodedata.normalize("NFC", text.strip()).casefold()
+
+        normalized_query = _normalized(query)
+        all_docs = repo.list_entities()
+        expected: list[tuple[str, float]] = []
+        for doc in all_docs:
+            if doc.entity.visibility.value != "player":
+                continue
+            normalized_name = _normalized(doc.entity.name)
+            score = fuzz.ratio(normalized_query, normalized_name)
+            if score > 0.0:
+                expected.append((doc.entity.id, float(score)))
+
+        # Sort by score descending, then EntityId ascending
+        expected.sort(key=lambda pair: (-pair[1], pair[0]))
+
+        hits = search_service.search(SearchQuery(text=query), limit=limit)
         fuzzy_hits = [h for h in hits if h.match_kind == MatchKind.FUZZY_NAME]
-        # All positive scores are preserved, even low ones
+
+        # 1. Every returned hit is FUZZY_NAME
         for h in fuzzy_hits:
+            assert h.match_kind == MatchKind.FUZZY_NAME
+
+        # 2. Actual EntityId sequence equals the independently computed
+        #    expected sequence
+        assert [h.entity_id for h in fuzzy_hits] == [eid for eid, _ in expected]
+
+        # 3. Actual scores correspond to expected scores
+        for h, (_, expected_score) in zip(fuzzy_hits, expected, strict=True):
+            assert h.score == pytest.approx(expected_score)
+
+        # 4. Every expected score is > 0
+        for _, s in expected:
+            assert s > 0.0
+
+        # 5. No positive expected candidate is missing
+        assert len(fuzzy_hits) == len(expected)
+
+        # 6. No zero-score candidate is returned
+        for h in fuzzy_hits:
+            assert h.score is not None
             assert h.score > 0.0
 
 

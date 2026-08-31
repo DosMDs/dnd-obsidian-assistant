@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-05)
+**Last updated:** 2026-08-31 (S5-C11)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -2640,6 +2640,71 @@ required.
 **Explicit confirmation:**
 Session Runtime, recent-context ranking, embeddings/vector/semantic-search
 work have NOT started.  S5-06 = [ ].
+
+### S5-C11 correction record
+
+**Review range:** S5-05 completion through S5-C11
+
+**Scope:** Narrow test-quality correction only. No production code changed.
+
+**Defects corrected:**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C11-1 | Resolver alias-collision regression (`test_alias_collision_varos_resolver`) used `candidate_ids = {c.entity_id for c in outcome.candidates}` which discarded SearchService candidate ordering. The test did not prove that `SearchEntityResolver` preserves SearchService candidate order. | Changed to `[c.entity_id for c in outcome.candidates] == ["npc_varos", "npc_varos_junior"]` — exact sequence assertion. Also asserts all candidates are `EXACT_ALIAS`. |
+| C11-2 | `test_no_arbitrary_fuzzy_threshold` only asserted that returned fuzzy scores were `> 0.0`. This did not prove the S5-02 policy that *every* positive RapidFuzz candidate is returned subject only to the caller limit. | Replaced with exhaustive regression that independently calculates expected fuzzy candidates from the real Golden repository using the same normalisation policy (strip → NFC → casefold) and `fuzz.ratio > 0.0`. Uses `limit=100` to avoid truncation by the 22-player-visible entity count. Asserts: every hit is `FUZZY_NAME`, exact EntityId sequence matches independently computed expectation, scores match via `pytest.approx`, every expected score is `> 0`, no positive candidate missing, no zero-score candidate returned. |
+
+**Production code changed:** No
+
+**Production defect discovered:** None — all S5-00 through S5-05 contracts work correctly against the real Golden Vault.
+
+**Test file changed (1 file):**
+- `tests/integration/test_retrieval_golden_vault.py` — 72 insertions, 8 deletions
+
+**Quality-gate results:**
+- `uv run pytest tests/integration/test_retrieval_golden_vault.py` — 58 passed (unchanged count)
+- `uv run pytest tests/unit/test_entity_resolver.py` — 42 passed (unchanged)
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed (unchanged)
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed (unchanged)
+- `uv run pytest tests/unit/test_fts_search.py` — 12 passed (unchanged)
+- `uv run pytest tests/unit/test_fts_index.py` — 70 passed, 22 skipped (unchanged)
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 160 passed (unchanged)
+- `uv run pytest` (full suite) — 1940 passed, 56 skipped (unchanged)
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 183 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Golden fixture verification:**
+- `git diff -- tests/fixtures/golden_test_vault` — empty (no changes to committed fixture)
+- No generated SQLite DB or temp artifact staged
+
+**Architecture review:**
+- No production code changed
+- No production defect discovered
+- Alias-collision resolver test now proves exact candidate-order preservation (not set)
+- Fuzzy no-cutoff test now independently calculates every positive RapidFuzz candidate with non-truncating explicit limit
+- No numeric fuzzy threshold introduced
+- Golden fixture unchanged
+- No generated SQLite artifact staged
+
+**Scope review:**
+- S5-06 remains NOT STARTED
+- No Session Runtime, recent-context, embeddings, vector, or semantic-search work
+- No Stage 6+ work
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [x]
+- S5-05 = [x]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+S5-06 / Stage 6 / recent-context / embeddings / vector work have NOT started.
 
 
 ---
