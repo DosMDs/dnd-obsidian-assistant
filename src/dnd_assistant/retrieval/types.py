@@ -36,7 +36,8 @@ class MatchKind(StrEnum):
     2. ``EXACT_NAME`` — matched by canonical display name.
     3. ``EXACT_ALIAS`` — matched by an alias from frontmatter.
     4. ``FUZZY_NAME`` — matched by fuzzy/approximate name comparison.
-    5. ``FTS`` — matched by SQLite FTS5 lexical search.
+    5. ``FTS`` — matched by full-text search (concrete implementation
+        finalized by the FTS provider).
 
     This ordering is meaningful for deterministic candidate ranking:
     a more specific match kind should rank above a less specific one,
@@ -127,8 +128,8 @@ class SearchHit(BaseModel):
     - ``EXACT_ID``, ``EXACT_NAME``, ``EXACT_ALIAS``: score is always ``None``
       (exact matches have no meaningful ranking score).
     - ``FUZZY_NAME``: score is the RapidFuzz similarity ratio (0.0–100.0).
-    - ``FTS``: score is the SQLite FTS5 rank (negative float, closer to 0
-      means better match).
+    - ``FTS``: score is source-specific and is finalized by the concrete
+      FTS implementation.  When present it must be finite.
 
     Scores from different ``MatchKind`` values are **not directly
     comparable**.  Candidate ordering must first group by ``MatchKind``
@@ -149,7 +150,8 @@ class SearchHit(BaseModel):
     """Source-specific score/rank.
 
     ``None`` for exact matches.  Fuzzy similarity (0.0–100.0) for
-    ``FUZZY_NAME``.  FTS rank (negative, closer to 0 better) for ``FTS``.
+    ``FUZZY_NAME``.  Source-specific for ``FTS`` (finalized by the
+    concrete FTS implementation).
     """
 
     # ── Pydantic configuration ─────────────────────────────────────────
@@ -229,7 +231,8 @@ class Resolved(BaseModel):
 
 
 class Ambiguous(BaseModel):
-    """Multiple candidates could match the input reference.
+    """One or more plausible candidates exist, but the resolver cannot
+    make a unique confident resolution; clarification is required.
 
     Returned when the resolver cannot uniquely identify a single entity.
     The ``candidates`` field carries enough information for the caller
@@ -306,9 +309,10 @@ ResolutionOutcome = Resolved | Ambiguous | NotFound
 """The explicit result of entity resolution.
 
 Exactly one of:
-- ``Resolved`` — a single entity was uniquely identified.
-- ``Ambiguous`` — multiple candidates matched; clarification needed.
-- ``NotFound`` — no candidate matched.
+- ``Resolved`` — a single entity was uniquely and confidently identified.
+- ``Ambiguous`` — one or more plausible candidates exist, but a unique
+  confident resolution cannot be made; clarification is required.
+- ``NotFound`` — no candidate exists.
 """
 
 

@@ -83,9 +83,10 @@ class EntityResolver(Protocol):
     ``EntityResolver`` takes a free-text reference (entity name, alias,
     or partial name) and returns an explicit ``ResolutionOutcome``:
 
-    - ``Resolved`` — exactly one entity matched.
-    - ``Ambiguous`` — multiple candidates matched; clarification needed.
-    - ``NotFound`` — no candidate matched.
+    - ``Resolved`` — the resolver confidently identifies one unique entity.
+    - ``Ambiguous`` — one or more plausible candidates exist, but a unique
+      confident resolution cannot be made; clarification is required.
+    - ``NotFound`` — no candidate exists.
 
     **Ambiguity is a normal outcome.**
     The resolver must never silently guess.  When confidence is low or
@@ -116,9 +117,11 @@ class EntityResolver(Protocol):
             entity_type: Optional type filter to narrow resolution scope.
 
         Returns:
-            ``Resolved`` if exactly one entity matches.
-            ``Ambiguous`` if multiple candidates match.
-            ``NotFound`` if no candidate matches.
+            ``Resolved`` if the resolver confidently identifies one unique
+            entity.
+            ``Ambiguous`` if one or more plausible candidates exist but a
+            unique confident resolution cannot be made.
+            ``NotFound`` if no candidate exists.
 
         Raises:
             ValidationError: The reference is empty, whitespace-only, or

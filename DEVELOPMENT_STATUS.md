@@ -910,8 +910,8 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
    - `SearchQueryStr` — annotated validated string type
 
 2. **`src/dnd_assistant/retrieval/service.py`** — Retrieval service protocols:
-   - `SearchService` — runtime-checkable Protocol with `search()`, `search_by_type()`, `get_by_id()`; read-only, player-visibility safety documented, no Ollama/ModelGateway dependency
-   - `EntityResolver` — runtime-checkable Protocol with `resolve()` returning `ResolutionOutcome`; deterministic, no LLM dependency, ambiguity is a normal outcome
+    - `SearchService` — runtime-checkable Protocol with `search()` and `get_by_id()`; read-only, player-visibility safety documented, no Ollama/ModelGateway dependency
+    - `EntityResolver` — runtime-checkable Protocol with `resolve()` returning `ResolutionOutcome`; deterministic, no LLM dependency, ambiguity is a normal outcome
 
 3. **`src/dnd_assistant/retrieval/__init__.py`** — Public API exports via `__all__`
 
@@ -931,7 +931,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 
 **Player-visibility policy confirmed:** `SearchService` and `EntityResolver` docstrings explicitly state that non-player-visible entities (`Visibility.DM`, `Visibility.SYSTEM`) must not appear in results. No unrestricted visibility override is exposed.
 
-**Match-provenance semantics:** `MatchKind` enum values are ordered by retrieval precedence. Scores from different `MatchKind` values are not directly comparable. `EXACT_ID`/`EXACT_NAME`/`EXACT_ALIAS` have `score=None`; `FUZZY_NAME` has RapidFuzz ratio (0.0–100.0); `FTS` has SQLite rank (negative float).
+**Match-provenance semantics:** `MatchKind` enum values are ordered by retrieval precedence. Scores from different `MatchKind` values are not directly comparable. `EXACT_ID`/`EXACT_NAME`/`EXACT_ALIAS` have `score=None`; `FUZZY_NAME` has RapidFuzz ratio (0.0–100.0); `FTS` score is source-specific and finalized by the concrete S5-03 FTS implementation (when present it must be finite).
 
 **Validation rules introduced:**
 - `SearchQuery.text`: non-empty after stripping, printable Unicode, no control characters, strict string type
@@ -1171,6 +1171,43 @@ was represented as `"storage"` instead of `"dnd_assistant.storage"` and therefor
 - S5-00 = [x] (unchanged)
 - S5-01 = [ ] (unchanged)
 - No S5-01 implementation started
+- No exact ID/name/alias search implementation
+- No RapidFuzz search
+- No SQLite/FTS
+- No EntityResolver implementation
+- No confidence thresholds
+- No session context
+- No CLI commands
+- No tool layer
+- No ModelGateway/Ollama
+- No embeddings/vector DB
+
+### S5-C04 correction record
+
+**Contract-documentation consistency cleanup discovered during S5-01 preparation.**
+
+**Review range:** S5-C03 completion through S5-C04
+
+**Defects confirmed and corrected:**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C04-1 | `SearchHit` docstring and `score` field docstring stated FTS score is "negative float, closer to 0 means better match". This is premature — S5-03 has not yet implemented the concrete FTS5 ranking policy. | Replaced with source-agnostic wording: FTS score is source-specific and finalized by the concrete FTS implementation; when present it must be finite. |
+| C04-2 | `Ambiguous` class docstring said "Multiple candidates could match". `ResolutionOutcome` docstring said "multiple candidates matched; clarification needed". `EntityResolver` docstring and `resolve()` return docs used similar phrasing. The accepted invariant allows `Ambiguous(candidates=[single_low_confidence_candidate])`, so documentation must distinguish candidate count from confidence/uniqueness. | Updated all relevant docstrings to use consistent semantics: `Resolved` = confidently identifies one unique entity; `Ambiguous` = one or more plausible candidates exist, but unique confident resolution cannot be made; `NotFound` = no candidate exists. |
+| C04-3 | S5-00 canonical summary still described `SearchService` as having `search_by_type()`. FTS score semantics still stated "negative float". Ambiguous semantics still said "multiple candidates". | Corrected to: `SearchService` has only `search()` and `get_by_id()`. FTS score semantics deferred to S5-03. Ambiguous described as 1+ candidates requiring clarification. |
+
+**Production changes:**
+- `src/dnd_assistant/retrieval/types.py` — corrected `MatchKind.FTS` docstring, `SearchHit` class docstring, `SearchHit.score` field docstring, `Ambiguous` class docstring, `ResolutionOutcome` docstring
+- `src/dnd_assistant/retrieval/service.py` — corrected `EntityResolver` class docstring, `EntityResolver.resolve()` return documentation
+
+**Test changes:**
+- `tests/unit/test_retrieval_contracts.py` — added `TestFtsScoreContract` (7 tests) verifying FTS accepts `None`, negative, zero, and positive finite scores; rejects NaN, inf, -inf, bool. Added `TestAmbiguousSemantics` (2 tests) verifying single-candidate and multi-candidate `Ambiguous` are accepted. Added `TestSearchServiceSurface` (2 tests) verifying `search` and `get_by_id` present and `search_by_type` absent.
+
+**Scope exclusions confirmed:**
+- No runtime retrieval implementation changed
+- No S5-01 production implementation started
+- S5-00 = [x] (unchanged)
+- S5-01 = [ ] (unchanged)
 - No exact ID/name/alias search implementation
 - No RapidFuzz search
 - No SQLite/FTS

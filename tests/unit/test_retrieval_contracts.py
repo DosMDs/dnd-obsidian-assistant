@@ -429,6 +429,96 @@ class TestResolutionOutcome:
         assert len(args) == 3
 
 
+class TestFtsScoreContract:
+    """FTS score contract: S5-00 does NOT prematurely encode SQLite
+    ranking direction.
+
+    Accepted: None, negative finite, 0.0, positive finite.
+    Rejected: NaN, +inf, -inf, bool.
+    """
+
+    @pytest.mark.parametrize(
+        "valid_score",
+        [None, -2.5, 0.0, 1.5, -100.0, 100.0],
+    )
+    def test_fts_accepts_valid_scores(self, valid_score: float | None) -> None:
+        hit = SearchHit(
+            entity_id=cast(EntityId, "x"),
+            match_kind=MatchKind.FTS,
+            score=valid_score,
+        )
+        assert hit.score == valid_score
+
+    @pytest.mark.parametrize(
+        "bad_score",
+        [
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            False,
+        ],
+    )
+    def test_fts_rejects_invalid_scores(self, bad_score: object) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            SearchHit(
+                entity_id=cast(EntityId, "x"),
+                match_kind=MatchKind.FTS,
+                score=bad_score,  # type: ignore[arg-type]
+            )
+
+
+class TestAmbiguousSemantics:
+    """Ambiguous contract: 1+ candidates requiring clarification.
+
+    Accepted: exactly 1 candidate, multiple candidates.
+    Rejected: zero candidates (use NotFound instead).
+    """
+
+    def test_single_candidate_accepted(self) -> None:
+        """Single-candidate Ambiguous represents low-confidence
+        uncertainty requiring clarification."""
+        result = Ambiguous(
+            candidates=[
+                SearchHit(
+                    entity_id=cast(EntityId, "npc_varos"),
+                    match_kind=MatchKind.FUZZY_NAME,
+                    score=45.0,
+                ),
+            ]
+        )
+        assert len(result.candidates) == 1
+
+    def test_multiple_candidates_accepted(self) -> None:
+        result = Ambiguous(
+            candidates=[
+                SearchHit(entity_id=cast(EntityId, "npc_a"), match_kind=MatchKind.EXACT_ALIAS),
+                SearchHit(entity_id=cast(EntityId, "npc_b"), match_kind=MatchKind.EXACT_ALIAS),
+            ]
+        )
+        assert len(result.candidates) == 2
+
+    def test_zero_candidates_rejected(self) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            Ambiguous(candidates=[])
+
+
+class TestSearchServiceSurface:
+    """SearchService protocol has exactly search() and get_by_id().
+
+    search_by_type must NOT be present.
+    """
+
+    def test_search_method_present(self) -> None:
+        assert hasattr(SearchService, "search")
+
+    def test_get_by_id_method_present(self) -> None:
+        assert hasattr(SearchService, "get_by_id")
+
+    def test_search_by_type_absent(self) -> None:
+        assert not hasattr(SearchService, "search_by_type")
+
+
 class TestSearchServiceProtocol:
     def test_protocol_is_runtime_checkable(self) -> None:
         assert hasattr(SearchService, "__instancecheck__")
