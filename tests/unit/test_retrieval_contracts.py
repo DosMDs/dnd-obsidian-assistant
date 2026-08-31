@@ -20,6 +20,7 @@ Covers:
 from __future__ import annotations
 
 import ast
+from collections.abc import Sequence
 from typing import cast
 
 import pytest
@@ -29,6 +30,7 @@ from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.retrieval import (
     Ambiguous,
     EntityResolver,
+    LexicalIndex,
     MatchKind,
     NotFound,
     ResolutionOutcome,
@@ -36,7 +38,9 @@ from dnd_assistant.retrieval import (
     SearchHit,
     SearchQuery,
     SearchService,
+    VaultSearchService,
 )
+from dnd_assistant.storage.types import VaultDocument
 
 
 class TestImports:
@@ -80,6 +84,47 @@ class TestPublicExports:
             "VaultSearchService",
         }
         assert set(retrieval_all) == expected
+
+    def test_lexical_index_protocol_has_verify_freshness(self) -> None:
+        """LexicalIndex protocol must declare verify_freshness (S5-C06)."""
+        assert hasattr(LexicalIndex, "verify_freshness")
+
+    def test_fake_lexical_index_with_verify_freshness_works(self) -> None:
+        """A fake satisfying the full LexicalIndex protocol including
+        verify_freshness must work with VaultSearchService (S5-C06)."""
+        from dnd_assistant.retrieval.lexical import LexicalHit
+
+        class FakeLexicalIndex:
+            def search(self, query: str, *, limit: int = 20) -> Sequence[LexicalHit]:
+                return []
+
+            def rebuild(self, documents: Sequence[VaultDocument]) -> None:
+                pass
+
+            def verify_freshness(self, current_documents: Sequence[VaultDocument]) -> None:
+                pass
+
+        fake_index = FakeLexicalIndex()
+        # Must satisfy the protocol
+        assert isinstance(fake_index, LexicalIndex)
+
+        # Must work with VaultSearchService
+        from dnd_assistant.storage.types import VaultRepository
+
+        class FakeRepo:
+            def get_entity(self, entity_id: EntityId) -> VaultDocument:
+                from dnd_assistant.errors import NotFoundError
+
+                raise NotFoundError("not found")
+
+            def list_entities(self, entity_type: EntityType | None = None) -> list[VaultDocument]:
+                return []
+
+        repo: VaultRepository = FakeRepo()
+        svc = VaultSearchService(repository=repo, lexical_index=fake_index)
+        # search must not raise (no FTS results, but no protocol error)
+        results = svc.search(SearchQuery(text="test"))
+        assert len(results) == 0
 
 
 class TestMatchKind:

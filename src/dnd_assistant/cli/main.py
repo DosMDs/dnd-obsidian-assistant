@@ -31,8 +31,9 @@ app.add_typer(index_app)
 
 @index_app.command("rebuild")
 def _rebuild_index(
-    vault: Path = typer.Argument(  # noqa: B008
+    vault: Path = typer.Option(  # noqa: B008
         ...,
+        "--vault",
         help="Путь к корню Obsidian Vault.",
         exists=True,
         file_okay=False,

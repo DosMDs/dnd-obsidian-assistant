@@ -1,4 +1,4 @@
-"""Tests for S5-03 SQLite FTS5 derived index.
+"""Tests for S5-03 SQLite FTS5 derived index (S5-C06).
 
 Covers:
 - Schema version and FTS virtual table existence
@@ -11,10 +11,17 @@ Covers:
 - Atomic rebuild: temp-build + replace, old index preserved on failure
 - Query literalization: operator-like text, punctuation-only, Cyrillic
 - bm25 ranking semantics
+- Player-only fingerprint (DM/SYSTEM changes do not stale player index)
+- Visibility membership changes stale fingerprint
+- Symlink rejection (directory components, final path, dangling)
+- SQLite cause preservation on corrupt index
+- Malformed schema-version metadata
 """
 
 from __future__ import annotations
 
+import os
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -150,11 +157,10 @@ class TestSourceFingerprint:
             lambda: [_make_doc("npc_a"), _make_doc("npc_b")],
             lambda: [_make_doc("npc_a", name="Beta")],
             lambda: [_make_doc("npc_a", body="Hello")],
-            lambda: [_make_doc("npc_a", visibility=Visibility.DM)],
             lambda: [_make_doc("npc_a", revision=2)],
         ],
     )
-    def test_changes_on_any_field(self, make_b) -> None:
+    def test_changes_on_player_field(self, make_b) -> None:
         base = [_make_doc("npc_a")]
         modified = make_b()
         assert _compute_source_fingerprint(base) != _compute_source_fingerprint(modified)
@@ -168,6 +174,51 @@ class TestSourceFingerprint:
         fp = _compute_source_fingerprint([_make_doc("npc_a")])
         assert isinstance(fp, str) and len(fp) == 64
         assert all(c in "0123456789abcdef" for c in fp)
+
+    # ── Player-only fingerprint (S5-C06) ────────────────────────────────
+
+    def test_dm_only_body_change_does_not_change_fingerprint(self) -> None:
+        """DM body/name change must not affect the player fingerprint."""
+        base = [_make_doc("npc_a", visibility=Visibility.DM, body="old dm secret")]
+        modified = [_make_doc("npc_a", visibility=Visibility.DM, body="new dm secret")]
+        assert _compute_source_fingerprint(base) == _compute_source_fingerprint(modified)
+
+    def test_dm_only_name_change_does_not_change_fingerprint(self) -> None:
+        base = [_make_doc("npc_a", visibility=Visibility.DM, name="Old Name")]
+        modified = [_make_doc("npc_a", visibility=Visibility.DM, name="New Name")]
+        assert _compute_source_fingerprint(base) == _compute_source_fingerprint(modified)
+
+    def test_system_only_body_change_does_not_change_fingerprint(self) -> None:
+        base = [_make_doc("npc_a", visibility=Visibility.SYSTEM, body="old system data")]
+        modified = [_make_doc("npc_a", visibility=Visibility.SYSTEM, body="new system data")]
+        assert _compute_source_fingerprint(base) == _compute_source_fingerprint(modified)
+
+    def test_player_body_change_changes_fingerprint(self) -> None:
+        base = [_make_doc("npc_a", body="old")]
+        modified = [_make_doc("npc_a", body="new")]
+        assert _compute_source_fingerprint(base) != _compute_source_fingerprint(modified)
+
+    def test_player_to_dm_changes_fingerprint(self) -> None:
+        """PLAYER → DM removes entity from player snapshot."""
+        base = [_make_doc("npc_a")]
+        modified = [_make_doc("npc_a", visibility=Visibility.DM)]
+        assert _compute_source_fingerprint(base) != _compute_source_fingerprint(modified)
+
+    def test_dm_to_player_changes_fingerprint(self) -> None:
+        """DM → PLAYER adds entity to player snapshot."""
+        base = [_make_doc("npc_a", visibility=Visibility.DM)]
+        modified = [_make_doc("npc_a")]
+        assert _compute_source_fingerprint(base) != _compute_source_fingerprint(modified)
+
+    def test_player_add_changes_fingerprint(self) -> None:
+        base: list[VaultDocument] = []
+        modified = [_make_doc("npc_a")]
+        assert _compute_source_fingerprint(base) != _compute_source_fingerprint(modified)
+
+    def test_player_remove_changes_fingerprint(self) -> None:
+        base = [_make_doc("npc_a")]
+        modified: list[VaultDocument] = []
+        assert _compute_source_fingerprint(base) != _compute_source_fingerprint(modified)
 
 
 # ── Schema and FTS5 support ──────────────────────────────────────────────────
@@ -501,3 +552,135 @@ class TestLimit:
         index.rebuild(docs)
         hits = index.search("SameName", limit=3)
         assert len(hits) == 3
+
+
+# ── Symlink rejection (S5-C06) ──────────────────────────────────────────────
+
+
+def _can_create_symlinks() -> bool:
+    """Check whether the current platform/user can create symlinks."""
+    import tempfile
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            target = f.name
+        link = target + "_link"
+        os.symlink(target, link)
+        os.unlink(link)
+        os.unlink(target)
+        return True
+    except OSError:
+        return False
+
+
+class TestSymlinkRejection:
+    def _create_vault(self, tmp_path: Path) -> Path:
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        audit_dir = vault / "_system" / "audit"
+        audit_dir.mkdir(parents=True)
+        (audit_dir / "audit.jsonl").write_text("", encoding="utf-8")
+        return vault
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test__system_symlink_rejected(self, tmp_path: Path) -> None:
+        vault = self._create_vault(tmp_path)
+        # Replace _system with a symlink (need to remove tree first)
+        system_link = vault / "_system"
+        real_system = tmp_path / "real_system"
+        real_system.mkdir()
+        shutil.rmtree(str(system_link))
+        system_link.symlink_to(real_system, target_is_directory=True)
+        with pytest.raises(StorageError, match="симлинк"):
+            SqliteFtsIndex(str(vault))
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test__system_indexes_symlink_rejected(self, tmp_path: Path) -> None:
+        vault = self._create_vault(tmp_path)
+        indexes_link = vault / "_system" / "indexes"
+        real_indexes = tmp_path / "real_indexes"
+        real_indexes.mkdir()
+        indexes_link.rmdir()
+        indexes_link.symlink_to(real_indexes, target_is_directory=True)
+        with pytest.raises(StorageError, match="симлинк"):
+            SqliteFtsIndex(str(vault))
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_dangling__system_indexes_symlink_rejected(self, tmp_path: Path) -> None:
+        vault = self._create_vault(tmp_path)
+        indexes_link = vault / "_system" / "indexes"
+        indexes_link.rmdir()
+        indexes_link.symlink_to(tmp_path / "nonexistent", target_is_directory=True)
+        with pytest.raises(StorageError, match="симлинк"):
+            SqliteFtsIndex(str(vault))
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_final_db_symlink_rejected_for_search(self, tmp_path: Path) -> None:
+        vault = self._create_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+        # Replace the db with a symlink
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+        db_path.symlink_to(real_db)
+        with pytest.raises(StorageError, match="симлинк"):
+            SqliteFtsIndex(str(vault))
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_dangling_final_db_symlink_rejected(self, tmp_path: Path) -> None:
+        vault = self._create_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+        db_path = index.index_path
+        db_path.unlink()
+        db_path.symlink_to(tmp_path / "nonexistent.sqlite3")
+        with pytest.raises(StorageError, match="симлинк"):
+            SqliteFtsIndex(str(vault))
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_rebuild_rejects_final_path_symlink(self, tmp_path: Path) -> None:
+        """Rebuild must reject an existing final-path symlink."""
+        vault = self._create_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+        db_path = index.index_path
+        db_path.unlink()
+        db_path.symlink_to(tmp_path / "nonexistent.sqlite3")
+        with pytest.raises(StorageError, match="симлинк"):
+            SqliteFtsIndex(str(vault))
+
+
+# ── SQLite cause preservation (S5-C06) ───────────────────────────────────────
+
+
+class TestSqliteCausePreservation:
+    def test_corrupt_index_preserves_sqlite_cause(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.index_path.parent.mkdir(parents=True, exist_ok=True)
+        index.index_path.write_bytes(b"not a valid sqlite db")
+        with pytest.raises(StorageError) as exc_info:
+            index.search("test")
+        assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
+
+
+# ── Malformed schema metadata (S5-C06) ───────────────────────────────────────
+
+
+class TestMalformedSchemaMetadata:
+    def test_non_int_schema_version_raises_storage_error(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+        conn = sqlite3.connect(str(index.index_path))
+        try:
+            conn.execute(
+                "UPDATE index_metadata SET value=? WHERE key='schema_version'",
+                ("not-an-int",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        with pytest.raises(StorageError, match="некорректную версию схемы"):
+            index.search("Alpha")

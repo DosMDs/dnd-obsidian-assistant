@@ -7,8 +7,10 @@ FTS5 implementation lives in ``retrieval.index``.
 The lexical index is **derived storage only**.  It must be fully
 disposable and reconstructable from the canonical Vault.
 
-This module depends only on retrieval-layer types and must not import:
-    sqlite3, storage implementation internals, models, tools, ollama
+This module is provider-independent with respect to the lexical backend;
+it may consume the established ``VaultDocument`` read representation.
+It must not depend on SQLite or storage implementation internals,
+models, tools, or ollama.
 """
 
 from __future__ import annotations
@@ -29,7 +31,8 @@ class LexicalHit:
     """The stable domain identifier of the matched entity."""
 
     score: float
-    """The FTS relevance score (bm25).  Smaller values mean better matches."""
+    """Provider-defined relevance score; results are returned best-first
+    according to the provider's deterministic lexical ranking."""
 
 
 @runtime_checkable
@@ -70,6 +73,22 @@ class LexicalIndex(Protocol):
 
         Raises:
             StorageError: The rebuild failed.
+        """
+        ...
+
+    def verify_freshness(self, current_documents: Sequence[VaultDocument]) -> None:
+        """Verify the index is fresh relative to the current canonical source.
+
+        Compares the derived index against the current canonical
+        player-visible source snapshot and raises ``StorageError`` if stale,
+        missing, corrupt, or incompatible.
+
+        Args:
+            current_documents: The current canonical Vault documents.
+
+        Raises:
+            StorageError: The index is stale, missing, corrupt, or
+                incompatible with the current source snapshot.
         """
         ...
 

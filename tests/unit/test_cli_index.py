@@ -1,9 +1,10 @@
-"""Tests for CLI index rebuild command (S5-03).
+"""Tests for CLI index rebuild command (S5-03 / S5-C06).
 
 Covers:
 - dnd --help still works
 - dnd index --help works
 - dnd index rebuild --help works
+- --vault is the canonical CLI option
 - Rebuild against a temporary valid Vault succeeds
 - Invalid Vault path fails cleanly
 - After rebuild, the SQLite file exists at the canonical path
@@ -39,22 +40,23 @@ class TestHelp:
         result = runner.invoke(app, ["index", "--help"])
         assert result.exit_code == 0
 
-    def test_index_rebuild_help(self) -> None:
+    def test_index_rebuild_help_exposes_vault_option(self) -> None:
         result = runner.invoke(app, ["index", "rebuild", "--help"])
         assert result.exit_code == 0
+        assert "--vault" in result.stdout
 
 
 class TestRebuild:
-    def test_rebuild_succeeds(self, tmp_path: Path) -> None:
+    def test_rebuild_succeeds_with_vault_option(self, tmp_path: Path) -> None:
         vault = _create_minimal_vault(tmp_path)
-        result = runner.invoke(app, ["index", "rebuild", str(vault)])
+        result = runner.invoke(app, ["index", "rebuild", "--vault", str(vault)])
         assert result.exit_code == 0
         assert "успешно" in result.stdout.lower()
 
         index_path = vault / "_system" / "indexes" / FTS_INDEX_FILENAME
         assert index_path.exists()
 
-    def test_invalid_vault_fails(self, tmp_path: Path) -> None:
+    def test_invalid_vault_fails_with_vault_option(self, tmp_path: Path) -> None:
         invalid = tmp_path / "nonexistent"
-        result = runner.invoke(app, ["index", "rebuild", str(invalid)])
+        result = runner.invoke(app, ["index", "rebuild", "--vault", str(invalid)])
         assert result.exit_code != 0

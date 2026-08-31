@@ -218,16 +218,23 @@ class VaultSearchService:
 
         # Tier 5: FTS
         if self._lexical_index is not None:
-            # Verify freshness against ALL repository documents (not just
-            # the filtered eligible set), because the index fingerprint
-            # was computed from the full Vault snapshot.
+            # Verify freshness against all repository documents
+            # (fingerprint filters to player-visible internally).
             try:
                 all_docs = list(self._repository.list_entities())
                 self._lexical_index.verify_freshness(all_docs)
             except StorageError:
                 raise
 
-            fts_hits = self._lexical_index.search(query.text, limit=limit)
+            # Request enough candidates to cover the full player-visible
+            # snapshot before filtering, so excluded types do not consume
+            # the user limit.
+            all_docs_for_limit = list(self._repository.list_entities())
+            player_count = sum(
+                1 for d in all_docs_for_limit if d.entity.visibility == Visibility.PLAYER
+            )
+            candidate_limit = max(player_count, limit)
+            fts_hits = self._lexical_index.search(query.text, limit=candidate_limit)
             if fts_hits:
                 # Filter by current eligibility (visibility + type already
                 # applied via eligible set; verify EntityId membership)

@@ -237,6 +237,36 @@ class TestEligibility:
         assert len(results) == 1
         assert results[0].entity_id == "npc_b"
 
+    def test_excluded_type_does_not_consume_limit_one(self, tmp_path: Path) -> None:
+        """Excluded type ranked first must not consume limit=1 (S5-C06)."""
+        vault = _create_index_dir(tmp_path)
+        docs = [
+            _make_doc(
+                "npc_a",
+                name="XXXXX",
+                body="ancient relic ancient relic",
+                entity_type=EntityType.NPC,
+            ),
+            _make_doc(
+                "loc_b",
+                name="YYYYY",
+                body="ancient relic",
+                entity_type=EntityType.LOCATION,
+            ),
+        ]
+        repo: VaultRepository = FakeRepository(docs)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild(docs)
+        svc = VaultSearchService(repository=repo, lexical_index=index)
+
+        results = svc.search(
+            SearchQuery(text="ancient relic", entity_types={EntityType.LOCATION}),
+            limit=1,
+        )
+        assert len(results) == 1
+        assert results[0].entity_id == "loc_b"
+        assert results[0].match_kind == MatchKind.FTS
+
 
 # ── Repository/index error propagation ───────────────────────────────────────
 

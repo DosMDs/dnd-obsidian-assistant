@@ -105,18 +105,22 @@ def _build_literal_fts_query(text: str) -> str:
 
 
 def _compute_source_fingerprint(documents: Sequence[VaultDocument]) -> str:
-    """Compute a deterministic SHA-256 fingerprint for the given documents.
+    """Compute a deterministic SHA-256 fingerprint for the player-visible
+    source snapshot.
 
-    The fingerprint changes when any indexed canonical source changes,
-    including:
+    Only ``Visibility.PLAYER`` documents are included — DM and SYSTEM
+    content must not affect the player-derived index fingerprint.
 
-    - entity added/removed
+    The fingerprint changes when any indexed player-visible source
+    changes, including:
+
+    - player-visible entity added/removed
     - ``EntityId``
     - ``EntityType``
     - ``revision``
     - ``name``
     - Markdown body
-    - player visibility membership
+    - visibility membership change (PLAYER ↔ DM/SYSTEM)
 
     Uses canonical JSON (sorted by stable ``EntityId``) then SHA-256.
 
@@ -126,8 +130,9 @@ def _compute_source_fingerprint(documents: Sequence[VaultDocument]) -> str:
     Returns:
         Hex digest of the SHA-256 hash.
     """
+    player_docs = [d for d in documents if d.entity.visibility == Visibility.PLAYER]
     entries: list[dict[str, object]] = []
-    for doc in sorted(documents, key=lambda d: d.entity.id):
+    for doc in sorted(player_docs, key=lambda d: d.entity.id):
         entries.append(
             {
                 "entity_id": doc.entity.id,
@@ -146,6 +151,22 @@ def _compute_source_fingerprint(documents: Sequence[VaultDocument]) -> str:
 # ── Path safety ──────────────────────────────────────────────────────────────
 
 
+def _reject_symlink(path: Path, label: str) -> None:
+    """Reject *path* if it is a symlink (including dangling/broken).
+
+    Args:
+        path: The filesystem path to check.
+        label: Human-readable label for error messages.
+
+    Raises:
+        StorageError: *path* is a symlink.
+    """
+    if path.is_symlink():
+        raise StorageError(
+            f"{label} является симлинком; отклонено из соображений безопасности: {path}"
+        )
+
+
 def _resolve_index_dir(vault_root: Path) -> Path:
     """Resolve and validate the derived-index directory path.
 
@@ -153,7 +174,8 @@ def _resolve_index_dir(vault_root: Path) -> Path:
     - *vault_root* must exist and be a directory.
     - The resulting path must be inside *vault_root*.
     - No ``..`` traversal in the relative path.
-    - No existing symlink for any path component beneath *vault_root*.
+    - No symlink (including dangling/broken) for any path component
+      beneath *vault_root*.
 
     Args:
         vault_root: The resolved Vault root path.
@@ -166,32 +188,35 @@ def _resolve_index_dir(vault_root: Path) -> Path:
     """
     vault_root = vault_root.resolve(strict=False)
     if not vault_root.is_dir():
-        raise StorageError(f"Vault root must be an existing directory: {vault_root}")
+        raise StorageError(f"Корень Vault должен быть существующей директорией: {vault_root}")
 
     relative_parts = ["_system", "indexes"]
     accumulated = vault_root
 
     for part in relative_parts:
         accumulated = accumulated / part
-        if accumulated.exists() and accumulated.is_symlink():
-            raise StorageError(
-                f"Derived-index path component is a symlink, rejected for safety: {accumulated}"
-            )
+        _reject_symlink(accumulated, f"Компонент пути производного индекса {accumulated}")
 
     try:
         accumulated.relative_to(vault_root)
     except ValueError:
         raise StorageError(
-            f"Derived-index path resolves outside the Vault root: {accumulated}"
+            f"Путь производного индекса выходит за пределы корня Vault: {accumulated}"
         ) from None
 
     return accumulated
 
 
 def _resolve_index_path(vault_root: Path) -> Path:
-    """Resolve the canonical SQLite index file path."""
+    """Resolve the canonical SQLite index file path.
+
+    Also rejects the final path if it is an existing symlink
+    (including dangling/broken).
+    """
     index_dir = _resolve_index_dir(vault_root)
-    return index_dir / FTS_INDEX_FILENAME
+    index_path = index_dir / FTS_INDEX_FILENAME
+    _reject_symlink(index_path, "Файл индекса")
+    return index_path
 
 
 # ── Concrete SqliteFtsIndex ─────────────────────────────────────────────────
@@ -234,7 +259,7 @@ class SqliteFtsIndex:
 
         Returns:
             Ranked ``LexicalHit`` values ordered by bm25 ascending
-            (smaller = better), then EntityId ascending.
+            (bm25 smaller = better), then EntityId ascending.
 
         Raises:
             StorageError: The index is missing, corrupt, stale, or
@@ -262,12 +287,13 @@ class SqliteFtsIndex:
         try:
             cursor = conn.execute("SELECT 1 FROM sqlite_master LIMIT 1")
             cursor.fetchone()
-        except sqlite3.DatabaseError:
+        except sqlite3.DatabaseError as exc:
             conn.close()
             raise StorageError(
                 "FTS index \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0451\u043d; "
-                "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 dnd index rebuild"
-            ) from None
+                "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 dnd index rebuild",
+                cause=exc,
+            ) from exc
 
         try:
             self._verify_index_fresh(conn)
@@ -331,12 +357,7 @@ class SqliteFtsIndex:
                     cause=exc,
                 ) from exc
 
-        if index_dir.is_symlink():
-            raise StorageError(
-                "\u0414\u0438\u0440\u0435\u043a\u0442\u043e\u0440\u0438\u044f \u0438\u043d\u0434\u0435\u043a\u0441\u0430 "
-                "\u044f\u0432\u043b\u044f\u0435\u0442\u0441\u044f \u0441\u0438\u043c\u0432\u043e\u043b\u0438\u0447\u0435\u0441\u043a\u043e\u0439 "
-                "\u0441\u0441\u044b\u043b\u043a\u043e\u0439: {index_dir}"
-            )
+        _reject_symlink(index_dir, "Директория индекса")
 
         fd, temp_path_str = tempfile.mkstemp(
             suffix=".sqlite3",
@@ -480,7 +501,15 @@ class SqliteFtsIndex:
                 "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 dnd index rebuild"
             )
 
-        stored_version = int(row[0])
+        try:
+            stored_version = int(row[0])
+        except (ValueError, TypeError):
+            raise StorageError(
+                "FTS index \u0438\u043c\u0435\u0435\u0442 \u043d\u0435\u043a\u043e\u0440\u0440\u0435\u043a\u0442\u043d\u0443\u044e "
+                "\u0432\u0435\u0440\u0441\u0438\u044e \u0441\u0445\u0435\u043c\u044b; "
+                "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 dnd index rebuild"
+            ) from None
+
         if stored_version != SCHEMA_VERSION:
             raise StorageError(
                 f"FTS index \u0438\u043c\u0435\u0435\u0442 \u0432\u0435\u0440\u0441\u0438\u044e "
@@ -492,9 +521,9 @@ class SqliteFtsIndex:
     def verify_freshness(self, current_documents: Sequence[VaultDocument]) -> None:
         """Verify the index is fresh relative to the current Vault state.
 
-        Computes the source fingerprint for *current_documents* and
-        compares it with the stored fingerprint.  Raises ``StorageError``
-        if they differ.
+        Computes the player-visible source fingerprint for
+        *current_documents* and compares it with the stored fingerprint.
+        Raises ``StorageError`` if they differ.
 
         Args:
             current_documents: The current canonical Vault documents.

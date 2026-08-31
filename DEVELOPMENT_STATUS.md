@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-03)
+**Last updated:** 2026-08-31 (S5-C06)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -1586,12 +1586,13 @@ SQLite database.  Tests prove hidden content is absent via direct SQLite
 inspection.
 
 **Source fingerprint algorithm:**
-- Deterministic SHA-256 over canonical JSON representation of all Vault
-  documents (sorted by stable `EntityId`)
+- Deterministic SHA-256 over canonical JSON representation of the current
+  player-visible indexed snapshot (sorted by stable `EntityId`)
+- Only `Visibility.PLAYER` documents are included
 - JSON includes: `entity_id`, `entity_type`, `revision`, `name`, `body`,
   `visibility`
-- Changes on: entity add/remove, `EntityId`, `EntityType`, `revision`,
-  `name`, body, player visibility membership
+- Changes on: player-visible entity add/remove, `EntityId`, `EntityType`,
+  `revision`, `name`, body, player visibility membership
 - Detects manual body/name changes even without revision increment
 - Not Python's built-in `hash()`
 
@@ -1846,6 +1847,81 @@ S5-04 remains NOT STARTED.
 No ADR required. SQLite FTS5 as derived storage is already an approved project
 decision. The concrete derived filename (`entities.sqlite3`) and schema version
 (1) are implementation details that do not require an ADR.
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
+
+
+### S5-C06 correction record
+
+**Acceptance-review defects (7 items):**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C06-1 | `LexicalIndex` Protocol did not declare `verify_freshness()`, so `VaultSearchService` depended on an undeclared concrete capability | Added `verify_freshness()` to `LexicalIndex` Protocol with documented semantics |
+| C06-2 | `_compute_source_fingerprint` included all documents including `Visibility.DM` and `Visibility.SYSTEM`, so hidden-only changes could stale the player index | Filtered to `Visibility.PLAYER` only before fingerprint computation; fingerprint now reflects only the player-visible source snapshot |
+| C06-3 | FTS eligibility filtering happened after SQLite LIMIT, so an excluded entity type could consume a result slot | Request `max(player_count, limit)` candidates from FTS before eligibility filtering, then apply user limit after filtering |
+| C06-4 | CLI used positional `vault: Path = typer.Argument(...)` instead of canonical `--vault` option | Changed to `vault: Path = typer.Option(..., "--vault", ...)` |
+| C06-5 | Symlink checks used `exists() and is_symlink()` which missed dangling/broken symlinks; final DB path was not checked | Added `_reject_symlink()` helper using `is_symlink()` only; checks all directory components AND final DB path; `_resolve_index_path` also rejects final-path symlinks |
+| C06-6 | One sqlite→StorageError translation used `from None` instead of preserving the cause; malformed schema_version metadata produced raw `ValueError` | Fixed `from exc` with `cause=exc` for the SQLite probe path; wrapped `int(row[0])` in try/except to raise `StorageError` for non-int schema versions |
+| C06-7 | `LexicalHit.score` docstring said "bm25 score; smaller is better" which is provider-specific; module docstring claimed "depends only on retrieval-layer types" while importing `VaultDocument` | Changed to generic "provider-defined deterministic lexical ranking" wording; module docstring now accurately describes provider-independence with VaultDocument consumption |
+
+**Production changes:**
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/retrieval/lexical.py` | Added `verify_freshness()` to `LexicalIndex` Protocol; corrected `LexicalHit.score` docstring; corrected module docstring |
+| `src/dnd_assistant/retrieval/index.py` | `_compute_source_fingerprint` now filters to `Visibility.PLAYER` only; added `_reject_symlink()` helper; `_resolve_index_dir` uses `is_symlink()` (not `exists()+is_symlink()`); `_resolve_index_path` rejects final-path symlinks; `rebuild()` uses `_reject_symlink`; fixed sqlite probe `from None` → `from exc`; wrapped `int(row[0])` in try/except for malformed schema version |
+| `src/dnd_assistant/retrieval/search.py` | FTS tier now requests `max(player_count, limit)` candidates before eligibility filtering |
+| `src/dnd_assistant/cli/main.py` | Changed `typer.Argument` to `typer.Option("--vault")` |
+
+**Test changes:**
+
+| File | Change |
+|---|---|
+| `tests/unit/test_fts_index.py` | Added 8 player-only fingerprint tests (DM/SYSTEM body/name unchanged, PLAYER body changed, PLAYER↔DM membership, add/remove); added 7 symlink-rejection tests (skipped when platform cannot create symlinks); added corrupt-index cause-preservation test; added malformed schema-version test |
+| `tests/unit/test_fts_search.py` | Added `test_excluded_type_does_not_consume_limit_one` regression test |
+| `tests/unit/test_cli_index.py` | Updated to use `--vault` option; `test_index_rebuild_help_exposes_vault_option` verifies `--vault` in help output |
+| `tests/unit/test_retrieval_contracts.py` | Added `test_lexical_index_protocol_has_verify_freshness`; added `test_fake_lexical_index_with_verify_freshness_works` (proves fake with `verify_freshness` works with `VaultSearchService`); added `VaultDocument`/`Sequence` imports |
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_fts_index.py` — 77 passed, 6 skipped (symlink tests on Windows)
+- `uv run pytest tests/unit/test_fts_search.py` — 12 passed
+- `uv run pytest tests/unit/test_cli_index.py` — 5 passed
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 147 passed
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed
+- `uv run pytest` (full suite) — 1834 passed, 40 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — All checks passed
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — `--vault` present
+- `git diff --check` — no whitespace errors
+
+**Architecture review:**
+- `LexicalIndex` Protocol now declares `verify_freshness()` — `VaultSearchService` uses only declared operations
+- `VaultSearchService` does not import `SqliteFtsIndex` (uses `LexicalIndex` contract only under `TYPE_CHECKING`)
+- Player fingerprint contains no DM/SYSTEM textual source
+- Hidden-only changes do not stale player index
+- Visibility membership changes do stale it
+- Eligibility filtering precedes final user limit
+- Final/dangling index symlinks rejected
+- SQLite errors retain causes
+- No generated SQLite DB staged
+- No golden Vault modifications
+- No EntityResolver implementation
+- S5-04 remains [ ]
 
 **Resulting Stage-5 status:**
 - S5-00 = [x]
