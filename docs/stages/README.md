@@ -20,6 +20,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | Stage 3 — Vault Repository | `03_VAULT_REPOSITORY.md` |
 | Stage 4 — Calendar | `04_CALENDAR.md` |
 | Stage 5 — Retrieval + Entity Resolution | `05_RETRIEVAL_AND_ENTITY_RESOLUTION.md` |
+| Stage 6 — Session Runtime without LLM | `06_SESSION_RUNTIME_WITHOUT_LLM.md` |
 
 ## Provenance
 

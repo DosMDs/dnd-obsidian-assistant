@@ -10,6 +10,10 @@ from dnd_assistant.storage.paths import (
     entity_directory,
     resolve_entity_path,
 )
+from dnd_assistant.storage.session_paths import (
+    SessionStoragePaths,
+    resolve_session_storage_paths,
+)
 from dnd_assistant.storage.types import EntityDirectory, VaultDocument, VaultRepository
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
 
@@ -21,6 +25,7 @@ __all__: list[str] = [
     "EntityDirectory",
     "EntityPatch",
     "ObsidianVaultRepository",
+    "SessionStoragePaths",
     "VaultDocument",
     "VaultRepository",
     "atomic_write_text",
@@ -28,5 +33,6 @@ __all__: list[str] = [
     "entity_directory",
     "parse",
     "resolve_entity_path",
+    "resolve_session_storage_paths",
     "serialize",
 ]
