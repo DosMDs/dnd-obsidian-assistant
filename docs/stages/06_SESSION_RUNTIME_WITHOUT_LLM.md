@@ -47,7 +47,7 @@ existing code and ADRs:
 - [x] `S6-00` Session runtime kickoff + safe session-storage path contracts
 - [x] `S6-01` Canonical current-world-time persistence boundary
 - [x] `S6-02` Raw session metadata persistence + ID allocation + start/status lifecycle
-- [ ] `S6-03` Append-only raw note/event JSONL logging
+- [x] `S6-03` Append-only raw note/event JSONL logging
 - [ ] `S6-04` Session end/close immutability + touched IDs + processing pending
 - [ ] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
 - [ ] `S6-06` Thin CLI orchestration: session start/status/end + note
@@ -644,7 +644,7 @@ Published S6-01 history was preserved; no rewrite was used.
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
 
 **Starting SHA:** `88c60ea758f2bfa2d2e85d779e980412bcf0922a`
-**Implementation commit:** (set after commit)
+**Implementation commit:** `3145165e7e18a6a3e66999658371c8960d1a2ca1`
 **Commit message:** `feat: add append-only session event logging (S6-03)`
 
 **Explicit deferrals:**
