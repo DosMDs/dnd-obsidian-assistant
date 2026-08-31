@@ -67,6 +67,8 @@ class TestPublicExports:
         expected = {
             "Ambiguous",
             "EntityResolver",
+            "LexicalHit",
+            "LexicalIndex",
             "MatchKind",
             "NotFound",
             "Resolved",
@@ -74,6 +76,7 @@ class TestPublicExports:
             "SearchHit",
             "SearchQuery",
             "SearchService",
+            "SqliteFtsIndex",
             "VaultSearchService",
         }
         assert set(retrieval_all) == expected
@@ -863,15 +866,24 @@ class TestBoundaries:
         actual = {i for i in imports if _has_forbidden_prefix(i, storage_internals)}
         assert not actual, f"retrieval/search.py imports storage internals: {actual}"
 
-    def test_no_sqlite_import_in_retrieval(self) -> None:
-        imports = self._ast_imports("dnd_assistant.retrieval.types")
-        imports |= self._ast_imports("dnd_assistant.retrieval.service")
-        imports |= self._ast_imports("dnd_assistant.retrieval.search")
-        assert "sqlite3" not in imports, "retrieval imports sqlite3"
-        # Also check no 'sqlite' appears in import strings
-        assert not any("sqlite" in i for i in imports), (
-            f"retrieval imports sqlite-related module: {imports}"
-        )
+    def test_no_sqlite_import_in_retrieval_contracts(self) -> None:
+        """retrieval/types.py, retrieval/service.py, retrieval/lexical.py
+        must not import sqlite3.  retrieval/index.py may import sqlite3."""
+        for mod in (
+            "dnd_assistant.retrieval.types",
+            "dnd_assistant.retrieval.service",
+            "dnd_assistant.retrieval.lexical",
+        ):
+            imports = self._ast_imports(mod)
+            assert "sqlite3" not in imports, f"{mod} imports sqlite3"
+            assert not any("sqlite" in i for i in imports), (
+                f"{mod} imports sqlite-related module: {imports}"
+            )
+
+    def test_sqlite_allowed_in_retrieval_index(self) -> None:
+        """retrieval/index.py may import sqlite3 for FTS5."""
+        imports = self._ast_imports("dnd_assistant.retrieval.index")
+        assert "sqlite3" in imports, "retrieval/index.py should import sqlite3"
 
     def test_no_rapidfuzz_import_in_retrieval_contracts(self) -> None:
         """retrieval/types.py and retrieval/service.py must not import rapidfuzz.
@@ -888,6 +900,49 @@ class TestBoundaries:
         assert "rapidfuzz" in imports or "rapidfuzz.fuzz" in imports, (
             "retrieval/search.py should import rapidfuzz for S5-02"
         )
+
+    def test_retrieval_lexical_no_forbidden_imports(self) -> None:
+        """retrieval/lexical.py must not import sqlite3, storage
+        implementation, models, tools, application, or ollama."""
+        imports = self._ast_imports("dnd_assistant.retrieval.lexical")
+        forbidden = {
+            "sqlite3",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+            "ollama",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual, f"retrieval/lexical.py imports forbidden modules: {actual}"
+
+    def test_retrieval_index_no_forbidden_imports(self) -> None:
+        """retrieval/index.py must not import models, tools, application,
+        session, or ollama.  sqlite3 and storage read contracts are allowed."""
+        imports = self._ast_imports("dnd_assistant.retrieval.index")
+        forbidden = {
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+            "dnd_assistant.session",
+            "ollama",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual, f"retrieval/index.py imports forbidden modules: {actual}"
+
+    def test_retrieval_index_no_storage_internals(self) -> None:
+        """retrieval/index.py must only import storage read contracts
+        (types), not implementation internals."""
+        imports = self._ast_imports("dnd_assistant.retrieval.index")
+        storage_internals = {
+            "dnd_assistant.storage.atomic",
+            "dnd_assistant.storage.audit",
+            "dnd_assistant.storage.markdown",
+            "dnd_assistant.storage.paths",
+            "dnd_assistant.storage.patch",
+            "dnd_assistant.storage.vault_repository",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, storage_internals)}
+        assert not actual, f"retrieval/index.py imports storage internals: {actual}"
 
     # ── Reverse-boundary protection ──────────────────────────────────────
 

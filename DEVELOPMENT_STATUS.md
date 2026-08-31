@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-02)
+**Last updated:** 2026-08-31 (S5-03)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -876,7 +876,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - [x] `S5-00` Retrieval kickoff + canonical contracts
 - [x] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
 - [x] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
-- [ ] `S5-03` SQLite FTS5 derived index + rebuild path
+- [x] `S5-03` SQLite FTS5 derived index + rebuild path
 - [ ] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
 - [ ] `S5-05` Golden-Vault integration + retrieval/resolver hardening
 - [ ] `S5-06` Full Stage 5 historical review / verification / status
@@ -1527,6 +1527,338 @@ No ADR required. All architectural decisions follow established patterns (Protoc
 
 **Explicit confirmation:**
 SQLite/FTS/EntityResolver work has NOT started. S5-03 = [ ].
+
+
+### S5-03 completion record
+
+**Starting branch:** `main`
+**Starting local SHA:** `c8504f69779d3c05a590eaaa36ec0097612224b7`
+**Starting upstream SHA:** `c8504f69779d3c05a590eaaa36ec0097612224b7`
+
+**Scope implemented:**
+SQLite FTS5 derived lexical index with rebuild path, source-fingerprint freshness
+protection, atomic rebuild, FTS query literalization, player-only indexing, and
+integration into the existing `VaultSearchService` tiered search.
+
+**SQLite/FTS design:**
+- `retrieval/lexical.py` — `LexicalIndex` protocol + `LexicalHit` frozen dataclass
+- `retrieval/index.py` — `SqliteFtsIndex` concrete implementation using stdlib
+  `sqlite3` with FTS5 virtual table
+- No external database dependency (stdlib only)
+- No ORM (SQLAlchemy) or vector/embedding columns
+
+**Derived-storage invariant:**
+The SQLite database is fully disposable and reconstructable from the canonical
+Vault.  The Obsidian Vault remains the only Source of Truth.
+
+**Canonical index location:**
+`<vault>/_system/indexes/entities.sqlite3`
+
+**FTS schema version:** 1 (stored in `index_metadata` table)
+
+**FTS table schema:**
+```sql
+CREATE VIRTUAL TABLE entity_fts USING fts5(
+    entity_id UNINDEXED,
+    entity_type UNINDEXED,
+    revision UNINDEXED,
+    name,
+    body,
+    tokenize='unicode61'
+);
+```
+
+**Indexed fields:**
+- `Entity.name` (canonical display name)
+- `VaultDocument.body` (Markdown body text)
+
+**Explicitly non-indexed fields:**
+- `EntityId` (stored as UNINDEXED metadata only)
+- `EntityType` (stored as UNINDEXED metadata only)
+- `Revision` (stored as UNINDEXED metadata only)
+- Arbitrary YAML frontmatter (no generic frontmatter indexing)
+- Aliases (governed by existing exact-alias tier, not FTS)
+
+**Player-only indexing:**
+Only `Visibility.PLAYER` entities are inserted into the FTS table.
+`Visibility.DM` and `Visibility.SYSTEM` content is never written to the
+SQLite database.  Tests prove hidden content is absent via direct SQLite
+inspection.
+
+**Source fingerprint algorithm:**
+- Deterministic SHA-256 over canonical JSON representation of all Vault
+  documents (sorted by stable `EntityId`)
+- JSON includes: `entity_id`, `entity_type`, `revision`, `name`, `body`,
+  `visibility`
+- Changes on: entity add/remove, `EntityId`, `EntityType`, `revision`,
+  `name`, body, player visibility membership
+- Detects manual body/name changes even without revision increment
+- Not Python's built-in `hash()`
+
+**Freshness/stale-index behavior:**
+- `verify_freshness()` compares stored fingerprint with current Vault snapshot
+- Mismatch raises `StorageError` with Russian message instructing rebuild
+- Exact/fuzzy tiers continue to work without consulting FTS
+- Stale FTS result is never returned
+
+**Missing-index behavior:**
+`search()` raises `StorageError` with Russian message: FTS index is missing;
+run `dnd index rebuild`.
+
+**Corrupt-index behavior:**
+`search()` raises `StorageError` preserving the underlying `sqlite3.DatabaseError`
+as cause.
+
+**Wrong-schema-version behavior:**
+`search()` raises `StorageError` with the stored and expected version numbers.
+
+**FTS5-unavailable behavior:**
+If the Python SQLite build does not support FTS5, the `CREATE VIRTUAL TABLE`
+statement will fail at rebuild time with `StorageError`.
+
+**Atomic rebuild design:**
+1. Validate index directory (symlink safety, traversal rejection)
+2. Create unique temp SQLite DB in same directory via `tempfile.mkstemp`
+3. Create schema, insert player-visible entities, write metadata/fingerprint
+4. Commit, close connection
+5. `os.replace(temp, final)` — atomic on both Windows and macOS
+6. Clean up temp file on any failure
+
+**Failed-rebuild old-index preservation:**
+If rebuild fails before `os.replace`, the old index file is untouched.
+The temp file is cleaned up.  A regression test proves the old index
+remains usable after a failed rebuild.
+
+**Path/symlink safety:**
+- Vault root must exist and be a directory
+- Resulting path must remain inside the Vault root
+- `..` traversal rejected
+- Existing symlinks in the `_system/indexes/` path rejected
+- Index directory created only when parent topology is safe
+
+**Literal FTS query policy:**
+- Strip and NFC-normalise input
+- Tokenise into word tokens (alphanumeric, `_`, `-`)
+- Quote each token as FTS5 literal (`"token"`)
+- Combine with deterministic `AND`
+- Prevents FTS operator injection (`OR`, `NOT`, `NEAR`, `*`, `"`, `(`, `)`)
+- Punctuation-only input yields empty query (no SQL/FTS exception)
+
+**Operator/injection regression behavior:**
+- `"OR"` → `'"OR"'` (literal, not FTS OR)
+- `"foo OR bar"` → `'"foo" AND "OR" AND "bar"'`
+- `"(test)"` → `'"test"'`
+- `"test*"` → `'"test"'`
+- `"!!!"` → `""` (empty, no error)
+
+**Cyrillic FTS behavior:**
+Cyrillic text is tokenised correctly and searchable via `unicode61` tokenizer.
+
+**bm25 score semantics:**
+- SQLite FTS5 `bm25(entity_fts)` used as the relevance score
+- Smaller bm25 value = better match
+- Sort: bm25 ASC, EntityId ASC (tie-break)
+- Score is finite float
+- Not compared numerically to RapidFuzz scores
+
+**FTS ranking/tie-break:**
+`ORDER BY score ASC, entity_id ASC`
+
+**Resulting tier precedence:**
+`EXACT_ID > EXACT_NAME > EXACT_ALIAS > FUZZY_NAME > FTS`
+
+**Exact-ID-over-FTS proof:**
+Test `test_exact_id_over_fts` — query matching EntityId returns EXACT_ID,
+not FTS.
+
+**Exact-name-over-FTS proof:**
+Test `test_exact_name_over_fts` — query matching canonical name returns
+EXACT_NAME, not FTS.
+
+**Exact-alias-over-FTS proof:**
+Test `test_exact_alias_over_fts` — query matching alias returns EXACT_ALIAS,
+not FTS.
+
+**Fuzzy-over-FTS proof:**
+Test `test_fuzzy_over_fts` — partial name match returns FUZZY_NAME, not FTS.
+
+**Current visibility/type filtering behavior:**
+FTS candidates are filtered against the current eligible document set
+(visibility + entity type) before being returned.  DM/SYSTEM entities
+never appear in results.  Excluded results do not consume `limit`.
+
+**Limit behavior:**
+Applied after FTS ranking and current-Vault eligibility filtering.
+
+**Repository/index error propagation:**
+- Repository `StorageError` propagates unchanged
+- Stale/missing/corrupt index raises `StorageError` when FTS tier is needed
+- Exact/fuzzy tiers unaffected by index state
+
+**`VaultSearchService` constructor/composition change:**
+Optional `lexical_index: LexicalIndex | None = None` parameter added.
+Backward compatible — existing code without an index continues to work.
+
+**Public API changes:**
+- `dnd_assistant.retrieval.lexical` — new module, exports `LexicalHit`,
+  `LexicalIndex`
+- `dnd_assistant.retrieval.index` — new module, exports `SqliteFtsIndex`
+- `dnd_assistant.retrieval.__init__` — added `LexicalHit`, `LexicalIndex`,
+  `SqliteFtsIndex` to `__all__`
+
+**CLI command implemented:**
+`dnd index rebuild --vault <PATH>` — validates Vault, reads canonical
+documents via `ObsidianVaultRepository`, rebuilds FTS index, prints
+indexed entity count and index path.
+
+**CLI Vault composition behavior:**
+- Validates Vault root exists and is a directory
+- Uses `AuditService` + `ObsidianVaultRepository` for read-only access
+- No current-campaign selection mechanism (explicit `--vault` required)
+- Returns non-zero exit code for invalid Vault or rebuild failure
+
+**CLI rebuild success result:**
+Russian-language message with indexed entity count and index path.
+
+**CLI invalid-Vault result:**
+Russian-language error message, non-zero exit code.
+
+**S5-02 docstring cleanup:**
+`_normalize_text()` docstring corrected from "exact and fuzzy name/alias
+comparison" to "exact name/alias comparison and fuzzy canonical-name
+comparison".
+
+**Dependency-boundary changes:**
+- `retrieval.lexical` — provider-independent contract; no sqlite3, no storage
+  implementation, no models/tools/application/session/ollama
+- `retrieval.index` — imports `sqlite3` (allowed); imports storage read
+  contracts (`VaultDocument`); no models/tools/application/session/ollama;
+  no storage implementation internals (atomic, audit, markdown, paths, patch,
+  vault_repository)
+- `retrieval.search` — imports `LexicalIndex` under `TYPE_CHECKING` only;
+  no sqlite3 import
+- `retrieval.types` and `retrieval.service` — unchanged, no sqlite3
+- Boundary tests updated: `test_no_sqlite_import_in_retrieval` → split into
+  `test_no_sqlite_import_in_retrieval_contracts` (types/service/lexical) and
+  `test_sqlite_allowed_in_retrieval_index` (index)
+- Added `test_retrieval_lexical_no_forbidden_imports`,
+  `test_retrieval_index_no_forbidden_imports`,
+  `test_retrieval_index_no_storage_internals`
+
+**Tests added/changed:**
+
+`tests/unit/test_fts_index.py` (new) — 56 tests covering:
+- FTS query safety (tokenize + literal build: 10 parametrized + 1)
+- Source fingerprint (stable, order-independent, changes on any field: 8 tests)
+- Schema and FTS5 support (schema version, usable DB, virtual table: 3 tests)
+- Indexed fields (name, body: 2 tests)
+- Hidden data (PLAYER indexed, DM/SYSTEM not, DB inspection: 5 tests)
+- Rebuild (first, replaces prior, entity removal, body/name change: 6 tests)
+- Stale index (fresh OK, stale detected, missing: 3 tests)
+- Index errors (missing, corrupt, wrong schema: 3 tests)
+- Atomic rebuild (atomic replace, failed rebuild preserves old: 2 tests)
+- bm25 ranking (finite, better-first, tie-break: 3 tests)
+- Entity-type filter (excluded type not in results: 1 test)
+- Limit (applied: 1 test)
+
+`tests/unit/test_fts_search.py` (new) — 11 tests covering:
+- Tier precedence (EXACT_ID/NAME/ALIAS/FUZZY over FTS, FTS only when empty: 5)
+- No lexical index configured (FTS unavailable: 1)
+- Current visibility/type eligibility (DM excluded, type filter, limit: 3)
+- Repository/index error propagation (stale, missing: 2)
+
+`tests/unit/test_cli_index.py` (new) — 5 tests covering:
+- `dnd --help`, `dnd index --help`, `dnd index rebuild --help`
+- Rebuild against valid Vault succeeds
+- Invalid Vault path fails
+
+`tests/unit/test_retrieval_contracts.py` — updated:
+- Public exports test updated (13 exports)
+- Boundary tests: sqlite3 split into contract/index checks; lexical and index
+  module boundary tests added
+
+**Targeted test results:**
+- `uv run pytest tests/unit/test_fts_index.py` — 56 passed
+- `uv run pytest tests/unit/test_fts_search.py` — 11 passed
+- `uv run pytest tests/unit/test_cli_index.py` — 5 passed
+- `uv run pytest tests/unit/test_exact_search.py tests/unit/test_fuzzy_search.py tests/unit/test_retrieval_contracts.py` — 256 passed
+
+**Full pytest result:**
+`uv run pytest` — 1822 passed, 34 skipped
+
+**Ruff check result:**
+All checks passed
+
+**Ruff format result:**
+179 files already formatted
+
+**`dnd --help` result:**
+CLI smoke test OK (Russian UI)
+
+**`dnd index --help` result:**
+OK
+
+**`dnd index rebuild --help` result:**
+OK
+
+**`git diff --check` result:**
+No whitespace errors
+
+**Architecture review:**
+- SQLite is derived/rebuildable only
+- No generated DB committed
+- Golden Vault source unchanged
+- DM/SYSTEM content absent from player index
+- Source fingerprint detects current-Vault changes
+- Stale index never returns stale FTS hits
+- Rebuild is temp-build + atomic replace
+- Failed rebuild preserves old index
+- Query text cannot inject FTS operators
+- bm25 ordering is deterministic
+- FTS is below exact/fuzzy tiers
+- Current visibility/type eligibility enforced
+- No sqlite3 in contract/search orchestration modules
+- No EntityResolver implementation
+- No embeddings/vector DB
+
+**Out-of-scope review:**
+No EntityResolver implementation, no confidence thresholds, no clarification
+behavior, no recent-session context, no context ranking, no semantic search,
+no embeddings, no vector database, no Ollama, no ModelGateway, no
+ToolRegistry/Executor, no session runtime, no ChangeSet, no post-session
+processing, no automatic index watcher, no incremental SQLite updates, no
+background indexing, no SQLite triggers, no FTS column-weight tuning, no
+stemming plugins, no custom tokenizer extensions, no search CLI, no ask CLI.
+S5-04 remains NOT STARTED.
+
+**Defects discovered/corrections made:**
+- `test_fts_only_when_higher_tiers_empty` — initial query "Grayford" fuzzy-matched
+  the entity name; fixed by using name "XXXXX" with body word "mage" (zero
+  character overlap)
+- `test_excluded_result_does_not_consume_limit` — `verify_freshness` was called
+  with filtered (player-visible only) documents, causing fingerprint mismatch;
+  fixed by passing all repository documents to `verify_freshness`
+- Ruff issues: unused `import sys`, unused `import os`/`import tempfile`, unused
+  `svc` variable, blind `Exception` assertion — all fixed
+- Formatting: `ruff format` applied to 6 files
+
+**ADR assessment:**
+No ADR required. SQLite FTS5 as derived storage is already an approved project
+decision. The concrete derived filename (`entities.sqlite3`) and schema version
+(1) are implementation details that do not require an ADR.
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
 
 
 ---

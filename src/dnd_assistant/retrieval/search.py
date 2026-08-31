@@ -1,8 +1,8 @@
-"""Concrete exact and fuzzy search implementation for the retrieval layer.
+"""Concrete exact, fuzzy, and FTS search implementation for the retrieval layer.
 
 ``VaultSearchService`` implements the ``SearchService`` protocol using
 the VaultRepository read contracts for exact stable-ID, exact canonical
-name, exact alias, and fuzzy canonical-name matching.
+name, exact alias, fuzzy canonical-name, and FTS lexical matching.
 
 This module depends on storage read contracts (``VaultRepository``,
 ``VaultDocument``) but not on storage implementation internals
@@ -13,19 +13,24 @@ from __future__ import annotations
 
 import unicodedata
 from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 from rapidfuzz import fuzz
 
 from dnd_assistant.domain.types import EntityId, EntityType, Visibility
-from dnd_assistant.errors import NotFoundError, ValidationError
+from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
 from dnd_assistant.retrieval.types import MatchKind, SearchHit, SearchQuery
 from dnd_assistant.storage.types import VaultDocument, VaultRepository
+
+if TYPE_CHECKING:
+    from dnd_assistant.retrieval.lexical import LexicalIndex
 
 # ── Exact-text normalisation ────────────────────────────────────────────────
 
 
 def _normalize_text(text: str) -> str:
-    """Normalise text for exact and fuzzy name/alias comparison.
+    """Normalise text for exact name/alias comparison and fuzzy
+    canonical-name comparison.
 
     Applies, in order:
     1. Strip surrounding whitespace.
@@ -122,20 +127,28 @@ def _validate_limit(limit: object) -> int:
 class VaultSearchService:
     """Concrete ``SearchService`` implementation using ``VaultRepository``.
 
-    Provides exact stable-ID, exact canonical name, exact alias, and
-    fuzzy canonical-name retrieval with player-visibility enforcement,
-    entity-type filtering, and deterministic ordering.
+    Provides exact stable-ID, exact canonical name, exact alias, fuzzy
+    canonical-name, and FTS lexical retrieval with player-visibility
+    enforcement, entity-type filtering, and deterministic ordering.
 
     Fuzzy matching uses RapidFuzz ``fuzz.ratio`` on normalised
     (strip → NFC → casefold) canonical names only.  Aliases and
     ``EntityId`` values are not fuzzy-matched.
 
+    The FTS tier uses a ``LexicalIndex`` (optional).  When no index is
+    configured, the FTS tier is unavailable and returns no results.
+
     This service is read-only.  It does not mutate the Vault, access the
     filesystem directly, or depend on Ollama/ModelGateway.
     """
 
-    def __init__(self, repository: VaultRepository) -> None:
+    def __init__(
+        self,
+        repository: VaultRepository,
+        lexical_index: LexicalIndex | None = None,
+    ) -> None:
         self._repository = repository
+        self._lexical_index = lexical_index
 
     # ── get_by_id ───────────────────────────────────────────────────────
 
@@ -172,6 +185,7 @@ class VaultSearchService:
         2. ``EXACT_NAME`` — normalised canonical name match.
         3. ``EXACT_ALIAS`` — normalised alias match.
         4. ``FUZZY_NAME`` — fuzzy canonical name match via RapidFuzz.
+        5. ``FTS`` — lexical full-text search via SQLite FTS5.
 
         Returns candidates only from the **highest-precedence non-empty
         tier**.  Visibility and entity-type filtering are applied before
@@ -201,6 +215,33 @@ class VaultSearchService:
         fuzzy_matches = self._match_fuzzy_name(eligible, query.text)
         if fuzzy_matches:
             return self._finalise_fuzzy(fuzzy_matches, limit)
+
+        # Tier 5: FTS
+        if self._lexical_index is not None:
+            # Verify freshness against ALL repository documents (not just
+            # the filtered eligible set), because the index fingerprint
+            # was computed from the full Vault snapshot.
+            try:
+                all_docs = list(self._repository.list_entities())
+                self._lexical_index.verify_freshness(all_docs)
+            except StorageError:
+                raise
+
+            fts_hits = self._lexical_index.search(query.text, limit=limit)
+            if fts_hits:
+                # Filter by current eligibility (visibility + type already
+                # applied via eligible set; verify EntityId membership)
+                eligible_ids = {d.entity.id for d in eligible}
+                filtered = [h for h in fts_hits if h.entity_id in eligible_ids]
+                if filtered:
+                    return [
+                        SearchHit(
+                            entity_id=h.entity_id,
+                            match_kind=MatchKind.FTS,
+                            score=h.score,
+                        )
+                        for h in filtered[:limit]
+                    ]
 
         return []
 

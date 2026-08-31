@@ -8,8 +8,12 @@ Sub-modules
 types/       — Canonical retrieval types (MatchKind, SearchQuery, SearchHit,
                Resolved, Ambiguous, NotFound, ResolutionOutcome).
 service/     — SearchService and EntityResolver protocols.
+lexical/     — Provider-independent LexicalIndex protocol.
+index/       — SQLite FTS5 concrete lexical index implementation.
 """
 
+from dnd_assistant.retrieval.index import SqliteFtsIndex
+from dnd_assistant.retrieval.lexical import LexicalHit, LexicalIndex
 from dnd_assistant.retrieval.search import VaultSearchService
 from dnd_assistant.retrieval.service import EntityResolver, SearchService
 from dnd_assistant.retrieval.types import (
@@ -25,6 +29,8 @@ from dnd_assistant.retrieval.types import (
 __all__: list[str] = [
     "Ambiguous",
     "EntityResolver",
+    "LexicalHit",
+    "LexicalIndex",
     "MatchKind",
     "NotFound",
     "Resolved",
@@ -32,5 +38,6 @@ __all__: list[str] = [
     "SearchHit",
     "SearchQuery",
     "SearchService",
+    "SqliteFtsIndex",
     "VaultSearchService",
 ]
