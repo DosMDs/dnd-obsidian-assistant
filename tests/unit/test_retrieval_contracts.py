@@ -19,6 +19,7 @@ Covers:
 
 from __future__ import annotations
 
+import ast
 from typing import cast
 
 import pytest
@@ -535,6 +536,14 @@ def _parse_imports_from_source(source: str, *, module_path: str | None = None) -
     *module_path* is ``None``, relative imports are collected as-is
     (their ``node.module`` value without resolution).
 
+    For ``ImportFrom`` nodes with named aliases (``from pkg import sub``),
+    the resolved base module **and** each qualified alias
+    (``pkg.sub``) are added as candidates.  This ensures that a bare
+    ``ImportFrom`` such as ``from dnd_assistant import storage`` is
+    detectable as ``dnd_assistant.storage`` by prefix-based boundary
+    checks.  ``from package import *`` produces only the base module
+    (no meaningless ``package.*`` candidate).
+
     Parameters
     ----------
     source:
@@ -547,8 +556,6 @@ def _parse_imports_from_source(source: str, *, module_path: str | None = None) -
     -------
     Set of imported module paths (absolute when *module_path* is given).
     """
-    import ast
-
     tree = ast.parse(source)
     result: set[str] = set()
     for node in ast.walk(tree):
@@ -561,11 +568,25 @@ def _parse_imports_from_source(source: str, *, module_path: str | None = None) -
                 if module_path is not None:
                     resolved = _resolve_relative_import(module_path, node.level, node.module)
                     result.add(resolved)
+                    _add_qualified_aliases(result, resolved, node)
                 elif node.module:
                     result.add(node.module)
             elif node.module:
                 result.add(node.module)
+                _add_qualified_aliases(result, node.module, node)
     return result
+
+
+def _add_qualified_aliases(result: set[str], base_module: str, node: ast.ImportFrom) -> None:
+    """For each named alias in an ``ImportFrom`` node, add a qualified
+    ``base_module.alias_name`` candidate to *result*.
+
+    ``from package import *`` produces no aliases and is silently skipped.
+    """
+    for alias in node.names:
+        if alias.name == "*":
+            continue
+        result.add(f"{base_module}.{alias.name}")
 
 
 def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
@@ -668,12 +689,15 @@ class TestBoundaries:
         Relative imports are resolved to absolute module paths using
         *module_path* as the context.
 
+        ``ImportFrom`` aliases are qualified: ``from pkg import sub``
+        produces both ``pkg`` and ``pkg.sub`` as candidates.
+
         Examples
         --------
         ``import sqlite3`` → ``{"sqlite3"}``
         ``import dnd_assistant.storage.types`` → ``{"dnd_assistant.storage.types"}``
-        ``from dnd_assistant.storage import VaultRepository`` → ``{"dnd_assistant.storage"}``
-        ``from .types import SearchHit`` → ``{"dnd_assistant.retrieval.types"}``
+        ``from dnd_assistant.storage import VaultRepository`` → ``{"dnd_assistant.storage", "dnd_assistant.storage.VaultRepository"}``
+        ``from .types import SearchHit`` → ``{"dnd_assistant.retrieval.types", "dnd_assistant.retrieval.types.SearchHit"}``
         """
         import importlib
 
@@ -778,11 +802,17 @@ class TestAstImportChecker:
 
     def test_from_import_storage(self) -> None:
         imports = self._parse_imports("from dnd_assistant.storage import VaultRepository")
-        assert imports == {"dnd_assistant.storage"}
+        assert imports == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
 
     def test_from_import_models_gateway(self) -> None:
         imports = self._parse_imports("from dnd_assistant.models.gateway import ModelGateway")
-        assert imports == {"dnd_assistant.models.gateway"}
+        assert imports == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }
 
     def test_import_rapidfuzz(self) -> None:
         imports = self._parse_imports("import rapidfuzz.fuzz")
@@ -799,7 +829,10 @@ class TestAstImportChecker:
         imports = self._parse_imports("from dnd_assistant.storage import VaultRepository")
         forbidden = {"dnd_assistant.storage"}
         actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.storage"}
+        assert actual == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
 
     def test_detect_storage_subpackage_import(self) -> None:
         """import dnd_assistant.storage.types is detected."""
@@ -813,7 +846,10 @@ class TestAstImportChecker:
         imports = self._parse_imports("from dnd_assistant.models.gateway import ModelGateway")
         forbidden = {"dnd_assistant.models"}
         actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.models.gateway"}
+        assert actual == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }
 
     def test_detect_tools_registry_import(self) -> None:
         """import dnd_assistant.tools.registry is detected."""
@@ -832,12 +868,125 @@ class TestAstImportChecker:
         imports = self._parse_imports("from rapidfuzz import fuzz")
         forbidden = {"rapidfuzz"}
         actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
-        assert actual == {"rapidfuzz"}
+        assert actual == {"rapidfuzz", "rapidfuzz.fuzz"}
+
+    # ── ImportFrom alias gap regression (S5-C03) ─────────────────────────
+    #
+    # ``from dnd_assistant import storage`` must produce
+    # ``dnd_assistant.storage`` as a detectable candidate.
+    # The old code only recorded ``node.module`` (``dnd_assistant``)
+    # and did not qualify alias names.
+
+    def test_absolute_alias_storage_detected(self) -> None:
+        """``from dnd_assistant import storage`` must be detectable."""
+        imports = self._parse_imports("from dnd_assistant import storage")
+        assert "dnd_assistant.storage" in imports
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert "dnd_assistant.storage" in actual
+
+    def test_absolute_alias_models_detected(self) -> None:
+        """``from dnd_assistant import models`` must be detectable."""
+        imports = self._parse_imports("from dnd_assistant import models")
+        assert "dnd_assistant.models" in imports
+        forbidden = {"dnd_assistant.models"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert "dnd_assistant.models" in actual
+
+    def test_absolute_alias_tools_detected(self) -> None:
+        """``from dnd_assistant import tools`` must be detectable."""
+        imports = self._parse_imports("from dnd_assistant import tools")
+        assert "dnd_assistant.tools" in imports
+        forbidden = {"dnd_assistant.tools"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert "dnd_assistant.tools" in actual
+
+    def test_relative_alias_storage_detected(self) -> None:
+        """``from .. import storage`` in retrieval/service context
+        must produce ``dnd_assistant.storage``.
+        """
+        imports = _parse_imports_from_source(
+            "from .. import storage",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert "dnd_assistant.storage" in imports
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert "dnd_assistant.storage" in actual
+
+    def test_relative_alias_models_detected(self) -> None:
+        """``from .. import models`` in retrieval/service context
+        must produce ``dnd_assistant.models``.
+        """
+        imports = _parse_imports_from_source(
+            "from .. import models",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert "dnd_assistant.models" in imports
+        forbidden = {"dnd_assistant.models"}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert "dnd_assistant.models" in actual
+
+    def test_relative_alias_tools_detected(self) -> None:
+        """``from .. import tools`` in retrieval/service context
+        must produce ``dnd_assistant.tools``.
+        """
+        imports = _parse_imports_from_source(
+            "from .. import tools",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert "dnd_assistant.tools" in imports
+        forbidden = {"dnd_assistant.tools"}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert "dnd_assistant.tools" in actual
+
+    def test_absolute_alias_domain_allowed(self) -> None:
+        """``from dnd_assistant import domain`` is NOT a forbidden
+        import for retrieval contracts.
+        """
+        imports = self._parse_imports("from dnd_assistant import domain")
+        assert "dnd_assistant.domain" in imports
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+        }
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert not actual
+
+    def test_relative_dot_types_allowed(self) -> None:
+        """``from . import types`` in retrieval/service context
+        resolves to ``dnd_assistant.retrieval.types`` and is NOT rejected.
+        """
+        imports = _parse_imports_from_source(
+            "from . import types",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert "dnd_assistant.retrieval.types" in imports
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual
+
+    def test_star_import_no_alias_candidate(self) -> None:
+        """``from package import *`` must NOT produce a meaningless
+        ``package.*`` candidate.
+        """
+        imports = self._parse_imports("from dnd_assistant import *")
+        assert "dnd_assistant" in imports
+        assert "dnd_assistant.*" not in imports
 
     # ── Allowed imports not falsely rejected ─────────────────────────────
 
     def test_allowed_domain_import_not_falsely_rejected(self) -> None:
         imports = self._parse_imports("from dnd_assistant.domain.types import EntityId")
+        assert "dnd_assistant.domain.types" in imports
+        assert "dnd_assistant.domain.types.EntityId" in imports
         forbidden = {
             "dnd_assistant.storage",
             "dnd_assistant.models",
@@ -849,6 +998,8 @@ class TestAstImportChecker:
 
     def test_allowed_retrieval_import_not_falsely_rejected(self) -> None:
         imports = self._parse_imports("from dnd_assistant.retrieval.types import SearchHit")
+        assert "dnd_assistant.retrieval.types" in imports
+        assert "dnd_assistant.retrieval.types.SearchHit" in imports
         forbidden = {
             "dnd_assistant.storage",
             "dnd_assistant.models",
@@ -874,7 +1025,10 @@ class TestAstImportChecker:
         # Correct behaviour
         forbidden = {"dnd_assistant.storage"}
         actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.storage"}
+        assert actual == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
 
     def test_regression_buggy_split_dot_zero_detects_models(self) -> None:
         """Same regression proof for models import."""
@@ -885,7 +1039,10 @@ class TestAstImportChecker:
 
         forbidden = {"dnd_assistant.models"}
         actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.models.gateway"}
+        assert actual == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }
 
     def test_regression_buggy_split_dot_zero_detects_tools(self) -> None:
         """Same regression proof for tools import."""
@@ -908,7 +1065,10 @@ class TestAstImportChecker:
             "from .types import SearchHit",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert imports == {"dnd_assistant.retrieval.types"}
+        assert imports == {
+            "dnd_assistant.retrieval.types",
+            "dnd_assistant.retrieval.types.SearchHit",
+        }
         forbidden = {
             "dnd_assistant.storage",
             "dnd_assistant.models",
@@ -927,7 +1087,10 @@ class TestAstImportChecker:
             "from ..domain.types import EntityId",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert imports == {"dnd_assistant.domain.types"}
+        assert imports == {
+            "dnd_assistant.domain.types",
+            "dnd_assistant.domain.types.EntityId",
+        }
         forbidden = {
             "dnd_assistant.storage",
             "dnd_assistant.models",
@@ -945,10 +1108,16 @@ class TestAstImportChecker:
             "from ..storage import VaultRepository",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert imports == {"dnd_assistant.storage"}
+        assert imports == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
         forbidden = {"dnd_assistant.storage"}
         actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.storage"}
+        assert actual == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
 
     def test_relative_models_import_detected(self) -> None:
         """``from ..models.gateway import ModelGateway`` in retrieval/service
@@ -959,10 +1128,16 @@ class TestAstImportChecker:
             "from ..models.gateway import ModelGateway",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert imports == {"dnd_assistant.models.gateway"}
+        assert imports == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }
         forbidden = {"dnd_assistant.models"}
         actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.models.gateway"}
+        assert actual == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }
 
     def test_relative_tools_import_detected(self) -> None:
         """``from ..tools.registry import ToolRegistry`` in retrieval/service
@@ -973,10 +1148,16 @@ class TestAstImportChecker:
             "from ..tools.registry import ToolRegistry",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert imports == {"dnd_assistant.tools.registry"}
+        assert imports == {
+            "dnd_assistant.tools.registry",
+            "dnd_assistant.tools.registry.ToolRegistry",
+        }
         forbidden = {"dnd_assistant.tools"}
         actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.tools.registry"}
+        assert actual == {
+            "dnd_assistant.tools.registry",
+            "dnd_assistant.tools.registry.ToolRegistry",
+        }
 
     # ── Regression: previous S5-C01 ignored node.level ────────────────────
 
@@ -1000,10 +1181,16 @@ class TestAstImportChecker:
             "from ..storage import VaultRepository",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert resolved == {"dnd_assistant.storage"}
+        assert resolved == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
         forbidden = {"dnd_assistant.storage"}
         actual = {i for i in resolved if _has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.storage"}
+        assert actual == {
+            "dnd_assistant.storage",
+            "dnd_assistant.storage.VaultRepository",
+        }
 
     def test_regression_old_code_missed_relative_models(self) -> None:
         """Same regression proof for relative models import."""
@@ -1017,7 +1204,13 @@ class TestAstImportChecker:
             "from ..models.gateway import ModelGateway",
             module_path="dnd_assistant.retrieval.service",
         )
-        assert resolved == {"dnd_assistant.models.gateway"}
+        assert resolved == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }
         forbidden = {"dnd_assistant.models"}
         actual = {i for i in resolved if _has_forbidden_prefix(i, forbidden)}
-        assert actual == {"dnd_assistant.models.gateway"}
+        assert actual == {
+            "dnd_assistant.models.gateway",
+            "dnd_assistant.models.gateway.ModelGateway",
+        }

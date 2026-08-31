@@ -1018,9 +1018,9 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 1. **`_ast_imports()`** — removed `.split(".")[0]` from both `alias.name` and `node.module` collection. Full dotted paths are now preserved (e.g. `dnd_assistant.storage`, `dnd_assistant.models.gateway`, `rapidfuzz.fuzz`).
 2. **`_has_forbidden_prefix()`** — new static helper with prefix-aware matching: `module == prefix or module.startswith(prefix + ".")`.
 3. **Forbidden-prefix sets** — changed from short names (`{"storage", "models", ...}`) to full prefixes (`{"dnd_assistant.storage", "dnd_assistant.models", ...}`) using the new prefix-aware matcher.
-4. **`TestAstImportChecker`** — new test class (25 tests) proving:
+4. **`TestAstImportChecker`** — new test class (17 tests) proving:
    - Full dotted paths are preserved (6 tests: `sqlite3`, `dnd_assistant.storage.types`, `from dnd_assistant.storage import ...`, `from dnd_assistant.models.gateway import ...`, `rapidfuzz.fuzz`, `dnd_assistant.tools.registry`)
-   - Forbidden-prefix detection works correctly (7 tests: storage from-import, storage subpackage, models gateway, tools registry, sqlite3, rapidfuzz, allowed imports not falsely rejected)
+   - Forbidden-prefix detection works correctly (8 tests: storage from-import, storage subpackage, models gateway, tools registry, sqlite3, rapidfuzz, allowed domain import, allowed retrieval import)
    - Regression proof: `split(".")[0]` would miss `dnd_assistant.storage.*`, `dnd_assistant.models.*`, `dnd_assistant.tools.*` (3 tests that would fail under the old buggy behaviour)
 
 **Architectural nuance preserved:**
@@ -1053,10 +1053,8 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 **Commit SHA:** `bf68b45`
 
 **Historical test-count correction:**
-- S5-C01 documentation claimed 25 tests in `TestAstImportChecker` and 117 total.
-- The actual increase from S5-C00 (100 tests) to S5-C01 (117 tests) is **17 test cases**, not 25.
-- The 25 figure was the count within `TestAstImportChecker` alone, but the net targeted-test increase was 17.
-- This is now corrected in the S5-C02 record below.
+- S5-C01 originally documented 25 tests for `TestAstImportChecker`.
+- That metadata was incorrect. The actual S5-C01 increase was **17 targeted test cases** (100 → 117), and the S5-C01 record has now been corrected in place without rewriting Git history.
 
 ### S5-C02 correction record
 
@@ -1103,6 +1101,66 @@ was represented as `"storage"` instead of `"dnd_assistant.storage"` and therefor
 **Quality-gate results:**
 - `uv run pytest tests/unit/test_retrieval_contracts.py` — 124 passed (was 117)
 - `uv run pytest` (full suite) — 1623 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 171 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- No production source files changed (only test file `tests/unit/test_retrieval_contracts.py`)
+- S5-00 = [x] (unchanged)
+- S5-01 = [ ] (unchanged)
+- No S5-01 implementation started
+- No exact ID/name/alias search implementation
+- No RapidFuzz search
+- No SQLite/FTS
+- No EntityResolver implementation
+- No confidence thresholds
+- No session context
+- No CLI commands
+- No tool layer
+- No ModelGateway/Ollama
+- No embeddings/vector DB
+
+### S5-C03 correction record
+
+**ImportFrom alias gap — bare ``from pkg import sub`` not detectable.**
+
+**Defect confirmed:**
+- `_parse_imports_from_source()` recorded the resolved `ImportFrom.module` (e.g. `dnd_assistant`) but did not qualify alias names.
+- `from dnd_assistant import storage` produced only `{"dnd_assistant"}`, not `{"dnd_assistant", "dnd_assistant.storage"}`.
+- The same issue applied to bare relative imports: `from .. import storage` inside `dnd_assistant.retrieval.service` resolved to `dnd_assistant` but did not produce `dnd_assistant.storage`.
+- `from package import *` was not affected (no meaningful `package.*` candidate).
+
+**Production fix (test file only — no production source changed):**
+
+1. **`_add_qualified_aliases(result, base_module, node)`** — new module-level helper that adds `base_module.alias_name` for each named alias in an `ImportFrom` node. `from package import *` is silently skipped.
+2. **`_parse_imports_from_source()`** — calls `_add_qualified_aliases` after adding the resolved base module for both absolute and resolved-relative `ImportFrom` nodes. Relative imports without `module_path` are unchanged (collected as-is).
+
+**Alias-gap regression tests added (9 tests in `TestAstImportChecker`):**
+
+| Test | Source | Context | Verifies |
+|---|---|---|---|
+| `test_absolute_alias_storage_detected` | `from dnd_assistant import storage` | — | `dnd_assistant.storage` detectable |
+| `test_absolute_alias_models_detected` | `from dnd_assistant import models` | — | `dnd_assistant.models` detectable |
+| `test_absolute_alias_tools_detected` | `from dnd_assistant import tools` | — | `dnd_assistant.tools` detectable |
+| `test_relative_alias_storage_detected` | `from .. import storage` | `retrieval.service` | `dnd_assistant.storage` detectable |
+| `test_relative_alias_models_detected` | `from .. import models` | `retrieval.service` | `dnd_assistant.models` detectable |
+| `test_relative_alias_tools_detected` | `from .. import tools` | `retrieval.service` | `dnd_assistant.tools` detectable |
+| `test_absolute_alias_domain_allowed` | `from dnd_assistant import domain` | — | NOT rejected |
+| `test_relative_dot_types_allowed` | `from . import types` | `retrieval.service` | NOT rejected |
+| `test_star_import_no_alias_candidate` | `from dnd_assistant import *` | — | No `dnd_assistant.*` produced |
+
+**Existing tests preserved:**
+- All C01/C02 regression tests pass unchanged (expected sets updated for new alias candidates).
+
+**Historical S5-C01 metadata corrected:**
+- S5-C01 originally documented 25 tests for `TestAstImportChecker`. That metadata was incorrect. The actual S5-C01 increase was 17 targeted test cases (100 → 117), and the S5-C01 record has now been corrected in place without rewriting Git history.
+- The false explanation `"The 25 figure was the count within TestAstImportChecker alone"` has been removed.
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 133 passed (was 124; +9 alias-gap regression tests)
+- `uv run pytest` (full suite) — 1632 passed, 34 skipped
 - `uv run ruff check .` — All checks passed
 - `uv run ruff format --check .` — 171 files already formatted
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
