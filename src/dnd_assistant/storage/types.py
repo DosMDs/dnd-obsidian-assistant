@@ -28,10 +28,12 @@ from dnd_assistant.domain.types import EntityType
 if TYPE_CHECKING:
     from dnd_assistant.domain.calendar import WorldTick
     from dnd_assistant.domain.entity import Entity
+    from dnd_assistant.domain.session import Session
     from dnd_assistant.domain.types import EntityId, Revision
     from dnd_assistant.domain.world_time import CurrentWorldTime
     from dnd_assistant.storage.audit import AuditContext
     from dnd_assistant.storage.patch import EntityPatch
+    from dnd_assistant.storage.session_metadata import RawSessionMetadata
 
 
 # ── Entity directory mapping ───────────────────────────────────────────────
@@ -364,5 +366,118 @@ class WorldTimeRepository(Protocol):
             ValidationError: The ``world_tick`` or ``expected_revision``
                 is invalid.
             StorageError: A filesystem or audit operation failed.
+        """
+        ...
+
+
+# ── SessionMetadataRepository protocol ────────────────────────────────────
+
+
+@runtime_checkable
+class SessionMetadataRepository(Protocol):
+    """Protocol for raw session metadata persistence.
+
+    ``SessionMetadataRepository`` owns read, create, list, and active-session
+    discovery operations for the ``_system/raw/sessions/<id>/metadata.json``
+    sidecar files.
+
+    It is a separate persistence aggregate from ``VaultRepository`` and
+    ``WorldTimeRepository`` — session metadata is not an Entity and does not
+    live in an entity directory.
+
+    All mutations require explicit ``AuditContext``.
+    """
+
+    def allocate_next_session_id(self) -> str:
+        """Allocate the next automatic session ID.
+
+        The allocator scans both ``Sessions/`` and ``_system/raw/sessions/``
+        for existing numeric IDs matching ``^S[0-9]+$`` and returns the next
+        value formatted with minimum 3 digits.
+
+        Non-numeric IDs (e.g. ``\"Session Alpha\"``) are preserved and do not
+        affect the numeric maximum.
+
+        Returns:
+            The next available session ID (e.g. ``\"S006\"``).
+
+        Raises:
+            StorageError: A filesystem or symlink-safety error occurred.
+        """
+        ...
+
+    def create_session(
+        self,
+        session: Session,
+        *,
+        audit: AuditContext,
+    ) -> RawSessionMetadata:
+        """Persist a new raw session metadata record.
+
+        Creates the session storage directories, initializes an empty
+        ``events.jsonl``, and atomically writes ``metadata.json``.
+
+        The persisted ``metadata.json`` may contain extra fields beyond the
+        canonical ``Session`` schema; those are preserved in
+        ``RawSessionMetadata.extra_fields``.
+
+        Args:
+            session: The canonical ``Session`` to persist.
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``RawSessionMetadata`` (verified read-back).
+
+        Raises:
+            ConflictError: The session ID already exists.
+            StorageError: A filesystem or audit operation failed.
+        """
+        ...
+
+    def get_session_metadata(
+        self,
+        session_id: str,
+    ) -> RawSessionMetadata:
+        """Read raw session metadata for a specific session.
+
+        Args:
+            session_id: The session identifier.
+
+        Returns:
+            The validated ``RawSessionMetadata``.
+
+        Raises:
+            NotFoundError: No metadata exists for the given session ID.
+            StorageError: The metadata is corrupt, malformed, or unsafe.
+        """
+        ...
+
+    def list_session_metadata(self) -> list[RawSessionMetadata]:
+        """List all raw session metadata records.
+
+        Discovers persisted raw sessions deterministically, sorted by
+        session ID.
+
+        Returns:
+            A list of ``RawSessionMetadata`` values.  Empty list when no
+            raw sessions exist.
+
+        Raises:
+            StorageError: A corrupt or unsafe session was encountered.
+        """
+        ...
+
+    def get_active_session(self) -> RawSessionMetadata | None:
+        """Return the active session metadata, if exactly one exists.
+
+        An active session is identified by ``session.status == \"active\"``.
+
+        Returns:
+            The active ``RawSessionMetadata``, or ``None`` if no active
+            session exists.
+
+        Raises:
+            ConflictError: More than one active session exists.
+            StorageError: A corrupt or unsafe session was encountered.
         """
         ...

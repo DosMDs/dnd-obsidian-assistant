@@ -234,3 +234,57 @@ def test_storage_world_time_does_not_import_cli() -> None:
     _clean_import("dnd_assistant.storage.world_time")
     mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
     assert not mod_names, f"storage.world_time imported CLI modules: {mod_names}"
+
+
+# ── storage/session_metadata must not depend on models/retrieval/tools/application/cli ──
+
+
+def test_storage_session_metadata_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.storage.session_metadata")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"storage.session_metadata imported model modules: {mod_names}"
+
+
+def test_storage_session_metadata_does_not_import_retrieval() -> None:
+    _clean_import("dnd_assistant.storage.session_metadata")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
+    assert not mod_names, f"storage.session_metadata imported retrieval modules: {mod_names}"
+
+
+def test_storage_session_metadata_does_not_import_tools() -> None:
+    _clean_import("dnd_assistant.storage.session_metadata")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.tools")}
+    assert not mod_names, f"storage.session_metadata imported tool modules: {mod_names}"
+
+
+def test_storage_session_metadata_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.storage.session_metadata")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"storage.session_metadata imported application modules: {mod_names}"
+
+
+def test_storage_session_metadata_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.storage.session_metadata")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"storage.session_metadata imported CLI modules: {mod_names}"
+
+
+# ── application/session_runtime must not depend on models/tools/ollama ──
+
+
+def test_application_session_runtime_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.application.session_runtime")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"application.session_runtime imported model modules: {mod_names}"
+
+
+def test_application_session_runtime_does_not_import_tools() -> None:
+    _clean_import("dnd_assistant.application.session_runtime")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.tools")}
+    assert not mod_names, f"application.session_runtime imported tool modules: {mod_names}"
+
+
+def test_application_session_runtime_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.application.session_runtime")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"application.session_runtime triggered ollama import: {mod_names}"

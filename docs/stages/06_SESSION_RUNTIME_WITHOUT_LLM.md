@@ -501,3 +501,110 @@ Published S6-01 history was preserved; no rewrite was used.
 
 **Correction commit SHA:** (set after commit)
 **Commit message:** `fix: harden world time persistence integrity (S6-C01)`
+
+### S6-02 — Raw session metadata persistence + ID allocation + start/status lifecycle
+
+**Scope implemented:**
+
+1. `src/dnd_assistant/storage/types.py` — `SessionMetadataRepository` protocol
+   with `allocate_next_session_id()`, `create_session()`, `get_session_metadata()`,
+   `list_session_metadata()`, and `get_active_session()`.
+
+2. `src/dnd_assistant/storage/session_metadata.py` — new module defining:
+   - `RawSessionMetadata` — storage-level representation wrapping a validated
+     canonical `Session` plus preserved unknown extra fields.
+   - `_serialize` / `_deserialize` — deterministic JSON codec with one final
+     newline, compact separators, and sorted keys.
+   - `_CANONICAL_SESSION_FIELDS` — frozenset ensuring extra fields never
+     override canonical Session fields.
+   - `ObsidianSessionMetadataRepository` — concrete filesystem-backed
+     implementation with:
+     - ID allocation scanning both `Sessions/` and `_system/raw/sessions/`.
+     - Session creation: creates both directories, empty `events.jsonl`,
+       atomically writes `metadata.json`, verified read-back.
+     - Path reauthorization and mutation environment validation before writes.
+     - Audit intent/committed records with `operation="session.start"`.
+     - Exclusive-create semantics for `events.jsonl` via `os.open(O_CREAT|O_EXCL)`.
+     - Symlink rejection at all leaf and directory levels.
+     - Active-session discovery with `ConflictError` for 2+ active sessions.
+
+3. `src/dnd_assistant/application/session_runtime.py` — `SessionRuntimeService`
+   composing `SessionMetadataRepository` + `WorldTimeRepository`:
+   - `start_session()`: checks no active session, reads current world tick,
+     allocates ID, constructs `Session(status="active", revision=1)`, persists.
+   - `get_active_session()`: delegates to repository (no in-memory cache).
+
+4. `src/dnd_assistant/storage/__init__.py` — added `RawSessionMetadata`,
+   `ObsidianSessionMetadataRepository`, `SessionMetadataRepository` exports.
+
+5. `tests/unit/test_session_metadata.py` — 53 tests covering:
+   - `RawSessionMetadata` value semantics (construct, equality, hash, repr).
+   - Metadata codec: serialize, deserialize, roundtrip, invalid JSON, non-object,
+     invalid Session fields, directory/ID mismatch, unknown extras preserved,
+     canonical fields not overridden.
+   - Path safety: 4 symlink tests (skipped when OS doesn't support symlinks).
+   - ID allocation: no sessions, S001→S002, S001+S005→S006, split trees,
+     S999→S1000, S1000→S1001, non-numeric ignored, collision detection.
+   - Session creation: directories, events.jsonl, metadata.json, no Session.md,
+     no conversation.jsonl, revision=1, status=active, readback, collision,
+     no overwrite.
+   - Audit: intent+committed, operation name, entity_id=None, session ID,
+     source, before_hash=None, after_hash matches.
+   - Failure integrity: atomic write failure, events.jsonl creation failure,
+     pre-existing sessions unchanged.
+
+6. `tests/unit/test_session_runtime.py` — 17 tests covering:
+   - Start session: first ID, S005→S006, real_started_at, world_tick_start,
+     status=active, real_finished_at=None, world_tick_end=None, processed=False,
+     processed_model_profile=None, revision=1.
+   - Get active session: none, same session after start, multiple active→Conflict.
+   - Second start while active→ConflictError.
+   - World time missing→NotFoundError.
+   - World time not mutated by start.
+   - No in-memory authoritative active session.
+
+7. `tests/contract/test_boundaries.py` — 8 new boundary tests verifying:
+   - `storage.session_metadata` does not import models/retrieval/tools/application/cli.
+   - `application.session_runtime` does not import models/tools/ollama.
+
+**Contract decisions:**
+
+- `RawSessionMetadata` wraps `Session` + `extra_fields` dict, analogous to
+  `VaultDocument` for entities.
+- Canonical Session fields (`_CANONICAL_SESSION_FIELDS`) are never overridden
+  by extra fields during serialization.
+- ID allocation scans both `Sessions/` and `_system/raw/sessions/` for
+  `^S[0-9]+$` patterns; non-numeric IDs are preserved.
+- `events.jsonl` is created empty via exclusive-create (`os.open(O_CREAT|O_EXCL)`)
+  — not through `atomic_write_text`.
+- `Session.md` is explicitly NOT written in S6-02.
+- `get_active_session()` reads Vault state each time (no in-memory cache).
+- `ConflictError` for 2+ active sessions; no arbitrary selection.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_metadata.py` — 49 passed, 4 skipped
+- `uv run pytest tests/unit/test_session_runtime.py` — 17 passed
+- `uv run pytest tests/contract/test_boundaries.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py` — 111 passed, 4 skipped
+- `uv run pytest tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/contract/test_boundaries.py` — 111 passed, 4 skipped
+- `uv run pytest tests/unit/test_session.py tests/unit/test_session_storage_paths.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/unit/test_world_time.py tests/unit/test_world_time_repository.py tests/contract/test_boundaries.py` — 359 passed, 19 skipped
+- `uv run pytest` (full suite) — **2170 passed, 75 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 200 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Starting SHA:** `7a3091cc96bc1c91a21d6d96131a5d5eefccbd0e`
+**Implementation commit:** (set after commit)
+**Commit message:** `feat: add session start and metadata runtime (S6-02)`
+
+**Explicit deferrals:**
+
+- S6-03 (append-only event JSONL logging) is NOT started.
+- S6-04 (session end, touched IDs, processing pending) is NOT started.
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- `CalendarService`/world time were not mutated by session start.
+- No `Session.md`, `conversation.jsonl`, or event schema implemented.
