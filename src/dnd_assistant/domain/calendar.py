@@ -727,12 +727,11 @@ class _CalendarLayout:
         "_hours_per_day",
         "_minutes_per_hour",
         "_month_offsets",
-        "_intercalary_offsets",
+        "_intercalary_offsets_by_name",
         "_day_index",
         "_month_map",
         "_intercalary_set",
         "_month_names_ordered",
-        "_ic_names_ordered",
     )
 
     def __init__(self, definition: CalendarDefinition) -> None:
@@ -747,15 +746,16 @@ class _CalendarLayout:
         self._month_map: dict[str, CalendarMonth] = {m.name: m for m in definition.months}
         self._intercalary_set: set[str] = {d.name for d in definition.intercalary_days}
         self._month_names_ordered: tuple[str, ...] = tuple(m.name for m in definition.months)
-        self._ic_names_ordered: tuple[str, ...] = tuple(d.name for d in definition.intercalary_days)
 
         # Build the chronological day index for one year.
         # For each month in order: emit its numbered days, then emit any
         # intercalary days declared after that month (in declaration order).
         # This correctly handles multiple intercalary days after the same month.
+        # Intercalary day offsets are stored in a name-keyed dict so that
+        # lookup does not depend on correlated declaration-order indices.
         lookup: list[tuple[bool, str, int]] = []
         month_offsets: list[int] = []
-        ic_offsets: list[int] = []
+        ic_offsets_by_name: dict[str, int] = {}
         for m in definition.months:
             month_offsets.append(len(lookup))
             for d in range(m.days):
@@ -763,11 +763,11 @@ class _CalendarLayout:
             # Emit intercalary days declared after this month
             for ic in definition.intercalary_days:
                 if ic.after_month == m.name:
-                    ic_offsets.append(len(lookup))
+                    ic_offsets_by_name[ic.name] = len(lookup)
                     lookup.append((True, ic.name, 1))
 
         self._month_offsets: tuple[int, ...] = tuple(month_offsets)
-        self._intercalary_offsets: tuple[int, ...] = tuple(ic_offsets)
+        self._intercalary_offsets_by_name: dict[str, int] = ic_offsets_by_name
         self._day_index: tuple[tuple[bool, str, int], ...] = tuple(lookup)
 
     def validate_date(self, date: GameDate, label: str = "date") -> None:
@@ -807,8 +807,7 @@ class _CalendarLayout:
     def _day_index_offset(self, date: GameDate) -> int:
         """Return zero-based day offset of date within its year."""
         if date.intercalary_day is not None:
-            ic_idx = self._ic_names_ordered.index(date.intercalary_day)
-            return self._intercalary_offsets[ic_idx]
+            return self._intercalary_offsets_by_name[date.intercalary_day]
         # Regular date
         month_idx = self._month_names_ordered.index(date.month)  # type: ignore[arg-type]
         return self._month_offsets[month_idx] + (date.day - 1)  # type: ignore[operator]

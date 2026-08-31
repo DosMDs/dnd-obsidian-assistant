@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31
+**Last updated:** 2026-08-31 (S4-04)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 4 — Calendar`
 **Status:** `IN PROGRESS`
@@ -179,7 +179,7 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - [x] `S4-01` Deterministic date ↔ world_tick conversion
 - [x] `S4-02` World-time arithmetic + relative-time operations
 - [x] `S4-03` TimelineEvent calendar queries
-- [ ] `S4-04` Custom-calendar/intercalary hardening + property tests
+- [x] `S4-04` Custom-calendar/intercalary hardening + property tests
 - [ ] `S4-05` Full Stage 4 verification/diff/status
 
 ### Definition of Done
@@ -596,11 +596,114 @@ All boundaries are inclusive. Interval-overlap semantics for `events_between`, `
 - `events_between`, `events_near`, `upcoming`, `time_until_event` unchanged
 - Conservative overdue predicate (`interval[1] < current_tick`) unchanged
 - Unknown handling unchanged
-- S4-04 remains NOT STARTED
+- S4-04 remains NOT STARTED (at S4-C02 time)
 - S4-05 remains NOT STARTED
 - Stage 5 remains NOT STARTED
 
-## Stage 3 — Vault Repository
+## Stage 4 — S4-04 completion record
+
+**Review range:** S4-C02 completion through S4-04
+
+**Intercalary hardening investigation:**
+
+The suspected cross-month declaration-order defect was **confirmed** and corrected.
+
+**Root cause:**
+- `_CalendarLayout._ic_names_ordered` stored intercalary names in declaration order.
+- `_CalendarLayout._intercalary_offsets` stored chronological offsets (built by iterating months in order).
+- `_day_index_offset()` used `_ic_names_ordered.index(name)` to get a declaration-order index, then used that same index into `_intercalary_offsets`, assuming both arrays were in the same order.
+- When intercalary days were declared in non-chronological month order (e.g. "Late Festival" after "Second" declared before "Early Festival" after "First"), the name index and offset index did not correspond, producing swapped offsets and incorrect tick values.
+
+**Production correction:**
+- Replaced `_intercalary_offsets: tuple[int, ...]` (parallel array) with `_intercalary_offsets_by_name: dict[str, int]` (direct name-to-offset mapping).
+- Removed `_ic_names_ordered` slot as it is no longer needed.
+- `_day_index_offset()` now looks up `_intercalary_offsets_by_name[date.intercalary_day]` directly instead of the two-step `_ic_names_ordered.index(name) -> _intercalary_offsets[idx]`.
+- Same-month IC ordering (multiple ICs after the same month) remains correct because the dict is populated in the same iteration order as before.
+
+**Regression tests added (31 tests in `tests/unit/test_calendar_intercalary_hardening.py`):**
+- `TestCrossMonthDeclarationOrder` (10 tests): early-before-late, adjacency checks, round trips, negative-year round trips
+- `TestSameMonthIntercalaryOrder` (4 tests): declaration order preserved, adjacency, round trips
+- `TestFinalMonthIntercalary` (5 tests): after-final-month adjacency, before-next-year, round trip, year-boundary adjacent ticks
+- `TestMinimalCalendar` (7 tests): 1-month/1-day/1-hour/1-minute with 0, 1, and multiple IC days
+- `TestExtremeCalendars` (5 tests): very short months, large hours/day, large minutes/hour, 10 IC days ordering, negative-year with many ICs
+
+**Hypothesis strategy design:**
+- `calendar_strategy()` — valid-by-construction `CalendarDefinition` generator:
+  - 1-6 months with machine-friendly names (M0, M1, ...)
+  - 1-40 days per month
+  - 0-6 intercalary days with random `after_month` references (explicitly allowing cross-month ordering)
+  - 1-30 hours/day, 1-120 minutes/hour
+  - Epoch always in first month day 1
+- `draw_valid_date(draw, cal)` — definition-aware `GameDate` generator:
+  - Signed year range -10000 to +10000
+  - Random regular or intercalary date (when ICs exist)
+  - Valid hour/minute within calendar bounds
+- Tick/delta ranges: -10^9 to +10^9 for ticks, -10^6 to +10^6 for deltas
+- All strategies use bounded small ranges for effective shrinking
+- No `filter()` — valid-by-construction throughout
+
+**Properties implemented (15 tests):**
+
+| Property | Invariant | File |
+|---|---|---|
+| P1 | date -> tick -> date round trip | test_calendar_properties.py |
+| P2 | tick -> date -> tick round trip | test_calendar_properties.py |
+| P3 | epoch identity (date_to_tick(epoch)==0, tick_to_date(0)==epoch) | test_calendar_properties.py |
+| P4 | advance(advance(tick, delta), -delta) == tick | test_calendar_properties.py |
+| P5 | time_until(t, advance(t, d)) == d | test_calendar_properties.py |
+| P5b | time_until(advance(t, d), t) == -d | test_calendar_properties.py |
+| P5c | time_until(t, t) == 0 | test_calendar_properties.py |
+| P6 | adjacent ticks map to adjacent elapsed minutes | test_calendar_properties.py |
+| P7 | one-year translation = days_per_year * minutes_per_day | test_calendar_properties.py |
+| P8 | holidays do not affect tick_to_date | test_calendar_properties.py |
+| P8b | holidays do not affect date_to_tick | test_calendar_properties.py |
+| P9 | intercalary declaration order semantics (same-month + cross-month) | test_calendar_properties_p2.py |
+| P10 | events_between matches naive reference | test_calendar_properties_p2.py |
+| P11 | events_near matches naive distance | test_calendar_properties_p2.py |
+| P12 | overdue conservative semantics (end < current) | test_calendar_properties_p2.py |
+
+**Defects discovered by property testing:**
+- Beyond the targeted intercalary cross-month ordering defect (confirmed and fixed), no additional defects were discovered by property testing. All properties passed on the first successful run after the production fix.
+
+**Hypothesis configuration:**
+- Default settings used throughout (no custom `max_examples`, no deadline suppression).
+- `st.data()` pattern used instead of nested `@given` to avoid `HealthCheck.nested_given`.
+- No random seeds hard-coded.
+- No health checks suppressed.
+
+**Production changes:**
+- `src/dnd_assistant/domain/calendar.py` — `_CalendarLayout`:
+  - Replaced `_intercalary_offsets: tuple[int, ...]` with `_intercalary_offsets_by_name: dict[str, int]`
+  - Removed `_ic_names_ordered` slot
+  - Updated `_day_index_offset()` to use direct name-to-offset dict lookup
+
+**Test results:**
+- `uv run pytest tests/unit/test_calendar_intercalary_hardening.py` — 31 passed
+- `uv run pytest tests/property/test_calendar_properties.py tests/property/test_calendar_properties_p2.py` — 15 passed
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py tests/unit/test_calendar_event_queries.py tests/unit/test_timeline_event.py tests/unit/test_calendar_intercalary_hardening.py tests/property/test_calendar_properties.py tests/property/test_calendar_properties_p2.py` — 511 passed
+- `uv run pytest` (full suite) — 1496 passed, 34 skipped
+
+**Quality gates:**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 168 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope confirmation:**
+- S4-05 not started
+- Stage 5 not started
+- No retrieval work
+- No session-runtime work
+- No Tool Layer work
+- No ModelGateway/Ollama work
+- No leap-year functionality added
+- No new unrelated CalendarService API added
+- No storage/Vault imports
+
+**Tool-usage compliance:**
+All repository files were read and edited only through built-in GigaCode/IDE file tools (Read, Write, Edit). No PowerShell, Bash, or Python scripts were used for repository file mutation.
+
+**ADR assessment:** No ADR required. The production correction replaces a fragile parallel-array lookup with a direct name-keyed dict, which is a local implementation detail of `_CalendarLayout` and does not change any public API or architectural boundary.
 
 ### Goal
 
