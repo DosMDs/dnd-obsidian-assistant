@@ -21,13 +21,18 @@ import hashlib
 import json
 import os
 import re
+from collections.abc import Sequence
 from pathlib import Path
 
+from pydantic import TypeAdapter
+
 from dnd_assistant.domain.session import Session
-from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
+from dnd_assistant.domain.types import EntityId
+from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_paths import (
+    SessionStoragePaths,
     resolve_session_storage_paths,
 )
 
@@ -749,8 +754,281 @@ class ObsidianSessionMetadataRepository:
             + ", ".join(m.session.id for m in active)
         )
 
+    # ── Close ─────────────────────────────────────────────────────────────
 
-# ── Exact text reader ─────────────────────────────────────────────────────────
+    def close_session(
+        self,
+        session_id: str,
+        *,
+        expected_revision: int,
+        world_tick_end: int,
+        touched_entity_ids: Sequence[str],
+        audit: AuditContext,
+    ) -> RawSessionMetadata:
+        """Close an active session with completed state."""
+        # 1. Validate inputs
+        _validate_session_runtime_roots(self._vault_root)
+
+        # Validate EntityIds in touched_entity_ids
+        _entity_id_adapter = TypeAdapter(EntityId)
+        validated_touched: list[str] = []
+        for eid in touched_entity_ids:
+            try:
+                validated_touched.append(_entity_id_adapter.validate_python(eid))
+            except Exception as exc:
+                raise ValidationError(
+                    f"Invalid entity ID in touched_entity_ids: {eid!r}",
+                    cause=exc,
+                ) from exc
+
+        # 2. Resolve paths
+        paths = resolve_session_storage_paths(self._vault_root, session_id)
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # 3. Read exact current metadata
+        if not paths.raw_metadata.exists():
+            raise NotFoundError(f"Session metadata not found for {session_id}")
+
+        before_text = _read_exact_text(paths.raw_metadata)
+        before_hash = _content_hash(before_text)
+        current_meta = _deserialize(before_text, expected_id=session_id)
+        current_session = current_meta.session
+
+        # 4. Verify directory ID matches metadata ID (already done by _deserialize)
+
+        # 5. Verify expected revision
+        if current_session.revision != expected_revision:
+            raise ConflictError(
+                f"Session {session_id} revision mismatch: "
+                f"expected {expected_revision}, stored {current_session.revision}"
+            )
+
+        # 6. Verify closable lifecycle
+        if current_session.status != "active":
+            raise ConflictError(
+                f"Session {session_id} is not active (status={current_session.status!r}), "
+                f"cannot close"
+            )
+
+        # Check for contradictory finished/processed fields
+        if current_session.real_finished_at is not None:
+            raise StorageError(
+                f"Session {session_id} claims status='active' but real_finished_at is set"
+            )
+        if current_session.world_tick_end is not None:
+            raise StorageError(
+                f"Session {session_id} claims status='active' but world_tick_end is set"
+            )
+        if current_session.processed is True:
+            raise StorageError(f"Session {session_id} claims status='active' but processed is True")
+        if current_session.processed_model_profile is not None:
+            raise StorageError(
+                f"Session {session_id} claims status='active' but processed_model_profile is set"
+            )
+
+        # 7. Validate finish time >= start time
+        real_finished_at = audit.real_time
+        if real_finished_at < current_session.real_started_at:
+            raise ValidationError(
+                f"Finish time {real_finished_at} predates start time "
+                f"{current_session.real_started_at}"
+            )
+
+        # 8. Require valid raw events file
+        events_path = paths.raw_events
+        if events_path.is_symlink():
+            raise StorageError(f"events.jsonl is a symlink, rejected for safety: {events_path}")
+        if not events_path.exists():
+            raise StorageError(f"events.jsonl not found for session {session_id}")
+        if events_path.is_dir():
+            raise StorageError(f"events.jsonl is a directory: {events_path}")
+
+        # Snapshot exact event-log bytes/hash
+        events_before_text = _read_exact_text(events_path)
+        events_before_hash = _content_hash(events_before_text)
+
+        # 9. Build a fully validated new Session
+        new_session = Session(
+            id=current_session.id,
+            schema_version=current_session.schema_version,
+            type="session",
+            status="completed",
+            real_started_at=current_session.real_started_at,
+            real_finished_at=real_finished_at,
+            world_tick_start=current_session.world_tick_start,
+            world_tick_end=world_tick_end,
+            processed=False,
+            processed_model_profile=None,
+            revision=current_session.revision + 1,
+        )
+
+        # 10. Merge touched_entities from existing extras + supplied
+        existing_touched: list[str] = []
+        persisted_extras = dict(current_meta.extra_fields)
+        if "touched_entities" in persisted_extras:
+            raw = persisted_extras["touched_entities"]
+            if not isinstance(raw, list):
+                raise StorageError(
+                    f"Session {session_id}: persisted touched_entities is not a list"
+                )
+            for item in raw:
+                if not isinstance(item, str):
+                    raise StorageError(
+                        f"Session {session_id}: persisted touched_entities contains "
+                        f"non-string value: {item!r}"
+                    )
+                try:
+                    _entity_id_adapter.validate_python(item)
+                except Exception as exc:
+                    raise StorageError(
+                        f"Session {session_id}: persisted touched_entities contains "
+                        f"invalid EntityId: {item!r}",
+                        cause=exc,
+                    ) from exc
+                existing_touched.append(item)
+
+        # Merge: existing order first, new appended, duplicates removed by first occurrence
+        merged_touched: list[str] = []
+        seen: set[str] = set()
+        for eid in existing_touched:
+            if eid not in seen:
+                seen.add(eid)
+                merged_touched.append(eid)
+        for eid in validated_touched:
+            if eid not in seen:
+                seen.add(eid)
+                merged_touched.append(eid)
+
+        # 11. Build candidate metadata with extras
+        candidate_extras = dict(persisted_extras)
+        candidate_extras["touched_entities"] = merged_touched
+        candidate_extras["processing_status"] = "pending"
+
+        candidate_meta = RawSessionMetadata(session=new_session, extra_fields=candidate_extras)
+        serialized = _serialize(candidate_meta)
+        after_hash = _content_hash(serialized)
+
+        # 12. Audit intent
+        intent_record = _build_audit_record(
+            operation_id=audit.operation_id,
+            real_time=audit.real_time,
+            operation="session.end",
+            before_hash=before_hash,
+            after_hash=after_hash,
+            source=audit.source,
+            session=session_id,
+            model_profile=audit.model_profile,
+            prompt_version=audit.prompt_version,
+            phase="intent",
+        )
+        self._audit_service.append(intent_record)
+
+        # 13. Reauthorize after durable intent
+        _validate_session_runtime_roots(self._vault_root)
+        paths = resolve_session_storage_paths(self._vault_root, session_id)
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # Re-read metadata and verify unchanged
+        if not paths.raw_metadata.exists():
+            raise ConflictError(
+                f"Session metadata disappeared after intent for operation {audit.operation_id}"
+            )
+        current_text_after = _read_exact_text(paths.raw_metadata)
+        current_hash_after = _content_hash(current_text_after)
+        if current_hash_after != before_hash:
+            raise ConflictError(
+                f"Session metadata changed after intent for operation {audit.operation_id}"
+            )
+
+        # Re-read events and verify unchanged
+        events_path = paths.raw_events
+        if events_path.is_symlink():
+            raise ConflictError(
+                f"events.jsonl became a symlink after intent for operation {audit.operation_id}"
+            )
+        if not events_path.exists():
+            raise ConflictError(
+                f"events.jsonl disappeared after intent for operation {audit.operation_id}"
+            )
+        events_text_after = _read_exact_text(events_path)
+        events_hash_after = _content_hash(events_text_after)
+        if events_hash_after != events_before_hash:
+            raise ConflictError(
+                f"events.jsonl changed after intent for operation {audit.operation_id}"
+            )
+
+        # 14. Atomic write metadata
+        atomic_write_text(
+            target=paths.raw_metadata,
+            content=serialized,
+            validator=lambda c: _deserialize(c),
+        )
+
+        # 15. Verified close read-back
+        persisted_text = _read_exact_text(paths.raw_metadata)
+        persisted_hash = _content_hash(persisted_text)
+        if persisted_hash != after_hash:
+            raise StorageError(
+                f"Session close committed but hash verification failed for "
+                f"operation {audit.operation_id}"
+            )
+
+        persisted_meta = _deserialize(persisted_text, expected_id=session_id)
+
+        # Verify full persisted result equals candidate
+        if persisted_meta.session.status != "completed":
+            raise StorageError(
+                f"Session close committed but status is "
+                f"{persisted_meta.session.status!r} for operation {audit.operation_id}"
+            )
+        if persisted_meta.session.revision != new_session.revision:
+            raise StorageError(
+                f"Session close committed but revision mismatch for operation {audit.operation_id}"
+            )
+        if persisted_meta.session.real_finished_at != real_finished_at:
+            raise StorageError(
+                f"Session close committed but real_finished_at mismatch for "
+                f"operation {audit.operation_id}"
+            )
+        if persisted_meta.session.world_tick_end != world_tick_end:
+            raise StorageError(
+                f"Session close committed but world_tick_end mismatch for "
+                f"operation {audit.operation_id}"
+            )
+
+        # 16. Re-read events and verify exact unchanged hash
+        events_text_final = _read_exact_text(events_path)
+        events_hash_final = _content_hash(events_text_final)
+        if events_hash_final != events_before_hash:
+            raise StorageError(
+                f"events.jsonl changed after metadata close for operation {audit.operation_id}"
+            )
+
+        # 17. Append committed audit
+        committed_record = _build_audit_record(
+            operation_id=audit.operation_id,
+            real_time=audit.real_time,
+            operation="session.end",
+            before_hash=before_hash,
+            after_hash=after_hash,
+            source=audit.source,
+            session=session_id,
+            model_profile=audit.model_profile,
+            prompt_version=audit.prompt_version,
+            phase="committed",
+        )
+        try:
+            self._audit_service.append(committed_record)
+        except StorageError as exc:
+            raise StorageError(
+                f"Session close committed but audit finalization failed "
+                f"for operation {audit.operation_id}.  "
+                f"The mutated file exists in {paths.raw_dir}.  "
+                f"An intent audit record is present.",
+                cause=exc,
+            ) from exc
+
+        return persisted_meta
 
 
 def _read_exact_text(path: Path) -> str:
@@ -774,3 +1052,30 @@ def _read_exact_text(path: Path) -> str:
             f"Failed to read session metadata: {path}",
             cause=exc,
         ) from exc
+
+
+# ── Authorized metadata read helper (shared with session_events) ──────────────
+
+
+def _authorized_metadata_read(
+    vault_root: Path,
+    session_id: str,
+) -> tuple[SessionStoragePaths, str, RawSessionMetadata]:
+    """Validate runtime roots, resolve paths, and read metadata.
+
+    Returns:
+        ``(paths, exact_text, metadata)`` — all validated and consistent.
+
+    Raises:
+        NotFoundError: metadata.json does not exist.
+        StorageError: Path or content validation fails.
+    """
+    _validate_session_runtime_roots(vault_root)
+    paths = resolve_session_storage_paths(vault_root, session_id)
+
+    if not paths.raw_metadata.exists():
+        raise NotFoundError(f"Session metadata not found for {session_id}")
+
+    text = _read_exact_text(paths.raw_metadata)
+    meta = _deserialize(text, expected_id=session_id)
+    return paths, text, meta

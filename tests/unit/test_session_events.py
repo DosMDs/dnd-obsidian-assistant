@@ -21,7 +21,8 @@ from pathlib import Path
 import pytest
 
 import dnd_assistant.storage.session_events as _events_mod
-from dnd_assistant.errors import StorageError
+from dnd_assistant.domain.session import Session
+from dnd_assistant.errors import NotFoundError, StorageError
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_events import (
     ObsidianSessionEventRepository,
@@ -33,6 +34,7 @@ from dnd_assistant.storage.session_events import (
     _serialize_event,
     _validate_json_value,
 )
+from dnd_assistant.storage.session_metadata import RawSessionMetadata, _serialize
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -132,7 +134,21 @@ def _create_session_dir(vault_root: Path, session_id: str = "S001") -> Path:
     events_path = session_dir / "events.jsonl"
     events_path.write_text("", encoding="utf-8")
     metadata_path = session_dir / "metadata.json"
-    metadata_path.write_text('{"id":"' + session_id + '","status":"active"}\n', encoding="utf-8")
+    session = Session(
+        id=session_id,
+        type="session",
+        status="active",
+        real_started_at=datetime(2026, 8, 31, 15, 0, 0, tzinfo=UTC),
+        real_finished_at=None,
+        world_tick_start=13800,
+        world_tick_end=None,
+        processed=False,
+        processed_model_profile=None,
+        revision=1,
+    )
+    meta = RawSessionMetadata(session=session)
+    text = _serialize(meta)
+    metadata_path.write_text(text, encoding="utf-8")
     return events_path
 
 
@@ -493,8 +509,8 @@ class TestAppendOnlyPersistence:
         events_path = _create_session_dir(vault_root, "S001")
         session_dir = events_path.parent
         metadata_path = session_dir / "metadata.json"
-        # Overwrite with test-specific metadata
-        metadata_path.write_text('{"test":"data"}\n', encoding="utf-8")
+        # Read original metadata text
+        original_text = metadata_path.read_text(encoding="utf-8")
 
         repo.append_event(
             "S001",
@@ -504,7 +520,7 @@ class TestAppendOnlyPersistence:
             extra_fields={"text": "hello"},
             audit=_make_audit_context(),
         )
-        assert metadata_path.read_text(encoding="utf-8") == '{"test":"data"}\n'
+        assert metadata_path.read_text(encoding="utf-8") == original_text
 
     def test_fsync_called(self, vault_root: Path, monkeypatch) -> None:
         events_path = _create_session_dir(vault_root, "S001")
@@ -558,7 +574,7 @@ class TestPathSafety:
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        with pytest.raises(StorageError, match="no metadata.json"):
+        with pytest.raises((StorageError, NotFoundError), match="not found"):
             repo.append_event(
                 "S001",
                 event_type="note",

@@ -10,11 +10,12 @@ This module belongs to the application layer and must not import from:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING
 
 from dnd_assistant.domain.session import Session
-from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
+from dnd_assistant.domain.types import EntityId
+from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 
 if TYPE_CHECKING:
     from dnd_assistant.storage.audit import AuditContext
@@ -226,3 +227,66 @@ class SessionRuntimeService:
             extra_fields={"text": text},
             audit=audit,
         )
+
+    # ── End session ───────────────────────────────────────────────────────
+
+    def end_session(
+        self,
+        *,
+        touched_entity_ids: Sequence[EntityId] = (),
+        audit: AuditContext,
+    ) -> Session:
+        """End the current active session.
+
+        Lifecycle:
+        1. Get active session (exactly one required).
+        2. Strictly read/validate active session events.
+        3. Read canonical current world time.
+        4. Delegate close to ``SessionMetadataRepository.close_session``.
+
+        Args:
+            touched_entity_ids: Stable entity IDs touched during the session.
+            audit: Audit context for this operation.
+                ``audit.real_time`` is the session finish timestamp.
+
+        Returns:
+            The completed ``Session``.
+
+        Raises:
+            NotFoundError: No active session exists, or world time has
+                not been initialized.
+            ConflictError: More than one active session exists.
+            StorageError: A storage operation failed.
+        """
+        # 1. Get active session (exactly one required)
+        active = self._session_repo.get_active_session()
+        if active is None:
+            raise NotFoundError("Cannot end session: no active session. Start a session first.")
+
+        # 2. Strictly read/validate active session events
+        try:
+            self._event_repo.list_events(active.session.id)
+        except Exception as exc:
+            raise StorageError(
+                f"Cannot close session {active.session.id}: failed to validate event log",
+                cause=exc,
+            ) from exc
+
+        # 3. Read canonical current world time
+        try:
+            world_time = self._world_time_repo.get_current_world_time()
+        except NotFoundError:
+            raise NotFoundError(
+                "Cannot end session: current world time has not been initialized."
+            ) from None
+
+        # 4. Delegate close to repository
+        persisted = self._session_repo.close_session(
+            session_id=active.session.id,
+            expected_revision=active.session.revision,
+            world_tick_end=world_time.current_world_tick,
+            touched_entity_ids=touched_entity_ids,
+            audit=audit,
+        )
+
+        return persisted.session

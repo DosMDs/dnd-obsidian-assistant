@@ -28,6 +28,7 @@ from pydantic import TypeAdapter
 
 from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.errors import ConflictError, StorageError
+from dnd_assistant.storage.session_metadata import _authorized_metadata_read
 from dnd_assistant.storage.session_paths import (
     SessionStoragePaths,
     resolve_session_storage_paths,
@@ -897,6 +898,17 @@ class ObsidianSessionEventRepository:
         # 1. Validate session runtime roots
         _validate_session_runtime_roots(self._vault_root)
 
+        # 1.5. Read authorized metadata and verify session is active
+        # (before any event audit intent)
+        _meta_paths, _meta_text, _meta = _authorized_metadata_read(self._vault_root, session_id)
+        _meta_before_hash = _content_hash(_meta_text)
+        _meta_revision = _meta.session.revision
+        if _meta.session.status != "active":
+            raise ConflictError(
+                f"Session {session_id} is not active (status={_meta.session.status!r}), "
+                f"cannot append events"
+            )
+
         # 2. Resolve and validate event path
         paths = resolve_session_storage_paths(self._vault_root, session_id)
         _validate_mutation_environment(self._vault_root, self._audit_service)
@@ -958,6 +970,20 @@ class ObsidianSessionEventRepository:
         paths = resolve_session_storage_paths(self._vault_root, session_id)
         _validate_mutation_environment(self._vault_root, self._audit_service)
 
+        # 8.5. Re-read metadata and verify lifecycle still active
+        _meta_paths2, _meta_text2, _meta2 = _authorized_metadata_read(self._vault_root, session_id)
+        _meta_hash2 = _content_hash(_meta_text2)
+        if _meta_hash2 != _meta_before_hash:
+            raise ConflictError(
+                f"Session metadata changed after intent for operation {audit.operation_id}"
+            )
+        if _meta2.session.status != "active":
+            raise ConflictError(
+                f"Session {session_id} status changed to "
+                f"{_meta2.session.status!r} after intent for operation "
+                f"{audit.operation_id}"
+            )
+
         # Revalidate metadata sidecar
         _validate_metadata_exists(paths, session_id)
 
@@ -1018,6 +1044,22 @@ class ObsidianSessionEventRepository:
                 f"Event append committed but final event mismatch for "
                 f"operation {audit.operation_id}: "
                 f"persisted={persisted_event!r} != candidate={candidate!r}"
+            )
+
+        # 11.5. Post-append lifecycle recheck — metadata must still be active
+        _meta_paths3, _meta_text3, _meta3 = _authorized_metadata_read(self._vault_root, session_id)
+        _meta_hash3 = _content_hash(_meta_text3)
+        if _meta_hash3 != _meta_before_hash:
+            raise StorageError(
+                f"Session metadata changed after event append for operation "
+                f"{audit.operation_id}. Event bytes exist but metadata may have "
+                f"been closed concurrently."
+            )
+        if _meta3.session.status != "active":
+            raise StorageError(
+                f"Session {session_id} status changed to "
+                f"{_meta3.session.status!r} after event append for operation "
+                f"{audit.operation_id}. Event bytes exist but session is no longer active."
             )
 
         # 12. Append committed audit

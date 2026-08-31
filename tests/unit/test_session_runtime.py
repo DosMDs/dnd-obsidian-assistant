@@ -72,6 +72,37 @@ class FakeSessionMetadataRepo:
             raise NotFoundError(f"Session {session_id} not found")
         return self._sessions[session_id]
 
+    def close_session(
+        self,
+        session_id: str,
+        *,
+        expected_revision: int,
+        world_tick_end: int,
+        touched_entity_ids: list[str],
+        audit: AuditContext,
+    ) -> _FakeMetadata:
+        if session_id not in self._sessions:
+            raise NotFoundError(f"Session {session_id} not found")
+        meta = self._sessions[session_id]
+        if meta.session.revision != expected_revision:
+            raise ConflictError("Revision mismatch")
+        if meta.session.status != "active":
+            raise ConflictError(f"Session not active: {meta.session.status}")
+        new_session = Session(
+            id=meta.session.id,
+            type="session",
+            status="completed",
+            real_started_at=meta.session.real_started_at,
+            real_finished_at=audit.real_time,
+            world_tick_start=meta.session.world_tick_start,
+            world_tick_end=world_tick_end,
+            processed=False,
+            processed_model_profile=None,
+            revision=meta.session.revision + 1,
+        )
+        self._sessions[session_id] = _FakeMetadata(session=new_session)
+        return self._sessions[session_id]
+
 
 class _FakeMetadata:
     """Minimal stand-in for RawSessionMetadata."""
@@ -456,3 +487,116 @@ class TestRecordNote:
             service.record_note("  ", audit=_make_audit_context())
         with pytest.raises(ValidationError):
             service.record_note("\t", audit=_make_audit_context())
+
+
+# ── End session ─────────────────────────────────────────────────────────────────
+
+
+class TestEndSession:
+    def test_end_session_uses_active_session(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        result = service.end_session(audit=_make_audit_context(operation_id="end"))
+        assert result.status == "completed"
+        assert result.id == "S001"
+
+    def test_end_session_returns_completed_session(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        result = service.end_session(audit=_make_audit_context(operation_id="end"))
+        assert result.status == "completed"
+        assert result.revision == 2
+
+    def test_end_session_uses_audit_real_time(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        audit_time = datetime(2026, 8, 31, 20, 0, 0, tzinfo=UTC)
+        ctx = AuditContext(operation_id="end", real_time=audit_time, source="test")
+        result = service.end_session(audit=ctx)
+        assert result.real_finished_at == audit_time
+
+    def test_end_session_uses_canonical_world_tick(self) -> None:
+        world_repo = FakeWorldTimeRepo(tick=99999)
+        service = _make_service(world_repo=world_repo)
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        result = service.end_session(audit=_make_audit_context(operation_id="end"))
+        assert result.world_tick_end == 99999
+
+    def test_end_session_passes_active_session_revision(self) -> None:
+        session_repo = FakeSessionMetadataRepo()
+        service = _make_service(session_repo=session_repo)
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        result = service.end_session(audit=_make_audit_context(operation_id="end"))
+        assert result.revision == 2
+
+    def test_end_session_passes_touched_entity_ids(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        result = service.end_session(
+            touched_entity_ids=["npc_varos", "loc_crypt"],
+            audit=_make_audit_context(operation_id="end"),
+        )
+        assert result.status == "completed"
+
+    def test_no_active_session_raises_not_found(self) -> None:
+        service = _make_service()
+        with pytest.raises(NotFoundError, match="no active session"):
+            service.end_session(audit=_make_audit_context())
+
+    def test_multiple_active_sessions_raises_conflict(self) -> None:
+        session_repo = FakeSessionMetadataRepo()
+        service = _make_service(session_repo=session_repo)
+        service.start_session(audit=_make_audit_context(operation_id="first"))
+        session_repo._sessions["S002"] = _FakeMetadata(
+            Session(
+                id="S002",
+                type="session",
+                status="active",
+                real_started_at=datetime(2026, 8, 31, 16, 0, 0, tzinfo=UTC),
+                world_tick_start=14000,
+                revision=1,
+            )
+        )
+        with pytest.raises(ConflictError):
+            service.end_session(audit=_make_audit_context())
+
+    def test_world_time_not_mutated_by_end(self) -> None:
+        world_repo = FakeWorldTimeRepo(tick=13800)
+        service = _make_service(world_repo=world_repo)
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        before = world_repo.get_current_world_time()
+        service.end_session(audit=_make_audit_context(operation_id="end"))
+        after = world_repo.get_current_world_time()
+        assert before.current_world_tick == after.current_world_tick
+        assert before.revision == after.revision
+
+    def test_after_close_get_active_session_returns_none(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        service.end_session(audit=_make_audit_context(operation_id="end"))
+        assert service.get_active_session() is None
+
+    def test_after_close_record_note_raises_not_found(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        service.end_session(audit=_make_audit_context(operation_id="end"))
+        with pytest.raises(NotFoundError, match="no active session"):
+            service.record_note("test", audit=_make_audit_context())
+
+    def test_after_close_record_event_raises_not_found(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        service.end_session(audit=_make_audit_context(operation_id="end"))
+        with pytest.raises(NotFoundError, match="no active session"):
+            service.record_event(
+                "note",
+                extra_fields={"text": "test"},
+                audit=_make_audit_context(),
+            )
+
+    def test_repeated_end_raises_not_found(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        service.end_session(audit=_make_audit_context(operation_id="end1"))
+        with pytest.raises(NotFoundError, match="no active session"):
+            service.end_session(audit=_make_audit_context(operation_id="end2"))

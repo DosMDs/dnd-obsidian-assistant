@@ -26,7 +26,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from dnd_assistant.domain.types import EntityType
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping
+    from collections.abc import Mapping, Sequence
 
     from pydantic.types import AwareDatetime
 
@@ -487,8 +487,53 @@ class SessionMetadataRepository(Protocol):
         """
         ...
 
+    def close_session(
+        self,
+        session_id: str,
+        *,
+        expected_revision: Revision,
+        world_tick_end: WorldTick,
+        touched_entity_ids: Sequence[EntityId],
+        audit: AuditContext,
+    ) -> RawSessionMetadata:
+        """Close an active session with completed state.
 
-# ── SessionEventRepository protocol ──────────────────────────────────────────
+        Lifecycle:
+        1. Validate inputs and runtime roots.
+        2. Read exact current metadata.
+        3. Verify expected revision, closable lifecycle, and finish time.
+        4. Build a fully validated new ``Session`` with ``status=\"completed\"``.
+        5. Persist through atomic write with audit intent/committed.
+
+        The ``real_finished_at`` is set to ``audit.real_time``.
+        The ``world_tick_end`` is the caller-supplied canonical current tick.
+        ``touched_entity_ids`` are merged with any existing persisted
+        ``touched_entities`` extra field (existing order first, new appended,
+        duplicates removed by first occurrence).
+
+        ``processing_status`` is set to ``\"pending\"`` in extra fields.
+
+        Unknown extra fields are preserved unchanged.
+
+        Args:
+            session_id: The session identifier to close.
+            expected_revision: The revision the caller last observed.
+            world_tick_end: The canonical current world tick at close time.
+            touched_entity_ids: Stable entity IDs touched during the session.
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``RawSessionMetadata`` with completed state.
+
+        Raises:
+            NotFoundError: No metadata exists for the given session ID.
+            ConflictError: The stored revision does not match
+                ``expected_revision``, or the session is not closable
+                (e.g. already completed).
+            ValidationError: The finish time predates the start time.
+            StorageError: A filesystem, symlink, or audit operation failed.
+        """
+        ...
 
 
 @runtime_checkable

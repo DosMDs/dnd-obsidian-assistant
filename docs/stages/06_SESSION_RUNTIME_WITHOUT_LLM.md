@@ -48,7 +48,7 @@ existing code and ADRs:
 - [x] `S6-01` Canonical current-world-time persistence boundary
 - [x] `S6-02` Raw session metadata persistence + ID allocation + start/status lifecycle
 - [x] `S6-03` Append-only raw note/event JSONL logging
-- [ ] `S6-04` Session end/close immutability + touched IDs + processing pending
+- [x] `S6-04` Session end/close immutability + touched IDs + processing pending
 - [ ] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
 - [ ] `S6-06` Thin CLI orchestration: session start/status/end + note
 - [ ] `S6-07` Golden-Vault temp-copy integration + cross-platform/failure hardening
@@ -1036,3 +1036,121 @@ This was inaccurate.  The correct semantics are:
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or `touched_entities` semantics.
 - No session end, processing_status, corrupt-tail repair, or CLI commands.
+
+### S6-04 — Session end/close immutability + touched IDs + processing pending
+
+**Scope implemented:**
+
+1. **`src/dnd_assistant/storage/types.py`** — added `close_session()` to the
+   `SessionMetadataRepository` protocol with full typed signature.
+
+2. **`src/dnd_assistant/storage/session_metadata.py`:**
+   - `_authorized_metadata_read()` — shared helper that validates runtime roots,
+     resolves paths, and returns validated `RawSessionMetadata` with exact text
+     and hash. Used by both `close_session()` and `session_events.py`.
+   - `close_session()` — full implementation with:
+     - Input validation (EntityId validation via `TypeAdapter`)
+     - Path reauthorization and mutation environment validation
+     - Exact metadata read with hash snapshot
+     - Expected revision check (optimistic concurrency)
+     - Closable lifecycle check (status=active, no contradictory finished fields)
+     - Finish-time validation (>= start time)
+     - Raw events file existence and symlink rejection
+     - Fully validated new `Session` construction (status="completed", revision+1)
+     - Touched-entity merge (existing order first, new appended, deduplicated)
+     - `processing_status` = "pending" in extra fields
+     - Unknown extras preservation
+     - Audit intent before metadata mutation
+     - Post-intent reauthorization (metadata hash + events hash unchanged)
+     - Atomic metadata write via `atomic_write_text`
+     - Verified read-back (full candidate comparison)
+     - Post-write events hash verification
+     - Committed audit
+
+3. **`src/dnd_assistant/storage/session_events.py`:**
+   - Added lifecycle guard to `append_event()`:
+     - Pre-intent: reads authorized metadata, requires `status == "active"`
+     - Post-intent recheck: re-reads metadata, verifies hash + status unchanged
+     - Post-append recheck: re-reads metadata, detects concurrent close
+
+4. **`src/dnd_assistant/application/session_runtime.py`:**
+   - `end_session()` — composes `SessionMetadataRepository`,
+     `WorldTimeRepository`, and `SessionEventRepository`:
+     - Gets active session (exactly one)
+     - Strictly validates event log via `list_events()`
+     - Reads canonical current world tick (no mutation)
+     - Delegates to `close_session()`
+
+5. **`tests/unit/test_session_close.py`** — new file (40 tests):
+   - `TestNormalClose` (13 tests): status, timestamps, revision, processing,
+     touched entities, extras preservation, events byte-for-byte unchanged
+   - `TestTouchedEntityMerge` (8 tests): existing/supplied merge, dedup,
+     invalid input rejection, no-mutation invariant
+   - `TestLifecyclePreconditions` (9 tests): stale revision, completed session,
+     contradictory active fields, finish time before start, no-mutation
+   - `TestPathSafety` (5 tests, 3 symlink-skipped): missing metadata, missing
+     events, live/dangling symlink rejection
+   - `TestCloseAudit` (9 tests): intent/committed phases, operation name,
+     session/entity_id/source/time/hash/model_profile preservation
+
+6. **`tests/unit/test_session_runtime.py`** — 13 new `TestEndSession` tests:
+   - Active session close, completed state, audit time, world tick,
+     revision, touched IDs, no-active/conflict, world time not mutated,
+     post-close get_active_session/record_note/record_event rejection,
+     repeated close
+
+7. **`tests/unit/test_session_events.py`**, **`tests/unit/test_session_events_c03.py`**,
+   **`tests/unit/test_session_events_c03f.py`** — updated `_create_session_dir`
+   helper to produce fully valid Session metadata (required by new lifecycle guard).
+
+**Contract decisions:**
+
+- `close_session()` is a storage-level operation; `end_session()` is the
+  application-level orchestration.
+- `real_finished_at` = `audit.real_time` (no second independent timestamp).
+- `world_tick_end` comes from `WorldTimeRepository.get_current_world_time()`
+  (not mutated during close).
+- `touched_entity_ids` are validated through canonical `EntityId` via
+  `TypeAdapter`. Invalid caller input raises `ValidationError` before any
+  audit intent.
+- Persisted `touched_entities` that are non-list or contain non-string values
+  raise `StorageError` (no silent repair).
+- `processing_status` = "pending" is set only on close; no `processing_status`
+  is defined for active sessions.
+- Unknown extra fields survive close unchanged.
+- Event-log lifecycle guard in `append_event()` uses `_authorized_metadata_read`
+  for three-phase checking (pre-intent, post-intent, post-append).
+- Session domain `Session` remains unchanged (no `touched_entities` or
+  `processing_status` fields).
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_close.py` — 37 passed, 3 skipped
+- `uv run pytest tests/unit/test_session_events.py` — 65 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03.py` — 43 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03f.py` — 9 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 42 passed
+- `uv run pytest tests/contract/test_boundaries.py tests/unit/test_session_close.py tests/unit/test_session_events.py tests/unit/test_session_events_c03.py tests/unit/test_session_events_c03f.py tests/unit/test_session_runtime.py` — 244 passed, 7 skipped (order A)
+- `uv run pytest tests/unit/test_session_runtime.py tests/unit/test_session_events_c03f.py tests/unit/test_session_events_c03.py tests/unit/test_session_events.py tests/unit/test_session_close.py tests/contract/test_boundaries.py` — 244 passed, 7 skipped (order B)
+- `uv run pytest tests/unit/test_session.py tests/unit/test_session_storage_paths.py tests/unit/test_session_metadata.py tests/unit/test_session_close.py tests/unit/test_session_events.py tests/unit/test_session_events_c03.py tests/unit/test_session_events_c03f.py tests/unit/test_session_runtime.py tests/unit/test_world_time.py tests/unit/test_world_time_repository.py tests/unit/test_audit_protocol.py tests/contract/test_boundaries.py` — 556 passed, 36 skipped
+- `uv run pytest` (full suite) — **2367 passed, 92 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 205 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Starting SHA:** `5467d9140fe02ccd38d11a91ed2006318b9b335f`
+**Implementation commit:** (reported in Final Report)
+**Commit message:** `feat: add session close lifecycle (S6-04)`
+
+**Explicit deferrals:**
+
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
+- No recovery/truncation/repair logic.
+- No CLI commands for session lifecycle.

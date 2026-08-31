@@ -26,6 +26,7 @@ from pathlib import Path
 import pytest
 
 import dnd_assistant.storage.session_events as _events_mod
+from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import StorageError
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_events import (
@@ -34,6 +35,7 @@ from dnd_assistant.storage.session_events import (
     _append_event_line,
     _serialize_event,
 )
+from dnd_assistant.storage.session_metadata import RawSessionMetadata, _serialize
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -87,8 +89,21 @@ def _create_session_dir(vault_root: Path, session_id: str = "S001") -> Path:
     session_dir.mkdir()
     events_path = session_dir / "events.jsonl"
     events_path.write_text("", encoding="utf-8")
-    meta = '{"id":"' + session_id + '","status":"active"}\n'
-    (session_dir / "metadata.json").write_text(meta, encoding="utf-8")
+    session = Session(
+        id=session_id,
+        type="session",
+        status="active",
+        real_started_at=datetime(2026, 8, 31, 15, 0, 0, tzinfo=UTC),
+        real_finished_at=None,
+        world_tick_start=13800,
+        world_tick_end=None,
+        processed=False,
+        processed_model_profile=None,
+        revision=1,
+    )
+    meta = RawSessionMetadata(session=session)
+    text = _serialize(meta)
+    (session_dir / "metadata.json").write_text(text, encoding="utf-8")
     return events_path
 
 
