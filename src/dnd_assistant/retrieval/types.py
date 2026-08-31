@@ -16,11 +16,12 @@ These types belong to the retrieval layer and must not depend on:
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import BaseModel, BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field, model_validator
 
 from dnd_assistant.domain.types import EntityId, EntityType
 
@@ -109,6 +110,13 @@ class SearchQuery(BaseModel):
 # ── Search hit ──────────────────────────────────────────────────────────────
 
 
+def _validate_score(value: object) -> object:
+    """Validate score is not a bool."""
+    if isinstance(value, bool):
+        raise ValueError("score must not be a bool")
+    return value
+
+
 class SearchHit(BaseModel):
     """A single search result candidate.
 
@@ -133,7 +141,11 @@ class SearchHit(BaseModel):
     match_kind: MatchKind
     """How this hit was obtained (match provenance)."""
 
-    score: float | None = None
+    score: Annotated[
+        float | None,
+        BeforeValidator(_validate_score),
+        Field(description="Source-specific score/rank."),
+    ] = None
     """Source-specific score/rank.
 
     ``None`` for exact matches.  Fuzzy similarity (0.0–100.0) for
@@ -145,6 +157,52 @@ class SearchHit(BaseModel):
     model_config = {
         "extra": "forbid",
     }
+
+    # ── Model validators ────────────────────────────────────────────────
+
+    @model_validator(mode="after")
+    def _validate_score_by_match_kind(self) -> SearchHit:
+        """Validate score consistency with match_kind."""
+        kind = self.match_kind
+        score = self.score
+
+        # Exact matches must have score=None
+        if kind in (MatchKind.EXACT_ID, MatchKind.EXACT_NAME, MatchKind.EXACT_ALIAS):
+            if score is not None:
+                raise ValueError(f"score must be None for {kind.value!r}, got {score!r}")
+            return self
+
+        # FUZZY_NAME must have a finite numeric score in [0.0, 100.0]
+        if kind == MatchKind.FUZZY_NAME:
+            if score is None:
+                raise ValueError(f"score must not be None for {kind.value!r}")
+            if isinstance(score, bool):
+                raise ValueError(f"score must not be a bool for {kind.value!r}")
+            if not isinstance(score, (int, float)):
+                raise ValueError(
+                    f"score must be numeric for {kind.value!r}, got {type(score).__name__}"
+                )
+            if math.isnan(score) or math.isinf(score):
+                raise ValueError(f"score must be finite for {kind.value!r}, got {score!r}")
+            if score < 0.0 or score > 100.0:
+                raise ValueError(f"score must be in [0.0, 100.0] for {kind.value!r}, got {score!r}")
+            return self
+
+        # FTS must have a finite numeric score (when score is provided)
+        if kind == MatchKind.FTS:
+            if score is None:
+                return self
+            if isinstance(score, bool):
+                raise ValueError(f"score must not be a bool for {kind.value!r}")
+            if not isinstance(score, (int, float)):
+                raise ValueError(
+                    f"score must be numeric for {kind.value!r}, got {type(score).__name__}"
+                )
+            if math.isnan(score) or math.isinf(score):
+                raise ValueError(f"score must be finite for {kind.value!r}, got {score!r}")
+            return self
+
+        return self
 
 
 # ── Entity resolution outcomes ──────────────────────────────────────────────
@@ -177,6 +235,9 @@ class Ambiguous(BaseModel):
     The ``candidates`` field carries enough information for the caller
     (application/agent layer) to ask the user for clarification.
 
+    At least one candidate is required.  Use ``NotFound`` when zero
+    candidates exist.
+
     This is a normal resolver outcome, not an error.
     """
 
@@ -184,6 +245,7 @@ class Ambiguous(BaseModel):
     """The candidate entities that could match.
 
     Ordered by descending confidence (most likely first).
+    Must contain at least one candidate.
     """
 
     # ── Pydantic configuration ─────────────────────────────────────────
@@ -191,6 +253,17 @@ class Ambiguous(BaseModel):
     model_config = {
         "extra": "forbid",
     }
+
+    # ── Model validators ────────────────────────────────────────────────
+
+    @model_validator(mode="after")
+    def _validate_candidates_not_empty(self) -> Ambiguous:
+        if not self.candidates:
+            raise ValueError(
+                "Ambiguous requires at least one candidate; "
+                "use NotFound for zero-candidate outcomes"
+            )
+        return self
 
 
 class NotFound(BaseModel):
@@ -200,13 +273,30 @@ class NotFound(BaseModel):
     """
 
     query: str
-    """The original query text that produced no results."""
+    """The original query text that produced no results.
+
+    Must be a non-empty, printable string.
+    """
 
     # ── Pydantic configuration ─────────────────────────────────────────
 
     model_config = {
         "extra": "forbid",
     }
+
+    # ── Model validators ────────────────────────────────────────────────
+
+    @model_validator(mode="after")
+    def _validate_query(self) -> NotFound:
+        q = self.query
+        if not isinstance(q, str):
+            raise ValueError("query must be a string")
+        stripped = q.strip()
+        if not stripped:
+            raise ValueError("query must not be empty or whitespace-only")
+        if not q.isprintable():
+            raise ValueError("query must not contain non-printable characters")
+        return self
 
 
 # ── Resolution outcome ──────────────────────────────────────────────────────

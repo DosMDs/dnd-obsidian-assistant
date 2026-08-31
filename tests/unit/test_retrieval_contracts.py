@@ -215,6 +215,90 @@ class TestSearchHit:
                 unknown=True,  # type: ignore[call-arg]
             )
 
+    # ── Score validation: exact matches must have score=None ─────────────
+
+    @pytest.mark.parametrize(
+        "kind, bad_score",
+        [
+            (MatchKind.EXACT_ID, 0.0),
+            (MatchKind.EXACT_ID, 100.0),
+            (MatchKind.EXACT_NAME, 0.0),
+            (MatchKind.EXACT_NAME, 42.0),
+            (MatchKind.EXACT_ALIAS, 0.0),
+            (MatchKind.EXACT_ALIAS, 99.9),
+        ],
+    )
+    def test_exact_match_rejects_score(self, kind: MatchKind, bad_score: float) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            SearchHit(
+                entity_id=cast(EntityId, "x"),
+                match_kind=kind,
+                score=bad_score,
+            )
+
+    # ── Score validation: FUZZY_NAME must have score in [0.0, 100.0] ────
+
+    @pytest.mark.parametrize(
+        "bad_score",
+        [
+            None,
+            -0.1,
+            -1.0,
+            100.1,
+            200.0,
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            False,
+        ],
+    )
+    def test_fuzzy_rejects_invalid_score(self, bad_score: object) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            SearchHit(
+                entity_id=cast(EntityId, "x"),
+                match_kind=MatchKind.FUZZY_NAME,
+                score=bad_score,  # type: ignore[arg-type]
+            )
+
+    @pytest.mark.parametrize("valid_score", [0.0, 50.0, 100.0, 0.5, 99.999])
+    def test_fuzzy_accepts_valid_score(self, valid_score: float) -> None:
+        hit = SearchHit(
+            entity_id=cast(EntityId, "x"),
+            match_kind=MatchKind.FUZZY_NAME,
+            score=valid_score,
+        )
+        assert hit.score == valid_score
+
+    # ── Score validation: FTS accepts None or finite numeric ─────────────
+
+    @pytest.mark.parametrize(
+        "bad_score",
+        [
+            float("nan"),
+            float("inf"),
+            float("-inf"),
+            True,
+            False,
+        ],
+    )
+    def test_fts_rejects_invalid_score(self, bad_score: object) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            SearchHit(
+                entity_id=cast(EntityId, "x"),
+                match_kind=MatchKind.FTS,
+                score=bad_score,  # type: ignore[arg-type]
+            )
+
+    @pytest.mark.parametrize("valid_score", [None, 0.0, -2.5, -100.0, 1.5])
+    def test_fts_accepts_valid_score(self, valid_score: float | None) -> None:
+        hit = SearchHit(
+            entity_id=cast(EntityId, "x"),
+            match_kind=MatchKind.FTS,
+            score=valid_score,
+        )
+        assert hit.score == valid_score
+
 
 class TestResolved:
     def test_construction(self) -> None:
@@ -235,7 +319,7 @@ class TestResolved:
 
 
 class TestAmbiguous:
-    def test_with_candidates(self) -> None:
+    def test_with_two_candidates(self) -> None:
         candidates = [
             SearchHit(entity_id=cast(EntityId, "npc_varos"), match_kind=MatchKind.EXACT_ALIAS),
             SearchHit(
@@ -245,19 +329,54 @@ class TestAmbiguous:
         result = Ambiguous(candidates=candidates)
         assert len(result.candidates) == 2
 
-    def test_empty_candidates(self) -> None:
-        result = Ambiguous(candidates=[])
-        assert len(result.candidates) == 0
+    def test_with_one_candidate(self) -> None:
+        """Single-candidate ambiguous represents low-confidence uncertainty."""
+        candidates = [
+            SearchHit(
+                entity_id=cast(EntityId, "npc_varos"), match_kind=MatchKind.FUZZY_NAME, score=45.0
+            ),
+        ]
+        result = Ambiguous(candidates=candidates)
+        assert len(result.candidates) == 1
+
+    def test_empty_candidates_rejected(self) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            Ambiguous(candidates=[])
 
     def test_extra_fields_forbidden(self) -> None:
         with pytest.raises((ValueError, DndAssistantError)):
-            Ambiguous(candidates=[], extra=True)  # type: ignore[call-arg]
+            Ambiguous(
+                candidates=[
+                    SearchHit(entity_id=cast(EntityId, "x"), match_kind=MatchKind.EXACT_ID),
+                ],
+                extra=True,  # type: ignore[call-arg]
+            )
 
 
 class TestNotFound:
     def test_construction(self) -> None:
         result = NotFound(query="unknown entity")
         assert result.query == "unknown entity"
+
+    def test_unicode_query(self) -> None:
+        result = NotFound(query="Чёрное Солнце")
+        assert result.query == "Чёрное Солнце"
+
+    def test_empty_rejected(self) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            NotFound(query="")
+
+    def test_whitespace_only_rejected(self) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            NotFound(query="   ")
+
+    def test_control_chars_rejected(self) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            NotFound(query="test\x00")
+
+    def test_non_string_rejected(self) -> None:
+        with pytest.raises((ValueError, DndAssistantError)):
+            NotFound(query=42)  # type: ignore[arg-type]
 
     def test_extra_fields_forbidden(self) -> None:
         with pytest.raises((ValueError, DndAssistantError)):
@@ -274,7 +393,11 @@ class TestResolutionOutcome:
         assert not isinstance(outcome, (Ambiguous, NotFound))
 
     def test_ambiguous_is_outcome(self) -> None:
-        outcome: ResolutionOutcome = Ambiguous(candidates=[])
+        outcome: ResolutionOutcome = Ambiguous(
+            candidates=[
+                SearchHit(entity_id=cast(EntityId, "npc_varos"), match_kind=MatchKind.EXACT_ALIAS),
+            ]
+        )
         assert isinstance(outcome, Ambiguous)
         assert not isinstance(outcome, (Resolved, NotFound))
 
@@ -285,7 +408,11 @@ class TestResolutionOutcome:
 
     def test_outcomes_are_mutually_exclusive(self) -> None:
         resolved = Resolved(entity_id=cast(EntityId, "x"), match_kind=MatchKind.EXACT_ID)
-        ambiguous = Ambiguous(candidates=[])
+        ambiguous = Ambiguous(
+            candidates=[
+                SearchHit(entity_id=cast(EntityId, "x"), match_kind=MatchKind.EXACT_ALIAS),
+            ]
+        )
         not_found = NotFound(query="x")
         assert not isinstance(resolved, (Ambiguous, NotFound))
         assert not isinstance(ambiguous, (Resolved, NotFound))
@@ -306,16 +433,13 @@ class TestSearchServiceProtocol:
         assert hasattr(SearchService, "__instancecheck__")
 
     def test_protocol_has_required_methods(self) -> None:
-        methods = {"search", "search_by_type", "get_by_id"}
+        methods = {"search", "get_by_id"}
         protocol_methods = {m for m in dir(SearchService) if not m.startswith("_")}
         assert methods.issubset(protocol_methods)
 
     def test_concrete_class_can_satisfy_protocol(self) -> None:
         class FakeSearchService:
             def search(self, query: SearchQuery, *, limit: int = 20) -> list[SearchHit]:
-                return []
-
-            def search_by_type(self, entity_type: EntityType) -> list[SearchHit]:
                 return []
 
             def get_by_id(self, entity_id: EntityId) -> SearchHit | None:
@@ -342,58 +466,145 @@ class TestEntityResolverProtocol:
 
 
 class TestBoundaries:
-    """Verify architectural boundaries are preserved."""
+    """Verify architectural boundaries are preserved.
+
+    Uses two complementary techniques:
+    1. ``sys.modules`` inspection after clean import — catches runtime
+       transitive imports.
+    2. AST-based source inspection of import statements — catches
+       ``TYPE_CHECKING``-guarded imports and is independent of
+       ``sys.modules`` contamination.
+    """
+
+    # ── sys.modules-based checks ─────────────────────────────────────────
+
+    def _clean_import(self, module_path: str) -> None:
+        """Import a module from a clean sys.modules state."""
+        import importlib
+        import sys
+
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        importlib.import_module(module_path)
+
+    def _assert_no_modules_loaded(
+        self, module_path: str, forbidden_prefix: str, label: str
+    ) -> None:
+        import sys
+
+        self._clean_import(module_path)
+        loaded = {m for m in sys.modules if m.startswith(forbidden_prefix)}
+        assert not loaded, f"{module_path} triggered {label} imports: {loaded}"
 
     def test_retrieval_does_not_import_storage(self) -> None:
-        import dnd_assistant.retrieval.service
-        import dnd_assistant.retrieval.types
-
-        mod_src = (
-            dnd_assistant.retrieval.types.__name__ + "\n" + dnd_assistant.retrieval.service.__name__
+        self._assert_no_modules_loaded(
+            "dnd_assistant.retrieval",
+            "dnd_assistant.storage",
+            "storage",
         )
-        assert "storage" not in mod_src
 
     def test_retrieval_does_not_import_models(self) -> None:
-        import dnd_assistant.retrieval.service
-        import dnd_assistant.retrieval.types
-
-        mod_src = (
-            dnd_assistant.retrieval.types.__name__ + "\n" + dnd_assistant.retrieval.service.__name__
+        self._assert_no_modules_loaded(
+            "dnd_assistant.retrieval",
+            "dnd_assistant.models",
+            "models",
         )
-        assert "models" not in mod_src
 
     def test_retrieval_does_not_import_tools(self) -> None:
-        import dnd_assistant.retrieval.service
-        import dnd_assistant.retrieval.types
-
-        mod_src = (
-            dnd_assistant.retrieval.types.__name__ + "\n" + dnd_assistant.retrieval.service.__name__
+        self._assert_no_modules_loaded(
+            "dnd_assistant.retrieval",
+            "dnd_assistant.tools",
+            "tools",
         )
-        assert "tools" not in mod_src
+
+    def test_retrieval_does_not_import_application(self) -> None:
+        self._assert_no_modules_loaded(
+            "dnd_assistant.retrieval",
+            "dnd_assistant.application",
+            "application",
+        )
 
     def test_retrieval_does_not_import_session_runtime(self) -> None:
-        import dnd_assistant.retrieval.service
-        import dnd_assistant.retrieval.types
-
-        mod_src = (
-            dnd_assistant.retrieval.types.__name__ + "\n" + dnd_assistant.retrieval.service.__name__
+        self._assert_no_modules_loaded(
+            "dnd_assistant.retrieval",
+            "dnd_assistant.session",
+            "session",
         )
-        assert "session" not in mod_src
+
+    def test_retrieval_does_not_import_ollama(self) -> None:
+        self._assert_no_modules_loaded(
+            "dnd_assistant.retrieval",
+            "ollama",
+            "ollama",
+        )
+
+    # ── AST-based source inspection ──────────────────────────────────────
+
+    @staticmethod
+    def _ast_imports(module_path: str) -> set[str]:
+        """Return the set of first-level imported module prefixes
+        found via AST in the given module's source file.
+
+        Only inspects top-level import statements (not TYPE_CHECKING
+        blocks or function-local imports).
+        """
+        import ast
+
+        importlib = __import__("importlib")
+        mod = importlib.import_module(module_path)
+        assert mod.__file__ is not None
+        with open(mod.__file__, encoding="utf-8") as f:
+            tree = ast.parse(f.read())
+
+        result: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    result.add(alias.name.split(".")[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    result.add(node.module.split(".")[0])
+        return result
+
+    def test_retrieval_types_no_forbidden_imports(self) -> None:
+        imports = self._ast_imports("dnd_assistant.retrieval.types")
+        forbidden = {"storage", "models", "tools", "application", "ollama"}
+        actual = forbidden & imports
+        assert not actual, f"retrieval/types.py imports forbidden modules: {actual}"
+
+    def test_retrieval_service_no_forbidden_imports(self) -> None:
+        imports = self._ast_imports("dnd_assistant.retrieval.service")
+        forbidden = {"storage", "models", "tools", "application", "ollama"}
+        actual = forbidden & imports
+        assert not actual, f"retrieval/service.py imports forbidden modules: {actual}"
 
     def test_no_sqlite_import_in_retrieval(self) -> None:
-        import dnd_assistant.retrieval.service
-        import dnd_assistant.retrieval.types
-
-        mod_src = (
-            dnd_assistant.retrieval.types.__name__ + "\n" + dnd_assistant.retrieval.service.__name__
+        imports = self._ast_imports("dnd_assistant.retrieval.types")
+        imports |= self._ast_imports("dnd_assistant.retrieval.service")
+        assert "sqlite3" not in imports, "retrieval imports sqlite3"
+        # Also check no 'sqlite' appears in import strings
+        assert not any("sqlite" in i for i in imports), (
+            f"retrieval imports sqlite-related module: {imports}"
         )
-        assert "sqlite" not in mod_src.lower()
 
     def test_no_rapidfuzz_import_in_retrieval(self) -> None:
-        import dnd_assistant.retrieval.service
-        import dnd_assistant.retrieval.types
+        imports = self._ast_imports("dnd_assistant.retrieval.types")
+        imports |= self._ast_imports("dnd_assistant.retrieval.service")
+        assert "rapidfuzz" not in imports, "retrieval imports rapidfuzz"
 
-        mod_src = (
-            dnd_assistant.retrieval.types.__name__ + "\n" + dnd_assistant.retrieval.service.__name__
+    # ── Reverse-boundary protection ──────────────────────────────────────
+
+    def test_domain_does_not_import_retrieval(self) -> None:
+        self._assert_no_modules_loaded(
+            "dnd_assistant.domain",
+            "dnd_assistant.retrieval",
+            "retrieval",
         )
-        assert "rapidfuzz" not in mod_src.lower()
+
+    def test_storage_does_not_import_retrieval(self) -> None:
+        self._assert_no_modules_loaded(
+            "dnd_assistant.storage",
+            "dnd_assistant.retrieval",
+            "retrieval",
+        )

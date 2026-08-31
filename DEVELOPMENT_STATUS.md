@@ -873,7 +873,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 
 ### Tasks
 
-- [ ] `S5-00` Retrieval kickoff + canonical contracts
+- [x] `S5-00` Retrieval kickoff + canonical contracts
 - [ ] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
 - [ ] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
 - [ ] `S5-03` SQLite FTS5 derived index + rebuild path
@@ -961,6 +961,48 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - No `dict[str, Any]` placeholders
 - No aliases added to base Entity model
 - No ADR required (all architectural decisions follow established patterns: Protocol for contracts, Pydantic with `extra="forbid"`, StrEnum for typed enums, separate types/service modules)
+
+### S5-C00 correction record
+
+**Independent review found 6 defects in the S5-00 implementation.**
+**Correction range:** `ee086a3` (S5-00 completion) through S5-C00
+
+**Defects confirmed and fixed:**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C00-1 | Boundary tests used `module.__name__` string checks that did not inspect actual imports | Replaced with real `sys.modules`-based import analysis (matching `tests/contract/test_boundaries.py` pattern) + AST-based source inspection. Added reverse-boundary checks: `domain !→ retrieval`, `storage !→ retrieval`. |
+| C00-2 | `Ambiguous(candidates=[])` was allowed, overlapping semantically with `NotFound` | Added `@model_validator` rejecting empty candidates. `Ambiguous` now requires at least one candidate. Also added `NotFound.query` validation (non-empty, printable). |
+| C00-3 | `SearchHit` score rules were documented but not enforced by the model | Added `@model_validator` enforcing: exact matches → `score=None`; `FUZZY_NAME` → finite `[0.0, 100.0]`; `FTS` → `None` or finite numeric. `BeforeValidator` rejects `bool` before Pydantic coercion. |
+| C00-4 | `search_by_type` returned `SearchHit` without a valid `MatchKind` | Removed from `SearchService` protocol. `SearchQuery.entity_types` already provides type filtering. `list_entities(entity_type=...)` remains available in VaultRepository. |
+| C00-5 | Player-visibility wording implied a privileged escape hatch that does not exist | Reworded to state unambiguously: only `Visibility.PLAYER` may be returned; `Visibility.DM`/`SYSTEM` must never be returned; no visibility override is exposed. |
+| C00-6 | S5-00 was `[ ]` in task list despite having a completion record | Changed to `[x]`. S5-01 remains `[ ]`. |
+
+**Production changes:**
+- `src/dnd_assistant/retrieval/types.py` — added `math` import, `_validate_score` BeforeValidator, `SearchHit._validate_score_by_match_kind` model validator, `Ambiguous._validate_candidates_not_empty` model validator, `NotFound._validate_query` model validator; removed `Field` import (replaced by `Annotated` usage)
+- `src/dnd_assistant/retrieval/service.py` — removed `search_by_type` method from `SearchService` protocol; tightened player-visibility docstrings in both `SearchService` and `EntityResolver`
+
+**Test changes:**
+- `tests/unit/test_retrieval_contracts.py` — rewrote `TestBoundaries` with real `sys.modules` cleanup + AST source inspection (12 tests, was 6); added reverse-boundary checks (2 tests); replaced `Ambiguous(candidates=[])` with valid single-candidate usage; added `NotFound` validation tests (5 tests); added `SearchHit` score validation tests (20 parametrized tests); removed `search_by_type` from protocol tests
+
+**Test count:** 100 tests (was 57), all passed
+
+**Scope exclusions confirmed:**
+- S5-01 not started (no exact ID/name/alias search implementation)
+- S5-02 not started (no RapidFuzz, no fuzzy matching)
+- S5-03 not started (no SQLite database, no FTS schema)
+- S5-04 not started (no EntityResolver implementation)
+- S5-05 not started (no golden Vault integration)
+- S5-06 not started (no Stage 5 final verification)
+- Stage 6+ not started (no session runtime, tools, model, agent, changeset work)
+- No RapidFuzz called anywhere in retrieval contracts
+- No SQLite database or FTS tables created
+- No actual search/resolution implementation
+- No storage/domain reverse dependencies
+- No model/Ollama/tool/session-runtime dependency
+- No `dict[str, Any]` placeholders
+- No aliases added to base Entity model
+- No ADR required (all corrections are local to existing contracts/tests; no architectural boundary changed)
 
 ---
 

@@ -32,10 +32,10 @@ class SearchService(Protocol):
     paths, or depend on Ollama/ModelGateway.
 
     **Player-visibility safety:**
-    Results must exclude entities with ``Visibility.DM`` and
-    ``Visibility.SYSTEM`` unless the caller explicitly demonstrates
-    an authorised need.  An exact ``EntityId`` lookup must not become
-    a bypass for visibility filtering.
+    Only ``Visibility.PLAYER`` entities may be returned.
+    ``Visibility.DM`` and ``Visibility.SYSTEM`` must never be returned
+    by ``SearchService``, including exact stable-ID lookup via
+    ``get_by_id``.  No visibility override is exposed at this layer.
 
     **Vault is Source of Truth:**
     The concrete implementation reads from the Vault directly (or
@@ -60,24 +60,6 @@ class SearchService(Protocol):
 
         Raises:
             ValidationError: The query or limit is invalid.
-        """
-        ...
-
-    def search_by_type(
-        self,
-        entity_type: EntityType,
-    ) -> Sequence[SearchHit]:
-        """List all entities of a given type.
-
-        This is a convenience method for type-filtered browsing.
-        Results are ordered deterministically (by ``EntityId``).
-
-        Args:
-            entity_type: The entity type to list.
-
-        Returns:
-            An ordered sequence of ``SearchHit`` for all entities of the
-            given type.  Empty sequence when no entities of that type exist.
         """
         ...
 
@@ -111,8 +93,9 @@ class EntityResolver(Protocol):
     candidate information for the caller to ask the user for clarification.
 
     **Player-visibility safety:**
-    Non-player-visible entities (``Visibility.DM``, ``Visibility.SYSTEM``)
-    must not appear in resolution results.
+    Only ``Visibility.PLAYER`` entities may be returned.
+    ``Visibility.DM`` and ``Visibility.SYSTEM`` must never appear
+    in resolution results.
 
     **No LLM dependency:**
     Resolution is deterministic.  The resolver does not call Ollama or
