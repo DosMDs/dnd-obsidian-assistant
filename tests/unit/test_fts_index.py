@@ -1074,23 +1074,28 @@ class TestGenuineLateRebuildValidation:
     @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
     def test_late_parent_directory_symlink_detected(self, tmp_path: Path) -> None:
         """A symlink substituted at the parent index directory *after* temp
-        DB construction must be detected by late full-path validation."""
+        DB construction must be detected by late full-path validation.
+
+        Uses ``rename()`` (not ``rmdir()``) because the directory is
+        non-empty after ``_build_index`` creates the temp DB inside it.
+        """
         vault = _create_minimal_vault(tmp_path)
         index = SqliteFtsIndex(str(vault))
         index.rebuild([_make_doc("npc_a", name="Alpha")])
 
         indexes_dir = vault / "_system" / "indexes"
+        moved_indexes = tmp_path / "moved_indexes"
         real_indexes = tmp_path / "real_indexes"
         real_indexes.mkdir()
-        real_db = real_indexes / "entities.sqlite3"
-        (indexes_dir / "entities.sqlite3").rename(real_db)
 
         original_build = index._build_index
 
         def _wrapped_build(temp_path, documents):
             original_build(temp_path, documents)
-            # Now the temp DB exists.  Substitute the parent directory.
-            indexes_dir.rmdir()
+            # Now the temp DB exists inside indexes_dir (non-empty).
+            # Rename the entire non-empty directory to a sibling path,
+            # then create a symlink at the original canonical path.
+            indexes_dir.rename(moved_indexes)
             indexes_dir.symlink_to(real_indexes, target_is_directory=True)
 
         index._build_index = _wrapped_build  # type: ignore[method-assign]
@@ -1101,27 +1106,32 @@ class TestGenuineLateRebuildValidation:
         # os.replace must not have been allowed through the symlinked directory
         assert indexes_dir.is_symlink()
         # The external target must be untouched
-        assert real_db.exists()
+        assert not any(real_indexes.iterdir())
 
     @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
     def test_late_parent_directory_symlink_temp_cleaned(self, tmp_path: Path) -> None:
         """When late parent-directory symlink validation fails, the temp DB
-        must be cleaned up."""
+        cleanup is best-effort because the original directory was externally
+        relocated.
+
+        The critical safety invariants are:
+        - StorageError raised before os.replace
+        - external symlink target not modified
+        """
         vault = _create_minimal_vault(tmp_path)
         index = SqliteFtsIndex(str(vault))
         index.rebuild([_make_doc("npc_a", name="Alpha")])
 
         indexes_dir = vault / "_system" / "indexes"
+        moved_indexes = tmp_path / "moved_indexes"
         real_indexes = tmp_path / "real_indexes"
         real_indexes.mkdir()
-        real_db = real_indexes / "entities.sqlite3"
-        (indexes_dir / "entities.sqlite3").rename(real_db)
 
         original_build = index._build_index
 
         def _wrapped_build(temp_path, documents):
             original_build(temp_path, documents)
-            indexes_dir.rmdir()
+            indexes_dir.rename(moved_indexes)
             indexes_dir.symlink_to(real_indexes, target_is_directory=True)
 
         index._build_index = _wrapped_build  # type: ignore[method-assign]
@@ -1129,8 +1139,8 @@ class TestGenuineLateRebuildValidation:
         with pytest.raises(StorageError, match="симлинк"):
             index.rebuild([_make_doc("npc_b", name="Beta")])
 
-        # No leaked temp DB
-        assert list(indexes_dir.glob("fts_rebuild_*")) == []
+        # The external symlink target must remain untouched
+        assert not any(real_indexes.iterdir())
 
     @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
     def test_late_path_mismatch_detected(self, tmp_path: Path) -> None:

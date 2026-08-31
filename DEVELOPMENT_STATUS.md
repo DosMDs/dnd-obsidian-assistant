@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C08)
+**Last updated:** 2026-08-31 (S5-C09)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -2018,7 +2018,7 @@ EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
 
 | File | Change |
 |---|---|
-| `tests/unit/test_fts_index.py` | Added `TestGenuineLateRebuildValidation` class (5 tests) — wraps `_build_index` on the instance to mutate filesystem topology AFTER temp DB construction but BEFORE late validation: late final-file symlink detected, late parent-directory symlink detected, temp cleaned on both, path mismatch detected |
+| `tests/unit/test_fts_index.py` | Added `TestGenuineLateRebuildValidation` class (5 tests) — wraps `_build_index` on the instance to mutate filesystem topology AFTER temp DB construction but BEFORE late validation: late final-file symlink detected, late parent-directory symlink detected, path mismatch detected |
 
 **Genuine late test design:**
 
@@ -2035,7 +2035,7 @@ This is the real regression test for both C08-1 and C08-2.
 - `test_late_final_file_symlink_detected` — final-path symlink after temp build → `StorageError`; external target untouched; `os.replace` did not follow symlink
 - `test_late_final_file_symlink_temp_cleaned` — no leaked `fts_rebuild_*` DB after late validation failure
 - `test_late_parent_directory_symlink_detected` — `_system/indexes` directory substituted with symlink after temp build → `StorageError`; `os.replace` not allowed through symlinked directory
-- `test_late_parent_directory_symlink_temp_cleaned` — no leaked temp DB after parent-directory symlink failure
+- `test_late_parent_directory_symlink_temp_cleaned` — StorageError on parent-directory symlink; external target untouched (see S5-C09 for corrected cleanup semantics)
 - `test_late_path_mismatch_detected` — path changed during rebuild → `StorageError`; no leaked temp DB
 
 All symlink tests skip when the platform cannot create symlinks (Windows without Developer Mode/admin).
@@ -2063,6 +2063,110 @@ All symlink tests skip when the platform cannot create symlinks (Windows without
 - No golden Vault modifications
 - No EntityResolver implementation
 - S5-04 remains [ ]
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
+
+### S5-C09 correction record
+
+**Acceptance-review defects — invalid parent-directory race tests:**
+
+The C08 parent-directory tests (`test_late_parent_directory_symlink_detected`, `test_late_parent_directory_symlink_temp_cleaned`) used `indexes_dir.rmdir()` after `original_build()` had already created a temp DB inside `indexes_dir`. On any normal POSIX filesystem, `rmdir()` of a non-empty directory fails with `ENOTEMPTY`. On the current Windows environment these tests were skipped (no symlink privileges), so the defect was not exposed.
+
+| Defect | Description | Fix |
+|---|---|---|
+| C09-1 | `rmdir()` on non-empty directory — invalid test design | Replaced `rmdir()` with `indexes_dir.rename(moved_indexes)` to move the entire non-empty directory to a sibling path, then create a symlink at the original canonical path |
+| C09-2 | `test_late_parent_directory_symlink_temp_cleaned` asserted `list(indexes_dir.glob("fts_rebuild_*")) == []` which is logically invalid — after `indexes_dir` is replaced with a symlink, the glob inspects the symlink target, not the moved original directory | Removed the invalid cleanup assertion; replaced with external-target-untouched verification (`not any(real_indexes.iterdir())`) |
+| C09-3 | S5-C08 completion record claimed "temp DB cleaned on parent-directory relocation" as a guaranteed result | Corrected below: parent-directory cleanup is best-effort after external relocation |
+
+**Corrected safety contract semantics:**
+
+**Final-file late substitution (parent directory stable):**
+- safe abort before `os.replace`
+- no symlink following
+- external target untouched
+- **guaranteed temp cleanup** (temp directory remains addressable)
+
+**Parent-directory late substitution:**
+- safe abort before `os.replace`
+- no symlink following
+- no external-target modification
+- **cleanup is best-effort** if the temp directory itself was externally relocated
+
+This is acceptable because:
+- the temp DB is derived/disposable data
+- the Vault remains canonical
+- unsafe `os.replace` must not occur
+- no external symlink target may be modified
+
+**Production changes:**
+None. The existing production code in `index.py` already:
+- validates full canonical path at rebuild start
+- re-validates full canonical path after `_build_index` (late validation)
+- compares `late_final_path != final_path` to detect any substitution
+- aborts before `os.replace` on mismatch
+- cleans up temp on failure (best-effort when directory is externally relocated)
+
+**Test changes:**
+- `tests/unit/test_fts_index.py` — corrected 2 parent-directory tests in `TestGenuineLateRebuildValidation`:
+  - `test_late_parent_directory_symlink_detected`: `rmdir()` → `rename()` + symlink; assertion changed from `real_db.exists()` to `not any(real_indexes.iterdir())`
+  - `test_late_parent_directory_symlink_temp_cleaned`: `rmdir()` → `rename()` + symlink; removed invalid `glob("fts_rebuild_*")` cleanup assertion; replaced with external-target-untouched check
+- Final-file late substitution tests (`test_late_final_file_symlink_detected`, `test_late_final_file_symlink_temp_cleaned`, `test_late_path_mismatch_detected`) — unchanged, already correct
+
+**Symlink test execution:**
+- Current Windows host: all symlink tests skipped (no `SeCreateSymbolicLinkPrivilege`)
+- Tests structurally verified by code inspection
+- Corrected parent-directory tests use `rename()` (works on all platforms) + `symlink_to()` (requires privilege, skipped when unavailable)
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_fts_index.py` — 70 passed, 22 skipped (symlink tests)
+- `uv run pytest tests/unit/test_fts_search.py` — 12 passed
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 159 passed
+- `uv run pytest tests/unit/test_cli_index.py` — 5 passed
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed
+- `uv run pytest` (full suite) — 1839 passed, 56 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — All checks passed
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — `--vault` present
+- `git diff --check` — no whitespace errors
+
+**Architecture review:**
+- No production code changed
+- No new locking infrastructure added
+- No OS-specific directory-file-descriptor APIs introduced
+- No filesystem watchers added
+- No background indexing added
+- No incremental FTS updates added
+- Player-only fingerprint preserved unchanged
+- `verify_freshness()` schema validation preserved unchanged
+- Eligibility-before-limit preserved unchanged
+- `--vault` CLI option preserved unchanged
+- SQLite error semantics preserved unchanged
+- FTS ranking/query semantics preserved unchanged
+- Public API preserved unchanged
+- No generated SQLite DB staged
+- No golden Vault modifications
+
+**Scope review:**
+- S5-04 remains NOT STARTED
+- No EntityResolver implementation
+- No embeddings
+- No vector DB
+- No semantic search
+- No Stage 6+ work
 
 **Resulting Stage-5 status:**
 - S5-00 = [x]
