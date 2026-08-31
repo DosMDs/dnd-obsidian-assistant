@@ -56,7 +56,31 @@ def calendar_strategy(draw: st.DrawFn) -> CalendarDefinition:
 
     hours = draw(st.integers(min_value=1, max_value=30))
     minutes = draw(st.integers(min_value=1, max_value=120))
-    epoch = GameDate(year=1, month=month_names[0], day=1)
+
+    # Draw a valid-by-construction epoch
+    epoch_year = draw(st.integers(min_value=-10000, max_value=10000))
+    epoch_hour = draw(st.integers(min_value=0, max_value=hours - 1))
+    epoch_minute = draw(st.integers(min_value=0, max_value=minutes - 1))
+
+    if ics and draw(st.booleans()):
+        ic_name = draw(st.sampled_from(ic_names))
+        epoch = GameDate(
+            year=epoch_year,
+            intercalary_day=ic_name,
+            hour=epoch_hour,
+            minute=epoch_minute,
+        )
+    else:
+        month_name = draw(st.sampled_from(month_names))
+        month_obj = next(m for m in months if m.name == month_name)
+        epoch_day = draw(st.integers(min_value=1, max_value=month_obj.days))
+        epoch = GameDate(
+            year=epoch_year,
+            month=month_name,
+            day=epoch_day,
+            hour=epoch_hour,
+            minute=epoch_minute,
+        )
 
     return CalendarDefinition(
         calendar_id="prop",

@@ -600,7 +600,7 @@ All boundaries are inclusive. Interval-overlap semantics for `events_between`, `
 - S4-05 remains NOT STARTED
 - Stage 5 remains NOT STARTED
 
-## Stage 4 — S4-04 completion record
+### S4-04 completion record
 
 **Review range:** S4-C02 completion through S4-04
 
@@ -704,6 +704,71 @@ The suspected cross-month declaration-order defect was **confirmed** and correct
 All repository files were read and edited only through built-in GigaCode/IDE file tools (Read, Write, Edit). No PowerShell, Bash, or Python scripts were used for repository file mutation.
 
 **ADR assessment:** No ADR required. The production correction replaces a fragile parallel-array lookup with a direct name-keyed dict, which is a local implementation detail of `_CalendarLayout` and does not change any public API or architectural boundary.
+
+### S4-C03 correction record
+
+**Acceptance-review defects:**
+
+1. **DEVELOPMENT_STATUS.md hierarchy corruption** — The S4-04 commit replaced the existing `## Stage 3 — Vault Repository` heading with `## Stage 4 — S4-04 completion record`, leaving historical Stage-3 content structurally nested under the S4-04 section. The heading has been restored to `### S4-04 completion record` (correctly nested under `## Stage 4 — Calendar`) and `## Stage 3 — Vault Repository` has been restored before the Stage-3 `### Goal` section.
+
+2. **Incomplete epoch property coverage** — The `calendar_strategy()` in `test_calendar_properties.py` always used a fixed epoch of `GameDate(year=1, month=month_names[0], day=1)`. This meant Hypothesis varied month lengths, intercalary layout, clock units, test dates, and ticks, but never varied the actual epoch shape. Properties P1-P12 exercised calendars whose tick zero was always the same trivial shape.
+
+**Strategy correction:**
+
+- `calendar_strategy()` now generates a valid-by-construction epoch from the calendar being built:
+  - **Epoch year**: signed integer from -10000 to +10000 (negative, zero, positive)
+  - **Regular epoch**: any declared month, any valid day within that month
+  - **Intercalary epoch**: any declared intercalary day (when ICs exist), with 50% probability
+  - **Epoch time**: non-midnight hour/minute within the calendar's custom clock bounds
+  - No `filter()` — valid-by-construction throughout
+
+**Deterministic epoch regressions added (3 tests in `TestEpochRegressions` in `test_calendar_intercalary_hardening.py`):**
+
+- `test_signed_non_midnight_regular_epoch` — year=-5, month="B", day=2, hour=13, minute=17
+- `test_year_zero_epoch` — year=0, month="A", day=3
+- `test_intercalary_non_midnight_epoch` — cross-month IC declaration ordering, year=42, hour=7, minute=31
+
+**Property coverage after correction:**
+
+All 15 properties (P1-P12) now automatically run over calendars with genuinely varying epochs:
+- P1 (date round trip) — varied epoch dates
+- P2 (tick round trip) — varied epoch dates
+- P3 (epoch identity) — now genuinely varies: regular/intercalary, signed years, non-midnight
+- P4/P5 (arithmetic) — varied-epoch calendars
+- P6 (adjacent ticks) — varied-epoch calendars
+- P7 (year translation) — varied-epoch calendars
+- P8 (holiday neutrality) — varied-epoch calendars
+- P9-P12 (event queries) — varied-epoch calendars
+
+**Additional defects discovered:** None.
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_intercalary_hardening.py` — 34 passed (was 31, +3 epoch regressions)
+- `uv run pytest tests/property/test_calendar_properties.py tests/property/test_calendar_properties_p2.py` — 15 passed
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py tests/unit/test_calendar_event_queries.py tests/unit/test_timeline_event.py tests/unit/test_calendar_intercalary_hardening.py tests/property/test_calendar_properties.py tests/property/test_calendar_properties_p2.py` — 514 passed
+- `uv run pytest` (full suite) — 1499 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 168 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope confirmation:**
+- S4-04 DONE (unchanged)
+- S4-05 NOT STARTED
+- Stage 5 NOT STARTED
+- No retrieval work
+- No session-runtime work
+- No Tool Layer work
+- No ModelGateway/Ollama work
+- No production calendar.py changes (no new defects discovered)
+- S4-04 intercalary offset fix (`_intercalary_offsets_by_name`) preserved unchanged
+
+**Tool-usage compliance:**
+All repository files were read and edited only through built-in GigaCode/IDE file tools (Read, Write, Edit). No PowerShell, Bash, or Python scripts were used for repository file mutation.
+
+**ADR assessment:** No ADR required. The epoch strategy correction is a local implementation detail of the Hypothesis test strategy and does not change any public API or architectural boundary.
+
+## Stage 3 — Vault Repository
 
 ### Goal
 

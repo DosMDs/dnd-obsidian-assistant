@@ -379,3 +379,63 @@ class TestExtremeCalendars:
         for i in range(5):
             d = GameDate(year=-100, intercalary_day=f"I{i}")
             assert svc.tick_to_date(svc.date_to_tick(d)) == d
+
+
+# =============================================================================
+# S4-C03: Deterministic epoch regression tests
+# =============================================================================
+
+
+class TestEpochRegressions:
+    """Deterministic epoch regression tests for S4-C03.
+
+    These supplement the Hypothesis property coverage by fixing important
+    epoch classes that must not silently disappear from the strategy.
+    """
+
+    def test_signed_non_midnight_regular_epoch(self) -> None:
+        """Epoch at year=-5, non-first month, non-day-1, non-midnight."""
+        cal = CalendarDefinition(
+            calendar_id="signed-epoch",
+            months=(
+                CalendarMonth(name="A", days=5),
+                CalendarMonth(name="B", days=3),
+            ),
+            epoch=GameDate(year=-5, month="B", day=2, hour=13, minute=17),
+        )
+        svc = DeterministicCalendarService(cal)
+        assert svc.date_to_tick(cal.epoch) == 0
+        assert svc.tick_to_date(0) == cal.epoch
+
+    def test_year_zero_epoch(self) -> None:
+        """Epoch at year=0, regular date."""
+        cal = CalendarDefinition(
+            calendar_id="year-zero-epoch",
+            months=(
+                CalendarMonth(name="A", days=5),
+                CalendarMonth(name="B", days=3),
+            ),
+            epoch=GameDate(year=0, month="A", day=3),
+        )
+        svc = DeterministicCalendarService(cal)
+        assert svc.date_to_tick(cal.epoch) == 0
+        assert svc.tick_to_date(0) == cal.epoch
+
+    def test_intercalary_non_midnight_epoch(self) -> None:
+        """Epoch at an intercalary day with cross-month declaration ordering,
+        non-midnight time-of-day."""
+        cal = CalendarDefinition(
+            calendar_id="ic-epoch",
+            months=(
+                CalendarMonth(name="First", days=3),
+                CalendarMonth(name="Second", days=3),
+            ),
+            intercalary_days=(
+                IntercalaryDay(name="Late Festival", after_month="Second"),
+                IntercalaryDay(name="Early Festival", after_month="First"),
+            ),
+            epoch=GameDate(year=42, intercalary_day="Early Festival", hour=7, minute=31),
+        )
+        svc = DeterministicCalendarService(cal)
+        assert svc.date_to_tick(cal.epoch) == 0
+        assert svc.tick_to_date(0) == cal.epoch
