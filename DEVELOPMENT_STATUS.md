@@ -1050,7 +1050,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - No ModelGateway/Ollama
 - No embeddings/vector DB
 
-**Commit SHA:** (to be recorded after commit)
+**Commit SHA:** `bf68b45`
 
 ---
 
