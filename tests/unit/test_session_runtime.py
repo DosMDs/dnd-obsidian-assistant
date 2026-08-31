@@ -20,7 +20,7 @@ import pytest
 from dnd_assistant.application.session_runtime import SessionRuntimeService
 from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.world_time import CurrentWorldTime
-from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
+from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.storage.session_events import RawSessionEvent
 
@@ -600,3 +600,127 @@ class TestEndSession:
         service.end_session(audit=_make_audit_context(operation_id="end1"))
         with pytest.raises(NotFoundError, match="no active session"):
             service.end_session(audit=_make_audit_context(operation_id="end2"))
+
+
+# ── Application corrupt event log ──────────────────────────────────────────────
+
+
+class TestCorruptEventLogPreventsClose:
+    def test_corrupt_event_log_raises_storage_error(self) -> None:
+        class FailingEventRepo:
+            def __init__(self) -> None:
+                self.list_events_called = False
+
+            def list_events(self, session_id: str) -> list:
+                self.list_events_called = True
+                raise StorageError("corrupt event log")
+
+            def append_event(self, *args, **kwargs):
+                raise NotImplementedError
+
+        session_repo = FakeSessionMetadataRepo()
+        world_repo = FakeWorldTimeRepo(tick=13800)
+        event_repo = FailingEventRepo()
+        service = _make_service(
+            session_repo=session_repo,
+            world_repo=world_repo,
+            event_repo=event_repo,
+        )
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+
+        with pytest.raises(StorageError, match="failed to validate event log"):
+            service.end_session(audit=_make_audit_context(operation_id="end"))
+
+        assert event_repo.list_events_called
+        active = service.get_active_session()
+        assert active is not None
+        assert active.status == "active"
+
+
+# ── Application missing world time ─────────────────────────────────────────────
+
+
+class TestMissingWorldTimePreventsClose:
+    def test_missing_world_time_raises_not_found(self) -> None:
+        session_repo = FakeSessionMetadataRepo()
+        world_repo = FakeWorldTimeRepo(tick=13800)
+        event_repo = FakeSessionEventRepo()
+        service = _make_service(
+            session_repo=session_repo,
+            world_repo=world_repo,
+            event_repo=event_repo,
+        )
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+
+        # Make world time missing for close
+        world_repo._tick = None
+
+        with pytest.raises(NotFoundError, match="world time"):
+            service.end_session(audit=_make_audit_context(operation_id="end"))
+
+        active = service.get_active_session()
+        assert active is not None
+        assert active.status == "active"
+
+
+# ── Application close delegation ───────────────────────────────────────────────
+
+
+class TestCloseDelegation:
+    def test_close_delegated_once_with_exact_args(self) -> None:
+        class TrackingSessionRepo(FakeSessionMetadataRepo):
+            def __init__(self) -> None:
+                super().__init__()
+                self.close_calls: list[dict] = []
+
+            def close_session(
+                self,
+                session_id: str,
+                *,
+                expected_revision: int,
+                world_tick_end: int,
+                touched_entity_ids: list[str],
+                audit: AuditContext,
+            ) -> _FakeMetadata:
+                self.close_calls.append(
+                    {
+                        "session_id": session_id,
+                        "expected_revision": expected_revision,
+                        "world_tick_end": world_tick_end,
+                        "touched_entity_ids": touched_entity_ids,
+                        "audit": audit,
+                    }
+                )
+                return super().close_session(
+                    session_id,
+                    expected_revision=expected_revision,
+                    world_tick_end=world_tick_end,
+                    touched_entity_ids=touched_entity_ids,
+                    audit=audit,
+                )
+
+        session_repo = TrackingSessionRepo()
+        world_repo = FakeWorldTimeRepo(tick=99999)
+        event_repo = FakeSessionEventRepo()
+        service = _make_service(
+            session_repo=session_repo,
+            world_repo=world_repo,
+            event_repo=event_repo,
+        )
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+
+        audit_ctx = _make_audit_context(operation_id="end")
+        touched = ["npc_varos", "loc_crypt"]
+        result = service.end_session(
+            touched_entity_ids=touched,
+            audit=audit_ctx,
+        )
+
+        assert len(session_repo.close_calls) == 1
+        call = session_repo.close_calls[0]
+        assert call["session_id"] == "S001"
+        assert call["expected_revision"] == 1
+        assert call["world_tick_end"] == 99999
+        assert call["touched_entity_ids"] == touched
+        assert call["audit"] is audit_ctx
+        assert result.status == "completed"

@@ -22,7 +22,7 @@ import pytest
 
 import dnd_assistant.storage.session_events as _events_mod
 from dnd_assistant.domain.session import Session
-from dnd_assistant.errors import NotFoundError, StorageError
+from dnd_assistant.errors import StorageError
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_events import (
     ObsidianSessionEventRepository,
@@ -574,7 +574,7 @@ class TestPathSafety:
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        with pytest.raises((StorageError, NotFoundError), match="not found"):
+        with pytest.raises(StorageError, match="no metadata"):
             repo.append_event(
                 "S001",
                 event_type="note",

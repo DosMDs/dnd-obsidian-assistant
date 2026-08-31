@@ -26,8 +26,9 @@ from pathlib import Path
 
 from pydantic import TypeAdapter
 
+from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.domain.session import Session
-from dnd_assistant.domain.types import EntityId
+from dnd_assistant.domain.types import EntityId, Revision
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.audit import AuditContext, AuditService
@@ -760,16 +761,43 @@ class ObsidianSessionMetadataRepository:
         self,
         session_id: str,
         *,
-        expected_revision: int,
-        world_tick_end: int,
-        touched_entity_ids: Sequence[str],
+        expected_revision: Revision,
+        world_tick_end: WorldTick,
+        touched_entity_ids: Sequence[EntityId],
         audit: AuditContext,
     ) -> RawSessionMetadata:
         """Close an active session with completed state."""
-        # 1. Validate inputs
+        # 1. Validate inputs (before any audit intent or mutation)
         _validate_session_runtime_roots(self._vault_root)
 
-        # Validate EntityIds in touched_entity_ids
+        # 1a. Canonical Revision validation
+        _revision_adapter = TypeAdapter(Revision)
+        try:
+            _revision_adapter.validate_python(expected_revision)
+        except Exception as exc:
+            raise ValidationError(
+                f"Invalid expected_revision: {expected_revision!r}",
+                cause=exc,
+            ) from exc
+
+        # 1b. Canonical WorldTick validation
+        _world_tick_adapter = TypeAdapter(WorldTick)
+        try:
+            _world_tick_adapter.validate_python(world_tick_end)
+        except Exception as exc:
+            raise ValidationError(
+                f"Invalid world_tick_end: {world_tick_end!r}",
+                cause=exc,
+            ) from exc
+
+        # 1c. Reject scalar string/bytes-like touched_entity_ids
+        if isinstance(touched_entity_ids, (str, bytes, bytearray)):
+            raise ValidationError(
+                f"touched_entity_ids must be a sequence of EntityId, "
+                f"got scalar {type(touched_entity_ids).__name__}: {touched_entity_ids!r}"
+            )
+
+        # 1d. Validate EntityIds in touched_entity_ids
         _entity_id_adapter = TypeAdapter(EntityId)
         validated_touched: list[str] = []
         for eid in touched_entity_ids:
@@ -899,6 +927,15 @@ class ObsidianSessionMetadataRepository:
                 seen.add(eid)
                 merged_touched.append(eid)
 
+        # 10.5. Validate persisted processing_status shape before overwrite
+        if "processing_status" in persisted_extras:
+            raw_ps = persisted_extras["processing_status"]
+            if not isinstance(raw_ps, str):
+                raise StorageError(
+                    f"Session {session_id}: persisted processing_status is not a string, "
+                    f"got {type(raw_ps).__name__}: {raw_ps!r}"
+                )
+
         # 11. Build candidate metadata with extras
         candidate_extras = dict(persisted_extras)
         candidate_extras["touched_entities"] = merged_touched
@@ -964,7 +1001,41 @@ class ObsidianSessionMetadataRepository:
             validator=lambda c: _deserialize(c),
         )
 
-        # 15. Verified close read-back
+        # 15. Post-write path reauthorization
+        _validate_session_runtime_roots(self._vault_root)
+        paths = resolve_session_storage_paths(self._vault_root, session_id)
+        _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # 15a. Reject metadata/events that are symlinks or directories
+        if paths.raw_metadata.is_symlink():
+            raise StorageError(
+                f"metadata.json became a symlink after close write for "
+                f"operation {audit.operation_id}"
+            )
+        if not paths.raw_metadata.exists():
+            raise StorageError(
+                f"metadata.json disappeared after close write for operation {audit.operation_id}"
+            )
+        if paths.raw_metadata.is_dir():
+            raise StorageError(
+                f"metadata.json is a directory after close write for operation {audit.operation_id}"
+            )
+
+        if paths.raw_events.is_symlink():
+            raise StorageError(
+                f"events.jsonl became a symlink after close write for "
+                f"operation {audit.operation_id}"
+            )
+        if not paths.raw_events.exists():
+            raise StorageError(
+                f"events.jsonl disappeared after close write for operation {audit.operation_id}"
+            )
+        if paths.raw_events.is_dir():
+            raise StorageError(
+                f"events.jsonl is a directory after close write for operation {audit.operation_id}"
+            )
+
+        # 16. Verified close read-back using newly authorized paths
         persisted_text = _read_exact_text(paths.raw_metadata)
         persisted_hash = _content_hash(persisted_text)
         if persisted_hash != after_hash:
@@ -975,36 +1046,22 @@ class ObsidianSessionMetadataRepository:
 
         persisted_meta = _deserialize(persisted_text, expected_id=session_id)
 
-        # Verify full persisted result equals candidate
-        if persisted_meta.session.status != "completed":
+        # 16a. Full persisted candidate equality check
+        if persisted_meta != candidate_meta:
             raise StorageError(
-                f"Session close committed but status is "
-                f"{persisted_meta.session.status!r} for operation {audit.operation_id}"
-            )
-        if persisted_meta.session.revision != new_session.revision:
-            raise StorageError(
-                f"Session close committed but revision mismatch for operation {audit.operation_id}"
-            )
-        if persisted_meta.session.real_finished_at != real_finished_at:
-            raise StorageError(
-                f"Session close committed but real_finished_at mismatch for "
-                f"operation {audit.operation_id}"
-            )
-        if persisted_meta.session.world_tick_end != world_tick_end:
-            raise StorageError(
-                f"Session close committed but world_tick_end mismatch for "
-                f"operation {audit.operation_id}"
+                f"Session close committed but persisted metadata differs from candidate "
+                f"for operation {audit.operation_id}"
             )
 
-        # 16. Re-read events and verify exact unchanged hash
-        events_text_final = _read_exact_text(events_path)
+        # 17. Re-read events using newly authorized path and verify exact unchanged hash
+        events_text_final = _read_exact_text(paths.raw_events)
         events_hash_final = _content_hash(events_text_final)
         if events_hash_final != events_before_hash:
             raise StorageError(
                 f"events.jsonl changed after metadata close for operation {audit.operation_id}"
             )
 
-        # 17. Append committed audit
+        # 18. Append committed audit
         committed_record = _build_audit_record(
             operation_id=audit.operation_id,
             real_time=audit.real_time,

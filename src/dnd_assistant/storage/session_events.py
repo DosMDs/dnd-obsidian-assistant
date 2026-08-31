@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING
 from pydantic import TypeAdapter
 
 from dnd_assistant.domain.calendar import WorldTick
-from dnd_assistant.errors import ConflictError, StorageError
+from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
 from dnd_assistant.storage.session_metadata import _authorized_metadata_read
 from dnd_assistant.storage.session_paths import (
     SessionStoragePaths,
@@ -900,7 +900,14 @@ class ObsidianSessionEventRepository:
 
         # 1.5. Read authorized metadata and verify session is active
         # (before any event audit intent)
-        _meta_paths, _meta_text, _meta = _authorized_metadata_read(self._vault_root, session_id)
+        # Missing metadata raises StorageError (not NotFoundError) for this API
+        try:
+            _meta_paths, _meta_text, _meta = _authorized_metadata_read(self._vault_root, session_id)
+        except NotFoundError:
+            raise StorageError(
+                f"Session {session_id} has no metadata.json — event operations require "
+                f"a valid metadata sidecar"
+            ) from None
         _meta_before_hash = _content_hash(_meta_text)
         _meta_revision = _meta.session.revision
         if _meta.session.status != "active":

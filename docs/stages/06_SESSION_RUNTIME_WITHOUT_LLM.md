@@ -1154,3 +1154,131 @@ This was inaccurate.  The correct semantics are:
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No recovery/truncation/repair logic.
 - No CLI commands for session lifecycle.
+
+### S6-C04 — Session-close validation / TOCTOU / failure-coverage hardening
+
+**Review base:**
+`46a9909967cbfe282c1d05e3d0a3957299d1c19a`
+
+**Confirmed findings:**
+
+- expected_revision lacked strict Revision validation
+- world_tick_end lacked strict WorldTick validation
+- concrete close_session typing used raw int/Sequence[str] instead of
+  Revision/WorldTick/Sequence[EntityId]
+- scalar touched_entity_ids (str) silently iterated as characters
+- corrupt non-string processing_status silently overwritten
+- post-write path reauthorization missing (roots, resolve, mutation env)
+- post-write metadata/events symlink/directory safety missing
+- append_event missing-metadata error boundary weakened to
+  (StorageError, NotFoundError)
+- close failure/race regression suite absent
+- exact close after_hash audit regression absent
+- event close/append race regression suite absent
+- application corrupt-log/missing-world-time guards absent
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/session_metadata.py`:**
+   - Added canonical `Revision` validation via `TypeAdapter(Revision)`
+     before any audit intent or mutation.
+   - Added canonical `WorldTick` validation via `TypeAdapter(WorldTick)`.
+   - Changed concrete `close_session` signature to use
+     `expected_revision: Revision`, `world_tick_end: WorldTick`,
+     `touched_entity_ids: Sequence[EntityId]`.
+   - Added scalar `str`/`bytes`/`bytearray` rejection for
+     `touched_entity_ids` before iteration.
+   - Added persisted `processing_status` shape validation: non-str values
+     raise `StorageError` before overwrite.
+   - Added full `persisted_meta == candidate_meta` equality check.
+   - Added post-write path reauthorization:
+     `_validate_session_runtime_roots` → `resolve_session_storage_paths`
+     → `_validate_mutation_environment`.
+   - Added post-write metadata/events safety checks: reject symlinks,
+     missing files, directories.
+   - Added `from dnd_assistant.domain.calendar import WorldTick` and
+     `from dnd_assistant.domain.types import Revision`.
+
+2. **`src/dnd_assistant/storage/session_events.py`:**
+   - `append_event` now wraps `_authorized_metadata_read` in a
+     `try/except NotFoundError` that translates to `StorageError`,
+     restoring the strict contract.
+   - Added `from dnd_assistant.errors import NotFoundError`.
+
+3. **`tests/unit/test_session_events.py`:**
+   - `test_missing_events_file_append_raises`: changed expected exception
+     from `(StorageError, NotFoundError)` to `StorageError` with correct
+     match pattern.
+
+4. **`tests/unit/test_session_events_c03.py`:**
+   - `test_append_event_missing_metadata_raises`: same strict fix.
+
+5. **`tests/unit/test_session_close_failures.py`** (new — 10 tests):
+   - `TestExactCloseAuditHash`: before_hash and after_hash exact audit
+     regression.
+   - `TestAuditIntentFailure`: intent failure prevents all mutation.
+   - `TestAtomicWriteFailure`: atomic write failure after intent leaves
+     old metadata intact with intent audit present.
+   - `TestMetadataChangedAfterIntent`: competitor metadata after intent
+     raises ConflictError.
+   - `TestEventsChangedAfterIntent`: competitor event after intent raises
+     ConflictError.
+   - `TestEventsChangedAfterMetadataClose`: competitor event after
+     metadata close raises StorageError; completed metadata remains.
+   - `TestCommittedAuditFailure`: committed audit failure leaves completed
+     metadata without committed audit.
+   - `TestRuntimeRootRace`: missing runtime root after intent raises
+     StorageError.
+   - `TestPostWriteSymlinkRace`: events symlink after metadata write
+     raises StorageError (skipped when OS lacks symlink support).
+
+6. **`tests/unit/test_session_event_lifecycle.py`** (new — 4 tests):
+   - `TestClosedSessionEventAppend`: list_events succeeds on closed
+     session; append_event raises ConflictError.
+   - `TestCloseWinsAfterEventIntent`: close after event intent but before
+     append raises ConflictError.
+   - `TestCloseWinsAfterEventAppend`: close after physical event append
+     raises StorageError.
+
+7. **`tests/unit/test_session_runtime.py`** — 3 new test classes:
+   - `TestCorruptEventLogPreventsClose`: corrupt event log prevents
+     end_session; active session preserved.
+   - `TestMissingWorldTimePreventsClose`: missing world time prevents
+     end_session; active session preserved.
+   - `TestCloseDelegation`: verifies close_session called exactly once
+     with exact arguments (session_id, revision, tick, touched IDs,
+     audit context).
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_close.py` — 37 passed, 3 skipped
+- `uv run pytest tests/unit/test_session_close_failures.py` — 9 passed, 1 skipped
+- `uv run pytest tests/unit/test_session_event_lifecycle.py` — 4 passed
+- `uv run pytest tests/unit/test_session_events.py` — 44 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03.py` — 41 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03f.py` — 8 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 45 passed
+- Boundary order A (boundaries first) — 260 passed, 8 skipped
+- Boundary order B (boundaries last) — 260 passed, 8 skipped
+- Broader lifecycle gate — 572 passed, 37 skipped
+- `uv run pytest` (full suite) — **2383 passed, 93 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 207 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — No whitespace errors
+
+**Correction commit SHA:** (reported in Final Report)
+**Commit message:** `fix: harden session close integrity (S6-C04)`
+
+**Explicit deferrals:**
+
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
+- No recovery/truncation/repair logic.
+- No CLI commands for session lifecycle.
