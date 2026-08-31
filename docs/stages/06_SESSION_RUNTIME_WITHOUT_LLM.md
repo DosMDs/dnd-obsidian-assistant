@@ -122,6 +122,8 @@ existing code and ADRs:
 - Symlink containment checks follow the same component-by-component
   pattern as `_resolve_entity_directory` in `paths.py`.
 - The resolver is pure read-only — no directories or files are created.
+- `_resolve_vault_root` is imported at module level (not lazy) to avoid
+  test-isolation issues when boundary tests manipulate `sys.modules`.
 
 **Quality-gate results:**
 
@@ -131,6 +133,10 @@ existing code and ADRs:
 - `uv run ruff check .` — All checks passed
 - `uv run ruff format --check .` — 191 files already formatted
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Starting SHA:** `79d2c1d153e02a578a81fade9e0fa3098f0c2b59`
+**Final SHA:** `d68c5dd51c377b98d7d03d475630469ceb5f4758`
+**Commit message:** `feat: define session storage path contracts (S6-00)`
 
 **Known deferred items:**
 
