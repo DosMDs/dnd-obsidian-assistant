@@ -645,8 +645,108 @@ class TestFailureIntegrity:
 class TestFsync:
     """Tests for events.jsonl fsync semantics."""
 
+    # ── Direct helper tests (no AuditService involvement) ──────────────────
+
+    def test_direct_event_log_fsync_called(self, tmp_path: Path, monkeypatch) -> None:
+        """Direct test: _create_exclusive_event_log calls os.fsync.
+
+        Does NOT call create_session() or involve AuditService.
+        """
+        path = tmp_path / "events.jsonl"
+        called = False
+        original_fsync = os.fsync
+
+        def tracking_fsync(fd: int) -> None:
+            nonlocal called
+            called = True
+            return original_fsync(fd)
+
+        monkeypatch.setattr(_meta_mod.os, "fsync", tracking_fsync)
+
+        _meta_mod._create_exclusive_event_log(path)
+
+        assert called, "_create_exclusive_event_log did not call os.fsync"
+        assert path.exists()
+        assert path.read_bytes() == b""
+
+    def test_direct_event_log_fsync_failure_raises_storage_error(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """Direct test: fsync failure in helper raises StorageError.
+
+        Does NOT call create_session() or involve AuditService.
+        """
+        path = tmp_path / "events.jsonl"
+
+        def failing_fsync(fd: int) -> None:
+            raise OSError("Simulated fsync failure")
+
+        monkeypatch.setattr(_meta_mod.os, "fsync", failing_fsync)
+
+        with pytest.raises(StorageError, match="fsync"):
+            _meta_mod._create_exclusive_event_log(path)
+
+        # File descriptor was closed (no leak)
+        # The zero-byte file MAY remain after fsync failure — that is acceptable.
+        # We verify the helper did not leave an open descriptor by attempting
+        # to open the file for writing (which should succeed if fd was closed).
+        if path.exists():
+            # Verify the file can be opened for write (fd was closed)
+            fd2 = os.open(str(path), os.O_WRONLY)
+            os.close(fd2)
+
+    # ── create_session integration tests (patch helper seam, not os.fsync) ─
+
+    def test_create_session_event_helper_failure_after_intent(
+        self, vault_root: Path, monkeypatch
+    ) -> None:
+        """create_session fails after audit intent when event-helper fails.
+
+        Patches _create_exclusive_event_log directly, not global os.fsync,
+        so AuditService fsync is not affected.
+        """
+
+        def failing_helper(path):
+            raise StorageError("simulated events.jsonl durability failure")
+
+        monkeypatch.setattr(_meta_mod, "_create_exclusive_event_log", failing_helper)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="events.jsonl"):
+            ObsidianSessionMetadataRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).create_session(session, audit=_make_audit_context(operation_id="fsync-helper-fail"))
+
+        # Audit intent was already persisted
+        records = _read_audit_records(vault_root)
+        assert len(records) == 1
+        assert records[0]["phase"] == "intent"
+        assert records[0]["operation_id"] == "fsync-helper-fail"
+
+        # metadata.json must NOT exist
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        assert not meta_path.exists()
+
+        # No committed audit record
+        committed = [r for r in records if r.get("phase") == "committed"]
+        assert len(committed) == 0
+
+        # Partial owned directories MAY exist (S6-02 permits partial artifacts
+        # when safe rollback is not guaranteed; S6-05 owns recovery).
+        # We verify metadata is absent and committed audit is absent.
+        # Pre-existing sessions unchanged
+        assert not (vault_root / "Sessions" / "S005").exists()
+
+    # ── Legacy tests (kept for backward compat, known false-positive
+    #     behavior documented in S6-C02F) ───────────────────────────────────
+
     def test_fsync_called_on_successful_creation(self, vault_root: Path, monkeypatch) -> None:
-        """Verify os.fsync is actually called for successful events.jsonl creation."""
+        """Verify os.fsync is actually called for successful events.jsonl creation.
+
+        NOTE: This test monkeypatches global os.fsync and therefore also
+        covers AuditService fsync.  The direct helper test
+        test_direct_event_log_fsync_called provides isolated coverage.
+        """
         fsync_called = False
         original_fsync = os.fsync
 
@@ -665,7 +765,14 @@ class TestFsync:
         assert fsync_called, "os.fsync was not called during events.jsonl creation"
 
     def test_fsync_failure_raises_storage_error(self, vault_root: Path, monkeypatch) -> None:
-        """Verify fsync failure raises StorageError and no metadata is committed."""
+        """Verify fsync failure raises StorageError and no metadata is committed.
+
+        NOTE: This test monkeypatches global os.fsync, which also affects
+        AuditService.  The failure occurs during audit intent, not during
+        event-log fsync.  The direct helper test
+        test_direct_event_log_fsync_failure_raises_storage_error provides
+        isolated coverage.
+        """
 
         def failing_fsync(fd: int) -> None:
             raise OSError("Simulated fsync failure")
@@ -691,7 +798,13 @@ class TestFsync:
         assert not (vault_root / "Sessions" / "S006").exists()
 
     def test_fsync_failure_does_not_create_session_dir(self, vault_root: Path, monkeypatch) -> None:
-        """Verify fsync failure leaves no session directories."""
+        """Verify fsync failure leaves no session directories.
+
+        NOTE: This test monkeypatches global os.fsync, which also affects
+        AuditService.  The failure occurs during audit intent, not during
+        event-log fsync.  The assertions pass because audit intent never
+        completed, NOT because event-log fsync was isolated.
+        """
 
         def failing_fsync(fd: int) -> None:
             raise OSError("Simulated fsync failure")

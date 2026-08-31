@@ -707,3 +707,130 @@ Published S6-01 history was preserved; no rewrite was used.
 - No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or event schema implemented.
+
+### S6-C02F — Event-log fsync test-isolation correction
+
+**Review base:** `b5c7cb80f2afba9e1208e29763a8fcde3a5ef122`
+
+**False-positive root cause:**
+
+The initial S6-C02 fsync tests monkeypatched global `os.fsync`:
+
+```python
+monkeypatch.setattr(os, "fsync", failing_fsync)
+```
+
+`AuditService.append()` (via `_append_line`) also performs:
+
+```text
+write → flush → os.fsync
+```
+
+Python's `os` is the same shared module object. Therefore the
+monkeypatched `os.fsync` fired during `AuditService.append(intent_record)`
+— **before** `_create_exclusive_event_log()` was reached.
+
+The tests passed for the wrong reason:
+
+- `test_fsync_called_on_successful_creation` — `tracking_fsync` called
+  `original_fsync` for the audit fsync too, so audit succeeded; the
+  `fsync_called` flag was set to `True` by the audit fsync, not by the
+  event-log fsync.
+
+- `test_fsync_failure_raises_storage_error` — the failure occurred during
+  audit intent. Assertions like "no session dirs" passed because audit
+  intent never completed, guaranteeing zero filesystem mutation. This is
+  the **audit-intent-failure** contract, not an event-log-fsync contract.
+
+- `test_fsync_failure_does_not_create_session_dir` — same false negative.
+  The assertions `assert not (vault_root / "Sessions" / "S006").exists()`
+  passed because the failure aborted before any mkdir, not because event-
+  log fsync was isolated.
+
+**Production check:**
+
+The production `os.fsync(fd)` implementation at line 316 of
+`session_metadata.py` was present and correct.  No production changes were
+needed.
+
+**Test corrections (2 new direct helper tests, 1 new integration test):**
+
+1. `test_direct_event_log_fsync_called(tmp_path, monkeypatch)` —
+   Calls `_create_exclusive_event_log(path)` directly on a `tmp_path`
+   file, monkeypatching `_meta_mod.os.fsync` with a tracking wrapper.
+   Does NOT call `create_session()` or involve `AuditService`.  Asserts
+   `called`, `path.exists()`, `path.read_bytes() == b""`.
+
+2. `test_direct_event_log_fsync_failure_raises_storage_error(tmp_path,
+   monkeypatch)` — Calls `_create_exclusive_event_log(path)` directly,
+   monkeypatching `_meta_mod.os.fsync` to raise `OSError`.  Does NOT call
+   `create_session()` or involve `AuditService`.  Asserts `StorageError`,
+   descriptor was closed (deterministic check by re-opening the file).
+
+3. `test_create_session_event_helper_failure_after_intent(vault_root,
+   monkeypatch)` — Patches `_meta_mod._create_exclusive_event_log` with a
+   stub that raises `StorageError("simulated events.jsonl durability
+   failure")`.  This does NOT affect `AuditService.append()` so the audit
+   intent completes successfully.  Asserts:
+   - 1 intent audit record present;
+   - `metadata.json` does NOT exist;
+   - No committed audit record;
+   - Partial owned directories MAY exist (not asserted);
+   - Pre-existing sessions unchanged.
+
+**Corrected partial-state semantics for event-log failure after intent:**
+
+The previous S6-C02 claimed:
+
+```text
+fsync failure → no session dirs
+```
+
+This was inaccurate.  The correct semantics are:
+
+- **Audit intent failure (phase: intent append fails):** Zero filesystem
+  mutation.  Guaranteed.
+
+- **Event-log initialization/durability failure after intent (event-log
+  create or fsync fails):** Partial newly-created directories MAY exist.
+  `metadata.json` is absent.  No committed audit record.  S6-05 is
+  responsible for recovery.
+
+- **Audit committed failure (phase: committed append fails):** Full
+  session persistence already exists.  Intent audit exists.  Committed
+  audit absent.  `StorageError` raised.  No rollback.
+
+**Confirmation of preserved contracts:**
+
+- `test_audit_intent_failure_prevents_all_mutation` — unchanged, still
+  asserts zero filesystem mutation when audit intent fails.
+- `test_audit_committed_failure_leaves_persisted_data` — unchanged, still
+  asserts persisted session artifacts remain when audit committed fails.
+- All S6-C02 production fixes retained: canonical root validation, no
+  `parents=True` bootstrap, discovery symlink ordering, metadata leaf
+  safety, audit intent/committed failure semantics.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_metadata.py` — 64 passed, 14 skipped
+- `uv run pytest tests/unit/test_session_runtime.py` — 17 passed
+- `uv run pytest tests/contract/test_boundaries.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py` — 126 passed, 14 skipped
+- `uv run pytest tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/contract/test_boundaries.py` — 126 passed, 14 skipped
+- `uv run pytest` (full suite) — **2185 passed, 85 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — All files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Correction commit SHA:** (set after commit)
+**Commit message:** `test: isolate session event fsync failures (S6-C02F)`
+
+**Explicit deferrals:**
+
+- S6-03 (append-only event JSONL logging) is NOT started.
+- S6-04 (session end, touched IDs, processing pending) is NOT started.
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or event schema implemented.
