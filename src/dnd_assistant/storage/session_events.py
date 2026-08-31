@@ -24,8 +24,12 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from pydantic import TypeAdapter
+
+from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.errors import ConflictError, StorageError
 from dnd_assistant.storage.session_paths import (
+    SessionStoragePaths,
     resolve_session_storage_paths,
 )
 
@@ -39,6 +43,9 @@ if TYPE_CHECKING:
 
 _AUDIT_SYSTEM_DIR = "_system"
 _AUDIT_DIR = "audit"
+
+# Portable O_BINARY flag: Windows requires binary mode; POSIX/macOS ignores it.
+_O_BINARY = getattr(os, "O_BINARY", 0)
 
 # ── Event ID pattern ──────────────────────────────────────────────────────────
 
@@ -54,6 +61,93 @@ _CANONICAL_EVENT_FIELDS: frozenset[str] = frozenset(
         "type",
     }
 )
+
+# ── Field-level validation helpers ────────────────────────────────────────────
+
+
+def _validate_event_id(value: str) -> None:
+    """Validate an event ID string.
+
+    Requirements:
+    - strict str
+    - printable
+    - no surrounding whitespace
+    - matches ``^evt_[0-9]+$``
+    - numeric part >= 1
+
+    Raises:
+        StorageError: Validation failed.
+    """
+    if not isinstance(value, str):
+        raise StorageError(f"event_id must be a string, got {type(value).__name__}")
+    if not value:
+        raise StorageError("event_id must not be empty")
+    if value.strip() != value:
+        raise StorageError(f"event_id must not have leading or trailing whitespace: {value!r}")
+    if not value.isprintable():
+        raise StorageError(f"event_id contains non-printable characters: {value!r}")
+    m = _EVENT_ID_RE.match(value)
+    if not m:
+        raise StorageError(f"event_id does not match expected format evt_N: {value!r}")
+    num = int(m.group(1))
+    if num < 1:
+        raise StorageError(f"event_id numeric part must be >= 1, got {num}")
+
+
+def _validate_aware_datetime(value: object) -> None:
+    """Validate that value is a timezone-aware datetime.
+
+    Raises:
+        StorageError: Validation failed.
+    """
+    from datetime import datetime as _dt
+
+    if not isinstance(value, _dt):
+        raise StorageError(f"real_time must be a datetime, got {type(value).__name__}")
+    if value.tzinfo is None:
+        raise StorageError("real_time must be timezone-aware")
+
+
+def _validate_world_tick_value(value: object) -> None:
+    """Validate a world_tick value using the canonical WorldTick contract.
+
+    Uses ``TypeAdapter(WorldTick)`` to validate the value through the
+    canonical Pydantic pipeline, which enforces strict int (rejecting
+    bool, float, str).
+
+    Raises:
+        StorageError: Validation failed.
+    """
+    try:
+        TypeAdapter(WorldTick).validate_python(value)
+    except Exception as exc:
+        raise StorageError(
+            f"Invalid world_tick: {value!r}",
+            cause=exc,
+        ) from exc
+
+
+def _validate_event_type(value: str) -> None:
+    """Validate an event type string.
+
+    Requirements:
+    - strict str
+    - non-empty
+    - printable
+    - no surrounding whitespace
+
+    Raises:
+        StorageError: Validation failed.
+    """
+    if not isinstance(value, str):
+        raise StorageError(f"type must be a string, got {type(value).__name__}")
+    if not value:
+        raise StorageError("type must not be empty")
+    if value.strip() != value:
+        raise StorageError(f"type must not have leading or trailing whitespace: {value!r}")
+    if not value.isprintable():
+        raise StorageError(f"type contains non-printable characters: {value!r}")
+
 
 # ── RawSessionEvent ───────────────────────────────────────────────────────────
 
@@ -82,11 +176,30 @@ class RawSessionEvent:
         type: str,
         extra_fields: dict[str, object] | None = None,
     ) -> None:
+        # ── Validate event_id ──────────────────────────────────────────────
+        _validate_event_id(event_id)
+
+        # ── Validate real_time ─────────────────────────────────────────────
+        _validate_aware_datetime(real_time)
+
+        # ── Validate world_tick ────────────────────────────────────────────
+        _validate_world_tick_value(world_tick)
+
+        # ── Validate type ──────────────────────────────────────────────────
+        _validate_event_type(type)
+
+        # ── Validate extra_fields ──────────────────────────────────────────
+        extras = dict(extra_fields) if extra_fields else {}
+        for k in extras:
+            if k in _CANONICAL_EVENT_FIELDS:
+                raise StorageError(f"Extra field {k!r} collides with a canonical event field")
+        _validate_json_value(extras)
+
         self._event_id = event_id
         self._real_time = real_time
         self._world_tick = world_tick
         self._type = type
-        self._extra_fields = dict(extra_fields) if extra_fields else {}
+        self._extra_fields = extras
 
     @property
     def event_id(self) -> str:
@@ -362,6 +475,7 @@ def _parse_events_jsonl(text: str) -> list[RawSessionEvent]:
         lines = lines[:-1]
 
     events: list[RawSessionEvent] = []
+    seen_ids: set[str] = set()
     for line_no, raw_line in enumerate(lines, start=1):
         stripped = raw_line.strip()
 
@@ -370,6 +484,14 @@ def _parse_events_jsonl(text: str) -> list[RawSessionEvent]:
             raise StorageError(f"events.jsonl corruption at line {line_no}: unexpected blank line")
 
         event = _deserialize_event(raw_line)
+
+        # Reject duplicate event IDs (strict parser detects corruption)
+        if event.event_id in seen_ids:
+            raise StorageError(
+                f"events.jsonl: duplicate event_id {event.event_id!r} at line {line_no}"
+            )
+        seen_ids.add(event.event_id)
+
         events.append(event)
 
     return events
@@ -507,6 +629,29 @@ def _validate_session_runtime_roots(vault_root: Path) -> None:
             ) from None
 
 
+# ── Metadata existence validation ──────────────────────────────────────────────
+
+
+def _validate_metadata_exists(paths: SessionStoragePaths, session_id: str) -> None:
+    """Validate that the canonical metadata.json exists for a session.
+
+    The metadata sidecar is required for event read/append operations.
+    A missing, symlink, or directory metadata.json is rejected.
+
+    Raises:
+        StorageError: metadata.json is missing, is a symlink, or is a directory.
+    """
+    if paths.raw_metadata.is_symlink():
+        raise StorageError(f"metadata.json is a symlink, rejected for safety: {paths.raw_metadata}")
+    if not paths.raw_metadata.exists():
+        raise StorageError(
+            f"Session {session_id} has no metadata.json — event operations require "
+            f"a valid metadata sidecar"
+        )
+    if paths.raw_metadata.is_dir():
+        raise StorageError(f"metadata.json is a directory: {paths.raw_metadata}")
+
+
 # ── Event ID allocation ────────────────────────────────────────────────────────
 
 
@@ -559,7 +704,7 @@ def _append_event_line(path: Path, encoded_line: bytes) -> None:
         StorageError: Open, write, short write, or fsync failed.
     """
     try:
-        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_BINARY)
+        fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | _O_BINARY)
     except OSError as exc:
         raise StorageError(
             f"Failed to open events.jsonl for append: {path}",
@@ -567,7 +712,13 @@ def _append_event_line(path: Path, encoded_line: bytes) -> None:
         ) from exc
 
     try:
-        written = os.write(fd, encoded_line)
+        try:
+            written = os.write(fd, encoded_line)
+        except OSError as exc:
+            raise StorageError(
+                f"Failed to write to events.jsonl: {path}",
+                cause=exc,
+            ) from exc
         if written != len(encoded_line):
             raise StorageError(
                 f"Short write to events.jsonl: wrote {written} of {len(encoded_line)} bytes"
@@ -675,6 +826,9 @@ class ObsidianSessionEventRepository:
         _validate_session_runtime_roots(self._vault_root)
         paths = resolve_session_storage_paths(self._vault_root, session_id)
 
+        # Require metadata sidecar
+        _validate_metadata_exists(paths, session_id)
+
         if not paths.raw_events.exists():
             raise StorageError(f"events.jsonl not found for session {session_id}")
 
@@ -741,6 +895,9 @@ class ObsidianSessionEventRepository:
         paths = resolve_session_storage_paths(self._vault_root, session_id)
         _validate_mutation_environment(self._vault_root, self._audit_service)
 
+        # Require metadata sidecar
+        _validate_metadata_exists(paths, session_id)
+
         events_path = paths.raw_events
 
         # Validate events path
@@ -760,16 +917,8 @@ class ObsidianSessionEventRepository:
         # 4. Allocate event ID
         event_id = _allocate_event_id(existing_events)
 
-        # 5. Build candidate event
+        # 5. Build candidate event (validates all fields through __init__)
         extra = dict(extra_fields) if extra_fields else {}
-        # Reject canonical-field collision in extras
-        for k in extra:
-            if k in _CANONICAL_EVENT_FIELDS:
-                raise StorageError(f"Extra field {k!r} collides with a canonical event field")
-
-        # Validate extra fields are JSON-compatible
-        _validate_json_value(extra)
-
         candidate = RawSessionEvent(
             event_id=event_id,
             real_time=real_time,
@@ -799,8 +948,12 @@ class ObsidianSessionEventRepository:
         self._audit_service.append(intent_record)
 
         # 8. Reauthorize paths after durable intent
+        _validate_session_runtime_roots(self._vault_root)
         paths = resolve_session_storage_paths(self._vault_root, session_id)
         _validate_mutation_environment(self._vault_root, self._audit_service)
+
+        # Revalidate metadata sidecar
+        _validate_metadata_exists(paths, session_id)
 
         events_path = paths.raw_events
 
@@ -854,10 +1007,11 @@ class ObsidianSessionEventRepository:
             )
 
         persisted_event = all_events[-1]
-        if persisted_event.event_id != candidate.event_id:
+        if persisted_event != candidate:
             raise StorageError(
-                f"Event append committed but final event ID mismatch for "
-                f"operation {audit.operation_id}"
+                f"Event append committed but final event mismatch for "
+                f"operation {audit.operation_id}: "
+                f"persisted={persisted_event!r} != candidate={candidate!r}"
             )
 
         # 12. Append committed audit

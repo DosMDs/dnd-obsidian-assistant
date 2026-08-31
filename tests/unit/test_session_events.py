@@ -125,14 +125,21 @@ def event_repo(vault_root: Path, audit_service: AuditService) -> ObsidianSession
     return ObsidianSessionEventRepository(vault_root, audit_service)
 
 
-@pytest.fixture
-def session_with_events(vault_root: Path) -> Path:
-    """Create a session directory with an empty events.jsonl."""
-    session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
+def _create_session_dir(vault_root: Path, session_id: str = "S001") -> Path:
+    """Create a session directory with empty events.jsonl and metadata.json."""
+    session_dir = vault_root / "_system" / "raw" / "sessions" / session_id
     session_dir.mkdir()
     events_path = session_dir / "events.jsonl"
     events_path.write_text("", encoding="utf-8")
+    metadata_path = session_dir / "metadata.json"
+    metadata_path.write_text('{"id":"' + session_id + '","status":"active"}\n', encoding="utf-8")
     return events_path
+
+
+@pytest.fixture
+def session_with_events(vault_root: Path) -> Path:
+    """Create a session directory with an empty events.jsonl and metadata.json."""
+    return _create_session_dir(vault_root, "S001")
 
 
 # ── RawSessionEvent value semantics ────────────────────────────────────────────
@@ -393,11 +400,7 @@ class TestEventIdAllocation:
 class TestAppendOnlyPersistence:
     def test_append_first_event(self, vault_root: Path, audit_service: AuditService) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
-
+        _create_session_dir(vault_root, "S001")
         ev = repo.append_event(
             "S001",
             event_type="note",
@@ -412,10 +415,7 @@ class TestAppendOnlyPersistence:
 
     def test_append_second_event(self, vault_root: Path, audit_service: AuditService) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        _create_session_dir(vault_root, "S001")
 
         repo.append_event(
             "S001",
@@ -441,10 +441,7 @@ class TestAppendOnlyPersistence:
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        events_path = _create_session_dir(vault_root, "S001")
 
         before_bytes = events_path.read_bytes()
         repo.append_event(
@@ -461,10 +458,7 @@ class TestAppendOnlyPersistence:
 
     def test_only_one_new_line_added(self, vault_root: Path, audit_service: AuditService) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        events_path = _create_session_dir(vault_root, "S001")
 
         repo.append_event(
             "S001",
@@ -480,10 +474,7 @@ class TestAppendOnlyPersistence:
 
     def test_events_file_not_rewritten(self, vault_root: Path, audit_service: AuditService) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        events_path = _create_session_dir(vault_root, "S001")
 
         inode_before = events_path.stat().st_ino if hasattr(events_path.stat(), "st_ino") else None
         repo.append_event(
@@ -499,11 +490,10 @@ class TestAppendOnlyPersistence:
 
     def test_metadata_json_unchanged(self, vault_root: Path, audit_service: AuditService) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        events_path = _create_session_dir(vault_root, "S001")
+        session_dir = events_path.parent
         metadata_path = session_dir / "metadata.json"
+        # Overwrite with test-specific metadata
         metadata_path.write_text('{"test":"data"}\n', encoding="utf-8")
 
         repo.append_event(
@@ -517,10 +507,7 @@ class TestAppendOnlyPersistence:
         assert metadata_path.read_text(encoding="utf-8") == '{"test":"data"}\n'
 
     def test_fsync_called(self, vault_root: Path, monkeypatch) -> None:
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        events_path = _create_session_dir(vault_root, "S001")
 
         fsync_called = False
         original_fsync = _events_mod.os.fsync
@@ -541,10 +528,7 @@ class TestAppendOnlyPersistence:
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
-        events_path = session_dir / "events.jsonl"
-        events_path.write_text("", encoding="utf-8")
+        _create_session_dir(vault_root, "S001")
 
         result = repo.append_event(
             "S001",
@@ -567,14 +551,14 @@ class TestPathSafety:
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        with pytest.raises(StorageError, match="events.jsonl not found"):
+        with pytest.raises(StorageError, match="no metadata.json"):
             repo.list_events("S001")
 
     def test_missing_events_file_append_raises(
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
-        with pytest.raises(StorageError, match="events.jsonl not found"):
+        with pytest.raises(StorageError, match="no metadata.json"):
             repo.append_event(
                 "S001",
                 event_type="note",
@@ -588,11 +572,12 @@ class TestPathSafety:
     def test_live_events_symlink_rejected(
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
+        _create_session_dir(vault_root, "S001")
         session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
         target = vault_root / "external_target.jsonl"
         target.write_text("", encoding="utf-8")
         events_path = session_dir / "events.jsonl"
+        events_path.unlink()
         events_path.symlink_to(target)
 
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
@@ -603,11 +588,124 @@ class TestPathSafety:
     def test_dangling_events_symlink_rejected(
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
+        _create_session_dir(vault_root, "S001")
         session_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
-        session_dir.mkdir()
         events_path = session_dir / "events.jsonl"
+        events_path.unlink()
         events_path.symlink_to(vault_root / "nonexistent.jsonl")
 
         repo = ObsidianSessionEventRepository(vault_root, audit_service)
         with pytest.raises(StorageError, match="symlink"):
             repo.list_events("S001")
+
+
+# ── RawSessionEvent validation ──────────────────────────────────────────────────
+
+
+class TestRawSessionEventValidation:
+    """Tests for canonical RawSessionEvent field validation in __init__."""
+
+    def test_evt_000_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match=">= 1"):
+            RawSessionEvent("evt_000", dt, 13800, "note")
+
+    def test_evt_00_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match=">= 1"):
+            RawSessionEvent("evt_00", dt, 13800, "note")
+
+    def test_evt_negative_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="event_id"):
+            RawSessionEvent("evt_-1", dt, 13800, "note")
+
+    def test_uppercase_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="event_id"):
+            RawSessionEvent("EVT_001", dt, 13800, "note")
+
+    def test_non_matching_format_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="event_id"):
+            RawSessionEvent("evt_x", dt, 13800, "note")
+
+    def test_whitespace_event_id_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="whitespace"):
+            RawSessionEvent(" evt_001", dt, 13800, "note")
+
+    def test_naive_datetime_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0)  # no tzinfo
+        with pytest.raises(StorageError, match="timezone-aware"):
+            RawSessionEvent("evt_001", dt, 13800, "note")
+
+    def test_world_tick_bool_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="world_tick"):
+            RawSessionEvent("evt_001", dt, True, "note")  # type: ignore[arg-type]
+
+    def test_world_tick_float_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="world_tick"):
+            RawSessionEvent("evt_001", dt, 13800.5, "note")  # type: ignore[arg-type]
+
+    def test_world_tick_str_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="world_tick"):
+            RawSessionEvent("evt_001", dt, "13800", "note")  # type: ignore[arg-type]
+
+    def test_empty_type_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="type"):
+            RawSessionEvent("evt_001", dt, 13800, "")
+
+    def test_whitespace_type_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="whitespace"):
+            RawSessionEvent("evt_001", dt, 13800, "  ")
+
+    def test_extra_field_collision_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="collides"):
+            RawSessionEvent("evt_001", dt, 13800, "note", extra_fields={"event_id": "evt_999"})
+
+    def test_extra_field_real_time_collision_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="collides"):
+            RawSessionEvent("evt_001", dt, 13800, "note", extra_fields={"real_time": "2026-01-01"})
+
+    def test_extra_field_world_tick_collision_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="collides"):
+            RawSessionEvent("evt_001", dt, 13800, "note", extra_fields={"world_tick": 999})
+
+    def test_extra_field_type_collision_rejected(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="collides"):
+            RawSessionEvent("evt_001", dt, 13800, "note", extra_fields={"type": "custom"})
+
+    def test_non_json_extra_rejected_in_init(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="not JSON-compatible"):
+            RawSessionEvent("evt_001", dt, 13800, "note", extra_fields={"data": Path("/tmp/test")})
+
+    def test_nan_extra_rejected_in_init(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        with pytest.raises(StorageError, match="NaN or Infinity"):
+            RawSessionEvent("evt_001", dt, 13800, "note", extra_fields={"val": float("nan")})
+
+    def test_leading_zero_above_zero_accepted(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        ev = RawSessionEvent("evt_001", dt, 13800, "note")
+        assert ev.event_id == "evt_001"
+
+    def test_evt_005_accepted(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        ev = RawSessionEvent("evt_005", dt, 13800, "note")
+        assert ev.event_id == "evt_005"
+
+    def test_evt_0001_accepted(self) -> None:
+        dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
+        ev = RawSessionEvent("evt_0001", dt, 13800, "note")
+        assert ev.event_id == "evt_0001"
