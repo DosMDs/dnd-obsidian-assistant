@@ -22,9 +22,12 @@ S4-01 — implemented in DeterministicCalendarService
 ────────────────────────────────────────────────────
 - date_to_tick / tick_to_date.
 
-Deferred to S4-02
-─────────────────
-- advance_world_time / time_until implementation.
+S4-02 — implemented in DeterministicCalendarService
+────────────────────────────────────────────────────
+- advance_world_time / time_until.
+- Signed elapsed-minute arithmetic on canonical WorldTick.
+- No date round-trip in production arithmetic.
+- No mutable current-world-time ownership.
 
 Deferred to S4-03
 ─────────────────
@@ -591,9 +594,7 @@ class CalendarService(Protocol):
 
     S4-00 defines these signatures.  S4-01 implements
     ``date_to_tick`` / ``tick_to_date`` in ``DeterministicCalendarService``.
-
-    Deferred to S4-02:
-    - ``advance_world_time`` / ``time_until``
+    S4-02 implements ``advance_world_time`` / ``time_until``.
 
     Deferred to S4-03:
     - TimelineEvent query APIs
@@ -746,11 +747,14 @@ class _CalendarLayout:
 
 
 class DeterministicCalendarService:
-    """Deterministic, stateless calendar conversion service.
+    """Deterministic, stateless calendar conversion and arithmetic service.
 
     Converts between ``GameDate`` and ``WorldTick`` using direct ordinal
-    arithmetic.  Complexity depends only on calendar-definition size, not
-    on year or tick magnitude.
+    arithmetic (S4-01).  Provides elapsed-minute arithmetic via
+    ``advance_world_time`` and ``time_until`` (S4-02).
+
+    Complexity depends only on calendar-definition size, not on year or
+    tick magnitude.
 
     The service is stateless with respect to campaign current time.
     Mutable world-tick persistence belongs to the application layer.
@@ -773,6 +777,21 @@ class DeterministicCalendarService:
     def definition(self) -> CalendarDefinition:
         """Return the calendar definition this service is configured with."""
         return self._definition
+
+    @staticmethod
+    def _validate_minutes(value: object) -> int:
+        """Validate a signed integer minute amount.
+
+        - negative, zero and positive ``int`` accepted
+        - ``bool`` rejected
+        - ``str`` rejected
+        - ``float`` rejected
+        """
+        if isinstance(value, bool):
+            raise ValueError("minutes must not be a bool")
+        if not isinstance(value, int):
+            raise ValueError(f"minutes must be an int, got {type(value).__name__}")
+        return value
 
     def date_to_tick(self, date: GameDate) -> WorldTick:
         """Convert a ``GameDate`` to its canonical ``WorldTick``.
@@ -848,3 +867,61 @@ class DeterministicCalendarService:
                 hour=hour,
                 minute=minute,
             )
+
+    def advance_world_time(
+        self,
+        current_tick: WorldTick,
+        *,
+        minutes: int,
+    ) -> WorldTick:
+        """Advance from ``current_tick`` by ``minutes``.
+
+        Elapsed-minute arithmetic on the canonical ``WorldTick`` scalar.
+        The result is ``current_tick + minutes`` with no clamping, no
+        date round-trip, and no calendar-boundary awareness — those
+        boundaries are already encoded in the tick scalar.
+
+        Parameters
+        ----------
+        current_tick:
+            The current world tick (signed integer minutes).
+        minutes:
+            Signed integer number of game minutes to advance (negative
+            for backward, zero for no change, positive for forward).
+
+        Returns
+        -------
+        The new ``WorldTick`` after advancing by ``minutes``.
+        """
+        # Validate inputs using existing strict-integer helpers
+        _validate_world_tick(current_tick)
+        self._validate_minutes(minutes)
+
+        return WorldTick(current_tick + minutes)
+
+    def time_until(
+        self,
+        start_tick: WorldTick,
+        end_tick: WorldTick,
+    ) -> int:
+        """Return the signed number of minutes between two ticks.
+
+        ``end_tick - start_tick``.  A positive result means ``end_tick``
+        is after ``start_tick``; a negative result means ``end_tick`` is
+        before ``start_tick``; zero means they are the same tick.
+
+        Parameters
+        ----------
+        start_tick:
+            The starting world tick.
+        end_tick:
+            The ending world tick.
+
+        Returns
+        -------
+        Signed integer difference in minutes.
+        """
+        _validate_world_tick(start_tick)
+        _validate_world_tick(end_tick)
+
+        return int(end_tick - start_tick)

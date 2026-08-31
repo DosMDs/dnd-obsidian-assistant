@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-30
+**Last updated:** 2026-08-31
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 4 — Calendar`
 **Status:** `IN PROGRESS`
@@ -177,7 +177,7 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 
 - [x] `S4-00` Calendar kickoff + canonical domain contracts
 - [x] `S4-01` Deterministic date ↔ world_tick conversion
-- [ ] `S4-02` World-time arithmetic + relative-time operations
+- [x] `S4-02` World-time arithmetic + relative-time operations
 - [ ] `S4-03` TimelineEvent calendar queries
 - [ ] `S4-04` Custom-calendar/intercalary hardening + property tests
 - [ ] `S4-05` Full Stage 4 verification/diff/status
@@ -276,6 +276,113 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - No ModelGateway/Ollama work
 
 **ADR assessment:** No ADR required. All architectural decisions follow established patterns (Protocol for contracts, immutable derived layout data per ADR-0003, direct ordinal arithmetic).
+
+### S4-02 completion record
+
+**Review range:** S4-01 completion through S4-02
+
+**Implementation:**
+- `advance_world_time(current_tick, *, minutes)` — elapsed-minute arithmetic on canonical `WorldTick`:
+  - `result = current_tick + minutes` with no clamping, no date round-trip, no calendar-boundary awareness
+  - Signed arithmetic: negative/zero/positive ticks and minutes all supported
+  - Crossing tick zero is natural (`-1 + 1 == 0`, `0 - 1 == -1`)
+  - Large Python integers supported without overflow/clamping
+- `time_until(start_tick, end_tick)` — signed difference:
+  - `end_tick - start_tick` (not absolute value)
+  - Positive result: end_tick is after start_tick
+  - Negative result: end_tick is before start_tick (meaningful for overdue/past-time semantics)
+  - Zero when ticks are equal
+- `_validate_minutes(value)` — static helper matching `_validate_world_tick` pattern:
+  - negative/zero/positive `int` accepted
+  - `bool`, `str`, `float`, `None` rejected with clear error messages
+- Input validation reuses existing `_validate_world_tick` for tick parameters
+- Both operations are calendar-independent: no `tick_to_date`/`date_to_tick` round-trip in production arithmetic
+- Service remains stateless: no mutable `current_world_tick`, no Vault/filesystem persistence
+
+**Arithmetic semantics:**
+- `advance_world_time(100, minutes=10) == 110`
+- `advance_world_time(100, minutes=0) == 100`
+- `advance_world_time(100, minutes=-10) == 90`
+- `advance_world_time(-100, minutes=10) == -90`
+- `advance_world_time(-100, minutes=-10) == -110`
+- `advance_world_time(-1, minutes=1) == 0`
+- `advance_world_time(0, minutes=-1) == -1`
+- `time_until(100, 110) == 10`
+- `time_until(100, 100) == 0`
+- `time_until(110, 100) == -10`
+- Inverse property: `time_until(tick, advance_world_time(tick, delta)) == delta`
+- Reverse property: `advance_world_time(advance_world_time(tick, delta), -delta) == tick`
+
+**Relative-time scope resolution:**
+- Repository inspection confirmed no typed/executable relative-time contract beyond `advance_world_time` and `time_until`
+- No `resolve_relative_time(text: str)`, `parse_duration(...)`, `RelativeTimeExpression`, or `Duration` DTO was invented
+- The phrase "relative-time operations" in the S4-02 status title was interpreted as the signed arithmetic contract only
+
+**Tests added (54 tests in `tests/unit/test_calendar_arithmetic.py`):**
+
+1. **Calendar-boundary integration (8 tests)** — uses S4-01 conversion to verify arithmetic through:
+   - Hour boundary (24×60 clock)
+   - Day boundary
+   - Month boundary
+   - Intercalary entry (regular day → intercalary day)
+   - Intercalary exit (intercalary day → next month)
+   - Year boundary
+   - Custom clock hour boundary (10h×100m clock)
+   - Custom clock day boundary
+
+2. **Invalid-input rejection (12 tests):**
+   - `advance_world_time`: current_tick bool/str/float rejected (3 tests)
+   - `advance_world_time`: minutes bool/str/float/None rejected (4 tests)
+   - `time_until`: start_tick bool/str rejected (2 tests)
+   - `time_until`: end_tick bool/str/float rejected (3 tests)
+
+3. **Protocol compatibility (1 test):**
+   - `isinstance(DeterministicCalendarService(definition), CalendarService)` is now `True`
+
+4. **Advance positive/zero/negative (3 tests):**
+   - `100 + 10 == 110`, `100 + 0 == 100`, `100 + (-10) == 90`
+
+5. **Negative current tick (2 tests):**
+   - `-100 + 10 == -90`, `-100 - 10 == -110`
+
+6. **Cross zero (2 tests):**
+   - `-1 + 1 == 0`, `0 - 1 == -1`
+
+7. **Large signed values (3 tests):**
+   - `10^12 + 10^12 == 2*10^12`, `-10^12 - 10^12 == -2*10^12`, `10^12 - 10^12 == 0`
+
+8. **time_until future/same/past (3 tests):**
+   - `100 → 110 == 10`, `100 → 100 == 0`, `110 → 100 == -10`
+
+9. **time_until with negative ticks (4 tests):**
+   - Both negative future/past, cross zero positive/negative
+
+10. **Inverse arithmetic property (16 parametrized tests):**
+    - `time_until(tick, advance(tick, delta)) == delta` (8 cases)
+    - `advance(advance(tick, delta), -delta) == tick` (8 cases)
+
+**Targeted quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_arithmetic.py` — 54 passed
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py` — 221 passed
+- `uv run pytest` (full suite) — 1343 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 163 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- S4-03 not started (no TimelineEvent calendar queries)
+- S4-04 not started (no broad property-based hardening beyond focused S4-02 parametrized tests)
+- Stage 5 not started (no retrieval/entity resolution)
+- No session-runtime work
+- No ToolRegistry/ToolExecutor work
+- No ModelGateway/Ollama work
+- No natural-language relative-time parser invented
+- No new duration DTO invented
+- No mutable current-world-time state added
+- No CLI world-time persistence commands
+
+**ADR assessment:** No ADR required. All architectural decisions follow established patterns (signed integer arithmetic, strict input validation via static helpers, stateless service per ADR-0003, calendar-independent tick arithmetic).
 
 ## Stage 3 — Vault Repository
 
