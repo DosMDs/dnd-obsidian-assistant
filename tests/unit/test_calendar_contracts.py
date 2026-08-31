@@ -576,6 +576,11 @@ class TestCalendarServiceProtocol:
             "tick_to_date",
             "advance_world_time",
             "time_until",
+            "events_between",
+            "events_near",
+            "upcoming",
+            "overdue_events",
+            "time_until_event",
         ]
         for name in methods:
             assert hasattr(CalendarService, name), f"CalendarService missing {name}"
@@ -583,18 +588,16 @@ class TestCalendarServiceProtocol:
     def test_definition_property(self) -> None:
         assert hasattr(CalendarService, "definition")
 
-    def test_no_event_query_methods_yet(self) -> None:
-        deferred = [
+    def test_event_query_methods_exist(self) -> None:
+        s4_03 = [
             "events_between",
             "events_near",
             "upcoming",
             "overdue_events",
             "time_until_event",
         ]
-        for name in deferred:
-            assert not hasattr(CalendarService, name), (
-                f"CalendarService should not define {name} in S4-00"
-            )
+        for name in s4_03:
+            assert hasattr(CalendarService, name), f"CalendarService missing {name} in S4-03"
 
 
 # =============================================================================

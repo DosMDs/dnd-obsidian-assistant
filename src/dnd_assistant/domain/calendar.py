@@ -29,23 +29,33 @@ S4-02 — implemented in DeterministicCalendarService
 - No date round-trip in production arithmetic.
 - No mutable current-world-time ownership.
 
-Deferred to S4-03
-─────────────────
-- TimelineEvent query APIs (events_between, events_near, upcoming,
-  overdue_events, time_until_event).
+S4-03 — implemented in DeterministicCalendarService
+────────────────────────────────────────────────────
+- events_between / events_near / upcoming / overdue_events / time_until_event.
+- TimelineEvent interval-overlap semantics with inclusive boundaries.
+- Conservative overdue detection (latest-possible-tick < current).
+- Signed time_until_event preserves uncertainty for approximate/range events.
+- No repository/Vault dependency — caller supplies the events.
+- No runtime circular import (TYPE_CHECKING for TimelineEvent).
 
-    TimelineEvent supports exact, approximate, range and unknown temporal
-    certainty.  Event query semantics must explicitly define how interval
-    overlap and unknown dates behave.  That decision belongs to S4-03.
+S4-04 — deferred
+────────────────
+- Custom-calendar/intercalary hardening + property tests.
 
-    Do NOT casually treat every TimelineEvent as a single exact tick.
+S4-05 — deferred
+────────────────
+- Full Stage 4 verification/diff/status.
 """
 
 from __future__ import annotations
 
-from typing import Annotated, Literal, Protocol, runtime_checkable
+from collections.abc import Sequence
+from typing import TYPE_CHECKING, Annotated, Literal, Protocol, runtime_checkable
 
 from pydantic import BaseModel, BeforeValidator, Field, model_validator
+
+if TYPE_CHECKING:
+    from dnd_assistant.domain.events import TimelineEvent
 
 # ── WorldTick ────────────────────────────────────────────────────────────────
 
@@ -595,9 +605,7 @@ class CalendarService(Protocol):
     S4-00 defines these signatures.  S4-01 implements
     ``date_to_tick`` / ``tick_to_date`` in ``DeterministicCalendarService``.
     S4-02 implements ``advance_world_time`` / ``time_until``.
-
-    Deferred to S4-03:
-    - TimelineEvent query APIs
+    S4-03 implements TimelineEvent query APIs.
     """
 
     @property
@@ -639,6 +647,66 @@ class CalendarService(Protocol):
         """Return the number of minutes between two ticks.
 
         Implemented in S4-02.
+        """
+        ...
+
+    def events_between(
+        self,
+        events: Sequence[TimelineEvent],
+        start_tick: WorldTick,
+        end_tick: WorldTick,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events whose temporal interval overlaps [start_tick, end_tick].
+
+        Implemented in S4-03.
+        """
+        ...
+
+    def events_near(
+        self,
+        events: Sequence[TimelineEvent],
+        event: TimelineEvent,
+        *,
+        radius: int,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events within ``radius`` game-minutes of the target event.
+
+        Implemented in S4-03.
+        """
+        ...
+
+    def upcoming(
+        self,
+        events: Sequence[TimelineEvent],
+        current_tick: WorldTick,
+        *,
+        days: int,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events whose temporal interval overlaps the upcoming window.
+
+        Implemented in S4-03.
+        """
+        ...
+
+    def overdue_events(
+        self,
+        events: Sequence[TimelineEvent],
+        current_tick: WorldTick,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events whose latest possible tick is before current_tick.
+
+        Implemented in S4-03.
+        """
+        ...
+
+    def time_until_event(
+        self,
+        current_tick: WorldTick,
+        event: TimelineEvent,
+    ) -> tuple[int, int] | None:
+        """Return signed minute-delta interval until an event.
+
+        Implemented in S4-03.
         """
         ...
 
@@ -927,3 +995,284 @@ class DeterministicCalendarService:
         _validate_world_tick(end_tick)
 
         return int(end_tick - start_tick)
+
+    # ── S4-03: TimelineEvent calendar queries ────────────────────────────────
+
+    @staticmethod
+    def _event_interval(
+        event: TimelineEvent,
+    ) -> tuple[int, int] | None:
+        """Return the inclusive temporal interval for an event, or None if unknown.
+
+        Returns
+        -------
+        ``(interval_start, interval_end)`` or ``None`` for unknown events.
+        """
+        if event.certainty == "exact":
+            assert event.world_tick is not None
+            return (event.world_tick, event.world_tick)
+        if event.certainty in ("approximate", "range"):
+            assert event.world_tick_min is not None
+            assert event.world_tick_max is not None
+            return (event.world_tick_min, event.world_tick_max)
+        # unknown
+        return None
+
+    @staticmethod
+    def _interval_overlaps(
+        interval_a: tuple[int, int],
+        interval_b: tuple[int, int],
+    ) -> bool:
+        """Return True when two inclusive intervals overlap."""
+        a_start, a_end = interval_a
+        b_start, b_end = interval_b
+        return a_start <= b_end and a_end >= b_start
+
+    @staticmethod
+    def _interval_distance(
+        interval_a: tuple[int, int],
+        interval_b: tuple[int, int],
+    ) -> int:
+        """Return the minimum temporal distance between two inclusive intervals.
+
+        Overlapping intervals have distance 0.
+        """
+        a_start, a_end = interval_a
+        b_start, b_end = interval_b
+        if a_end < b_start:
+            return b_start - a_end
+        if b_end < a_start:
+            return a_start - b_end
+        return 0
+
+    @staticmethod
+    def _validate_nonnegative_int(value: object, label: str) -> int:
+        """Validate a non-negative strict integer query parameter."""
+        if isinstance(value, bool):
+            raise ValueError(f"{label} must not be a bool")
+        if not isinstance(value, int):
+            raise ValueError(f"{label} must be an int, got {type(value).__name__}")
+        if value < 0:
+            raise ValueError(f"{label} must be >= 0, got {value}")
+        return value
+
+    @staticmethod
+    def _event_sort_key(
+        event: TimelineEvent,
+    ) -> tuple[int, int, str]:
+        """Deterministic sort key: interval start, interval end, event id."""
+        interval = DeterministicCalendarService._event_interval(event)
+        if interval is not None:
+            return (interval[0], interval[1], event.id)
+        # Unknown events sort after all known events
+        return (0, 0, event.id)
+
+    def events_between(
+        self,
+        events: Sequence[TimelineEvent],
+        start_tick: WorldTick,
+        end_tick: WorldTick,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events whose temporal interval overlaps [start_tick, end_tick].
+
+        Inclusive interval-overlap semantics.  Unknown events are excluded.
+        Results sorted by: interval start, interval end, event id.
+
+        Parameters
+        ----------
+        events:
+            The candidate events (caller-supplied, not loaded from Vault).
+        start_tick:
+            Query interval start (inclusive).
+        end_tick:
+            Query interval end (inclusive).
+
+        Raises
+        ------
+        ValueError
+            If ``start_tick > end_tick``, or tick values fail strict validation.
+        """
+        _validate_world_tick(start_tick)
+        _validate_world_tick(end_tick)
+
+        if start_tick > end_tick:
+            raise ValueError(f"start_tick ({start_tick}) must not exceed end_tick ({end_tick})")
+
+        query_interval = (start_tick, end_tick)
+        matching: list[TimelineEvent] = []
+        for ev in events:
+            ev_interval = self._event_interval(ev)
+            if ev_interval is not None and self._interval_overlaps(ev_interval, query_interval):
+                matching.append(ev)
+
+        matching.sort(key=self._event_sort_key)
+        return tuple(matching)
+
+    def events_near(
+        self,
+        events: Sequence[TimelineEvent],
+        event: TimelineEvent,
+        *,
+        radius: int,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events within ``radius`` game-minutes of the target event.
+
+        Uses minimum interval-distance semantics: overlapping intervals have
+        distance 0.  The target event itself is excluded by stable ID.
+        Unknown candidates are excluded.  Unknown target raises ValueError.
+
+        Results sorted by: distance, interval start, interval end, event id.
+
+        Parameters
+        ----------
+        events:
+            The candidate events (caller-supplied).
+        event:
+            The target event to measure proximity from.
+        radius:
+            Non-negative integer number of game minutes.
+
+        Raises
+        ------
+        ValueError
+            If the target event has unknown time, or radius is invalid.
+        """
+        target_interval = self._event_interval(event)
+        if target_interval is None:
+            raise ValueError(
+                "Cannot compute events_near for an event with unknown temporal certainty"
+            )
+
+        radius = self._validate_nonnegative_int(radius, "radius")
+
+        target_id = event.id
+        candidates: list[tuple[int, TimelineEvent]] = []
+        for ev in events:
+            if ev.id == target_id:
+                continue
+            ev_interval = self._event_interval(ev)
+            if ev_interval is None:
+                continue
+            distance = self._interval_distance(target_interval, ev_interval)
+            if distance <= radius:
+                candidates.append((distance, ev))
+
+        candidates.sort(
+            key=lambda pair: (
+                pair[0],
+                self._event_sort_key(pair[1]),
+            )
+        )
+        return tuple(ev for _, ev in candidates)
+
+    def upcoming(
+        self,
+        events: Sequence[TimelineEvent],
+        current_tick: WorldTick,
+        *,
+        days: int,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events whose temporal interval overlaps the upcoming window.
+
+        The upcoming window is::
+
+            [current_tick, current_tick + days * minutes_per_day]
+
+        Uses the same interval-overlap semantics as ``events_between``.
+        Unknown events are excluded.
+
+        Parameters
+        ----------
+        events:
+            The candidate events (caller-supplied).
+        current_tick:
+            The current world tick.
+        days:
+            Non-negative integer number of calendar days ahead.
+
+        Raises
+        ------
+        ValueError
+            If ``days`` is invalid or tick values fail strict validation.
+        """
+        _validate_world_tick(current_tick)
+        days = self._validate_nonnegative_int(days, "days")
+
+        window_minutes = days * self._minutes_per_day
+        end_tick = current_tick + window_minutes
+        return self.events_between(events, current_tick, end_tick)
+
+    def overdue_events(
+        self,
+        events: Sequence[TimelineEvent],
+        current_tick: WorldTick,
+    ) -> tuple[TimelineEvent, ...]:
+        """Return events whose latest possible tick is before current_tick.
+
+        Conservative semantics: an approximate/range event is overdue only
+        when its *latest* possible tick (world_tick_max) is strictly before
+        current_tick.  Events whose interval straddles current_tick are NOT
+        classified as overdue.  Unknown events are excluded.
+
+        Results sorted by: interval end, interval start, event id.
+
+        Parameters
+        ----------
+        events:
+            The candidate events (caller-supplied).
+        current_tick:
+            The current world tick.
+
+        Raises
+        ------
+        ValueError
+            If ``current_tick`` fails strict validation.
+        """
+        _validate_world_tick(current_tick)
+
+        overdue: list[TimelineEvent] = []
+        for ev in events:
+            interval = self._event_interval(ev)
+            if interval is None:
+                continue
+            # Latest possible tick is interval[1]
+            if interval[1] < current_tick:
+                overdue.append(ev)
+
+        overdue.sort(key=self._event_sort_key)
+        return tuple(overdue)
+
+    def time_until_event(
+        self,
+        current_tick: WorldTick,
+        event: TimelineEvent,
+    ) -> tuple[int, int] | None:
+        """Return signed minute-delta interval until an event.
+
+        Returns ``(min_delta, max_delta)`` where both values are signed
+        (negative means the event may be in the past).
+
+        Semantics by certainty:
+
+        * **exact**: ``(delta, delta)`` — degenerate interval.
+        * **approximate/range**: ``(min - current, max - current)``.
+        * **unknown**: ``None`` — no temporal distance computable.
+
+        Parameters
+        ----------
+        current_tick:
+            The current world tick.
+        event:
+            The target event.
+
+        Returns
+        -------
+        ``(min_delta, max_delta)`` or ``None`` for unknown events.
+        """
+        _validate_world_tick(current_tick)
+
+        interval = self._event_interval(event)
+        if interval is None:
+            return None
+
+        return (interval[0] - current_tick, interval[1] - current_tick)

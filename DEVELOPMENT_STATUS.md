@@ -178,7 +178,7 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - [x] `S4-00` Calendar kickoff + canonical domain contracts
 - [x] `S4-01` Deterministic date ↔ world_tick conversion
 - [x] `S4-02` World-time arithmetic + relative-time operations
-- [ ] `S4-03` TimelineEvent calendar queries
+- [x] `S4-03` TimelineEvent calendar queries
 - [ ] `S4-04` Custom-calendar/intercalary hardening + property tests
 - [ ] `S4-05` Full Stage 4 verification/diff/status
 
@@ -411,6 +411,148 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - S4-03 not started
 - S4-04 not started
 - Stage 5 not started
+
+### S4-03 completion record
+
+**Review range:** S4-C01 completion through S4-03
+
+**Implementation:**
+
+1. **`calendar.py` — CalendarService Protocol extended:**
+   - `events_between(events, start_tick, end_tick)` — inclusive interval-overlap semantics
+   - `events_near(events, event, *, radius)` — minimum interval-distance semantics
+   - `upcoming(events, current_tick, *, days)` — stateless window query using `minutes_per_day`
+   - `overdue_events(events, current_tick)` — conservative latest-possible-tick semantics
+   - `time_until_event(current_tick, event)` — signed delta interval preserving uncertainty
+
+2. **`calendar.py` — DeterministicCalendarService implementation:**
+   - `_event_interval(event)` — canonical helper: exact→[T,T], approximate→[min,max], range→[min,max], unknown→None
+   - `_interval_overlaps(a, b)` — inclusive interval overlap predicate
+   - `_interval_distance(a, b)` — minimum temporal distance (0 for overlapping)
+   - `_validate_nonnegative_int(value, label)` — strict non-negative integer validation
+   - `_event_sort_key(event)` — deterministic sort key: (interval_start, interval_end, event_id)
+   - No midpoint arithmetic, no mutation, no repository/Vault dependency
+
+3. **`calendar.py` — Circular import avoidance:**
+   - `TimelineEvent` imported under `TYPE_CHECKING` only
+   - No runtime circular import (`events.py` imports `WorldTick` from `calendar.py`)
+
+4. **`test_calendar_contracts.py` — Protocol test updated:**
+   - `test_required_methods_exist` now includes all 5 S4-03 methods
+   - `test_event_query_methods_exist` replaces `test_no_event_query_methods_yet`
+
+5. **`tests/unit/test_calendar_event_queries.py` (new) — 96 tests:**
+
+   **Event interval normalization (4 tests):**
+   - exact→[T,T], approximate→[min,max], range→[min,max], unknown→None
+
+   **events_between — exact (5 tests):** inside, before, after, exactly start, exactly end
+
+   **events_between — approximate/range overlap (9 tests):** fully inside, overlap left, overlap right, contains whole query, touch start/end boundary, fully before/after, range same as approx
+
+   **events_between — unknown (1 test):** excluded
+
+   **events_between — invalid query (7 tests):** start>end rejected, bool/str/float/None rejected
+
+   **events_between deterministic ordering (1 test):** interval start → interval end → event id
+
+   **events_near (8 tests):** exact-exact, exact-range, range-range, overlap→0, touching, exactly radius, radius+1 excluded, both before/after
+
+   **events_near target exclusion (2 tests):** same ID excluded, different ID same tick included
+
+   **events_near unknown (2 tests):** unknown candidate excluded, unknown target raises
+
+   **events_near radius validation (7 tests):** 0/positive accepted, negative/bool/str/float/None rejected
+
+   **events_near ordering (1 test):** distance → interval start → interval end → event id
+
+   **upcoming (8 tests):** at current, inside window, exactly at end, immediately after, before current, straddling current, overlapping window end, unknown excluded
+
+   **custom calendar upcoming (2 tests):** 10h×100m day conversion, boundary
+
+   **upcoming days validation (7 tests):** 0/positive accepted, negative/bool/str/float/None rejected
+
+   **overdue exact (3 tests):** before=overdue, at=not, after=not
+
+   **overdue approximate/range (5 tests):** max<current=overdue, straddling=not, min==current=not, min>current=not, unknown excluded
+
+   **overdue ordering (1 test):** interval end → interval start → event id
+
+   **time_until_event exact (3 tests):** future→(+n,+n), now→(0,0), past→(-n,-n)
+
+   **time_until_event approximate/range (4 tests):** entirely future, entirely past, straddles current, degenerate min==max
+
+   **time_until_event unknown (1 test):** returns None
+
+   **Strict current tick validation (9 tests):** upcoming/overdue/time_until_event reject bool/str/float/None
+
+   **Status independence (1 test):** temporal queries do not interpret status strings
+
+   **Input immutability (1 test):** event models not modified by queries
+
+   **Protocol compatibility (1 test):** `isinstance(svc, CalendarService)` remains True
+
+**Query API signatures:**
+
+```python
+def events_between(
+    self, events: Sequence[TimelineEvent], start_tick: WorldTick, end_tick: WorldTick
+) -> tuple[TimelineEvent, ...]: ...
+
+def events_near(
+    self, events: Sequence[TimelineEvent], event: TimelineEvent, *, radius: int
+) -> tuple[TimelineEvent, ...]: ...
+
+def upcoming(
+    self, events: Sequence[TimelineEvent], current_tick: WorldTick, *, days: int
+) -> tuple[TimelineEvent, ...]: ...
+
+def overdue_events(
+    self, events: Sequence[TimelineEvent], current_tick: WorldTick
+) -> tuple[TimelineEvent, ...]: ...
+
+def time_until_event(
+    self, current_tick: WorldTick, event: TimelineEvent
+) -> tuple[int, int] | None: ...
+```
+
+**Temporal interval semantics:**
+
+| Certainty | Interval | Notes |
+|---|---|---|
+| EXACT | [world_tick, world_tick] | Degenerate point interval |
+| APPROXIMATE | [world_tick_min, world_tick_max] | Inclusive, A ≤ B |
+| RANGE | [world_tick_min, world_tick_max] | Inclusive, A ≤ B |
+| UNKNOWN | None | No computable interval |
+
+All boundaries are inclusive. Interval-overlap semantics for `events_between`, `events_near`, and `upcoming`. Conservative overdue: only when `latest_tick < current_tick`. `time_until_event` returns signed `(min_delta, max_delta)` preserving uncertainty.
+
+**Circular-import handling:**
+- `TimelineEvent` is imported in `calendar.py` under `TYPE_CHECKING` only
+- No runtime circular dependency (`events.py` → `WorldTick` from `calendar.py` is safe)
+- No module restructuring was required
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_event_queries.py` — 96 passed
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py tests/unit/test_calendar_event_queries.py tests/unit/test_timeline_event.py` — 462 passed
+- `uv run pytest` (full suite) — 1447 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 164 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- S4-04 not started (no property-based hardening)
+- S4-05 not started (no Stage 4 final verification)
+- Stage 5 not started (no retrieval/entity resolution)
+- No storage/Vault query implementation
+- No ToolRegistry/ToolExecutor work
+- No ModelGateway/Ollama work
+- No TimelineEvent schema broadening
+- No midpoint arithmetic
+- No status-based lifecycle assumptions
+
+**ADR assessment:** No ADR required. All architectural decisions follow established patterns (TYPE_CHECKING for circular imports, stateless service per ADR-0003, interval-overlap semantics consistent with existing domain contracts).
 
 ## Stage 3 — Vault Repository
 
