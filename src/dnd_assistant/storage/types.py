@@ -26,6 +26,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from dnd_assistant.domain.types import EntityType
 
 if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from pydantic.types import AwareDatetime
+
     from dnd_assistant.domain.calendar import WorldTick
     from dnd_assistant.domain.entity import Entity
     from dnd_assistant.domain.session import Session
@@ -33,6 +37,7 @@ if TYPE_CHECKING:
     from dnd_assistant.domain.world_time import CurrentWorldTime
     from dnd_assistant.storage.audit import AuditContext
     from dnd_assistant.storage.patch import EntityPatch
+    from dnd_assistant.storage.session_events import RawSessionEvent
     from dnd_assistant.storage.session_metadata import RawSessionMetadata
 
 
@@ -479,5 +484,78 @@ class SessionMetadataRepository(Protocol):
         Raises:
             ConflictError: More than one active session exists.
             StorageError: A corrupt or unsafe session was encountered.
+        """
+        ...
+
+
+# ── SessionEventRepository protocol ──────────────────────────────────────────
+
+
+@runtime_checkable
+class SessionEventRepository(Protocol):
+    """Protocol for raw session event persistence.
+
+    ``SessionEventRepository`` owns append and read operations for raw
+    session events stored in ``_system/raw/sessions/<id>/events.jsonl``.
+
+    It is a separate persistence aggregate from ``VaultRepository``,
+    ``WorldTimeRepository``, and ``SessionMetadataRepository`` — raw
+    session events are not Entities and do not live in entity directories.
+
+    All mutations require explicit ``AuditContext``.
+    """
+
+    def list_events(
+        self,
+        session_id: str,
+    ) -> list[RawSessionEvent]:
+        """Read all raw events for a session in physical order.
+
+        Args:
+            session_id: The session identifier.
+
+        Returns:
+            A list of ``RawSessionEvent`` values in physical append order.
+            Returns an empty list for an empty events file.
+
+        Raises:
+            StorageError: The events file is corrupt, malformed, or the
+                path is unsafe.
+        """
+        ...
+
+    def append_event(
+        self,
+        session_id: str,
+        *,
+        event_type: str,
+        real_time: AwareDatetime,
+        world_tick: WorldTick,
+        extra_fields: Mapping[str, object] | None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
+        """Append a raw event to the session's events.jsonl.
+
+        The repository owns event ID allocation, event validation,
+        append-only persistence, audit orchestration, and verified
+        read-back.
+
+        Args:
+            session_id: The session identifier.
+            event_type: The event type string.
+            real_time: Timezone-aware real-world timestamp.
+            world_tick: The canonical game-world tick at recording time.
+            extra_fields: Event-specific top-level fields preserved
+                without interpretation.
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``RawSessionEvent``.
+
+        Raises:
+            StorageError: The events file is corrupt, unsafe, or an
+                I/O error occurred.
+            ConflictError: The events file changed between intent and
+                append.
         """
         ...

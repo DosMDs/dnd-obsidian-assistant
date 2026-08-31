@@ -606,8 +606,57 @@ Published S6-01 history was preserved; no rewrite was used.
 - Stage 7 (Tool Registry) remains NOT STARTED.
 - No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
 - No Golden Vault fixture was modified.
-- `CalendarService`/world time were not mutated by session start.
 - No `Session.md`, `conversation.jsonl`, or event schema implemented.
+
+### S6-03 — Append-only raw note/event JSONL logging
+
+**Scope implemented:**
+
+1. `src/dnd_assistant/storage/session_events.py` — new module defining:
+   - `RawSessionEvent` — storage-level representation of a raw session event
+     with canonical core fields (`event_id`, `real_time`, `world_tick`, `type`)
+     and event-specific extra top-level fields preserved without interpretation.
+   - `_serialize_event` / `_deserialize_event` — deterministic JSON codec.
+   - `_validate_json_value` — recursive JSON-compatible value validation.
+   - `_parse_events_jsonl` — strict JSONL parser.
+   - `_allocate_event_id` — per-session event ID allocation.
+   - `_append_event_line` — append-only primitive with `os.open(O_APPEND | O_BINARY)`.
+   - `ObsidianSessionEventRepository` — concrete implementation.
+
+2. `src/dnd_assistant/storage/types.py` — `SessionEventRepository` protocol.
+
+3. `src/dnd_assistant/application/session_runtime.py` — extended with
+   `record_event()` and `record_note()`.
+
+4. `tests/unit/test_session_events.py` — 44 tests (2 symlink skipped).
+
+5. `tests/unit/test_session_runtime.py` — 12 new tests (29 total).
+
+6. `tests/contract/test_boundaries.py` — 5 new boundary tests.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_events.py` — 44 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_runtime.py` — 29 passed
+- `uv run pytest` (full suite) — **2246 passed, 87 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 202 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Starting SHA:** `88c60ea758f2bfa2d2e85d779e980412bcf0922a`
+**Implementation commit:** (set after commit)
+**Commit message:** `feat: add append-only session event logging (S6-03)`
+
+**Explicit deferrals:**
+
+- S6-04 (session end, touched IDs, processing pending) is NOT started.
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or `touched_entities` semantics.
+- No session end, processing_status, corrupt-tail repair, or CLI commands.
 
 ### S6-C02 — Session metadata root/discovery/durability hardening
 

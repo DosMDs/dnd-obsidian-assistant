@@ -10,6 +10,10 @@ from dnd_assistant.storage.paths import (
     entity_directory,
     resolve_entity_path,
 )
+from dnd_assistant.storage.session_events import (
+    ObsidianSessionEventRepository,
+    RawSessionEvent,
+)
 from dnd_assistant.storage.session_metadata import (
     ObsidianSessionMetadataRepository,
     RawSessionMetadata,
@@ -20,6 +24,7 @@ from dnd_assistant.storage.session_paths import (
 )
 from dnd_assistant.storage.types import (
     EntityDirectory,
+    SessionEventRepository,
     SessionMetadataRepository,
     VaultDocument,
     VaultRepository,
@@ -35,10 +40,13 @@ __all__: list[str] = [
     "DiscoveredEntityFile",
     "EntityDirectory",
     "EntityPatch",
+    "ObsidianSessionEventRepository",
     "ObsidianSessionMetadataRepository",
     "ObsidianVaultRepository",
     "ObsidianWorldTimeRepository",
+    "RawSessionEvent",
     "RawSessionMetadata",
+    "SessionEventRepository",
     "SessionMetadataRepository",
     "SessionStoragePaths",
     "VaultDocument",

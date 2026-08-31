@@ -71,7 +71,7 @@ Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/sta
 | S6-00 — Session runtime kickoff + safe session-storage path contracts | DONE |
 | S6-01 — Canonical current-world-time persistence boundary | DONE |
 | S6-02 — Raw session metadata persistence + ID allocation + start/status lifecycle | DONE |
-| S6-03 — Append-only raw note/event JSONL logging | NOT STARTED |
+| S6-03 — Append-only raw note/event JSONL logging | DONE |
 | S6-04 — Session end/close immutability + touched IDs + processing pending | NOT STARTED |
 | S6-05 — Restart/recovery + corrupt-state/failure-path integrity | NOT STARTED |
 | S6-06 — Thin CLI orchestration: session start/status/end + note | NOT STARTED |

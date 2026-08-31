@@ -1,4 +1,4 @@
-"""Unit tests for S6-02 SessionRuntimeService.
+"""Unit tests for S6-02/S6-03 SessionRuntimeService.
 
 Tests cover:
 - start_session lifecycle
@@ -7,6 +7,8 @@ Tests cover:
 - NotFoundError when world time missing
 - World time not mutated during start
 - No in-memory authoritative active session
+- record_event lifecycle
+- record_note lifecycle
 """
 
 from __future__ import annotations
@@ -18,8 +20,9 @@ import pytest
 from dnd_assistant.application.session_runtime import SessionRuntimeService
 from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.world_time import CurrentWorldTime
-from dnd_assistant.errors import ConflictError, NotFoundError
+from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.session_events import RawSessionEvent
 
 # ── Fakes / stubs ──────────────────────────────────────────────────────────────
 
@@ -93,6 +96,39 @@ class FakeWorldTimeRepo:
         return CurrentWorldTime(current_world_tick=self._tick, revision=1)
 
 
+class FakeSessionEventRepo:
+    """Fake implementation of SessionEventRepository for testing."""
+
+    def __init__(self) -> None:
+        self._events: dict[str, list[RawSessionEvent]] = {}
+
+    def list_events(self, session_id: str) -> list[RawSessionEvent]:
+        return list(self._events.get(session_id, []))
+
+    def append_event(
+        self,
+        session_id: str,
+        *,
+        event_type: str,
+        real_time: datetime,
+        world_tick: int,
+        extra_fields: dict | None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
+        events = self._events.setdefault(session_id, [])
+        n = len(events) + 1
+        event_id = f"evt_{n:03d}"
+        ev = RawSessionEvent(
+            event_id=event_id,
+            real_time=real_time,
+            world_tick=world_tick,
+            type=event_type,
+            extra_fields=dict(extra_fields) if extra_fields else None,
+        )
+        events.append(ev)
+        return ev
+
+
 def _make_audit_context(
     operation_id: str = "test-op-001",
     source: str = "test",
@@ -104,6 +140,20 @@ def _make_audit_context(
     )
 
 
+def _make_service(
+    session_repo=None,
+    world_repo=None,
+    event_repo=None,
+) -> SessionRuntimeService:
+    if session_repo is None:
+        session_repo = FakeSessionMetadataRepo()
+    if world_repo is None:
+        world_repo = FakeWorldTimeRepo(tick=13800)
+    if event_repo is None:
+        event_repo = FakeSessionEventRepo()
+    return SessionRuntimeService(session_repo, world_repo, event_repo)
+
+
 # ── Start session ──────────────────────────────────────────────────────────────
 
 
@@ -111,7 +161,7 @@ class TestStartSession:
     def test_start_with_no_sessions_returns_first_id(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.id == "S001"
         assert session.status == "active"
@@ -120,14 +170,14 @@ class TestStartSession:
         session_repo = FakeSessionMetadataRepo()
         session_repo.set_next_id("S006")
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.id == "S006"
 
     def test_real_started_at_matches_audit_time(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         audit_time = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
         ctx = AuditContext(
             operation_id="test-001",
@@ -140,49 +190,49 @@ class TestStartSession:
     def test_world_tick_start_comes_from_world_time_repo(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=99999)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.world_tick_start == 99999
 
     def test_status_is_active(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.status == "active"
 
     def test_real_finished_at_is_none(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.real_finished_at is None
 
     def test_world_tick_end_is_none(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.world_tick_end is None
 
     def test_processed_is_false(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.processed is False
 
     def test_processed_model_profile_is_none(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.processed_model_profile is None
 
     def test_revision_is_one(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         session = service.start_session(audit=_make_audit_context())
         assert session.revision == 1
 
@@ -194,13 +244,13 @@ class TestGetActiveSession:
     def test_none_when_no_session(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         assert service.get_active_session() is None
 
     def test_returns_same_session_after_start(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         started = service.start_session(audit=_make_audit_context())
         active = service.get_active_session()
         assert active is not None
@@ -210,7 +260,7 @@ class TestGetActiveSession:
     def test_multiple_active_raises_conflict(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         service.start_session(audit=_make_audit_context(operation_id="first"))
         # Manually inject a second active session into the fake repo
         session_repo._sessions["S002"] = _FakeMetadata(
@@ -234,7 +284,7 @@ class TestSecondStartWhileActive:
     def test_raises_conflict(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         service.start_session(audit=_make_audit_context(operation_id="first"))
         with pytest.raises(ConflictError, match="active"):
             service.start_session(audit=_make_audit_context(operation_id="second"))
@@ -247,7 +297,7 @@ class TestWorldTimeMissing:
     def test_raises_not_found(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=None)  # not initialized
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         with pytest.raises(NotFoundError, match="world time"):
             service.start_session(audit=_make_audit_context())
 
@@ -259,7 +309,7 @@ class TestWorldTimeNotMutated:
     def test_start_does_not_change_world_time(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         before = world_repo.get_current_world_time()
         service.start_session(audit=_make_audit_context())
         after = world_repo.get_current_world_time()
@@ -274,7 +324,7 @@ class TestNoInMemoryActiveSession:
     def test_get_active_session_reads_from_repo(self) -> None:
         session_repo = FakeSessionMetadataRepo()
         world_repo = FakeWorldTimeRepo(tick=13800)
-        service = SessionRuntimeService(session_repo, world_repo)
+        service = _make_service(session_repo=session_repo, world_repo=world_repo)
         # Start a session
         service.start_session(audit=_make_audit_context(operation_id="first"))
         # Manually change the repo state (simulating external mutation)
@@ -290,3 +340,119 @@ class TestNoInMemoryActiveSession:
         )
         # Service must reflect the repo state, not an in-memory cache
         assert service.get_active_session() is None
+
+
+# ── Record event ────────────────────────────────────────────────────────────────
+
+
+class TestRecordEvent:
+    def test_record_event_uses_active_session(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        ev = service.record_event(
+            "item_acquired", extra_fields={"entity": "Silver Key"}, audit=_make_audit_context()
+        )
+        assert ev.event_id == "evt_001"
+        assert ev.type == "item_acquired"
+        assert ev.extra_fields["entity"] == "Silver Key"
+
+    def test_record_event_type_preserved(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        ev = service.record_event(
+            "party_decision", extra_fields={"text": "decision"}, audit=_make_audit_context()
+        )
+        assert ev.type == "party_decision"
+
+    def test_record_event_with_no_active_session_raises(self) -> None:
+        service = _make_service()
+        with pytest.raises(NotFoundError, match="no active session"):
+            service.record_event("note", extra_fields={"text": "test"}, audit=_make_audit_context())
+
+    def test_record_event_multiple_active_sessions_raises(self) -> None:
+        session_repo = FakeSessionMetadataRepo()
+        service = _make_service(session_repo=session_repo)
+        service.start_session(audit=_make_audit_context(operation_id="first"))
+        session_repo._sessions["S002"] = _FakeMetadata(
+            Session(
+                id="S002",
+                type="session",
+                status="active",
+                real_started_at=datetime(2026, 8, 31, 16, 0, 0, tzinfo=UTC),
+                world_tick_start=14000,
+                revision=1,
+            )
+        )
+        with pytest.raises(ConflictError):
+            service.record_event("note", extra_fields={"text": "test"}, audit=_make_audit_context())
+
+    def test_record_event_uses_audit_real_time(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        audit_time = datetime(2026, 8, 31, 20, 0, 0, tzinfo=UTC)
+        ctx = AuditContext(operation_id="evt", real_time=audit_time, source="test")
+        ev = service.record_event("note", extra_fields={"text": "test"}, audit=ctx)
+        assert ev.real_time == audit_time
+
+    def test_record_event_uses_canonical_world_tick(self) -> None:
+        world_repo = FakeWorldTimeRepo(tick=99999)
+        service = _make_service(world_repo=world_repo)
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        ev = service.record_event(
+            "note", extra_fields={"text": "test"}, audit=_make_audit_context()
+        )
+        assert ev.world_tick == 99999
+
+    def test_record_event_gets_sequential_ids(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        ev1 = service.record_event(
+            "note", extra_fields={"text": "first"}, audit=_make_audit_context(operation_id="evt1")
+        )
+        ev2 = service.record_event(
+            "note", extra_fields={"text": "second"}, audit=_make_audit_context(operation_id="evt2")
+        )
+        assert ev1.event_id == "evt_001"
+        assert ev2.event_id == "evt_002"
+
+    def test_record_event_does_not_mutate_world_time(self) -> None:
+        world_repo = FakeWorldTimeRepo(tick=13800)
+        service = _make_service(world_repo=world_repo)
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        before = world_repo.get_current_world_time()
+        service.record_event("note", extra_fields={"text": "test"}, audit=_make_audit_context())
+        after = world_repo.get_current_world_time()
+        assert before.current_world_tick == after.current_world_tick
+        assert before.revision == after.revision
+
+
+# ── Record note ─────────────────────────────────────────────────────────────────
+
+
+class TestRecordNote:
+    def test_record_note_type_is_note(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        ev = service.record_note("Test note", audit=_make_audit_context())
+        assert ev.type == "note"
+
+    def test_record_note_text_preserved(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        ev = service.record_note("Бармен сказал, что караван исчез", audit=_make_audit_context())
+        assert ev.extra_fields["text"] == "Бармен сказал, что караван исчез"
+
+    def test_record_note_with_no_active_session_raises(self) -> None:
+        service = _make_service()
+        with pytest.raises(NotFoundError):
+            service.record_note("test", audit=_make_audit_context())
+
+    def test_invalid_note_rejected(self) -> None:
+        service = _make_service()
+        service.start_session(audit=_make_audit_context(operation_id="start"))
+        with pytest.raises(ValidationError):
+            service.record_note("", audit=_make_audit_context())
+        with pytest.raises(ValidationError):
+            service.record_note("  ", audit=_make_audit_context())
+        with pytest.raises(ValidationError):
+            service.record_note("\t", audit=_make_audit_context())
