@@ -1,8 +1,8 @@
-"""Concrete exact-search implementation for the retrieval layer.
+"""Concrete exact and fuzzy search implementation for the retrieval layer.
 
 ``VaultSearchService`` implements the ``SearchService`` protocol using
 the VaultRepository read contracts for exact stable-ID, exact canonical
-name, and exact alias matching.
+name, exact alias, and fuzzy canonical-name matching.
 
 This module depends on storage read contracts (``VaultRepository``,
 ``VaultDocument``) but not on storage implementation internals
@@ -14,6 +14,8 @@ from __future__ import annotations
 import unicodedata
 from collections.abc import Sequence
 
+from rapidfuzz import fuzz
+
 from dnd_assistant.domain.types import EntityId, EntityType, Visibility
 from dnd_assistant.errors import NotFoundError, ValidationError
 from dnd_assistant.retrieval.types import MatchKind, SearchHit, SearchQuery
@@ -23,17 +25,16 @@ from dnd_assistant.storage.types import VaultDocument, VaultRepository
 
 
 def _normalize_text(text: str) -> str:
-    """Normalise text for exact name/alias comparison.
+    """Normalise text for exact and fuzzy name/alias comparison.
 
     Applies, in order:
     1. Strip surrounding whitespace.
     2. Unicode NFC normalisation.
     3. Unicode ``casefold()``.
 
-    This is a conservative deterministic policy for S5-01 only.
-    It does **not** implement fuzzy matching, substring matching,
-    prefix matching, token matching, transliteration, punctuation
-    stripping, accent stripping, or word reordering.
+    This is a conservative deterministic policy.
+    It does **not** implement transliteration, punctuation stripping,
+    accent stripping, token sorting, or word reordering.
     """
     return unicodedata.normalize("NFC", text.strip()).casefold()
 
@@ -121,9 +122,13 @@ def _validate_limit(limit: object) -> int:
 class VaultSearchService:
     """Concrete ``SearchService`` implementation using ``VaultRepository``.
 
-    Provides exact stable-ID, exact canonical name, and exact alias
-    retrieval with player-visibility enforcement, entity-type filtering,
-    and deterministic ordering.
+    Provides exact stable-ID, exact canonical name, exact alias, and
+    fuzzy canonical-name retrieval with player-visibility enforcement,
+    entity-type filtering, and deterministic ordering.
+
+    Fuzzy matching uses RapidFuzz ``fuzz.ratio`` on normalised
+    (strip → NFC → casefold) canonical names only.  Aliases and
+    ``EntityId`` values are not fuzzy-matched.
 
     This service is read-only.  It does not mutate the Vault, access the
     filesystem directly, or depend on Ollama/ModelGateway.
@@ -160,12 +165,13 @@ class VaultSearchService:
     # ── search ──────────────────────────────────────────────────────────
 
     def search(self, query: SearchQuery, *, limit: int = 20) -> Sequence[SearchHit]:
-        """Execute an exact-tier search over campaign entities.
+        """Execute a tiered search over campaign entities.
 
         Operates in deterministic tiers:
         1. ``EXACT_ID`` — literal stable-ID match.
         2. ``EXACT_NAME`` — normalised canonical name match.
         3. ``EXACT_ALIAS`` — normalised alias match.
+        4. ``FUZZY_NAME`` — fuzzy canonical name match via RapidFuzz.
 
         Returns candidates only from the **highest-precedence non-empty
         tier**.  Visibility and entity-type filtering are applied before
@@ -190,6 +196,11 @@ class VaultSearchService:
         alias_matches = self._match_exact_alias(eligible, query.text)
         if alias_matches:
             return self._finalise(alias_matches, limit)
+
+        # Tier 4: FUZZY_NAME
+        fuzzy_matches = self._match_fuzzy_name(eligible, query.text)
+        if fuzzy_matches:
+            return self._finalise_fuzzy(fuzzy_matches, limit)
 
         return []
 
@@ -245,6 +256,26 @@ class VaultSearchService:
         return hits
 
     @staticmethod
+    def _match_fuzzy_name(
+        documents: list[VaultDocument], query: str
+    ) -> list[tuple[VaultDocument, float]]:
+        """Find documents whose canonical name fuzzy-matches *query*.
+
+        Normalises both query and canonical name (strip → NFC → casefold)
+        before computing ``rapidfuzz.fuzz.ratio``.
+
+        Returns only candidates with ``score > 0.0``.
+        """
+        normalised_query = _normalize_text(query)
+        hits: list[tuple[VaultDocument, float]] = []
+        for doc in documents:
+            normalised_name = _normalize_text(doc.entity.name)
+            score = fuzz.ratio(normalised_query, normalised_name)
+            if score > 0.0:
+                hits.append((doc, float(score)))
+        return hits
+
+    @staticmethod
     def _finalise(candidates: list[tuple[VaultDocument, MatchKind]], limit: int) -> list[SearchHit]:
         """Sort deterministically by ``EntityId`` and apply limit.
 
@@ -254,6 +285,17 @@ class VaultSearchService:
         candidates.sort(key=lambda pair: pair[0].entity.id)
         return [
             SearchHit(entity_id=doc.entity.id, match_kind=kind) for doc, kind in candidates[:limit]
+        ]
+
+    @staticmethod
+    def _finalise_fuzzy(
+        candidates: list[tuple[VaultDocument, float]], limit: int
+    ) -> list[SearchHit]:
+        """Sort fuzzy candidates by score descending, then EntityId ascending, and apply limit."""
+        candidates.sort(key=lambda pair: (-pair[1], pair[0].entity.id))
+        return [
+            SearchHit(entity_id=doc.entity.id, match_kind=MatchKind.FUZZY_NAME, score=score)
+            for doc, score in candidates[:limit]
         ]
 
 

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C05)
+**Last updated:** 2026-08-31 (S5-02)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -875,7 +875,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 
 - [x] `S5-00` Retrieval kickoff + canonical contracts
 - [x] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
-- [ ] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
+- [x] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
 - [ ] `S5-03` SQLite FTS5 derived index + rebuild path
 - [ ] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
 - [ ] `S5-05` Golden-Vault integration + retrieval/resolver hardening
@@ -1398,6 +1398,135 @@ Fuzzy/RapidFuzz/SQLite/FTS/EntityResolver work has NOT started. S5-02 = [ ].
 - S5-02 = [ ] (unchanged)
 - No fuzzy matching, RapidFuzz, SQLite, FTS5, EntityResolver, session runtime, ToolRegistry, ModelGateway/Ollama, embeddings, or vector DB implementation.
 - S5-02 remains NOT STARTED.
+
+### S5-02 completion record
+
+**Starting branch:** `main`
+**Starting local SHA:** `c75d77e822984b473bb7bdb2dc7d1f0231331aad`
+**Starting upstream SHA:** `c75d77e822984b473bb7bdb2dc7d1f0231331aad`
+
+**Scope implemented:**
+Fuzzy canonical-name retrieval using RapidFuzz `fuzz.ratio` with entity-type filtering, player-visibility enforcement, deterministic ranking, and strict limit validation.
+
+**RapidFuzz scorer chosen:**
+`rapidfuzz.fuzz.ratio` — explicit import `from rapidfuzz import fuzz`.
+
+**Normalization policy:**
+`strip → Unicode NFC → casefold` — same deterministic policy as S5-01 exact matching, applied to both query text and canonical entity name before `fuzz.ratio`.
+
+**Canonical-name-only fuzzy policy:**
+Fuzzy matching applies only to `VaultDocument.entity.name`. Aliases, `EntityId`, Markdown body, tags, status, and frontmatter values are NOT fuzzy-matched.
+
+**Positive-score candidate policy:**
+`score > 0.0` → eligible fuzzy candidate. `score == 0.0` → omitted. This is not a tunable confidence threshold.
+
+**No resolver threshold:**
+No arbitrary confidence threshold (e.g. 70, 80) is introduced. All positive finite fuzzy scores remain candidates, including low scores. A regression test (`test_low_positive_score_preserved`) proves this.
+
+**Tier precedence:**
+`EXACT_ID > EXACT_NAME > EXACT_ALIAS > FUZZY_NAME`. If any exact tier is non-empty, fuzzy candidates are not calculated or returned.
+
+**Visibility/type filtering:**
+Applied before fuzzy scoring. Only `Visibility.PLAYER` entities are eligible. `Visibility.DM` and `Visibility.SYSTEM` are excluded. Entity-type filter (`None`/empty → all types, non-empty → only matching types) is applied before scoring.
+
+**Score ranking and EntityId tie-break:**
+Fuzzy candidates sorted by `score descending`, then `EntityId ascending` as deterministic tie-breaker.
+
+**Limit behavior:**
+`limit` applied only after visibility filtering, type filtering, fuzzy scoring, zero-score removal, and deterministic ranking. Exact-tier limit behavior unchanged.
+
+**Error behavior:**
+Repository `StorageError` from `list_entities()` propagates unchanged. No conversion of retrieval failures into `[]` or zero scores.
+
+**Boundary changes:**
+- `retrieval.search` now imports `rapidfuzz` (allowed)
+- `retrieval.types` and `retrieval.service` remain RapidFuzz-free
+- Boundary tests updated: `test_no_rapidfuzz_import_in_retrieval_contracts` (types+service only), `test_rapidfuzz_allowed_in_retrieval_search` (new)
+- No `sqlite3`, `models`, `tools`, `application`, `session`, `ollama` imports in `retrieval.search`
+
+**Public API changes:**
+No new public class or protocol. `VaultSearchService.search()` extended with FUZZY_NAME tier. Private helpers `_match_fuzzy_name()` and `_finalise_fuzzy()` added.
+
+**Tests added/changed:**
+- `tests/unit/test_fuzzy_search.py` (new) — 31 tests covering:
+  - Basic fuzzy match (2 tests: Cyrillic, partial)
+  - Score correctness (2 tests: matches `fuzz.ratio`, is float)
+  - Ranking (2 tests: higher score first, tie-break by EntityId)
+  - Exact-tier precedence (6 tests: ID/name/alias suppress fuzzy, high-score variants)
+  - Visibility (4 tests: player, DM, SYSTEM, hidden high-score does not affect visible)
+  - Entity-type filter (5 tests: None, empty, matching, non-matching, filtered-out high-score)
+  - Limit (2 tests: after ranking, does not affect order)
+  - Unicode/casefold (3 tests: Cyrillic exact, Cyrillic partial, casefold)
+  - Non-fuzzy EntityId (1 test: typo in ID fuzzy-matches name, not ID)
+  - No fuzzy aliases (1 test: near-match to alias with zero-name-similarity)
+  - Zero score (1 test: completely different name omitted)
+  - Low positive score (1 test: preserved, no confidence threshold)
+  - Repository errors (1 test: StorageError propagates)
+- `tests/unit/test_exact_search.py` — 4 tests updated for S5-02 fuzzy tier:
+  - `test_exact_id_is_case_sensitive`: now checks no EXACT_ID (not len==0)
+  - `test_exact_name_not_fuzzy`: now checks no EXACT_NAME (not len==0)
+  - `test_scalar_alias_malformed`: now checks no EXACT_ALIAS (not len==0)
+  - `test_mixed_alias_list_control_chars_rejected`: now checks no EXACT_ALIAS (not len==0)
+- `tests/unit/test_retrieval_contracts.py` — boundary tests updated:
+  - `test_no_rapidfuzz_import_in_retrieval` → `test_no_rapidfuzz_import_in_retrieval_contracts` (types+service only)
+  - `test_rapidfuzz_allowed_in_retrieval_search` (new)
+
+**Targeted test results:**
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed
+- `uv run pytest tests/unit/test_exact_search.py tests/unit/test_retrieval_contracts.py` — 216 passed
+- `uv run pytest tests/unit/test_fuzzy_search.py tests/unit/test_exact_search.py tests/unit/test_retrieval_contracts.py` — 247 passed
+
+**Full pytest result:**
+`uv run pytest` — 1746 passed, 34 skipped
+
+**Ruff check result:**
+All checks passed
+
+**Ruff format result:**
+174 files already formatted
+
+**`dnd --help` result:**
+CLI smoke test OK (Russian UI)
+
+**`git diff --check` result:**
+No whitespace errors
+
+**Architecture review:**
+- `VaultSearchService` still satisfies `SearchService` protocol
+- Repository injected, not constructed internally
+- No direct filesystem access from `retrieval.search`
+- No Vault writes
+- No golden-Vault modifications
+- No SQLite, FTS5, or EntityResolver implementation
+- Domain/storage do not depend on retrieval
+- Contract modules remain storage-independent
+- RapidFuzz confined to `retrieval.search` only
+
+**Out-of-scope review:**
+No fuzzy alias search, no fuzzy EntityId search, no RapidFuzz WRatio/token/partial heuristics, no configurable fuzzy thresholds, no EntityResolver, no confidence policy, no recent-context ranking, no SQLite, no FTS5, no index rebuild, no CLI retrieval commands, no session runtime, no ToolRegistry/Executor, no ModelGateway, no Ollama, no ChangeSet, no embeddings, no vector DB, no semantic search. S5-03 remains NOT STARTED.
+
+**Defects discovered/corrections made:**
+- `test_higher_score_first` used exact-match query "Магистр" which returned EXACT_NAME only — changed to partial query "Маги"
+- `test_limit_does_not_affect_ranking_order` same issue — changed to partial query "Маги"
+- `test_completely_different_name_omitted` used Cyrillic strings with non-zero fuzzy overlap — changed to ASCII strings "xxxxx"/"zzzzz"
+- Unused `SearchService` import in `test_fuzzy_search.py` — removed
+- Ruff formatting issue — fixed via `ruff format`
+
+**ADR assessment:**
+No ADR required. All architectural decisions follow established patterns (Protocol for contracts, injected repository dependency, deterministic matching, strict input validation). RapidFuzz is already part of the approved MVP technology stack.
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [ ]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+SQLite/FTS/EntityResolver work has NOT started. S5-03 = [ ].
 
 
 ---

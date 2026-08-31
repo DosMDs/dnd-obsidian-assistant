@@ -873,11 +873,21 @@ class TestBoundaries:
             f"retrieval imports sqlite-related module: {imports}"
         )
 
-    def test_no_rapidfuzz_import_in_retrieval(self) -> None:
+    def test_no_rapidfuzz_import_in_retrieval_contracts(self) -> None:
+        """retrieval/types.py and retrieval/service.py must not import rapidfuzz.
+
+        retrieval/search.py may import rapidfuzz for fuzzy matching.
+        """
         imports = self._ast_imports("dnd_assistant.retrieval.types")
         imports |= self._ast_imports("dnd_assistant.retrieval.service")
-        imports |= self._ast_imports("dnd_assistant.retrieval.search")
-        assert "rapidfuzz" not in imports, "retrieval imports rapidfuzz"
+        assert "rapidfuzz" not in imports, "retrieval contracts import rapidfuzz"
+
+    def test_rapidfuzz_allowed_in_retrieval_search(self) -> None:
+        """retrieval/search.py may import rapidfuzz for fuzzy name matching."""
+        imports = self._ast_imports("dnd_assistant.retrieval.search")
+        assert "rapidfuzz" in imports or "rapidfuzz.fuzz" in imports, (
+            "retrieval/search.py should import rapidfuzz for S5-02"
+        )
 
     # ── Reverse-boundary protection ──────────────────────────────────────
 

@@ -200,12 +200,14 @@ class TestSearchExactId:
         assert results[0].match_kind == MatchKind.EXACT_ID
 
     def test_exact_id_is_case_sensitive(self) -> None:
-        """EntityId comparison is literal, not casefolded."""
+        """EntityId comparison is literal, not casefolded.
+        With S5-02, a non-matching ID may still fuzzy-match the name."""
         doc = _make_doc("npc_varos", name="Varos")
         repo: VaultRepository = FakeRepository([doc])
         svc = VaultSearchService(repository=repo)
         results = svc.search(SearchQuery(text="NPC_VAROS"))
-        assert len(results) == 0
+        # No EXACT_ID match (case-sensitive), but FUZZY_NAME may match
+        assert not any(h.match_kind == MatchKind.EXACT_ID for h in results)
 
     def test_exact_id_not_confused_with_name(self) -> None:
         """A query matching a name must not produce an EXACT_ID hit."""
@@ -259,12 +261,14 @@ class TestSearchExactName:
         assert results[0].match_kind == MatchKind.EXACT_NAME
 
     def test_exact_name_not_fuzzy(self) -> None:
-        """Substring must NOT match."""
+        """Substring must NOT match as EXACT_NAME.
+        With S5-02, a partial query may fuzzy-match the name."""
         doc = _make_doc("npc_varos", name="Varos")
         repo: VaultRepository = FakeRepository([doc])
         svc = VaultSearchService(repository=repo)
         results = svc.search(SearchQuery(text="Varo"))
-        assert len(results) == 0
+        # No EXACT_NAME match (substring is not exact), but FUZZY_NAME may match
+        assert not any(h.match_kind == MatchKind.EXACT_NAME for h in results)
 
     def test_whitespace_stripped_for_comparison(self) -> None:
         doc = _make_doc("npc_varos", name="Varos")
@@ -569,7 +573,8 @@ class TestAliasMetadata:
 
     def test_scalar_alias_malformed(self) -> None:
         """A scalar string alias (not a list) must be treated as malformed
-        and must not create a false match."""
+        and must not create an EXACT_ALIAS match.
+        With S5-02, fuzzy name matching may still produce a FUZZY_NAME hit."""
         extra = {"aliases": "Lord Varos"}
         doc = VaultDocument(
             entity=_make_entity("npc_varos", name="Varos"),
@@ -578,7 +583,8 @@ class TestAliasMetadata:
         repo: VaultRepository = FakeRepository([doc])
         svc = VaultSearchService(repository=repo)
         results = svc.search(SearchQuery(text="Lord Varos"))
-        assert len(results) == 0
+        # No EXACT_ALIAS match (scalar alias is malformed)
+        assert not any(h.match_kind == MatchKind.EXACT_ALIAS for h in results)
 
     def test_mixed_valid_invalid_aliases(self) -> None:
         extra = {
@@ -674,13 +680,14 @@ class TestAliasMetadata:
         )
         repo: VaultRepository = FakeRepository([doc])
         svc = VaultSearchService(repository=repo)
-        # "Good Alias" must match
+        # "Good Alias" must match as EXACT_ALIAS
         results = svc.search(SearchQuery(text="Good Alias"))
         assert len(results) == 1
         assert results[0].match_kind == MatchKind.EXACT_ALIAS
-        # "\tBad Alias" must NOT match
+        # "\tBad Alias" must NOT match as EXACT_ALIAS (control char rejected)
+        # With S5-02, fuzzy name matching may still produce a FUZZY_NAME hit
         results2 = svc.search(SearchQuery(text="Bad Alias"))
-        assert len(results2) == 0
+        assert not any(h.match_kind == MatchKind.EXACT_ALIAS for h in results2)
 
 
 # ── Repository error propagation ────────────────────────────────────────────
