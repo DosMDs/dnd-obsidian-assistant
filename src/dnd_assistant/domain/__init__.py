@@ -22,6 +22,7 @@ from dnd_assistant.domain.types import (
     Revision,
     Visibility,
 )
+from dnd_assistant.domain.world_time import CurrentWorldTime
 
 __all__: list[str] = [
     "CalendarDefinition",
@@ -30,6 +31,7 @@ __all__: list[str] = [
     "CalendarService",
     "DeterministicCalendarService",
     "CampaignState",
+    "CurrentWorldTime",
     "Entity",
     "EntityId",
     "EntityType",

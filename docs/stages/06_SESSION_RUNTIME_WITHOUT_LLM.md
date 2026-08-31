@@ -45,7 +45,7 @@ existing code and ADRs:
 ## Tasks
 
 - [x] `S6-00` Session runtime kickoff + safe session-storage path contracts
-- [ ] `S6-01` Canonical current-world-time persistence boundary
+- [x] `S6-01` Canonical current-world-time persistence boundary
 - [ ] `S6-02` Raw session metadata persistence + ID allocation + start/status lifecycle
 - [ ] `S6-03` Append-only raw note/event JSONL logging
 - [ ] `S6-04` Session end/close immutability + touched IDs + processing pending
@@ -265,3 +265,103 @@ S6-00 follow-up documentation commit:
 
 Original S6-00 was published as two commits although the task requested
 one logical commit. Published history was preserved; no rewrite was used.
+
+### S6-01 — Canonical current-world-time persistence boundary
+
+**Scope implemented:**
+
+1. `docs/adr/0004-current-world-time-persistence.md` — ADR-0004 documenting
+   the decision to use `_system/world_time.json` as the canonical persisted
+   representation, with typed schema, atomic writes, audit, and optimistic
+   revision concurrency.
+
+2. `src/dnd_assistant/domain/world_time.py` — `CurrentWorldTime` domain
+   schema: strict immutable Pydantic model with `schema_version`, `type`,
+   `current_world_tick` (WorldTick), and `revision` (Revision).  Rejects
+   extra fields, wrong type, invalid schema version.
+
+3. `src/dnd_assistant/storage/types.py` — `WorldTimeRepository` protocol
+   with `get_current_world_time()`, `initialize_current_world_time(...)`,
+   and `set_current_world_time(...)`.
+
+4. `src/dnd_assistant/storage/world_time.py` — `ObsidianWorldTimeRepository`
+   concrete implementation backed by `_system/world_time.json`:
+   - Path safety: symlink checking for all components and leaf.
+   - Audit path validation matching `VaultRepository` patterns.
+   - Mutation environment revalidation before each write.
+   - Atomic write via `atomic_write_text` with parse validator.
+   - Read-back verification (hash, schema, tick, revision).
+   - Audit intent/committed records with `entity_id=None`.
+   - Optimistic concurrency via revision checking.
+   - No monotonicity enforcement (backward tick updates accepted).
+
+5. `src/dnd_assistant/domain/__init__.py` — added `CurrentWorldTime` export.
+
+6. `src/dnd_assistant/storage/__init__.py` — added `ObsidianWorldTimeRepository`
+   and `WorldTimeRepository` exports.
+
+7. `tests/unit/test_world_time.py` — 17 domain tests covering:
+   - Valid construction (negative, zero, positive ticks).
+   - Strict type rejection (bool, str, float).
+   - Revision validation (zero, bool rejected).
+   - Extra fields, wrong type, wrong schema version rejected.
+   - Immutability.
+   - JSON roundtrip.
+
+8. `tests/unit/test_world_time_repository.py` — 47 tests covering:
+   - Path/layout (exact location, containment, no-creation on read).
+   - Symlink safety (4 tests, skipped when OS doesn't support symlinks).
+   - Read (valid, missing, malformed JSON, array, string, wrong schema
+     version, wrong type, invalid tick, invalid revision, unknown field).
+   - Initialize (missing, negative/zero/positive tick, existing, invalid
+     tick types, verified readback).
+   - Update (success, revision +1, stale revision, missing, backward
+     update accepted, invalid tick/revision rejected).
+   - Audit (intent/committed phases, operation names, entity_id=None,
+     source/session preserved, before/after hashes).
+   - Failure integrity (atomic write failure leaves existing unchanged,
+     initialize failure leaves file missing, no committed audit on
+     failure, content change race detected).
+
+9. `tests/contract/test_boundaries.py` — 10 new boundary tests verifying:
+   - `domain.world_time` does not import storage/models/retrieval/tools.
+   - `storage.world_time` does not import models/retrieval/tools.
+
+**Contract decisions:**
+
+- `_system/world_time.json` is the canonical Vault location (ADR-0004).
+- `CurrentWorldTime` is a strict `frozen=True`, `extra="forbid"` model.
+- `WorldTick` and `Revision` are reused from existing canonical types.
+- `GameDate` is never stored — always derived through `CalendarService`.
+- `WorldTimeRepository` is a separate protocol from `VaultRepository`.
+- Path safety follows the same component-by-component symlink checking
+  pattern as `session_paths.py`.
+- Audit path validation follows the same pattern as `vault_repository.py`.
+- Revision semantics: initialize → revision 1, successful set → +1.
+- No monotonicity enforcement (backward tick updates are valid).
+- Missing file on read → `NotFoundError` (no silent default).
+- Existing file on initialize → `ConflictError` (no silent overwrite).
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_world_time.py` — 17 passed
+- `uv run pytest tests/unit/test_world_time_repository.py` — 43 passed, 4 skipped
+- `uv run pytest` (full suite) — 2160 passed, 69 skipped (3 transient failures
+  in monkeypatch-based failure-integrity tests when run in full suite; all pass
+  in isolation and targeted runs)
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — All files formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Starting SHA:** `fcb6492953e1c1daaf254f3ac8e6e20215b1047c`
+**Implementation commit:** (set after commit)
+**Commit message:** `feat: add canonical world time persistence (S6-01)`
+
+**Explicit deferrals:**
+
+- S6-02 and subsequent Stage-6 tasks are NOT started.
+- Stage 7 remains NOT STARTED.
+- No Golden Vault fixture was modified.
+- `CalendarService` remains stateless (no mutable clock added).
+- `CampaignState` and `campaign.yaml` were not extended with world tick.
+- No Session lifecycle, Tool Layer, ModelGateway, or LLM code.

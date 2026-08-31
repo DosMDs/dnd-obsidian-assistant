@@ -14,8 +14,14 @@ from dnd_assistant.storage.session_paths import (
     SessionStoragePaths,
     resolve_session_storage_paths,
 )
-from dnd_assistant.storage.types import EntityDirectory, VaultDocument, VaultRepository
+from dnd_assistant.storage.types import (
+    EntityDirectory,
+    VaultDocument,
+    VaultRepository,
+    WorldTimeRepository,
+)
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
+from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
 
 __all__: list[str] = [
     "AuditContext",
@@ -25,9 +31,11 @@ __all__: list[str] = [
     "EntityDirectory",
     "EntityPatch",
     "ObsidianVaultRepository",
+    "ObsidianWorldTimeRepository",
     "SessionStoragePaths",
     "VaultDocument",
     "VaultRepository",
+    "WorldTimeRepository",
     "atomic_write_text",
     "discover_entity_files",
     "entity_directory",

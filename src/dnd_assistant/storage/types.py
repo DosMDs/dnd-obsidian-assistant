@@ -26,8 +26,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from dnd_assistant.domain.types import EntityType
 
 if TYPE_CHECKING:
+    from dnd_assistant.domain.calendar import WorldTick
     from dnd_assistant.domain.entity import Entity
     from dnd_assistant.domain.types import EntityId, Revision
+    from dnd_assistant.domain.world_time import CurrentWorldTime
     from dnd_assistant.storage.audit import AuditContext
     from dnd_assistant.storage.patch import EntityPatch
 
@@ -271,6 +273,96 @@ class VaultRepository(Protocol):
             NotFoundError: No entity with the given ID exists.
             ConflictError: The stored revision does not match
                 ``expected_revision``.
+            StorageError: A filesystem or audit operation failed.
+        """
+        ...
+
+
+# ── WorldTimeRepository protocol ──────────────────────────────────────────
+
+
+@runtime_checkable
+class WorldTimeRepository(Protocol):
+    """Protocol for current-world-time persistence.
+
+    ``WorldTimeRepository`` owns read, initialize-once, and optimistic-update
+    operations for the canonical ``_system/world_time.json`` state file.
+
+    It is a separate persistence aggregate from ``VaultRepository`` —
+    current world time is not an Entity and does not live in an entity
+    directory.
+
+    All mutations require explicit ``AuditContext``.
+    """
+
+    def get_current_world_time(self) -> CurrentWorldTime:
+        """Read the canonical current world time.
+
+        Returns:
+            The validated ``CurrentWorldTime`` from the Vault.
+
+        Raises:
+            NotFoundError: No ``world_time.json`` exists.
+            StorageError: The file is corrupt, malformed, or unreadable.
+        """
+        ...
+
+    def initialize_current_world_time(
+        self,
+        world_tick: WorldTick,
+        *,
+        audit: AuditContext,
+    ) -> CurrentWorldTime:
+        """Initialize world time state with revision 1.
+
+        This operation is valid only when no ``world_time.json`` exists.
+        The caller supplies the canonical starting ``WorldTick``.
+
+        Args:
+            world_tick: The canonical starting world tick.
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``CurrentWorldTime`` with revision 1.
+
+        Raises:
+            ConflictError: State already exists (no silent overwrite).
+            ValidationError: The ``world_tick`` is invalid.
+            StorageError: A filesystem or audit operation failed.
+        """
+        ...
+
+    def set_current_world_time(
+        self,
+        world_tick: WorldTick,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> CurrentWorldTime:
+        """Update the current world time with optimistic concurrency.
+
+        The stored revision must match ``expected_revision`` or a
+        ``ConflictError`` is raised.  On success, revision is incremented
+        by exactly 1.
+
+        Backward tick updates are accepted — monotonicity is not enforced
+        by this repository (gameplay policy belongs to the application
+        layer).
+
+        Args:
+            world_tick: The new canonical world tick.
+            expected_revision: The revision the caller last observed.
+            audit: Audit context for this mutation.
+
+        Returns:
+            The persisted ``CurrentWorldTime`` with incremented revision.
+
+        Raises:
+            NotFoundError: No ``world_time.json`` exists.
+            ConflictError: The stored revision does not match
+                ``expected_revision``.
+            ValidationError: The ``world_tick`` or ``expected_revision``
+                is invalid.
             StorageError: A filesystem or audit operation failed.
         """
         ...

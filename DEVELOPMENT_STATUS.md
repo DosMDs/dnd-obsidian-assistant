@@ -69,7 +69,7 @@ Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/sta
 | Task | Status |
 |---|---|
 | S6-00 — Session runtime kickoff + safe session-storage path contracts | DONE |
-| S6-01 — Canonical current-world-time persistence boundary | NOT STARTED |
+| S6-01 — Canonical current-world-time persistence boundary | DONE |
 | S6-02 — Raw session metadata persistence + ID allocation + start/status lifecycle | NOT STARTED |
 | S6-03 — Append-only raw note/event JSONL logging | NOT STARTED |
 | S6-04 — Session end/close immutability + touched IDs + processing pending | NOT STARTED |

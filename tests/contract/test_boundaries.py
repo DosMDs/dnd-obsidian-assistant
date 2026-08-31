@@ -162,3 +162,75 @@ def test_module_does_not_import_ollama(module_path: str) -> None:
     _clean_import(module_path)
     mod_names = {m for m in sys.modules if m.startswith("ollama")}
     assert not mod_names, f"{module_path} triggered ollama import: {mod_names}"
+
+
+# ── world_time domain must not depend on storage/models/retrieval ─────────
+
+
+def test_world_time_domain_does_not_import_storage() -> None:
+    _clean_import("dnd_assistant.domain.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
+    assert not mod_names, f"domain.world_time imported storage modules: {mod_names}"
+
+
+def test_world_time_domain_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.domain.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"domain.world_time imported model modules: {mod_names}"
+
+
+def test_world_time_domain_does_not_import_retrieval() -> None:
+    _clean_import("dnd_assistant.domain.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
+    assert not mod_names, f"domain.world_time imported retrieval modules: {mod_names}"
+
+
+def test_world_time_domain_does_not_import_tools() -> None:
+    _clean_import("dnd_assistant.domain.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.tools")}
+    assert not mod_names, f"domain.world_time imported tool modules: {mod_names}"
+
+
+def test_world_time_domain_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.domain.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"domain.world_time imported application modules: {mod_names}"
+
+
+def test_world_time_domain_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.domain.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"domain.world_time imported CLI modules: {mod_names}"
+
+
+# ── storage/world_time must not depend on models/retrieval/tools/application/cli ──
+
+
+def test_storage_world_time_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.storage.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"storage.world_time imported model modules: {mod_names}"
+
+
+def test_storage_world_time_does_not_import_retrieval() -> None:
+    _clean_import("dnd_assistant.storage.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
+    assert not mod_names, f"storage.world_time imported retrieval modules: {mod_names}"
+
+
+def test_storage_world_time_does_not_import_tools() -> None:
+    _clean_import("dnd_assistant.storage.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.tools")}
+    assert not mod_names, f"storage.world_time imported tool modules: {mod_names}"
+
+
+def test_storage_world_time_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.storage.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"storage.world_time imported application modules: {mod_names}"
+
+
+def test_storage_world_time_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.storage.world_time")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"storage.world_time imported CLI modules: {mod_names}"
