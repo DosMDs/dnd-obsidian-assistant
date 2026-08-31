@@ -1004,6 +1004,54 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - No aliases added to base Entity model
 - No ADR required (all corrections are local to existing contracts/tests; no architectural boundary changed)
 
+### S5-C01 correction record
+
+**AST dependency-boundary verification fix.**
+
+**Defect confirmed:**
+- `_ast_imports()` used `alias.name.split(".")[0]` and `node.module.split(".")[0]`, collapsing all dotted import paths to their first segment.
+- A forbidden import such as `from dnd_assistant.storage import VaultRepository` was represented as `dnd_assistant` (not `dnd_assistant.storage`), while the boundary test compared against short names like `storage`, `models`, etc.
+- Therefore the AST check did **not** detect forbidden internal `dnd_assistant.*` imports.
+- The runtime `sys.modules` checks are useful but cannot replace AST verification because imports under `TYPE_CHECKING`, conditional branches, or otherwise non-executed code may not appear in `sys.modules`.
+
+**Production fix (test file only — no production source changed):**
+1. **`_ast_imports()`** — removed `.split(".")[0]` from both `alias.name` and `node.module` collection. Full dotted paths are now preserved (e.g. `dnd_assistant.storage`, `dnd_assistant.models.gateway`, `rapidfuzz.fuzz`).
+2. **`_has_forbidden_prefix()`** — new static helper with prefix-aware matching: `module == prefix or module.startswith(prefix + ".")`.
+3. **Forbidden-prefix sets** — changed from short names (`{"storage", "models", ...}`) to full prefixes (`{"dnd_assistant.storage", "dnd_assistant.models", ...}`) using the new prefix-aware matcher.
+4. **`TestAstImportChecker`** — new test class (25 tests) proving:
+   - Full dotted paths are preserved (6 tests: `sqlite3`, `dnd_assistant.storage.types`, `from dnd_assistant.storage import ...`, `from dnd_assistant.models.gateway import ...`, `rapidfuzz.fuzz`, `dnd_assistant.tools.registry`)
+   - Forbidden-prefix detection works correctly (7 tests: storage from-import, storage subpackage, models gateway, tools registry, sqlite3, rapidfuzz, allowed imports not falsely rejected)
+   - Regression proof: `split(".")[0]` would miss `dnd_assistant.storage.*`, `dnd_assistant.models.*`, `dnd_assistant.tools.*` (3 tests that would fail under the old buggy behaviour)
+
+**Architectural nuance preserved:**
+- The S5-00 boundary test does NOT encode a permanent rule that the entire future `dnd_assistant.retrieval` package can never import storage. Stage 5 comes after VaultRepository in dependency order, and later concrete retrieval implementations may legitimately consume read-only `VaultRepository` / `VaultDocument` contracts. The invariant is: retrieval contract/types modules remain provider/storage-implementation independent; domain/storage never depend upward on retrieval.
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 117 passed (was 100)
+- `uv run pytest` (full suite) — 1616 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 171 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- No production source files changed (only test file `tests/unit/test_retrieval_contracts.py`)
+- S5-00 = [x] (unchanged)
+- S5-01 = [ ] (unchanged)
+- No S5-01 implementation started
+- No exact ID/name/alias search implementation
+- No RapidFuzz search
+- No SQLite/FTS
+- No EntityResolver implementation
+- No confidence thresholds
+- No session context
+- No CLI commands
+- No tool layer
+- No ModelGateway/Ollama
+- No embeddings/vector DB
+
+**Commit SHA:** (to be recorded after commit)
+
 ---
 
 ## Stage 3 — Vault Repository

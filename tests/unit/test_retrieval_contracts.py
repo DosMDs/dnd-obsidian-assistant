@@ -543,11 +543,18 @@ class TestBoundaries:
 
     @staticmethod
     def _ast_imports(module_path: str) -> set[str]:
-        """Return the set of first-level imported module prefixes
+        """Return the set of full imported module paths
         found via AST in the given module's source file.
 
         Only inspects top-level import statements (not TYPE_CHECKING
         blocks or function-local imports).
+
+        Examples
+        --------
+        ``import sqlite3`` → ``{"sqlite3"}``
+        ``import dnd_assistant.storage.types`` → ``{"dnd_assistant.storage.types"}``
+        ``from dnd_assistant.storage import VaultRepository`` → ``{"dnd_assistant.storage"}``
+        ``from dnd_assistant.models.gateway import ModelGateway`` → ``{"dnd_assistant.models.gateway"}``
         """
         import ast
 
@@ -561,22 +568,47 @@ class TestBoundaries:
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
-                    result.add(alias.name.split(".")[0])
+                    result.add(alias.name)
             elif isinstance(node, ast.ImportFrom):
                 if node.module:
-                    result.add(node.module.split(".")[0])
+                    result.add(node.module)
         return result
+
+    @staticmethod
+    def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
+        """Check if *module* matches *forbidden_prefixes* or any of their
+        sub-packages.
+
+        Semantics: ``module == prefix or module.startswith(prefix + ".")``
+        for any prefix in *forbidden_prefixes*.
+        """
+        for prefix in forbidden_prefixes:
+            if module == prefix or module.startswith(prefix + "."):
+                return True
+        return False
 
     def test_retrieval_types_no_forbidden_imports(self) -> None:
         imports = self._ast_imports("dnd_assistant.retrieval.types")
-        forbidden = {"storage", "models", "tools", "application", "ollama"}
-        actual = forbidden & imports
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+            "ollama",
+        }
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
         assert not actual, f"retrieval/types.py imports forbidden modules: {actual}"
 
     def test_retrieval_service_no_forbidden_imports(self) -> None:
         imports = self._ast_imports("dnd_assistant.retrieval.service")
-        forbidden = {"storage", "models", "tools", "application", "ollama"}
-        actual = forbidden & imports
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+            "ollama",
+        }
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
         assert not actual, f"retrieval/service.py imports forbidden modules: {actual}"
 
     def test_no_sqlite_import_in_retrieval(self) -> None:
@@ -608,3 +640,169 @@ class TestBoundaries:
             "dnd_assistant.retrieval",
             "retrieval",
         )
+
+
+class TestAstImportChecker:
+    """Regression tests for the AST-based import checker itself.
+
+    These tests verify that ``_ast_imports`` preserves full dotted paths
+    and that ``_has_forbidden_prefix`` correctly detects forbidden imports.
+    They use synthetic source text rather than production module files.
+    """
+
+    @staticmethod
+    def _parse_imports(source: str) -> set[str]:
+        """Parse *source* as Python code and return the set of full
+        imported module paths found at the top level.
+        """
+        import ast
+
+        tree = ast.parse(source)
+        result: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    result.add(alias.name)
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    result.add(node.module)
+        return result
+
+    @staticmethod
+    def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
+        for prefix in forbidden_prefixes:
+            if module == prefix or module.startswith(prefix + "."):
+                return True
+        return False
+
+    # ── Full dotted paths preserved ──────────────────────────────────────
+
+    def test_import_sqlite3(self) -> None:
+        imports = self._parse_imports("import sqlite3")
+        assert imports == {"sqlite3"}
+
+    def test_import_dotted_storage_types(self) -> None:
+        imports = self._parse_imports("import dnd_assistant.storage.types")
+        assert imports == {"dnd_assistant.storage.types"}
+
+    def test_from_import_storage(self) -> None:
+        imports = self._parse_imports("from dnd_assistant.storage import VaultRepository")
+        assert imports == {"dnd_assistant.storage"}
+
+    def test_from_import_models_gateway(self) -> None:
+        imports = self._parse_imports("from dnd_assistant.models.gateway import ModelGateway")
+        assert imports == {"dnd_assistant.models.gateway"}
+
+    def test_import_rapidfuzz(self) -> None:
+        imports = self._parse_imports("import rapidfuzz.fuzz")
+        assert imports == {"rapidfuzz.fuzz"}
+
+    def test_import_tools_registry(self) -> None:
+        imports = self._parse_imports("import dnd_assistant.tools.registry")
+        assert imports == {"dnd_assistant.tools.registry"}
+
+    # ── Forbidden-prefix detection ───────────────────────────────────────
+
+    def test_detect_storage_from_import(self) -> None:
+        """from dnd_assistant.storage import VaultRepository is detected."""
+        imports = self._parse_imports("from dnd_assistant.storage import VaultRepository")
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.storage"}
+
+    def test_detect_storage_subpackage_import(self) -> None:
+        """import dnd_assistant.storage.types is detected."""
+        imports = self._parse_imports("import dnd_assistant.storage.types")
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.storage.types"}
+
+    def test_detect_models_gateway_from_import(self) -> None:
+        """from dnd_assistant.models.gateway import ModelGateway is detected."""
+        imports = self._parse_imports("from dnd_assistant.models.gateway import ModelGateway")
+        forbidden = {"dnd_assistant.models"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.models.gateway"}
+
+    def test_detect_tools_registry_import(self) -> None:
+        """import dnd_assistant.tools.registry is detected."""
+        imports = self._parse_imports("import dnd_assistant.tools.registry")
+        forbidden = {"dnd_assistant.tools"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.tools.registry"}
+
+    def test_detect_sqlite3_import(self) -> None:
+        imports = self._parse_imports("import sqlite3")
+        forbidden = {"sqlite3"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"sqlite3"}
+
+    def test_detect_rapidfuzz_import(self) -> None:
+        imports = self._parse_imports("from rapidfuzz import fuzz")
+        forbidden = {"rapidfuzz"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"rapidfuzz"}
+
+    # ── Allowed imports not falsely rejected ─────────────────────────────
+
+    def test_allowed_domain_import_not_falsely_rejected(self) -> None:
+        imports = self._parse_imports("from dnd_assistant.domain.types import EntityId")
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+        }
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert not actual
+
+    def test_allowed_retrieval_import_not_falsely_rejected(self) -> None:
+        imports = self._parse_imports("from dnd_assistant.retrieval.types import SearchHit")
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+        }
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert not actual
+
+    # ── Regression: split(".")[0] would miss these ──────────────────────
+
+    def test_regression_buggy_split_dot_zero_detects_storage(self) -> None:
+        """Prove that the old ``split(\".\")[0]`` behaviour would NOT detect
+        ``from dnd_assistant.storage import ...`` because it collapses to
+        ``dnd_assistant``, but the corrected full-path logic does detect it.
+        """
+        imports = self._parse_imports("from dnd_assistant.storage import VaultRepository")
+        # Old buggy behaviour would produce {"dnd_assistant"}
+        old_buggy = {name.split(".")[0] for name in imports}
+        assert old_buggy == {"dnd_assistant"}
+        assert "storage" not in old_buggy  # old code missed it
+
+        # Correct behaviour
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.storage"}
+
+    def test_regression_buggy_split_dot_zero_detects_models(self) -> None:
+        """Same regression proof for models import."""
+        imports = self._parse_imports("from dnd_assistant.models.gateway import ModelGateway")
+        old_buggy = {name.split(".")[0] for name in imports}
+        assert old_buggy == {"dnd_assistant"}
+        assert "models" not in old_buggy
+
+        forbidden = {"dnd_assistant.models"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.models.gateway"}
+
+    def test_regression_buggy_split_dot_zero_detects_tools(self) -> None:
+        """Same regression proof for tools import."""
+        imports = self._parse_imports("import dnd_assistant.tools.registry")
+        old_buggy = {name.split(".")[0] for name in imports}
+        assert old_buggy == {"dnd_assistant"}
+        assert "tools" not in old_buggy
+
+        forbidden = {"dnd_assistant.tools"}
+        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.tools.registry"}
