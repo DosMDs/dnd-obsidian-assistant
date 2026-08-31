@@ -74,6 +74,7 @@ class TestPublicExports:
             "SearchHit",
             "SearchQuery",
             "SearchService",
+            "VaultSearchService",
         }
         assert set(retrieval_all) == expected
 
@@ -723,12 +724,21 @@ class TestBoundaries:
         loaded = {m for m in sys.modules if m.startswith(forbidden_prefix)}
         assert not loaded, f"{module_path} triggered {label} imports: {loaded}"
 
-    def test_retrieval_does_not_import_storage(self) -> None:
-        self._assert_no_modules_loaded(
-            "dnd_assistant.retrieval",
-            "dnd_assistant.storage",
-            "storage",
-        )
+    def test_retrieval_contracts_no_storage(self) -> None:
+        """Contract modules (types, service) must not import storage
+        in their source code.
+
+        The concrete search module (search.py) legitimately depends on
+        storage read contracts, but the contract-only modules must
+        remain storage-independent.  We use AST-based inspection here
+        because the retrieval __init__ re-exports VaultSearchService
+        which transitively loads storage at runtime.
+        """
+        for mod in ("dnd_assistant.retrieval.types", "dnd_assistant.retrieval.service"):
+            imports = self._ast_imports(mod)
+            forbidden = {"dnd_assistant.storage"}
+            actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+            assert not actual, f"{mod} imports storage: {actual}"
 
     def test_retrieval_does_not_import_models(self) -> None:
         self._assert_no_modules_loaded(
@@ -822,9 +832,41 @@ class TestBoundaries:
         actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
         assert not actual, f"retrieval/service.py imports forbidden modules: {actual}"
 
+    def test_retrieval_search_no_forbidden_imports(self) -> None:
+        """retrieval/search.py may import storage read contracts but
+        must not import models, tools, application, session, or ollama."""
+        imports = self._ast_imports("dnd_assistant.retrieval.search")
+        forbidden = {
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+            "dnd_assistant.session",
+            "ollama",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual, f"retrieval/search.py imports forbidden modules: {actual}"
+
+    def test_retrieval_search_storage_only_read_contracts(self) -> None:
+        """retrieval/search.py must only import narrow storage read
+        contracts (types), not implementation internals."""
+        imports = self._ast_imports("dnd_assistant.retrieval.search")
+        # Allow dnd_assistant.storage.types (read contracts)
+        # Reject other storage submodules
+        storage_internals = {
+            "dnd_assistant.storage.atomic",
+            "dnd_assistant.storage.audit",
+            "dnd_assistant.storage.markdown",
+            "dnd_assistant.storage.paths",
+            "dnd_assistant.storage.patch",
+            "dnd_assistant.storage.vault_repository",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, storage_internals)}
+        assert not actual, f"retrieval/search.py imports storage internals: {actual}"
+
     def test_no_sqlite_import_in_retrieval(self) -> None:
         imports = self._ast_imports("dnd_assistant.retrieval.types")
         imports |= self._ast_imports("dnd_assistant.retrieval.service")
+        imports |= self._ast_imports("dnd_assistant.retrieval.search")
         assert "sqlite3" not in imports, "retrieval imports sqlite3"
         # Also check no 'sqlite' appears in import strings
         assert not any("sqlite" in i for i in imports), (
@@ -834,6 +876,7 @@ class TestBoundaries:
     def test_no_rapidfuzz_import_in_retrieval(self) -> None:
         imports = self._ast_imports("dnd_assistant.retrieval.types")
         imports |= self._ast_imports("dnd_assistant.retrieval.service")
+        imports |= self._ast_imports("dnd_assistant.retrieval.search")
         assert "rapidfuzz" not in imports, "retrieval imports rapidfuzz"
 
     # ── Reverse-boundary protection ──────────────────────────────────────

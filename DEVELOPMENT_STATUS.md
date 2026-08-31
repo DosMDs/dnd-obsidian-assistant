@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S4-05)
+**Last updated:** 2026-08-31 (S5-01)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 4 — Calendar`
 **Status:** `DONE`
@@ -874,7 +874,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 ### Tasks
 
 - [x] `S5-00` Retrieval kickoff + canonical contracts
-- [ ] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
+- [x] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
 - [ ] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
 - [ ] `S5-03` SQLite FTS5 derived index + rebuild path
 - [ ] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
@@ -1201,7 +1201,8 @@ was represented as `"storage"` instead of `"dnd_assistant.storage"` and therefor
 - `src/dnd_assistant/retrieval/service.py` — corrected `EntityResolver` class docstring, `EntityResolver.resolve()` return documentation
 
 **Test changes:**
-- `tests/unit/test_retrieval_contracts.py` — added `TestFtsScoreContract` (7 tests) verifying FTS accepts `None`, negative, zero, and positive finite scores; rejects NaN, inf, -inf, bool. Added `TestAmbiguousSemantics` (2 tests) verifying single-candidate and multi-candidate `Ambiguous` are accepted. Added `TestSearchServiceSurface` (2 tests) verifying `search` and `get_by_id` present and `search_by_type` absent.
+- `tests/unit/test_retrieval_contracts.py` — added `TestFtsScoreContract` (11 cases: 6 accepted scores, 5 rejected scores) verifying FTS accepts `None`, negative, zero, and positive finite scores; rejects NaN, inf, -inf, bool. Added `TestAmbiguousSemantics` (3 cases) verifying single-candidate and multi-candidate `Ambiguous` are accepted, zero candidates rejected. Added `TestSearchServiceSurface` (3 cases) verifying `search` and `get_by_id` present and `search_by_type` absent.
+- **Total: 17 new targeted pytest cases** (was stale `7/2/2` in earlier records)
 
 **Scope exclusions confirmed:**
 - No runtime retrieval implementation changed
@@ -1219,8 +1220,130 @@ was represented as `"storage"` instead of `"dnd_assistant.storage"` and therefor
 - No ModelGateway/Ollama
 - No embeddings/vector DB
 
----
 
+### S5-01 completion record
+
+**Starting branch:** `main`
+**Starting local SHA:** `fa7b48cde28486cd2fb737b8c5f1a0b534327a1b`
+**Starting upstream SHA:** `fa7b48cde28486cd2fb737b8c5f1a0b534327a1b`
+
+**Scope implemented:**
+Exact stable-ID, exact canonical name, and exact alias retrieval with player-visibility enforcement, entity-type filtering, deterministic ordering, strict limit validation, and repository error propagation.
+
+**Concrete SearchService implementation:**
+`dnd_assistant.retrieval.search.VaultSearchService` — depends on `VaultRepository` (injected), reads `VaultDocument` for entity data and alias extra-frontmatter.
+
+**Exact-ID semantics:**
+Literal string comparison (no case folding, no normalisation). `EntityId` comparison is exact.
+
+**Exact-name normalisation semantics:**
+`strip → NFC normalise → casefold()` then equality comparison. No substring, prefix, token, fuzzy, or transliteration matching.
+
+**Exact-alias normalisation semantics:**
+Same `strip → NFC → casefold()` policy as name matching.
+
+**Alias extra-frontmatter parsing policy:**
+Fail-closed: list/tuple of strings accepted (non-string entries ignored, duplicates collapsed). Scalar string treated as malformed → no aliases. Missing/None → no aliases.
+
+**Match-tier precedence:**
+`EXACT_ID > EXACT_NAME > EXACT_ALIAS`. Only the highest-precedence non-empty tier is returned.
+
+**Duplicate/collision behaviour:**
+Multiple entities with same canonical name → multiple `EXACT_NAME` hits. Multiple entities sharing an alias → multiple `EXACT_ALIAS` hits. Same entity name+alias → one hit (name tier wins).
+
+**Deterministic ordering:**
+Within a tier, sorted by `EntityId` ascending. Then `limit` applied.
+
+**Entity-type filter behaviour:**
+`None` or empty set → all types. Non-empty → only matching types. Applied before tier selection.
+
+**Player visibility behaviour:**
+Only `Visibility.PLAYER` entities are eligible. `Visibility.DM` and `Visibility.SYSTEM` are excluded before any matching. No visibility override exists.
+
+**Hidden-ID behaviour:**
+A hidden entity matching by exact ID is excluded before tier evaluation. A visible lower-tier match (e.g. alias) may still be returned. Hidden entities are observationally equivalent to missing entities.
+
+**`get_by_id` behaviour:**
+Returns `SearchHit(EXACT_ID)` for visible existing entity. Returns `None` for missing, DM, or SYSTEM entities. Repository `StorageError` propagates unchanged.
+
+**Limit validation behaviour:**
+Strict positive integer >= 1. `0`, negative, `bool`, `float`, `str`, `None` → `ValidationError`.
+
+**Repository error propagation behaviour:**
+`StorageError` from repository methods propagates unchanged. `NotFoundError` from `get_entity` → `None` (normal not-found). Other repository integrity failures are not swallowed.
+
+**Public API/export changes:**
+- `dnd_assistant.retrieval.search` — new module, exports `VaultSearchService`
+- `dnd_assistant.retrieval.__init__` — added `VaultSearchService` to `__all__`
+
+**Dependency-boundary changes:**
+- `retrieval.search` imports `storage.types` (narrow read contracts: `VaultRepository`, `VaultDocument`)
+- `retrieval.types` and `retrieval.service` remain storage-independent
+- Boundary tests updated: contract modules verified via AST (not sys.modules), search module verified for no models/tools/application/session/ollama imports and only storage read-contract imports
+- No `storage.atomic`, `storage.audit`, `storage.markdown`, `storage.paths`, `storage.patch`, `storage.vault_repository` imported
+
+**S5-C04 bookkeeping correction:**
+Corrected stale `7/2/2` test counts to actual `11/3/3` (17 total) in the S5-C04 record.
+
+**Tests added/changed:**
+- `tests/unit/test_exact_search.py` (new) — 58 tests covering protocol conformance, get_by_id, exact-ID/name/alias tiers, tier precedence, visibility, entity-type filters, ordering, limit validation, alias metadata edge cases, and repository error propagation
+- `tests/unit/test_retrieval_contracts.py` — updated boundary tests: storage-contract independence verified via AST, added `test_retrieval_search_no_forbidden_imports`, `test_retrieval_search_storage_only_read_contracts`, updated SQLite/RapidFuzz checks to include `retrieval.search`, updated public exports test
+
+**Targeted test result:**
+`uv run pytest tests/unit/test_exact_search.py` — 58 passed
+
+**Full pytest result:**
+`uv run pytest` — 1709 passed, 34 skipped
+
+**Ruff check result:**
+All checks passed
+
+**Ruff format result:**
+173 files already formatted
+
+**`dnd --help` result:**
+CLI smoke test OK (Russian UI)
+
+**`git diff --check` result:**
+No whitespace errors
+
+**Architecture review:**
+- `VaultSearchService` satisfies `SearchService` protocol
+- Repository injected, not constructed internally
+- No direct filesystem access from `retrieval.search`
+- No Vault writes
+- No golden-Vault modifications
+- No RapidFuzz, SQLite, FTS, or EntityResolver implementation
+- Domain/storage do not depend on retrieval
+- Contract modules remain storage-independent
+
+**Out-of-scope review:**
+No RapidFuzz, no fuzzy matching, no SQLite, no FTS5, no EntityResolver, no CLI search commands, no session runtime, no ToolRegistry, no ModelGateway/Ollama, no embeddings, no vector DB. S5-02 remains NOT STARTED.
+
+**Defects discovered/corrections made:**
+- `search.py` initially imported `SearchService` (unused) — removed
+- `test_exact_search.py` initially imported `SearchHit` (unused) — removed
+- `FakeRepository.get_entity` raised `NotFoundError` without `from None` — fixed
+- `test_retrieval_contracts_no_storage` used `sys.modules` check which caught transitive imports via `__init__` — changed to AST-based check
+
+**ADR assessment:**
+No ADR required. All architectural decisions follow established patterns (Protocol for contracts, injected repository dependency, deterministic matching, strict input validation).
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [ ]
+- S5-03 = [ ]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+Fuzzy/RapidFuzz/SQLite/FTS/EntityResolver work has NOT started. S5-02 = [ ].
+
+
+---
 ## Stage 3 — Vault Repository
 
 ### Goal

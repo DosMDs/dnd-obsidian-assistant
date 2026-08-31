@@ -10,6 +10,7 @@ types/       — Canonical retrieval types (MatchKind, SearchQuery, SearchHit,
 service/     — SearchService and EntityResolver protocols.
 """
 
+from dnd_assistant.retrieval.search import VaultSearchService
 from dnd_assistant.retrieval.service import EntityResolver, SearchService
 from dnd_assistant.retrieval.types import (
     Ambiguous,
@@ -31,4 +32,5 @@ __all__: list[str] = [
     "SearchHit",
     "SearchQuery",
     "SearchService",
+    "VaultSearchService",
 ]
