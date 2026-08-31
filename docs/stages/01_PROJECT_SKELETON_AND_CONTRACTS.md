@@ -177,4 +177,77 @@ Do not implement yet:
 
 ## Definition of Done
 
-See `DEVELOPMENT_STATUS.md`. That file is the canonical current status source.
+- package skeleton imports successfully;
+- shared error hierarchy exists and is tested;
+- core boundaries are explicit and documented;
+- no domain/storage dependency on Ollama or a concrete model;
+- no Vault persistence implementation is pulled forward from Stage 3;
+- no Calendar implementation is pulled forward from Stage 4;
+- relevant tests pass;
+- `uv run pytest` passes when feasible;
+- `uv run ruff check .` passes;
+- `uv run ruff format --check .` passes;
+- final diff is reviewed;
+- `DEVELOPMENT_STATUS.md` is updated with current status only (detailed completion record goes here).
+
+## Implementation history
+
+### CTR-001 through CTR-007
+
+Package skeleton, error hierarchy, core contracts, responsibility documentation,
+contract/import tests, boundary review, and quality gates were implemented as
+part of Stage 1.
+
+### CTR-008 — Completion record
+
+Review the diff, update `DEVELOPMENT_STATUS.md` with current status only
+(checkbox/state), and record the detailed completion evidence in this stage
+document.
+
+### Stage 1 completion
+
+**Review range:** `5a38ea0..HEAD` (pre-Stage-2 boundary through S2-06)
+
+**Implemented domain types/models:**
+- `EntityId` — validated printable-Unicode string identifier
+- `EntityType` — MVP-only: npc, location, quest, item
+- `KnowledgeStatus` — epistemic: confirmed, reported, rumor, inferred, unknown
+- `Visibility` — player, dm, system
+- `Provenance` — manual, session, bootstrap, import, model_inference
+- `Revision` — strict int >= 1, no bool/string coercion
+- `Entity` — base schema with schema_version, id, type, name, status, visibility, knowledge_status, session refs, timestamps, revision, tags; `extra="forbid"`
+- `Session` — schema with id, type discriminator, status, real timestamps, world_tick range, processed flag, model profile, revision; `extra="forbid"`
+- `TemporalCertainty` — exact, approximate, range, unknown (separate from KnowledgeStatus)
+- `TimelineEvent` — schema with id, type discriminator, name, status, certainty, importance, world_tick fields with model-level temporal consistency validation, location, visibility, revision; `extra="forbid"`
+- `CampaignState` — compact snapshot with EntityId references (current_location, active_quests, important_npcs, upcoming_deadlines) and printable-string lists (party_goals, unresolved_threads); `extra="forbid"`
+
+**Architectural boundaries confirmed:**
+- `EntityType` is MVP-only (no timeline_event, campaign_state, session added)
+- `TemporalCertainty` is separate from `KnowledgeStatus`
+- No Stage 4 calendar implementation (no WorldTick value object, GameDate, CalendarDefinition, CalendarService)
+- No storage implementation (no VaultRepository, AuditService, atomic writes)
+- No retrieval implementation (no SearchService, EntityResolver)
+- No session runtime implementation (no SessionService)
+- No tool-layer implementation (no ToolRegistry, ToolExecutor)
+- No ModelGateway implementation/provider coupling
+- No CampaignState processing implementation (no state generation, ChangeSet application)
+- All deferred contracts remain correctly assigned to later stages
+- Domain dependency direction is clean (no imports from storage, models, retrieval, tools, application, cli)
+
+**Final quality-gate results:**
+- `uv run pytest tests/unit/test_domain_types.py` — 53 passed
+- `uv run pytest tests/unit/test_entity.py` — 119 passed
+- `uv run pytest tests/unit/test_session.py` — 103 passed
+- `uv run pytest tests/unit/test_timeline_event.py` — 137 passed
+- `uv run pytest tests/unit/test_campaign_state.py` — 89 passed
+- `uv run pytest tests/unit/test_imports.py tests/unit/test_gateway_protocol.py tests/unit/test_audit_protocol.py tests/unit/test_tool_registry_protocol.py` — 13 passed
+- `uv run pytest` (full suite) — 551 passed
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 66 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Defects discovered during S2-07:** None
+
+**Code/test changes during S2-07:** None (only DEVELOPMENT_STATUS.md updated)
+
+**Stage 1 status:** DONE.

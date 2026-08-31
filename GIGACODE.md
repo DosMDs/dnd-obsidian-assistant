@@ -33,7 +33,9 @@ Develop in this order unless the user explicitly changes the roadmap:
 
 Tests are implemented together with each stage.
 
-## Current development status
+## Development status and documentation
+
+### Current status
 
 Before planning or editing code, read:
 
@@ -43,13 +45,24 @@ DEVELOPMENT_STATUS.md
 
 It is the canonical source for the **current roadmap stage and task progress**.
 
-Current stage at the time these instructions were updated:
+Do not duplicate the current stage in `GIGACODE.md`. Always read `DEVELOPMENT_STATUS.md`.
 
-```text
-Stage 2 — Domain schemas
-```
+### Documentation responsibility split
 
-Do not assume this line is newer than `DEVELOPMENT_STATUS.md`; the status file always wins.
+- `DEVELOPMENT_STATUS.md` = canonical **current** roadmap/status state.
+- `docs/stages/NN_*.md` = canonical detailed plan/history/evidence for each stage.
+
+Rules:
+
+1. Do not append full Final Reports to `DEVELOPMENT_STATUS.md`.
+2. Do not append detailed correction narratives there.
+3. Task completion: update checkbox/current state in `DEVELOPMENT_STATUS.md`;
+   record detailed completion evidence in the relevant stage document.
+4. Correction task: keep current task state in status; append correction
+   record to the stage document.
+5. Stage final review: mark final state/date in status; write detailed
+   historical review into the stage document.
+6. Do not duplicate the same detailed report in both files.
 
 ### Stage discipline
 

@@ -3,14 +3,23 @@ name: stage-workflow
 description: Plan, execute, close, reopen or advance a D&D Session Assistant development stage using DEVELOPMENT_STATUS.md, task IDs, quality gates and ADR discipline. Use when asked to move to the next stage, update project progress, plan the current stage or mark work complete.
 compatibility: D&D Session Assistant repository, Git, uv, pytest, Ruff.
 metadata:
-  version: "1"
+  version: "2"
 ---
 # Development stage workflow
 
+## Documentation responsibility split
+
+- `DEVELOPMENT_STATUS.md` = compact canonical **current** roadmap state.
+- `docs/stages/NN_*.md` = detailed plan + implementation history + correction
+  records + review evidence + completion records.
+
+Do not copy full Final Reports or detailed correction narratives into the
+compact status file.
+
 ## Start or resume a stage
 
-1. Read `DEVELOPMENT_STATUS.md`.
-2. Read the relevant stage document under `docs/stages/` if present.
+1. Read `DEVELOPMENT_STATUS.md` for current state.
+2. Read the relevant `docs/stages/NN_*.md` for detailed plan/history.
 3. Inspect current code/tests before assuming task state.
 4. Confirm the current stage boundaries and out-of-scope work.
 5. Create/update task IDs in `DEVELOPMENT_STATUS.md` only when necessary.
@@ -37,6 +46,15 @@ A task can be checked off only when:
 
 Record unresolved risk/blockers explicitly.
 
+**Status update:**
+- `DEVELOPMENT_STATUS.md` → task checkbox/current state only.
+- Stage document (`docs/stages/NN_*.md`) → detailed completion record/evidence.
+
+## Correction
+
+- Stage document (`docs/stages/NN_*.md`) → detailed correction record.
+- `DEVELOPMENT_STATUS.md` → keep current task state only.
+
 ## Complete a stage
 
 1. Verify every Definition of Done item.
@@ -46,11 +64,13 @@ Record unresolved risk/blockers explicitly.
    - `uv run ruff format --check .`
 3. Review architecture boundaries and scope.
 4. Update stage status/dates in `DEVELOPMENT_STATUS.md`.
-5. Do not start the next stage automatically.
+5. Write detailed final review/completion record into the stage document.
+6. Do not start the next stage automatically.
 
 ## Advance a stage
 
-Only after explicit user direction or an already-established project policy authorizing the transition:
+Only after explicit user direction or an already-established project policy
+authorizing the transition:
 
 1. mark the completed stage `DONE`;
 2. mark the next stage `IN PROGRESS`;
@@ -58,6 +78,11 @@ Only after explicit user direction or an already-established project policy auth
 4. update/create the next `docs/stages/...` plan if needed;
 5. keep later stages `NOT STARTED`.
 
+**Status update:**
+- `DEVELOPMENT_STATUS.md` → roadmap transition only.
+- New stage document → detailed stage plan/tasks.
+
 ## Reopen
 
-If a supposedly completed gate fails later, reopen the specific task/stage rather than hiding the failure with downstream workarounds.
+If a supposedly completed gate fails later, reopen the specific task/stage
+rather than hiding the failure with downstream workarounds.
