@@ -25,6 +25,62 @@ repository text files:
 - bash/PowerShell/Python scripts как обход ошибки edit/write tool
 - base64/temporary-script generation как обход встроенного file tool
 
+## Absolute prohibition on indirect shell file writes
+
+Запрет shell-based editing распространяется не только на shell redirection.
+
+Любая команда, запущенная через shell, которая вызывает другой интерпретатор
+или runtime для изменения repository file, считается shell-based file
+mutation.
+
+В частности, без явного предварительного разрешения пользователя запрещены:
+
+```text
+python -c "open(..., 'w').write(...)"
+python -c "open(..., 'a').write(...)"
+python -c "Path(...).write_text(...)"
+python -c "Path(...).open(...).write(...)"
+python <temporary-generator-script>.py
+
+powershell -Command "...file write..."
+cmd /c "... > file"
+```
+
+Запрет одинаково распространяется на:
+
+```text
+create
+overwrite
+append
+insert
+patch
+```
+
+repository text files.
+
+Фраза «мне нужно только дописать несколько строк» не является исключением.
+
+Большой размер изменения также не является исключением.
+
+Если встроенный edit/write не принимает большой payload, обязательный
+следующий шаг:
+
+```text
+smaller IDE edit
+```
+
+а не:
+
+```text
+Python/PowerShell/Bash file mutation
+```
+
+Конкретный алгоритм incremental editing определён в:
+
+```text
+.gigacode/rules/07-incremental-file-editing.md
+```
+
 ## Recovery after edit/write tool failures
 
 Ошибка JSON parsing, oversized/large payload, timeout, transport failure или
