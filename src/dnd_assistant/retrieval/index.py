@@ -248,6 +248,21 @@ class SqliteFtsIndex:
         """The canonical SQLite index file path."""
         return self._index_path
 
+    # ── Operation-time path validation (S5-C07) ─────────────────────────
+
+    def _validate_current_index_path(self) -> Path:
+        """Re-validate the current canonical index path at operation time.
+
+        Returns:
+            The validated canonical index path.
+
+        Raises:
+            StorageError: Any path component beneath the Vault root is
+                now a symlink (including dangling/broken), or the final
+                DB path is now a symlink.
+        """
+        return _resolve_index_path(self._vault_root)
+
     # ── search ──────────────────────────────────────────────────────────
 
     def search(self, query: str, *, limit: int = 20) -> Sequence[LexicalHit]:
@@ -265,7 +280,8 @@ class SqliteFtsIndex:
             StorageError: The index is missing, corrupt, stale, or
                 the query could not be executed.
         """
-        if not self._index_path.exists():
+        current_path = self._validate_current_index_path()
+        if not current_path.exists():
             raise StorageError(
                 "FTS index \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442; "
                 "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 dnd index rebuild"
@@ -276,7 +292,7 @@ class SqliteFtsIndex:
             return []
 
         try:
-            conn = sqlite3.connect(str(self._index_path))
+            conn = sqlite3.connect(str(current_path))
         except sqlite3.DatabaseError as exc:
             raise StorageError(
                 "FTS index \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0451\u043d; "
@@ -328,7 +344,7 @@ class SqliteFtsIndex:
         """Rebuild the FTS index from the given canonical documents.
 
         The rebuild lifecycle:
-        1. Validate the index directory.
+        1. Validate the index directory (current path safety).
         2. Create a unique temp SQLite DB in the same directory.
         3. Create the schema.
         4. Insert only player-visible entities.
@@ -336,8 +352,9 @@ class SqliteFtsIndex:
         6. Commit.
         7. Validate the temp DB.
         8. Close the connection.
-        9. Atomically replace the old index.
-        10. Clean up temp artifacts on failure.
+        9. Re-validate final path (late safety check).
+        10. Atomically replace the old index.
+        11. Clean up temp artifacts on failure.
 
         Args:
             documents: Canonical entity documents to index.
@@ -345,7 +362,10 @@ class SqliteFtsIndex:
         Raises:
             StorageError: The rebuild failed.
         """
-        index_dir = _resolve_index_dir(self._vault_root)
+        # Step 1: Validate current index path (S5-C07 operation-time check)
+        final_path = self._validate_current_index_path()
+        index_dir = final_path.parent
+
         if not index_dir.exists():
             try:
                 index_dir.mkdir(parents=True, exist_ok=True)
@@ -377,7 +397,8 @@ class SqliteFtsIndex:
                     pass
             raise
 
-        final_path = self._index_path
+        # Step 9: Late final-path revalidation before os.replace (S5-C07)
+        _reject_symlink(final_path, "Файл индекса")
 
         try:
             os.replace(str(temp_path), str(final_path))
@@ -521,24 +542,31 @@ class SqliteFtsIndex:
     def verify_freshness(self, current_documents: Sequence[VaultDocument]) -> None:
         """Verify the index is fresh relative to the current Vault state.
 
-        Computes the player-visible source fingerprint for
-        *current_documents* and compares it with the stored fingerprint.
-        Raises ``StorageError`` if they differ.
+        Validation sequence (S5-C07):
+        1. Validate current path (symlink safety).
+        2. Ensure index exists.
+        3. Open SQLite.
+        4. Validate schema metadata/version (compatibility).
+        5. Read source fingerprint.
+        6. Compute current player fingerprint.
+        7. Compare.
 
         Args:
             current_documents: The current canonical Vault documents.
 
         Raises:
-            StorageError: The index is stale or missing.
+            StorageError: The index is stale, missing, corrupt, or
+                incompatible with the current source snapshot.
         """
-        if not self._index_path.exists():
+        current_path = self._validate_current_index_path()
+        if not current_path.exists():
             raise StorageError(
                 "FTS index \u043e\u0442\u0441\u0443\u0442\u0441\u0442\u0432\u0443\u0435\u0442; "
                 "\u0432\u044b\u043f\u043e\u043b\u043d\u0438\u0442\u0435 dnd index rebuild"
             )
 
         try:
-            conn = sqlite3.connect(str(self._index_path))
+            conn = sqlite3.connect(str(current_path))
         except sqlite3.DatabaseError as exc:
             raise StorageError(
                 "FTS index \u043f\u043e\u0432\u0440\u0435\u0436\u0434\u0451\u043d; "
@@ -547,6 +575,10 @@ class SqliteFtsIndex:
             ) from exc
 
         try:
+            # Step 4: Validate schema compatibility before fingerprint check
+            self._verify_index_fresh(conn)
+
+            # Step 5: Read source fingerprint
             cursor = conn.execute(
                 "SELECT value FROM index_metadata WHERE key = 'source_fingerprint'"
             )

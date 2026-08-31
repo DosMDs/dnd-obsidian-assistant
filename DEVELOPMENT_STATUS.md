@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C06)
+**Last updated:** 2026-08-31 (S5-C07)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -1918,6 +1918,69 @@ EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
 - Eligibility filtering precedes final user limit
 - Final/dangling index symlinks rejected
 - SQLite errors retain causes
+- No generated SQLite DB staged
+- No golden Vault modifications
+- No EntityResolver implementation
+- S5-04 remains [ ]
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
+
+### S5-C07 correction record
+
+**Acceptance-review defects (2 items):**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C07-1 | Symlink/path validation only happened at `SqliteFtsIndex(...)` construction time; a filesystem path substituted with a symlink after object construction could bypass constructor-time validation for `search()`, `verify_freshness()`, and `rebuild()` | Added `_validate_current_index_path()` private helper that calls `_resolve_index_path()` at operation time; `search()`, `verify_freshness()`, and `rebuild()` now revalidate the current canonical path immediately before SQLite access; `rebuild()` also performs a late pre-`os.replace` revalidation of the final path |
+| C07-2 | `verify_freshness()` read only `source_fingerprint` and did not call `_verify_index_fresh()` for schema compatibility validation; a DB with `schema_version = 999` and matching fingerprint could be reported as fresh | `verify_freshness()` now calls `self._verify_index_fresh(conn)` after opening SQLite and before reading the source fingerprint; full validation sequence: validate current path → ensure index exists → open SQLite → validate schema metadata/version → read source fingerprint → compute current player fingerprint → compare |
+
+**Production changes:**
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/retrieval/index.py` | Added `_validate_current_index_path()` helper; `search()` now calls it at start and uses `current_path` for all SQLite access; `verify_freshness()` now calls it at start, uses `current_path`, and calls `_verify_index_fresh(conn)` before fingerprint check; `rebuild()` now calls it at start (replacing `_resolve_index_dir`), and performs late `_reject_symlink(final_path)` immediately before `os.replace` |
+
+**Test changes:**
+
+| File | Change |
+|---|---|
+| `tests/unit/test_fts_index.py` | Added `TestSameInstanceSymlinkRejection` (9 tests — final DB symlink for search/freshness/rebuild, dangling symlink for search/freshness/rebuild, directory substitution for search/freshness/rebuild); added `TestLatePreReplaceValidation` (2 tests — late symlink rejected before replace, temp DB cleaned on late validation failure); added `TestFreshnessCompatibility` (5 tests — wrong schema version, malformed schema version, missing schema metadata, corrupt DB raises StorageError, corrupt DB preserves sqlite cause) |
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_fts_index.py` — 70 passed, 17 skipped (symlink tests on Windows)
+- `uv run pytest tests/unit/test_fts_search.py` — 12 passed
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 147 passed
+- `uv run pytest tests/unit/test_cli_index.py` — 5 passed
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed
+- `uv run pytest` (full suite) — 1839 passed, 51 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 179 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — `--vault` present
+- `git diff --check` — no whitespace errors
+
+**Architecture review:**
+- `_validate_current_index_path()` reuses existing `_resolve_index_path()` logic — no new path-safety policy
+- `search()`, `verify_freshness()`, `rebuild()` all perform operation-time path revalidation
+- `rebuild()` validates the final path late, immediately before `os.replace` — symlink created during a long rebuild is rejected
+- Temp DB is cleaned up on late validation failure
+- `verify_freshness()` now validates schema compatibility before fingerprint check — full sequence matches documented contract
+- Player-only fingerprint preserved unchanged
+- Eligibility-before-limit preserved unchanged
+- `--vault` CLI option preserved unchanged
 - No generated SQLite DB staged
 - No golden Vault modifications
 - No EntityResolver implementation

@@ -684,3 +684,305 @@ class TestMalformedSchemaMetadata:
             conn.close()
         with pytest.raises(StorageError, match="некорректную версию схемы"):
             index.search("Alpha")
+
+
+# ── Same-instance symlink regression tests (S5-C07) ──────────────────────
+
+
+class TestSameInstanceSymlinkRejection:
+    """Verify that a symlink substituted *after* SqliteFtsIndex construction
+    is rejected at operation time (search, verify_freshness, rebuild)."""
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_search_rejects_final_db_symlink(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        # Replace the db with a symlink *after* construction
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+        db_path.symlink_to(real_db)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.search("Alpha")
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_freshness_rejects_final_db_symlink(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+        db_path.symlink_to(real_db)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.verify_freshness(docs)
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_rebuild_rejects_final_db_symlink_same_instance(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        # Replace the db with a symlink *after* construction
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+        db_path.symlink_to(real_db)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # The external symlink target must remain untouched
+        assert real_db.exists()
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_search_rejects_dangling_final_symlink(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        db_path = index.index_path
+        db_path.unlink()
+        db_path.symlink_to(tmp_path / "nonexistent.sqlite3")
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.search("Alpha")
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_freshness_rejects_dangling_final_symlink(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        db_path = index.index_path
+        db_path.unlink()
+        db_path.symlink_to(tmp_path / "nonexistent.sqlite3")
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.verify_freshness(docs)
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_rebuild_rejects_dangling_final_symlink(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        db_path = index.index_path
+        db_path.unlink()
+        db_path.symlink_to(tmp_path / "nonexistent.sqlite3")
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_search_rejects_directory_symlink_substitution(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        # Replace _system/indexes with a symlink *after* construction
+        indexes_dir = vault / "_system" / "indexes"
+        real_indexes = tmp_path / "real_indexes"
+        real_indexes.mkdir()
+        # Move the real db to the new location
+        real_db = real_indexes / "entities.sqlite3"
+        (vault / "_system" / "indexes" / "entities.sqlite3").rename(real_db)
+        indexes_dir.rmdir()
+        indexes_dir.symlink_to(real_indexes, target_is_directory=True)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.search("Alpha")
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_freshness_rejects_directory_symlink_substitution(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        indexes_dir = vault / "_system" / "indexes"
+        real_indexes = tmp_path / "real_indexes"
+        real_indexes.mkdir()
+        real_db = real_indexes / "entities.sqlite3"
+        (vault / "_system" / "indexes" / "entities.sqlite3").rename(real_db)
+        indexes_dir.rmdir()
+        indexes_dir.symlink_to(real_indexes, target_is_directory=True)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.verify_freshness(docs)
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_rebuild_rejects_directory_symlink_substitution(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        indexes_dir = vault / "_system" / "indexes"
+        real_indexes = tmp_path / "real_indexes"
+        real_indexes.mkdir()
+        real_db = real_indexes / "entities.sqlite3"
+        (vault / "_system" / "indexes" / "entities.sqlite3").rename(real_db)
+        indexes_dir.rmdir()
+        indexes_dir.symlink_to(real_indexes, target_is_directory=True)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+
+# ── Late pre-replace validation (S5-C07) ──────────────────────────────────
+
+
+class TestLatePreReplaceValidation:
+    """Verify that rebuild validates the final path *immediately before*
+    os.replace, and cleans up the temp DB on failure."""
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_late_symlink_rejected_before_replace(self, tmp_path: Path) -> None:
+        """A symlink created at the final path *during* a long rebuild
+        must be rejected before os.replace."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        # Create a symlink at the final path (simulating race condition)
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+        db_path.symlink_to(real_db)
+
+        # Rebuild must fail with StorageError (not silently replace the symlink)
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # The external symlink target must remain untouched
+        assert real_db.exists()
+        conn = sqlite3.connect(str(real_db))
+        try:
+            row = conn.execute(
+                "SELECT value FROM index_metadata WHERE key='source_fingerprint'"
+            ).fetchone()
+            # Original fingerprint (from Alpha), not Beta
+            original_fp = _compute_source_fingerprint([_make_doc("npc_a", name="Alpha")])
+            assert row is not None and row[0] == original_fp
+        finally:
+            conn.close()
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_temp_cleaned_on_late_validation_failure(self, tmp_path: Path) -> None:
+        """When late path validation fails, the temp rebuild DB must be
+        cleaned up."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        # Count temp files before rebuild attempt
+        indexes_dir = vault / "_system" / "indexes"
+        temp_before = list(indexes_dir.glob("fts_rebuild_*"))
+
+        # Force late validation failure by making final path a symlink
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+        db_path.symlink_to(real_db)
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # Temp files must be cleaned up
+        temp_after = list(indexes_dir.glob("fts_rebuild_*"))
+        assert len(temp_after) == len(temp_before)
+
+
+# ── verify_freshness compatibility regressions (S5-C07) ───────────────────
+
+
+class TestFreshnessCompatibility:
+    """Direct verify_freshness() calls must reject incompatible indexes."""
+
+    def test_wrong_schema_version(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        conn = sqlite3.connect(str(index.index_path))
+        try:
+            conn.execute("UPDATE index_metadata SET value='999' WHERE key='schema_version'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(
+            StorageError,
+            match="версию схемы",
+        ):
+            index.verify_freshness(docs)
+
+    def test_malformed_schema_version(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        conn = sqlite3.connect(str(index.index_path))
+        try:
+            conn.execute(
+                "UPDATE index_metadata SET value=? WHERE key='schema_version'",
+                ("not-an-int",),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(StorageError, match="некорректную версию схемы"):
+            index.verify_freshness(docs)
+
+    def test_missing_schema_metadata(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        conn = sqlite3.connect(str(index.index_path))
+        try:
+            conn.execute("DELETE FROM index_metadata WHERE key='schema_version'")
+            conn.commit()
+        finally:
+            conn.close()
+
+        with pytest.raises(
+            StorageError,
+            match="неизвестную версию схемы",
+        ):
+            index.verify_freshness(docs)
+
+    def test_corrupt_db_raises_storage_error(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        # Corrupt the DB by writing random bytes
+        index.index_path.write_bytes(b"not a valid sqlite db")
+
+        with pytest.raises(StorageError, match="повреждён"):
+            index.verify_freshness(docs)
+
+    def test_corrupt_db_preserves_sqlite_cause(self, tmp_path: Path) -> None:
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        docs = [_make_doc("npc_a", name="Alpha")]
+        index.rebuild(docs)
+
+        index.index_path.write_bytes(b"not a valid sqlite db")
+
+        with pytest.raises(StorageError) as exc_info:
+            index.verify_freshness(docs)
+        assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
