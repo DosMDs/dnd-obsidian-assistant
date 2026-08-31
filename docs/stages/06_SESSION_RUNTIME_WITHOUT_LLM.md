@@ -135,8 +135,13 @@ existing code and ADRs:
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
 
 **Starting SHA:** `79d2c1d153e02a578a81fade9e0fa3098f0c2b59`
-**Final SHA:** `d68c5dd51c377b98d7d03d475630469ceb5f4758`
+**Implementation commit:** `d68c5dd51c377b98d7d03d475630469ceb5f4758`
+**Follow-up documentation commit:** `3bab266c105df46c07cb1fb3bf9951b16cd1c3e9`
 **Commit message:** `feat: define session storage path contracts (S6-00)`
+
+**Historical note:** Original S6-00 was published as two commits although
+the task requested one logical commit. Published history was preserved;
+no rewrite was used.
 
 **Known deferred items:**
 
@@ -144,3 +149,119 @@ existing code and ADRs:
 - Stage 7 remains NOT STARTED.
 - No ADR was created — the path layout follows the existing Golden Vault
   convention and does not introduce a new architectural decision.
+
+### S6-C00 — Session-path immutability and symlink hardening
+
+**Review base:** `3bab266c105df46c07cb1fb3bf9951b16cd1c3e9`
+
+**Defects found:**
+
+1. **C00-1 — SessionStoragePaths is not actually immutable.** The class
+   used `__slots__` and private attributes with property accessors, but
+   assignment like `paths._session_dir = other` was still possible. The
+   docstring and stage documentation claimed immutability but the
+   implementation did not enforce it.
+
+2. **C00-2 — Dangling symlink components are not reliably rejected.** The
+   `_check_component_symlinks` helper used `path.exists() and
+   path.is_symlink()`. For a dangling/broken symlink, `exists()` returns
+   `False` while `is_symlink()` returns `True`, so the symlink was not
+   detected.
+
+3. **C00-3 — Leaf session storage locations are not symlink-checked.**
+   Component checking stopped at the directory level
+   (`Sessions/<id>/`, `_system/raw/sessions/<id>/`). Leaf paths
+   (`Session.md`, `metadata.json`, `events.jsonl`) were appended without
+   checking whether they were existing symlinks.
+
+4. **C00-4 — Completion evidence / SHA labeling is inaccurate.** The
+   stage document listed `Final SHA: d68c5dd...` but the actual repository
+   head after S6-00 was `3bab266c...` (the follow-up documentation commit).
+
+**Root causes:**
+
+- `SessionStoragePaths` was hand-rolled with `__slots__` + properties
+  instead of a `@dataclass(frozen=True)` or equivalent enforcement.
+- The symlink check used `exists()` before `is_symlink()`, following the
+  same pattern as the earlier `_resolve_entity_directory` in `paths.py`.
+- Leaf paths were not considered as potential symlink vectors.
+- The SHA label was not updated after the documentation commit was created.
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/session_paths.py`:**
+   - `SessionStoragePaths` converted to `@dataclass(frozen=True, slots=True)`
+     with direct public fields. The frozen dataclass raises
+     `FrozenInstanceError` on any field assignment, guaranteeing true
+     immutability. Equality, hashability and repr are provided by the
+     dataclass generator.
+   - `_check_component_symlinks` changed from `accumulated.exists() and
+     accumulated.is_symlink()` to `accumulated.is_symlink()` — checked
+     first, independently of `exists()`. This catches dangling symlinks.
+   - New `_check_leaf_symlinks(*paths)` function checks that no leaf path
+     is an existing symlink (dangling or live).
+   - `resolve_session_storage_paths` now calls `_check_leaf_symlinks` on
+     all five returned locations (`session_md`, `raw_metadata`,
+     `raw_events`) after constructing leaf paths.
+
+2. **`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`:**
+   - `Final SHA` relabeled to `Implementation commit` / `Follow-up
+     documentation commit` for historical accuracy.
+   - Historical note added explaining the two-commit publication.
+   - This S6-C00 correction record appended.
+
+**Regression tests added (7 new tests, 92 total in file):**
+
+- `TestSessionStoragePathsValue::test_frozen_immutable` — verifies that
+  `FrozenInstanceError` is raised on assignment to any of the 5 fields.
+- `TestSymlinkSafety::test_dangling_sessions_symlink_rejected` — dangling
+  symlink at `Sessions/` directory component.
+- `TestSymlinkSafety::test_dangling_raw_symlink_rejected` — dangling
+  symlink at `_system/raw/` directory component.
+- `TestSymlinkSafety::test_session_md_leaf_symlink_rejected` — existing
+  live `Session.md` leaf symlink.
+- `TestSymlinkSafety::test_dangling_session_md_leaf_symlink_rejected` —
+  dangling `Session.md` leaf symlink.
+- `TestSymlinkSafety::test_raw_metadata_leaf_symlink_rejected` — existing
+  live `metadata.json` leaf symlink.
+- `TestSymlinkSafety::test_dangling_raw_metadata_leaf_symlink_rejected` —
+  dangling `metadata.json` leaf symlink.
+
+All symlink tests are conditionally skipped when the OS does not support
+symlink creation (Windows without developer mode).
+
+**Causal relation — pre-correction failures:**
+
+- `test_frozen_immutable` would have failed on `d68c5dd` because the old
+  `SessionStoragePaths` allowed field assignment.
+- `test_dangling_sessions_symlink_rejected` and
+  `test_dangling_raw_symlink_rejected` would have failed because
+  `_check_component_symlinks` used `exists() and is_symlink()`, and
+  dangling symlinks have `exists() == False`.
+- All four leaf-symlink tests would have failed because no leaf-path
+  symlink checking existed.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_storage_paths.py` — 83 passed, 9 skipped
+- `uv run pytest tests/unit/test_session.py tests/unit/test_session_storage_paths.py tests/contract/test_boundaries.py tests/unit/test_storage_paths.py` — 268 passed, 19 skipped
+- `uv run pytest` (full suite) — 2023 passed, 65 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 191 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Correction commit SHA:** (set after commit)
+**Commit message:** `fix: harden session storage path contracts (S6-C00)`
+
+**Historical Git note:**
+
+```
+S6-00 implementation commit:
+d68c5dd51c377b98d7d03d475630469ceb5f4758
+
+S6-00 follow-up documentation commit:
+3bab266c105df46c07cb1fb3bf9951b16cd1c3e9
+```
+
+Original S6-00 was published as two commits although the task requested
+one logical commit. Published history was preserved; no rewrite was used.

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import sys
+from dataclasses import FrozenInstanceError
 from pathlib import Path
 
 import pytest
@@ -132,6 +133,26 @@ class TestSessionStoragePathsValue:
         r = repr(paths)
         assert "SessionStoragePaths" in r
         assert "S006" in r
+
+    def test_frozen_immutable(self) -> None:
+        """Assignment to any field must raise FrozenInstanceError."""
+        paths = SessionStoragePaths(
+            session_dir=Path("/v/S006"),
+            session_md=Path("/v/S006/Session.md"),
+            raw_dir=Path("/v/_system/raw/sessions/S006"),
+            raw_metadata=Path("/v/_system/raw/sessions/S006/metadata.json"),
+            raw_events=Path("/v/_system/raw/sessions/S006/events.jsonl"),
+        )
+        with pytest.raises(FrozenInstanceError):
+            paths.session_dir = Path("/other")  # type: ignore[misc]
+        with pytest.raises(FrozenInstanceError):
+            paths.session_md = Path("/other")  # type: ignore[misc]
+        with pytest.raises(FrozenInstanceError):
+            paths.raw_dir = Path("/other")  # type: ignore[misc]
+        with pytest.raises(FrozenInstanceError):
+            paths.raw_metadata = Path("/other")  # type: ignore[misc]
+        with pytest.raises(FrozenInstanceError):
+            paths.raw_events = Path("/other")  # type: ignore[misc]
 
 
 # ── Valid layout ─────────────────────────────────────────────────────────────
@@ -400,6 +421,69 @@ class TestSymlinkSafety:
             str(vault / "Sessions" / "S006"),
             target_is_directory=True,
         )
+        with pytest.raises(StorageError, match="symlink"):
+            resolve_session_storage_paths(vault, "S006")
+
+    def test_dangling_sessions_symlink_rejected(self, tmp_path: Path) -> None:
+        """A dangling (broken) symlink in the Sessions subtree must be rejected."""
+        vault = _create_vault(tmp_path)
+        missing = tmp_path / "missing_target"
+        os.symlink(str(missing), str(vault / "Sessions"), target_is_directory=True)
+        with pytest.raises(StorageError, match="symlink"):
+            resolve_session_storage_paths(vault, "S006")
+
+    def test_dangling_raw_symlink_rejected(self, tmp_path: Path) -> None:
+        """A dangling (broken) symlink in the raw subtree must be rejected."""
+        vault = _create_vault(tmp_path)
+        (vault / "Sessions").mkdir(parents=True)
+        missing = tmp_path / "missing_raw"
+        os.symlink(
+            str(missing),
+            str(vault / "_system" / "raw"),
+            target_is_directory=True,
+        )
+        with pytest.raises(StorageError, match="symlink"):
+            resolve_session_storage_paths(vault, "S006")
+
+    def test_session_md_leaf_symlink_rejected(self, tmp_path: Path) -> None:
+        """An existing Session.md that is a symlink must be rejected."""
+        vault = _create_vault_with_session_dirs(tmp_path)
+        session_dir = vault / "Sessions" / "S006"
+        session_dir.mkdir(parents=True)
+        target = tmp_path / "outside_session.md"
+        target.write_text("", encoding="utf-8")
+        os.symlink(str(target), str(session_dir / "Session.md"))
+        with pytest.raises(StorageError, match="symlink"):
+            resolve_session_storage_paths(vault, "S006")
+
+    def test_dangling_session_md_leaf_symlink_rejected(self, tmp_path: Path) -> None:
+        """A dangling Session.md symlink must be rejected."""
+        vault = _create_vault_with_session_dirs(tmp_path)
+        session_dir = vault / "Sessions" / "S006"
+        session_dir.mkdir(parents=True)
+        missing = tmp_path / "missing_session.md"
+        os.symlink(str(missing), str(session_dir / "Session.md"))
+        with pytest.raises(StorageError, match="symlink"):
+            resolve_session_storage_paths(vault, "S006")
+
+    def test_raw_metadata_leaf_symlink_rejected(self, tmp_path: Path) -> None:
+        """An existing metadata.json that is a symlink must be rejected."""
+        vault = _create_vault_with_session_dirs(tmp_path)
+        raw_dir = vault / "_system" / "raw" / "sessions" / "S006"
+        raw_dir.mkdir(parents=True)
+        target = tmp_path / "outside_metadata.json"
+        target.write_text("{}", encoding="utf-8")
+        os.symlink(str(target), str(raw_dir / "metadata.json"))
+        with pytest.raises(StorageError, match="symlink"):
+            resolve_session_storage_paths(vault, "S006")
+
+    def test_dangling_raw_metadata_leaf_symlink_rejected(self, tmp_path: Path) -> None:
+        """A dangling metadata.json symlink must be rejected."""
+        vault = _create_vault_with_session_dirs(tmp_path)
+        raw_dir = vault / "_system" / "raw" / "sessions" / "S006"
+        raw_dir.mkdir(parents=True)
+        missing = tmp_path / "missing_metadata.json"
+        os.symlink(str(missing), str(raw_dir / "metadata.json"))
         with pytest.raises(StorageError, match="symlink"):
             resolve_session_storage_paths(vault, "S006")
 

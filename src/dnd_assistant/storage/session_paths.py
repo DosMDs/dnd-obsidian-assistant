@@ -22,6 +22,7 @@ This module belongs to the storage layer and must not import from:
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 from dnd_assistant.errors import StorageError
@@ -30,11 +31,13 @@ from dnd_assistant.storage.paths import _resolve_vault_root
 # ── Public result type ────────────────────────────────────────────────────────
 
 
+@dataclass(frozen=True, slots=True)
 class SessionStoragePaths:
     """Immutable value object holding safe absolute session storage paths.
 
-    All paths are guaranteed to be absolute, resolved, and contained within
-    the Vault root.  No directories or files are created by this resolver.
+    Instances returned by ``resolve_session_storage_paths()`` contain
+    safe resolved paths under the validated Vault root.  No directories
+    or files are created by this resolver.
 
     Attributes:
         session_dir: ``Sessions/<session_id>/``
@@ -44,77 +47,11 @@ class SessionStoragePaths:
         raw_events: ``_system/raw/sessions/<session_id>/events.jsonl``
     """
 
-    __slots__ = (
-        "_session_dir",
-        "_session_md",
-        "_raw_dir",
-        "_raw_metadata",
-        "_raw_events",
-    )
-
-    def __init__(
-        self,
-        session_dir: Path,
-        session_md: Path,
-        raw_dir: Path,
-        raw_metadata: Path,
-        raw_events: Path,
-    ) -> None:
-        self._session_dir = session_dir
-        self._session_md = session_md
-        self._raw_dir = raw_dir
-        self._raw_metadata = raw_metadata
-        self._raw_events = raw_events
-
-    @property
-    def session_dir(self) -> Path:
-        """Absolute path to ``Sessions/<session_id>/``."""
-        return self._session_dir
-
-    @property
-    def session_md(self) -> Path:
-        """Absolute path to ``Sessions/<session_id>/Session.md``."""
-        return self._session_md
-
-    @property
-    def raw_dir(self) -> Path:
-        """Absolute path to ``_system/raw/sessions/<session_id>/``."""
-        return self._raw_dir
-
-    @property
-    def raw_metadata(self) -> Path:
-        """Absolute path to ``_system/raw/sessions/<session_id>/metadata.json``."""
-        return self._raw_metadata
-
-    @property
-    def raw_events(self) -> Path:
-        """Absolute path to ``_system/raw/sessions/<session_id>/events.jsonl``."""
-        return self._raw_events
-
-    def __repr__(self) -> str:
-        return f"SessionStoragePaths(session_dir={self._session_dir!r})"
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, SessionStoragePaths):
-            return NotImplemented
-        return (
-            self._session_dir == other._session_dir
-            and self._session_md == other._session_md
-            and self._raw_dir == other._raw_dir
-            and self._raw_metadata == other._raw_metadata
-            and self._raw_events == other._raw_events
-        )
-
-    def __hash__(self) -> int:
-        return hash(
-            (
-                self._session_dir,
-                self._session_md,
-                self._raw_dir,
-                self._raw_metadata,
-                self._raw_events,
-            )
-        )
+    session_dir: Path
+    session_md: Path
+    raw_dir: Path
+    raw_metadata: Path
+    raw_events: Path
 
 
 # ── Session ID validation ────────────────────────────────────────────────────
@@ -230,8 +167,10 @@ def _check_component_symlinks(root: Path, relative: Path) -> Path:
     """Check existing path components beneath ``root`` for symlinks.
 
     Iterates over the parts of ``relative``, building each intermediate
-    path and checking whether it exists and is a symlink.  If any existing
-    component is a symlink, raises ``StorageError``.
+    path and checking whether it is a symlink (dangling or live).
+    Symlink identity is checked **before** ``exists()`` so that dangling
+    symlinks are also rejected.  If any existing component is a symlink,
+    raises ``StorageError``.
 
     Args:
         root: The resolved Vault root path.
@@ -247,7 +186,9 @@ def _check_component_symlinks(root: Path, relative: Path) -> Path:
     accumulated = root
     for part in relative.parts:
         accumulated = accumulated / part
-        if accumulated.exists() and accumulated.is_symlink():
+        # Check is_symlink() first — dangling symlinks have
+        # is_symlink() == True but exists() == False.
+        if accumulated.is_symlink():
             raise StorageError(
                 f"Session storage path component is a symlink, rejected for safety: {accumulated}"
             )
@@ -263,6 +204,26 @@ def _check_component_symlinks(root: Path, relative: Path) -> Path:
         ) from None
 
     return resolved
+
+
+def _check_leaf_symlinks(*paths: Path) -> None:
+    """Check that none of the given leaf paths is an existing symlink.
+
+    A leaf path (e.g. ``Session.md``, ``metadata.json``) that already
+    exists as a symlink must be rejected even if all parent components
+    are safe.
+
+    Args:
+        *paths: Leaf paths to inspect.
+
+    Raises:
+        StorageError: A leaf path exists and is a symlink.
+    """
+    for path in paths:
+        if path.is_symlink():
+            raise StorageError(
+                f"Session storage leaf path is a symlink, rejected for safety: {path}"
+            )
 
 
 # ── Public resolver ──────────────────────────────────────────────────────────
@@ -305,6 +266,9 @@ def resolve_session_storage_paths(
     session_md = session_dir / "Session.md"
     raw_metadata = raw_dir / "metadata.json"
     raw_events = raw_dir / "events.jsonl"
+
+    # Check leaf paths for existing symlinks (dangling or live)
+    _check_leaf_symlinks(session_md, raw_metadata, raw_events)
 
     return SessionStoragePaths(
         session_dir=session_dir,
