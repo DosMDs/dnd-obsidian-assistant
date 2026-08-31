@@ -77,6 +77,7 @@ class TestPublicExports:
             "NotFound",
             "Resolved",
             "ResolutionOutcome",
+            "SearchEntityResolver",
             "SearchHit",
             "SearchQuery",
             "SearchService",
@@ -959,6 +960,23 @@ class TestBoundaries:
         }
         actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
         assert not actual, f"retrieval/lexical.py imports forbidden modules: {actual}"
+
+    def test_retrieval_resolver_no_forbidden_imports(self) -> None:
+        """retrieval/resolver.py must not import storage, sqlite3,
+        rapidfuzz, models, tools, application, session, or ollama."""
+        imports = self._ast_imports("dnd_assistant.retrieval.resolver")
+        forbidden = {
+            "dnd_assistant.storage",
+            "sqlite3",
+            "rapidfuzz",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+            "dnd_assistant.session",
+            "ollama",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual, f"retrieval/resolver.py imports forbidden modules: {actual}"
 
     def test_retrieval_index_no_forbidden_imports(self) -> None:
         """retrieval/index.py must not import models, tools, application,

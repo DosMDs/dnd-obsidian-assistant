@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C09)
+**Last updated:** 2026-08-31 (S5-04)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -877,7 +877,7 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 - [x] `S5-01` Exact ID/name/alias retrieval + player-visibility enforcement
 - [x] `S5-02` Fuzzy name retrieval + entity-type filtering/ranking
 - [x] `S5-03` SQLite FTS5 derived index + rebuild path
-- [ ] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
+- [x] `S5-04` EntityResolver resolved/ambiguous/not-found behavior
 - [ ] `S5-05` Golden-Vault integration + retrieval/resolver hardening
 - [ ] `S5-06` Full Stage 5 historical review / verification / status
 
@@ -2179,7 +2179,217 @@ None. The existing production code in `index.py` already:
 - Stage 5 = IN PROGRESS
 
 **Explicit confirmation:**
-EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
+EntityResolver work has been implemented (S5-04). S5-05 remains NOT STARTED.
+
+
+### S5-04 completion record
+
+**Starting branch:** `main`
+**Starting local SHA:** `03f5bb7048064f81bb7eb744abfbda0fa3281716`
+**Starting upstream SHA:** `03f5bb7048064f81bb7eb744abfbda0fa3281716`
+
+**Scope implemented:**
+
+Deterministic entity resolver (`SearchEntityResolver`) that converts
+free-text entity references into explicit outcomes: `Resolved`,
+`Ambiguous`, or `NotFound`.
+
+**Concrete resolver module/class:**
+- `src/dnd_assistant/retrieval/resolver.py` — `SearchEntityResolver`
+
+**Injected dependency:**
+- `SearchService` (provider-independent protocol, not VaultRepository
+  or concrete search implementation)
+
+**Reference validation policy:**
+- Reuses `SearchQuery` Pydantic validation for input validation
+- Empty, whitespace-only, and non-printable references rejected
+
+**Raw validation error translation:**
+- Pydantic `ValidationError` translated to project `ValidationError`
+  with cause preserved
+
+**Entity-type forwarding:**
+- `entity_type=None` → `SearchQuery.entity_types=None`
+- `entity_type=NPC` → `SearchQuery.entity_types={EntityType.NPC}`
+- Forwarded through `SearchQuery`, not manually filtered
+
+**Candidate search limit:**
+- Internal limit of 20 (matching `SearchService` default)
+
+**Exact-ID resolution behavior:**
+- Single `EXACT_ID` hit → `Resolved(entity_id, match_kind=EXACT_ID)`
+
+**Exact-name resolution behavior:**
+- Single `EXACT_NAME` hit → `Resolved(entity_id, match_kind=EXACT_NAME)`
+
+**Exact-alias resolution behavior:**
+- Single `EXACT_ALIAS` hit → `Resolved(entity_id, match_kind=EXACT_ALIAS)`
+
+**Duplicate exact-name behavior:**
+- Two+ `EXACT_NAME` hits → `Ambiguous` (never auto-resolved)
+
+**Alias-collision behavior:**
+- Two+ `EXACT_ALIAS` hits → `Ambiguous` (never auto-resolved)
+
+**Single fuzzy behavior:**
+- One `FUZZY_NAME` hit → `Ambiguous` (never auto-resolved)
+
+**High-score fuzzy behavior:**
+- Fuzzy score of 99.9 → still `Ambiguous` (no numeric threshold)
+
+**Multiple fuzzy behavior:**
+- Two+ `FUZZY_NAME` hits → `Ambiguous`
+
+**Single FTS behavior:**
+- One `FTS` hit → `Ambiguous` (never auto-resolved)
+
+**Multiple FTS behavior:**
+- Two+ `FTS` hits → `Ambiguous`
+
+**Numeric confidence-threshold status:**
+- NOT implemented. No numeric threshold exists. Only exact matches
+  (`EXACT_ID`, `EXACT_NAME`, `EXACT_ALIAS`) are eligible for automatic
+  resolution.
+
+**NotFound behavior:**
+- Zero candidates → `NotFound(query=reference)`
+
+**Original query preservation:**
+- `NotFound.query` preserves the caller's original validated reference
+  text (not stripped or normalised)
+
+**Candidate ordering behavior:**
+- Candidate order from `SearchService` is preserved unchanged
+- Resolver does not reorder or rescore candidates
+
+**Mixed candidate defensive behavior:**
+- Two candidates with different `MatchKind` values → `Ambiguous`
+- Resolver does not silently pick one candidate
+
+**Normal ambiguity exception behavior:**
+- `Ambiguous` is a normal outcome, not an exception
+- `AmbiguousEntityError` is NOT raised for normal ambiguity
+
+**Search error propagation:**
+- `StorageError` from `SearchService.search()` propagates unchanged
+- `ValidationError` from `SearchService.search()` propagates unchanged
+
+**Recent-context status:**
+- NOT implemented. No `recent_context`, `session_id`, `current_location`,
+  or conversation-history parameters.
+
+**LLM dependency status:**
+- NOT implemented. No Ollama, ModelGateway, prompt, or model call.
+
+**Direct storage/filesystem dependency status:**
+- NOT present. `resolver.py` does not import `storage`, `sqlite3`,
+  `rapidfuzz`, `pathlib`, or filesystem APIs.
+
+**Public API changes:**
+- `dnd_assistant.retrieval.resolver` — new module, exports `SearchEntityResolver`
+- `dnd_assistant.retrieval.__init__` — added `SearchEntityResolver` to `__all__`
+
+**Protocol-conformance result:**
+- `isinstance(SearchEntityResolver(fake_search), EntityResolver)` → `True`
+
+**Boundary-test changes:**
+- `tests/unit/test_retrieval_contracts.py`:
+  - `TestPublicExports.test_retrieval_all_exports` — added `SearchEntityResolver`
+  - `TestBoundaries.test_retrieval_resolver_no_forbidden_imports` (new) —
+    verifies resolver does not import storage, sqlite3, rapidfuzz,
+    models, tools, application, session, or ollama
+
+**Resolver focused tests (37 tests in `tests/unit/test_entity_resolver.py`):**
+- Protocol conformance (1 test)
+- Resolved: exact ID, exact name, exact alias, entity_id preserved,
+  match_kind preserved (5 tests)
+- Ambiguous exact: duplicate name, alias collision, multiple candidates,
+  deterministic order (4 tests)
+- Fuzzy: single ambiguous, high score ambiguous, multiple ambiguous,
+  scores preserved, no numeric threshold (5 tests)
+- FTS: single ambiguous, multiple ambiguous, score preserved (3 tests)
+- NotFound: zero candidates, original query preserved (2 tests)
+- Entity type forwarding: None, NPC, LOCATION, QUEST, ITEM (5 tests)
+- Validation: empty, whitespace, newline, control, non-printable,
+  no search call on invalid (6 tests)
+- Error propagation: StorageError, ValidationError (2 tests)
+- Safety: no AmbiguousEntityError, no storage dependency (2 tests)
+- Mixed candidates: different MatchKinds → Ambiguous (1 test)
+- Candidate limit: >= 2 (1 test)
+
+**Exact-search regression:**
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed
+
+**Fuzzy-search regression:**
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed
+
+**FTS-search regression:**
+- `uv run pytest tests/unit/test_fts_search.py` — 11 passed
+
+**FTS-index regression:**
+- `uv run pytest tests/unit/test_fts_index.py` — 56 passed, 22 skipped
+
+**Retrieval-contract regression:**
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 160 passed
+
+**Full pytest:**
+- `uv run pytest` — 1877 passed, 56 skipped
+
+**Ruff check:**
+- All checks passed
+
+**Ruff format:**
+- 181 files already formatted
+
+**CLI smoke gates:**
+- `uv run dnd --help` — OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — OK
+
+**`git diff --check`:**
+- No whitespace errors
+
+**Architecture review:**
+- `SearchEntityResolver` depends only on `SearchService` (injected protocol)
+- No direct VaultRepository, SQLite, RapidFuzz, or filesystem dependency
+- No Ollama, ModelGateway, or LLM dependency
+- No session runtime, tool layer, or application imports
+- No Vault writes (read-only)
+- No numeric confidence thresholds
+- No recent-context or session parameters
+- Input validation reuses `SearchQuery` Pydantic validation
+- Ambiguity is a normal outcome (not an exception)
+- Search errors propagate unchanged
+
+**Out-of-scope review:**
+- No S5-05 work (Golden-Vault integration)
+- No recent-context ranking
+- No LLM-assisted resolver
+- No embeddings or vector DB
+- No ChangeSet or post-session processing
+- No CLI entity-resolution commands
+- No interactive clarification UI
+
+**ADR assessment:**
+No ADR required. The conservative MVP policy (unique exact → Resolved,
+fuzzy/FTS → Ambiguous) is the direct implementation of the existing
+safe-clarification architecture without an approved/eval-backed numeric
+threshold.
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [x]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+Golden-Vault hardening/S5-05, EntityResolver context ranking, and
+embeddings/vector work have NOT started. S5-05 = [ ].
 
 
 ---
