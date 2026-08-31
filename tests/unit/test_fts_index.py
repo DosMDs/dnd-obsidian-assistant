@@ -986,3 +986,176 @@ class TestFreshnessCompatibility:
         with pytest.raises(StorageError) as exc_info:
             index.verify_freshness(docs)
         assert isinstance(exc_info.value.__cause__, sqlite3.DatabaseError)
+
+
+# ── Genuine late rebuild validation tests (S5-C08) ──────────────────────────
+
+
+class TestGenuineLateRebuildValidation:
+    """Verify that rebuild revalidates the full canonical path *after* the
+    temp DB has been built, and that late validation failure cleans up the
+    temp DB.
+
+    Unlike the S5-C07 ``TestLatePreReplaceValidation`` tests (which create
+    symlinks *before* calling ``rebuild()``, so start-of-operation validation
+    catches them), these tests mutate the filesystem *during* rebuild —
+    after ``_build_index()`` has completed but before the late validation
+    runs.  This is the genuine race-condition scenario.
+    """
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_late_final_file_symlink_detected(self, tmp_path: Path) -> None:
+        """A symlink substituted at the final index path *after* temp DB
+        construction must be detected by late full-path validation."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+
+        # Wrap _build_index so that after the original builds the temp DB,
+        # we substitute the canonical final path with a symlink.
+        original_build = index._build_index
+
+        def _wrapped_build(temp_path, documents):
+            original_build(temp_path, documents)
+            # Now the temp DB exists.  Substitute the canonical final path.
+            db_path.symlink_to(real_db)
+
+        index._build_index = _wrapped_build  # type: ignore[method-assign]
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # The external symlink target must remain untouched
+        assert real_db.exists()
+        conn = sqlite3.connect(str(real_db))
+        try:
+            row = conn.execute(
+                "SELECT value FROM index_metadata WHERE key='source_fingerprint'"
+            ).fetchone()
+            original_fp = _compute_source_fingerprint([_make_doc("npc_a", name="Alpha")])
+            assert row is not None and row[0] == original_fp
+        finally:
+            conn.close()
+
+        # os.replace must not have replaced/followed the symlink
+        assert db_path.is_symlink()
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_late_final_file_symlink_temp_cleaned(self, tmp_path: Path) -> None:
+        """When late final-file symlink validation fails, the temp DB must
+        be cleaned up."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        indexes_dir = vault / "_system" / "indexes"
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+
+        original_build = index._build_index
+
+        def _wrapped_build(temp_path, documents):
+            original_build(temp_path, documents)
+            db_path.symlink_to(real_db)
+
+        index._build_index = _wrapped_build  # type: ignore[method-assign]
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # No leaked temp DB
+        assert list(indexes_dir.glob("fts_rebuild_*")) == []
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_late_parent_directory_symlink_detected(self, tmp_path: Path) -> None:
+        """A symlink substituted at the parent index directory *after* temp
+        DB construction must be detected by late full-path validation."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        indexes_dir = vault / "_system" / "indexes"
+        real_indexes = tmp_path / "real_indexes"
+        real_indexes.mkdir()
+        real_db = real_indexes / "entities.sqlite3"
+        (indexes_dir / "entities.sqlite3").rename(real_db)
+
+        original_build = index._build_index
+
+        def _wrapped_build(temp_path, documents):
+            original_build(temp_path, documents)
+            # Now the temp DB exists.  Substitute the parent directory.
+            indexes_dir.rmdir()
+            indexes_dir.symlink_to(real_indexes, target_is_directory=True)
+
+        index._build_index = _wrapped_build  # type: ignore[method-assign]
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # os.replace must not have been allowed through the symlinked directory
+        assert indexes_dir.is_symlink()
+        # The external target must be untouched
+        assert real_db.exists()
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_late_parent_directory_symlink_temp_cleaned(self, tmp_path: Path) -> None:
+        """When late parent-directory symlink validation fails, the temp DB
+        must be cleaned up."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        indexes_dir = vault / "_system" / "indexes"
+        real_indexes = tmp_path / "real_indexes"
+        real_indexes.mkdir()
+        real_db = real_indexes / "entities.sqlite3"
+        (indexes_dir / "entities.sqlite3").rename(real_db)
+
+        original_build = index._build_index
+
+        def _wrapped_build(temp_path, documents):
+            original_build(temp_path, documents)
+            indexes_dir.rmdir()
+            indexes_dir.symlink_to(real_indexes, target_is_directory=True)
+
+        index._build_index = _wrapped_build  # type: ignore[method-assign]
+
+        with pytest.raises(StorageError, match="симлинк"):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # No leaked temp DB
+        assert list(indexes_dir.glob("fts_rebuild_*")) == []
+
+    @pytest.mark.skipif(not _can_create_symlinks(), reason="Platform does not support symlinks")
+    def test_late_path_mismatch_detected(self, tmp_path: Path) -> None:
+        """If the canonical path changes during rebuild (e.g. vault root
+        changes), the late validation must detect the mismatch."""
+        vault = _create_minimal_vault(tmp_path)
+        index = SqliteFtsIndex(str(vault))
+        index.rebuild([_make_doc("npc_a", name="Alpha")])
+
+        indexes_dir = vault / "_system" / "indexes"
+        db_path = index.index_path
+        real_db = tmp_path / "real_db.sqlite3"
+        db_path.rename(real_db)
+
+        original_build = index._build_index
+
+        def _wrapped_build(temp_path, documents):
+            original_build(temp_path, documents)
+            # Replace the final path with a symlink to a different location
+            db_path.symlink_to(real_db)
+
+        index._build_index = _wrapped_build  # type: ignore[method-assign]
+
+        with pytest.raises((StorageError,)):
+            index.rebuild([_make_doc("npc_b", name="Beta")])
+
+        # No leaked temp DB
+        assert list(indexes_dir.glob("fts_rebuild_*")) == []

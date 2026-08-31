@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-C07)
+**Last updated:** 2026-08-31 (S5-C08)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -1981,6 +1981,84 @@ EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
 - Player-only fingerprint preserved unchanged
 - Eligibility-before-limit preserved unchanged
 - `--vault` CLI option preserved unchanged
+- No generated SQLite DB staged
+- No golden Vault modifications
+- No EntityResolver implementation
+- S5-04 remains [ ]
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [ ]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
+
+**Explicit confirmation:**
+EntityResolver/embeddings/vector-search work has NOT started. S5-04 = [ ].
+
+### S5-C08 correction record
+
+**Acceptance-review defects (2 items):**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C08-1 | Late rebuild validation checked only the final filename (`_reject_symlink(final_path, ...)`) instead of revalidating the full canonical path topology (`_system`, `_system/indexes`, `entities.sqlite3`). A parent directory substituted with a symlink while `_build_index()` was running would not be detected. | Replaced `_reject_symlink(final_path, ...)` with `self._validate_current_index_path()` which reuses the existing full canonical-path validator. The late validated path is compared against the start-of-operation `final_path`; a mismatch raises `StorageError`. |
+| C08-2 | Late validation (`_reject_symlink`) was outside the temp-cleanup `try/except` block. If late validation raised `StorageError`, the already-built `fts_rebuild_*.sqlite3` temp DB leaked. | Restructured `rebuild()` so that `_build_index`, late full-path validation, and `os.replace` all share a single `try` block. `except StorageError` and `except OSError` both clean up the temp DB before re-raising. A broad `except Exception` safety net handles unexpected errors. |
+
+**Production changes:**
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/retrieval/index.py` | `rebuild()` late validation now calls `self._validate_current_index_path()` (full canonical path) instead of `_reject_symlink(final_path, ...)` (final filename only); verifies `late_final_path == final_path`; restructured try/except so temp cleanup covers build + late validation + replace |
+
+**Test changes:**
+
+| File | Change |
+|---|---|
+| `tests/unit/test_fts_index.py` | Added `TestGenuineLateRebuildValidation` class (5 tests) — wraps `_build_index` on the instance to mutate filesystem topology AFTER temp DB construction but BEFORE late validation: late final-file symlink detected, late parent-directory symlink detected, temp cleaned on both, path mismatch detected |
+
+**Genuine late test design:**
+
+Each test wraps `index._build_index` so that the original `_build_index` runs first (creating the temp DB), then the wrapper mutates the filesystem (substituting a symlink at the final path or parent directory). This guarantees:
+
+- initial start-of-operation validation passed
+- temp DB was created and fully built
+- path substitution occurs during rebuild
+- late validation is the check being tested
+
+This is the real regression test for both C08-1 and C08-2.
+
+**Tests added:**
+- `test_late_final_file_symlink_detected` — final-path symlink after temp build → `StorageError`; external target untouched; `os.replace` did not follow symlink
+- `test_late_final_file_symlink_temp_cleaned` — no leaked `fts_rebuild_*` DB after late validation failure
+- `test_late_parent_directory_symlink_detected` — `_system/indexes` directory substituted with symlink after temp build → `StorageError`; `os.replace` not allowed through symlinked directory
+- `test_late_parent_directory_symlink_temp_cleaned` — no leaked temp DB after parent-directory symlink failure
+- `test_late_path_mismatch_detected` — path changed during rebuild → `StorageError`; no leaked temp DB
+
+All symlink tests skip when the platform cannot create symlinks (Windows without Developer Mode/admin).
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_fts_index.py` — 70 passed, 22 skipped
+- `uv run pytest tests/unit/test_fts_search.py` — 12 passed
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 159 passed
+- `uv run pytest tests/unit/test_cli_index.py` — 5 passed
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed
+- `uv run pytest` (full suite) — 1839 passed, 56 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 179 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — `--vault` present
+- `git diff --check` — no whitespace errors
+
+**Architecture review:**
+- Late validation now calls full canonical-path validator (`_validate_current_index_path()`), not just `_reject_symlink` on the final filename
+- Late validation occurs immediately before `os.replace`, inside temp-cleanup coverage
+- No new path-safety policy introduced — reuses existing `_resolve_index_path()`
 - No generated SQLite DB staged
 - No golden Vault modifications
 - No EntityResolver implementation

@@ -389,20 +389,32 @@ class SqliteFtsIndex:
 
         try:
             self._build_index(temp_path, documents)
-        except Exception:
+
+            # Step 9: Late full-path revalidation before os.replace (S5-C08)
+            # Reuse the full canonical-path validator to detect any path
+            # substitution (including parent-directory symlinks) that
+            # occurred while _build_index was running.
+            late_final_path = self._validate_current_index_path()
+            if late_final_path != final_path:
+                raise StorageError(
+                    "\u041f\u0443\u0442\u044c \u043f\u0440\u043e\u0438\u0437\u0432\u043e\u0434\u043d\u043e\u0433\u043e "
+                    "\u0438\u043d\u0434\u0435\u043a\u0441\u0430 \u0438\u0437\u043c\u0435\u043d\u0438\u043b\u0441\u044f "
+                    "\u0432\u043e \u0432\u0440\u0435\u043c\u044f \u043f\u0435\u0440\u0435\u0441\u0442\u0440\u043e\u0439\u043a\u0438: "
+                    f"{late_final_path} != {final_path}"
+                )
+
+            os.replace(str(temp_path), str(final_path))
+        except StorageError:
+            # StorageError from _build_index, late validation, or
+            # path mismatch — clean up temp, re-raise unchanged.
             if temp_path.exists():
                 try:
                     temp_path.unlink()
                 except OSError:
                     pass
             raise
-
-        # Step 9: Late final-path revalidation before os.replace (S5-C07)
-        _reject_symlink(final_path, "Файл индекса")
-
-        try:
-            os.replace(str(temp_path), str(final_path))
         except OSError as exc:
+            # os.replace failure — clean up temp, translate to StorageError.
             if temp_path.exists():
                 try:
                     temp_path.unlink()
@@ -414,6 +426,14 @@ class SqliteFtsIndex:
                 f"{final_path}",
                 cause=exc,
             ) from exc
+        except Exception:
+            # Unexpected error — clean up temp, re-raise unchanged.
+            if temp_path.exists():
+                try:
+                    temp_path.unlink()
+                except OSError:
+                    pass
+            raise
 
     # ── Internal helpers ────────────────────────────────────────────────
 
