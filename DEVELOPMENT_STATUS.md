@@ -894,19 +894,73 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 
 ### S5-00 completion record
 
-**Review range:** TBD
+**Review range:** `06adf01..0f3b986` (S4-05 completion through S5-00)
 
 **Implementation:**
 
-TBD
+1. **`src/dnd_assistant/retrieval/types.py`** — Canonical retrieval-layer types:
+   - `MatchKind` — StrEnum with 5 values ordered by retrieval precedence: `EXACT_ID`, `EXACT_NAME`, `EXACT_ALIAS`, `FUZZY_NAME`, `FTS`
+   - `SearchQuery` — Pydantic model with validated `text` field and optional `entity_types` filter; `extra="forbid"`
+   - `SearchHit` — Pydantic model with `entity_id`, `match_kind`, optional `score`; `extra="forbid"`
+   - `Resolved` — Pydantic model with `entity_id` and `match_kind`; `extra="forbid"`
+   - `Ambiguous` — Pydantic model with `candidates: Sequence[SearchHit]`; `extra="forbid"`
+   - `NotFound` — Pydantic model with `query` string; `extra="forbid"`
+   - `ResolutionOutcome = Resolved | Ambiguous | NotFound` — explicit union type
+   - `_validate_search_query()` — strict validation: empty/whitespace/control rejected, printable Unicode allowed
+   - `SearchQueryStr` — annotated validated string type
+
+2. **`src/dnd_assistant/retrieval/service.py`** — Retrieval service protocols:
+   - `SearchService` — runtime-checkable Protocol with `search()`, `search_by_type()`, `get_by_id()`; read-only, player-visibility safety documented, no Ollama/ModelGateway dependency
+   - `EntityResolver` — runtime-checkable Protocol with `resolve()` returning `ResolutionOutcome`; deterministic, no LLM dependency, ambiguity is a normal outcome
+
+3. **`src/dnd_assistant/retrieval/__init__.py`** — Public API exports via `__all__`
+
+4. **`tests/unit/test_retrieval_contracts.py`** — 57 tests:
+   - Import smoke tests (10 tests)
+   - Public exports verification (1 test)
+   - MatchKind values, members, precedence order, str representation (4 tests)
+   - SearchQuery construction, entity-type filtering, Unicode, extra-forbidden, validation (empty/whitespace/control/type coercion — 17 tests)
+   - SearchHit construction, exact/fuzzy/FTS scores, zero score, extra-forbidden (6 tests)
+   - Resolved/Ambiguous/NotFound construction and extra-forbidden (7 tests)
+   - ResolutionOutcome union semantics, mutual exclusivity, type args (5 tests)
+   - SearchService protocol: runtime-checkable, methods, concrete class satisfaction (3 tests)
+   - EntityResolver protocol: runtime-checkable, resolve method, concrete class satisfaction (3 tests)
+   - Architectural boundaries: no storage/models/tools/session/sqlite/rapidfuzz imports (6 tests)
+
+**Aliases policy confirmed:** Aliases remain extra-frontmatter metadata read from `VaultDocument.extra_frontmatter["aliases"]`. No `aliases` field was added to the base `Entity` model. `Entity.extra="forbid"` is preserved.
+
+**Player-visibility policy confirmed:** `SearchService` and `EntityResolver` docstrings explicitly state that non-player-visible entities (`Visibility.DM`, `Visibility.SYSTEM`) must not appear in results. No unrestricted visibility override is exposed.
+
+**Match-provenance semantics:** `MatchKind` enum values are ordered by retrieval precedence. Scores from different `MatchKind` values are not directly comparable. `EXACT_ID`/`EXACT_NAME`/`EXACT_ALIAS` have `score=None`; `FUZZY_NAME` has RapidFuzz ratio (0.0–100.0); `FTS` has SQLite rank (negative float).
+
+**Validation rules introduced:**
+- `SearchQuery.text`: non-empty after stripping, printable Unicode, no control characters, strict string type
+- `SearchQuery`, `SearchHit`, `Resolved`, `Ambiguous`, `NotFound`: `extra="forbid"`
 
 **Quality-gate results:**
-
-TBD
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 57 passed
+- `uv run pytest` (full suite) — 1556 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 171 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
 
 **Scope exclusions confirmed:**
-
-TBD
+- S5-01 not started (no exact ID/name/alias search implementation)
+- S5-02 not started (no RapidFuzz, no fuzzy matching)
+- S5-03 not started (no SQLite database, no FTS schema)
+- S5-04 not started (no EntityResolver implementation)
+- S5-05 not started (no golden Vault integration)
+- S5-06 not started (no Stage 5 final verification)
+- Stage 6+ not started (no session runtime, tools, model, agent, changeset work)
+- No RapidFuzz called anywhere in retrieval contracts
+- No SQLite database or FTS tables created
+- No actual search/resolution implementation
+- No storage/domain reverse dependencies
+- No model/Ollama/tool/session-runtime dependency
+- No `dict[str, Any]` placeholders
+- No aliases added to base Entity model
+- No ADR required (all architectural decisions follow established patterns: Protocol for contracts, Pydantic with `extra="forbid"`, StrEnum for typed enums, separate types/service modules)
 
 ---
 
