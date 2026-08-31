@@ -1067,6 +1067,22 @@ class DeterministicCalendarService:
         # Unknown events sort after all known events
         return (0, 0, event.id)
 
+    @staticmethod
+    def _overdue_sort_key(
+        event: TimelineEvent,
+    ) -> tuple[int, int, str]:
+        """Overdue sort key: interval end, interval start, event id.
+
+        Overdue detection uses the event's latest possible tick
+        (interval[1]), so chronological ordering for overdue events
+        prioritises the same temporal boundary.
+        """
+        interval = DeterministicCalendarService._event_interval(event)
+        if interval is not None:
+            return (interval[1], interval[0], event.id)
+        # Unknown events sort after all known events
+        return (0, 0, event.id)
+
     def events_between(
         self,
         events: Sequence[TimelineEvent],
@@ -1239,7 +1255,7 @@ class DeterministicCalendarService:
             if interval[1] < current_tick:
                 overdue.append(ev)
 
-        overdue.sort(key=self._event_sort_key)
+        overdue.sort(key=self._overdue_sort_key)
         return tuple(overdue)
 
     def time_until_event(

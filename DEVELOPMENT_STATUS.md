@@ -499,17 +499,21 @@ def events_between(
     self, events: Sequence[TimelineEvent], start_tick: WorldTick, end_tick: WorldTick
 ) -> tuple[TimelineEvent, ...]: ...
 
+
 def events_near(
     self, events: Sequence[TimelineEvent], event: TimelineEvent, *, radius: int
 ) -> tuple[TimelineEvent, ...]: ...
+
 
 def upcoming(
     self, events: Sequence[TimelineEvent], current_tick: WorldTick, *, days: int
 ) -> tuple[TimelineEvent, ...]: ...
 
+
 def overdue_events(
     self, events: Sequence[TimelineEvent], current_tick: WorldTick
 ) -> tuple[TimelineEvent, ...]: ...
+
 
 def time_until_event(
     self, current_tick: WorldTick, event: TimelineEvent
@@ -553,6 +557,48 @@ All boundaries are inclusive. Interval-overlap semantics for `events_between`, `
 - No status-based lifecycle assumptions
 
 **ADR assessment:** No ADR required. All architectural decisions follow established patterns (TYPE_CHECKING for circular imports, stateless service per ADR-0003, interval-overlap semantics consistent with existing domain contracts).
+
+### S4-C02 correction record
+
+**Acceptance-review defect:**
+- `overdue_events()` sorted by `_event_sort_key` which uses `(interval_start, interval_end, event_id)`.
+- The documented S4-03 contract requires `(interval_end, interval_start, event_id)` — end-first ordering.
+- Overdue detection uses the event's latest possible tick (`interval[1] < current_tick`), so chronological overdue ordering should prioritise the same temporal boundary.
+
+**Root cause:**
+- `_event_sort_key` was reused for `overdue_events()` without considering that the overdue query's natural ordering is end-first.
+- `_event_sort_key` is correct for `events_between` and `events_near` (which use start-first semantics) and remains unchanged.
+- The existing `TestOverdueOrdering.test_ordering_by_end_then_start_then_id` did not actually distinguish end-first from start-first ordering because the test data happened to produce the same result under both orderings.
+
+**Production change:**
+- Added `_overdue_sort_key(event)` static method returning `(interval_end, interval_start, event_id)`.
+- `overdue_events()` now calls `overdue.sort(key=self._overdue_sort_key)` instead of `overdue.sort(key=self._event_sort_key)`.
+- `_event_sort_key` is preserved unchanged for `events_between` and `events_near`.
+
+**Regression tests added (4 tests in `TestOverdueOrdering` in `test_calendar_event_queries.py`):**
+- `test_ordering_by_end_then_start_then_id` — combined test using `a=[30,30]` and `d=[10,50]`; end-first expects `a` before `d` (start-first would give `d` before `a`). This test fails under the old `_event_sort_key`.
+- `test_end_primary` — `a=[30,30]` vs `b=[10,50]`; end-first expects `a, b`.
+- `test_start_secondary` — `a=[10,50]` vs `b=[20,50]`; same end, tie-break on start: `a, b`.
+- `test_id_tertiary` — `a=[10,50]` vs `b=[10,50]`; identical interval, tie-break on id: `a, b`.
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_event_queries.py` — 99 passed (was 96, +3 new tests)
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py tests/unit/test_calendar_event_queries.py tests/unit/test_timeline_event.py` — 462 passed
+- `uv run pytest` (full suite) — 1450 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 164 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- `_event_sort_key` unchanged (still start-first for `events_between`, `events_near`)
+- `_event_interval`, `_interval_overlaps`, `_interval_distance` unchanged
+- `events_between`, `events_near`, `upcoming`, `time_until_event` unchanged
+- Conservative overdue predicate (`interval[1] < current_tick`) unchanged
+- Unknown handling unchanged
+- S4-04 remains NOT STARTED
+- S4-05 remains NOT STARTED
+- Stage 5 remains NOT STARTED
 
 ## Stage 3 — Vault Repository
 

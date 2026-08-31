@@ -690,13 +690,67 @@ class TestOverdueApproxRange:
 
 class TestOverdueOrdering:
     def test_ordering_by_end_then_start_then_id(self) -> None:
+        """Combined ordering test: end primary, start secondary, id tertiary.
+
+        Events:
+          a = exact [30, 30]
+          d = approx [10, 50]
+
+        End-first: a.end=30 < d.end=50 → a before d
+        Start-first: d.start=10 < a.start=30 → d before a
+
+        This test expects end-first, so 'a' must come before 'd'.
+        Under the old _event_sort_key (start-first) this would fail.
+        """
         svc = _svc()
         ev_a = _exact("a", 30)
-        ev_b = _exact("b", 30)
-        ev_c = _exact("c", 60)
         ev_d = _approx("d", 10, 50)
-        result = svc.overdue_events([ev_c, ev_a, ev_d, ev_b], 100)
-        assert [e.id for e in result] == ["d", "a", "b", "c"]
+        result = svc.overdue_events([ev_d, ev_a], 100)
+        assert [e.id for e in result] == ["a", "d"]
+
+    def test_end_primary(self) -> None:
+        """End is the primary sort key.
+
+        A = exact [30, 30]
+        B = range [10, 50]
+
+        A.end=30 < B.end=50 → A before B
+
+        Under start-first, B.start=10 < A.start=30 would give B before A.
+        """
+        svc = _svc()
+        ev_a = _exact("a", 30)
+        ev_b = _approx("b", 10, 50)
+        result = svc.overdue_events([ev_b, ev_a], 100)
+        assert [e.id for e in result] == ["a", "b"]
+
+    def test_start_secondary(self) -> None:
+        """Start is the secondary sort key when end is equal.
+
+        A = [10, 50]
+        B = [20, 50]
+
+        A.end == B.end (50 == 50), so tie-break on start: A.start=10 < B.start=20 → A before B
+        """
+        svc = _svc()
+        ev_a = _approx("a", 10, 50)
+        ev_b = _approx("b", 20, 50)
+        result = svc.overdue_events([ev_b, ev_a], 100)
+        assert [e.id for e in result] == ["a", "b"]
+
+    def test_id_tertiary(self) -> None:
+        """Event id is the tertiary sort key when end and start are equal.
+
+        a = [10, 50]
+        b = [10, 50]
+
+        Same interval → tie-break on id: "a" < "b" → a before b
+        """
+        svc = _svc()
+        ev_a = _approx("a", 10, 50)
+        ev_b = _approx("b", 10, 50)
+        result = svc.overdue_events([ev_b, ev_a], 100)
+        assert [e.id for e in result] == ["a", "b"]
 
 
 # =============================================================================
