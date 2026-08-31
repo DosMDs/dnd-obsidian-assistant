@@ -18,6 +18,7 @@ from pathlib import Path
 
 import pytest
 
+import dnd_assistant.storage.world_time as _world_time_mod
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
@@ -162,15 +163,30 @@ class TestPathLayout:
     def test_world_time_live_symlink_rejected(
         self, vault_root: Path, audit_service: AuditService
     ) -> None:
-        _write_world_time(vault_root)
-        real_path = vault_root / "_system" / "world_time.json"
-        symlink_path = vault_root / "_system" / "world_time_link.json"
-        symlink_path.symlink_to(real_path)
-        real_path.unlink()
-        symlink_path.rename(real_path)
-        repo = ObsidianWorldTimeRepository(vault_root, audit_service)
-        with pytest.raises(NotFoundError):
-            repo.get_current_world_time()
+        # Create an external target (not under vault)
+        external_target = vault_root.parent / "outside-world-time.json"
+        external_data = {
+            "schema_version": 1,
+            "type": "world_time",
+            "current_world_tick": 100,
+            "revision": 1,
+        }
+        external_text = (
+            json.dumps(external_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+            + "\n"
+        )
+        external_target.write_text(external_text, encoding="utf-8")
+        try:
+            path = vault_root / "_system" / "world_time.json"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.symlink_to(external_target)
+            repo = ObsidianWorldTimeRepository(vault_root, audit_service)
+            with pytest.raises(StorageError):
+                repo.get_current_world_time()
+            # External target must not be modified
+            assert external_target.read_text(encoding="utf-8") == external_text
+        finally:
+            external_target.unlink(missing_ok=True)
 
     @pytest.mark.skipif(not _SYMLINKS_SUPPORTED, reason="OS does not support symlinks")
     def test_world_time_dangling_symlink_rejected(
@@ -180,8 +196,54 @@ class TestPathLayout:
         path.parent.mkdir(parents=True, exist_ok=True)
         path.symlink_to(vault_root / "_nonexistent.json")
         repo = ObsidianWorldTimeRepository(vault_root, audit_service)
-        with pytest.raises(NotFoundError):
+        with pytest.raises(StorageError):
             repo.get_current_world_time()
+
+
+# ── Mutation-path symlink tests ─────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not _SYMLINKS_SUPPORTED, reason="OS does not support symlinks")
+def test_initialize_with_dangling_symlink_rejected(
+    vault_root: Path, audit_service: AuditService
+) -> None:
+    path = vault_root / "_system" / "world_time.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.symlink_to(vault_root / "_nonexistent.json")
+    repo = ObsidianWorldTimeRepository(vault_root, audit_service)
+    with pytest.raises(StorageError):
+        repo.initialize_current_world_time(100, audit=_make_audit_context())
+
+
+@pytest.mark.skipif(not _SYMLINKS_SUPPORTED, reason="OS does not support symlinks")
+def test_update_with_live_symlink_rejected(vault_root: Path, audit_service: AuditService) -> None:
+    _write_world_time(vault_root, tick=100, revision=1)
+    external_target = vault_root.parent / "outside-update-target.json"
+    external_data = {
+        "schema_version": 1,
+        "type": "world_time",
+        "current_world_tick": 999,
+        "revision": 2,
+    }
+    external_text = (
+        json.dumps(external_data, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n"
+    )
+    external_target.write_text(external_text, encoding="utf-8")
+    try:
+        path = vault_root / "_system" / "world_time.json"
+        path.unlink()
+        path.symlink_to(external_target)
+        repo = ObsidianWorldTimeRepository(vault_root, audit_service)
+        with pytest.raises(StorageError):
+            repo.set_current_world_time(
+                200,
+                expected_revision=1,
+                audit=_make_audit_context(),
+            )
+        # External target must remain unchanged
+        assert external_target.read_text(encoding="utf-8") == external_text
+    finally:
+        external_target.unlink(missing_ok=True)
 
 
 # ── Read tests ────────────────────────────────────────────────────────────────
@@ -585,20 +647,21 @@ class TestFailureIntegrity:
     """Failure integrity for world-time mutations."""
 
     def test_atomic_write_failure_leaves_existing_unchanged(
-        self, vault_root: Path, repo: ObsidianWorldTimeRepository, monkeypatch
+        self, vault_root: Path, monkeypatch
     ) -> None:
         _write_world_time(vault_root, tick=100, revision=1)
         original_text = (vault_root / "_system" / "world_time.json").read_text(encoding="utf-8")
 
-        import dnd_assistant.storage.atomic as atomic_mod
-
-        def failing_replace(src, dst):
+        def failing_atomic_write(target, content, *, validator):
             raise OSError("Simulated atomic write failure")
 
-        monkeypatch.setattr(atomic_mod, "_os_replace", failing_replace)
+        monkeypatch.setattr(_world_time_mod, "atomic_write_text", failing_atomic_write)
 
         with pytest.raises(OSError):
-            repo.set_current_world_time(
+            _world_time_mod.ObsidianWorldTimeRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).set_current_world_time(
                 200,
                 expected_revision=1,
                 audit=_make_audit_context(operation_id="fail-001"),
@@ -610,37 +673,37 @@ class TestFailureIntegrity:
         ) == original_text
 
     def test_initialize_write_failure_leaves_file_missing(
-        self, vault_root: Path, repo: ObsidianWorldTimeRepository, monkeypatch
+        self, vault_root: Path, monkeypatch
     ) -> None:
-        import dnd_assistant.storage.atomic as atomic_mod
-
-        def failing_replace(src, dst):
+        def failing_atomic_write(target, content, *, validator):
             raise OSError("Simulated atomic write failure")
 
-        monkeypatch.setattr(atomic_mod, "_os_replace", failing_replace)
+        monkeypatch.setattr(_world_time_mod, "atomic_write_text", failing_atomic_write)
 
         with pytest.raises(OSError):
-            repo.initialize_current_world_time(
+            _world_time_mod.ObsidianWorldTimeRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).initialize_current_world_time(
                 100, audit=_make_audit_context(operation_id="fail-init-001")
             )
 
         # File should still be missing
         assert not (vault_root / "_system" / "world_time.json").exists()
 
-    def test_failed_mutation_has_no_committed_audit(
-        self, vault_root: Path, repo: ObsidianWorldTimeRepository, monkeypatch
-    ) -> None:
+    def test_failed_mutation_has_no_committed_audit(self, vault_root: Path, monkeypatch) -> None:
         _write_world_time(vault_root, tick=100, revision=1)
 
-        import dnd_assistant.storage.atomic as atomic_mod
-
-        def failing_replace(src, dst):
+        def failing_atomic_write(target, content, *, validator):
             raise OSError("Simulated atomic write failure")
 
-        monkeypatch.setattr(atomic_mod, "_os_replace", failing_replace)
+        monkeypatch.setattr(_world_time_mod, "atomic_write_text", failing_atomic_write)
 
         with pytest.raises(OSError):
-            repo.set_current_world_time(
+            _world_time_mod.ObsidianWorldTimeRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).set_current_world_time(
                 200,
                 expected_revision=1,
                 audit=_make_audit_context(operation_id="fail-audit-001"),
@@ -677,3 +740,117 @@ class TestFailureIntegrity:
                 expected_revision=1,  # Stale — file now has revision 2
                 audit=_make_audit_context(operation_id="race-001"),
             )
+
+    def test_between_read_and_commit_race_detected(self, vault_root: Path, monkeypatch) -> None:
+        """Simulate a concurrent write between initial read and atomic commit.
+
+        The initial repository read succeeds at revision 1, then after audit
+        intent is appended but before atomic replacement, the canonical file
+        is changed externally.
+        """
+        _write_world_time(vault_root, tick=100, revision=1)
+        path = vault_root / "_system" / "world_time.json"
+
+        saved_append = _world_time_mod.AuditService.append
+        mutate_once = True
+
+        def intercept_append(self_audit, record):
+            nonlocal mutate_once
+            saved_append(self_audit, record)
+            if mutate_once and record.phase == "intent":
+                mutate_once = False
+                # Mutate world_time.json after intent is durable
+                data = {
+                    "schema_version": 1,
+                    "type": "world_time",
+                    "current_world_tick": 999,
+                    "revision": 2,
+                }
+                mutated = (
+                    json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                    + "\n"
+                )
+                path.write_text(mutated, encoding="utf-8")
+
+        monkeypatch.setattr(_world_time_mod.AuditService, "append", intercept_append)
+
+        with pytest.raises(ConflictError):
+            _world_time_mod.ObsidianWorldTimeRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).set_current_world_time(
+                200,
+                expected_revision=1,
+                audit=_make_audit_context(operation_id="race-intent-001"),
+            )
+
+        # Competing content must remain unchanged
+        assert path.read_text(encoding="utf-8") == (
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "type": "world_time",
+                    "current_world_tick": 999,
+                    "revision": 2,
+                },
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+            + "\n"
+        )
+
+        # Only intent record should exist (no committed)
+        records = _read_audit_records(vault_root)
+        assert len(records) == 1
+        assert records[0]["phase"] == "intent"
+
+    def test_initialize_race_detected(self, vault_root: Path, monkeypatch) -> None:
+        """Simulate a competing file appearing between initialize intent and commit.
+
+        Initialize begins with world_time.json missing.  Audit intent is
+        durably appended.  Before the final write, a competing valid
+        world_time.json appears externally.
+        """
+        path = vault_root / "_system" / "world_time.json"
+
+        saved_append = _world_time_mod.AuditService.append
+        mutate_once = True
+
+        def intercept_append(self_audit, record):
+            nonlocal mutate_once
+            saved_append(self_audit, record)
+            if mutate_once and record.phase == "intent":
+                mutate_once = False
+                # Create a competing world_time.json after intent is durable
+                data = {
+                    "schema_version": 1,
+                    "type": "world_time",
+                    "current_world_tick": 500,
+                    "revision": 1,
+                }
+                competing = (
+                    json.dumps(data, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+                    + "\n"
+                )
+                path.write_text(competing, encoding="utf-8")
+
+        monkeypatch.setattr(_world_time_mod.AuditService, "append", intercept_append)
+
+        with pytest.raises(ConflictError):
+            _world_time_mod.ObsidianWorldTimeRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).initialize_current_world_time(
+                100, audit=_make_audit_context(operation_id="race-init-001")
+            )
+
+        # Competing file must remain byte-for-byte unchanged
+        competing_text = path.read_text(encoding="utf-8")
+        assert "current_world_tick" in competing_text
+        assert "500" in competing_text
+
+        # Only intent record should exist (no committed)
+        records = _read_audit_records(vault_root)
+        assert len(records) == 1
+        assert records[0]["phase"] == "intent"

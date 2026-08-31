@@ -365,3 +365,139 @@ one logical commit. Published history was preserved; no rewrite was used.
 - `CalendarService` remains stateless (no mutable clock added).
 - `CampaignState` and `campaign.yaml` were not extended with world tick.
 - No Session lifecycle, Tool Layer, ModelGateway, or LLM code.
+
+### S6-C01 — World-time path/race/test-isolation hardening
+
+**Review base:** `7bd23d5591499e8611bd19d82aaee6fa8731276d`
+
+**Defects confirmed:**
+
+1. **C01-1 — Read path follows / misclassifies world-time symlinks.** The
+   `get_current_world_time()` method used `path.exists()` without first
+   reauthorizing canonical world-time topology.  A dangling leaf symlink
+   produced `NotFoundError` instead of `StorageError`.  A live leaf symlink
+   was followed without detection.
+
+2. **C01-2 — Initialize-once second-check semantics missing.** The
+   `_commit_mutation` helper used `before_hash is None` as an implicit
+   mode flag for initialize, skipping the second content check entirely.
+   An intervening creation between intent and write would be silently
+   replaced.
+
+3. **C01-3 — No real between-read-and-commit race test.** The existing
+   `test_content_change_race_detected` changed the file before calling
+   `set_current_world_time()`, testing only stale `expected_revision`
+   detection — not the second check inside `_commit_mutation()`.
+
+4. **C01-4 — No initialize race regression test.** No test verified that
+   a competing file appearing between initialize intent and atomic write
+   is rejected with `ConflictError`.
+
+5. **C01-5 — Symlink tests expected wrong exception.** The live and
+   dangling leaf symlink tests expected `NotFoundError` instead of
+   `StorageError`.
+
+6. **C01-6 — Test isolation failure in monkeypatch-based tests.** The
+   failure-integrity tests patched `atomic_write_text` on a re-imported
+   module object.  When `test_boundaries.py`'s `_clean_import` created a
+   new module object, the monkeypatch targeted the wrong namespace,
+   causing 5 transient failures in the full suite.
+
+**Root causes:**
+
+- `get_current_world_time()` had no path reauthorization before the
+  `exists()` check.
+- `_commit_mutation` used `before_hash is None` as an implicit mode flag
+  instead of an explicit typed mode.
+- The original race test only tested stale-revision detection, not the
+  commit-time second check.
+- The symlink tests were written with the wrong expected exception type.
+- The test monkeypatch imported a fresh module object instead of using
+  the module object that `ObsidianWorldTimeRepository`'s methods reference.
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/world_time.py`:**
+   - Added `_MutationMode` enum (`INITIALIZE`, `UPDATE`) for explicit
+     typed mutation semantics.
+   - Added `_reauthorize_world_time_path(vault_root, world_time_path)`
+     — a centralized helper that verifies:
+     - Vault root is still a directory;
+     - lexical relative path is exactly `_system/world_time.json`;
+     - `_system` is not a live or dangling symlink;
+     - `world_time.json` is not a live or dangling symlink;
+     - resolved path remains under Vault root;
+     - resolved path matches the canonical location.
+   - `get_current_world_time()` now calls `_reauthorize_world_time_path`
+     before the `exists()` check.  A dangling/live symlink raises
+     `StorageError` before any file content is read.
+   - `initialize_current_world_time()` now calls `_reauthorize_world_time_path`
+     before the existence decision, distinguishing safe missing from unsafe
+     symlink conditions.
+   - `set_current_world_time()` now calls `_reauthorize_world_time_path`
+     before the initial read.
+   - `_commit_mutation` accepts an explicit `mode: _MutationMode` parameter.
+     For `INITIALIZE`, the second check verifies the file is still absent
+     (not a symlink, not a regular file).  For `UPDATE`, the existing
+     hash-based second check is preserved.
+   - Removed the now-unused `_check_component_symlinks` and
+     `_check_leaf_symlink` helpers (replaced by `_reauthorize_world_time_path`).
+
+2. **`tests/unit/test_world_time_repository.py`:**
+   - `test_world_time_live_symlink_rejected` — now creates an external
+     target (outside the Vault), verifies `StorageError` on read, and
+     asserts the external target was not modified.
+   - `test_world_time_dangling_symlink_rejected` — now expects
+     `StorageError` instead of `NotFoundError`.
+   - Added `test_initialize_with_dangling_symlink_rejected` — module-level
+     test verifying `StorageError` on initialize with a dangling leaf symlink.
+   - Added `test_update_with_live_symlink_rejected` — module-level test
+     verifying `StorageError` on update with a live leaf symlink pointing
+     outside the Vault, and that the external target is not modified.
+   - Added `test_between_read_and_commit_race_detected` — deterministic
+     test that monkeypatches `AuditService.append` to mutate
+     `world_time.json` after intent is durable but before atomic write.
+     Asserts `ConflictError` and no committed audit record.
+   - Added `test_initialize_race_detected` — deterministic test that
+     monkeypatches `AuditService.append` to create a competing
+     `world_time.json` after initialize intent but before atomic write.
+     Asserts `ConflictError` and no committed audit record.
+   - Fixed test isolation: the module-level `import dnd_assistant.storage.world_time as _world_time_mod` captures the module object at collection time.  All monkeypatch tests use `_world_time_mod` (not a re-imported module) so the patch targets the same namespace that `ObsidianWorldTimeRepository`'s methods reference, regardless of `test_boundaries.py`'s `_clean_import` ordering.
+   - Failure-integrity tests create `ObsidianWorldTimeRepository` instances
+     inline (not via the `repo` fixture) to avoid stale module references.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_world_time.py` — 17 passed
+- `uv run pytest tests/unit/test_world_time_repository.py` — 45 passed, 6 skipped
+- `uv run pytest tests/contract/test_boundaries.py tests/unit/test_world_time_repository.py` — 82 passed, 6 skipped
+- `uv run pytest tests/unit/test_world_time_repository.py tests/contract/test_boundaries.py` — 82 passed, 6 skipped (reverse order)
+- `uv run pytest tests/unit/test_world_time.py tests/unit/test_world_time_repository.py tests/unit/test_audit_protocol.py tests/unit/test_session_storage_paths.py tests/contract/test_boundaries.py` — 182 passed, 15 skipped
+- `uv run pytest` (full suite) — **2096 passed, 71 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 196 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Historical Git note:**
+
+S6-01 was published as two commits:
+
+```
+S6-01 implementation commit:
+92131b71637c492b7b4cc42fa2a11f5b2afab5e6
+
+S6-01 follow-up documentation commit:
+7bd23d5591499e8611bd19d82aaee6fa8731276d
+```
+
+The S6-01 quality-gate record in the stage document previously described
+"2160 passed, 69 skipped (3 transient failures)" as a successful full-suite
+gate.  This was inaccurate — 3 failures in a full suite is a failed gate.
+S6-C01 corrects this: the initial S6-01 full suite had 3 transient
+monkeypatch-ordering failures, and S6-C01 fixes the root cause so the
+full suite now reports 0 failures.
+
+Published S6-01 history was preserved; no rewrite was used.
+
+**Correction commit SHA:** (set after commit)
+**Commit message:** `fix: harden world time persistence integrity (S6-C01)`

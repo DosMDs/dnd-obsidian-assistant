@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from enum import Enum
 from pathlib import Path
 
 from pydantic import TypeAdapter
@@ -135,44 +136,97 @@ def _resolve_world_time_path(vault_root: str | Path) -> Path:
     return root / _WORLD_TIME_RELATIVE
 
 
-# ── Path/symlink safety ───────────────────────────────────────────────────────
+# ── Mutation mode ─────────────────────────────────────────────────────────────
 
 
-def _check_component_symlinks(root: Path, relative: Path) -> None:
-    """Check existing path components beneath ``root`` for symlinks.
+class _MutationMode(Enum):
+    """Typed mode for ``_commit_mutation`` second-check semantics."""
 
-    Iterates over the parts of ``relative``, building each intermediate
-    path and checking whether it is a symlink (dangling or live).
-    Symlink identity is checked **before** ``exists()`` so that dangling
-    symlinks are also rejected.
+    INITIALIZE = "initialize"
+    """Expect the file to be absent before commit; a newly appeared regular
+    file or symlink is a conflict."""
+
+    UPDATE = "update"
+    """Expect the file to exist with a known before-hash; content change
+    between intent and write is a conflict."""
+
+
+# ── World-time path reauthorization ───────────────────────────────────────────
+
+
+def _reauthorize_world_time_path(vault_root: Path, world_time_path: Path) -> Path:
+    """Reauthorize the canonical world-time path against current filesystem topology.
+
+    Verifies that:
+    - ``vault_root`` is still a valid canonical root;
+    - the lexical relative path is exactly ``_system/world_time.json``;
+    - ``_system`` is not a live or dangling symlink;
+    - ``world_time.json`` is not a live or dangling symlink;
+    - the resolved path remains under the Vault root;
+    - the resolved path is the exact canonical location.
+
+    A safe missing regular ``world_time.json`` leaf is allowed — the caller
+    distinguishes that case from unsafe symlink conditions.
 
     Args:
-        root: The resolved Vault root path.
-        relative: A relative path whose components to inspect.
+        vault_root: The resolved Vault root path.
+        world_time_path: The canonical absolute ``world_time.json`` path.
+
+    Returns:
+        The reauthorized canonical path (same as ``world_time_path`` on
+        success).
 
     Raises:
-        StorageError: An existing path component is a symlink.
+        StorageError: Any topology check fails.
     """
-    accumulated = root
-    for part in relative.parts:
-        accumulated = accumulated / part
-        if accumulated.is_symlink():
-            raise StorageError(
-                f"World-time path component is a symlink, rejected for safety: {accumulated}"
-            )
+    # 1. Vault root must still be a directory
+    if not vault_root.is_dir():
+        raise StorageError(f"Vault root is no longer a directory: {vault_root}")
 
+    # 2. Lexical relative path must be exactly _system/world_time.json
+    try:
+        relative = world_time_path.relative_to(vault_root)
+    except ValueError:
+        raise StorageError(f"World-time path is not under Vault root: {world_time_path}") from None
 
-def _check_leaf_symlink(path: Path) -> None:
-    """Check that the given leaf path is not an existing symlink.
+    expected_relative = _WORLD_TIME_RELATIVE
+    if relative != expected_relative:
+        raise StorageError(
+            f"World-time path is not the canonical location: "
+            f"expected {expected_relative}, got {relative}"
+        )
 
-    Args:
-        path: The leaf path to inspect.
+    # 3. Check _system component (must not be a symlink)
+    system_path = vault_root / "_system"
+    if system_path.is_symlink():
+        raise StorageError(
+            f"World-time _system/ component is a symlink, rejected for safety: {system_path}"
+        )
 
-    Raises:
-        StorageError: The path exists and is a symlink.
-    """
-    if path.is_symlink():
-        raise StorageError(f"World-time leaf path is a symlink, rejected for safety: {path}")
+    # 4. Check world_time.json leaf (must not be a symlink — live or dangling)
+    if world_time_path.is_symlink():
+        raise StorageError(
+            f"World-time leaf path is a symlink, rejected for safety: {world_time_path}"
+        )
+
+    # 5. Resolve and verify containment under Vault root
+    resolved = world_time_path.resolve(strict=False)
+    try:
+        resolved.relative_to(vault_root)
+    except ValueError:
+        raise StorageError(
+            f"World-time path resolves outside the Vault root: {world_time_path} -> {resolved}"
+        ) from None
+
+    # 6. Resolved path must match the canonical location
+    resolved_relative = resolved.relative_to(vault_root)
+    if resolved_relative != expected_relative:
+        raise StorageError(
+            f"World-time path resolves to a non-canonical location: "
+            f"expected {expected_relative}, got {resolved_relative}"
+        )
+
+    return world_time_path
 
 
 # ── Audit path validation ─────────────────────────────────────────────────────
@@ -377,6 +431,7 @@ def _commit_mutation(
     candidate: CurrentWorldTime,
     *,
     before_hash: str | None,
+    mode: _MutationMode,
     audit: AuditContext,
     operation: str,
     vault_root: Path,
@@ -390,6 +445,7 @@ def _commit_mutation(
         candidate: The desired new ``CurrentWorldTime``.
         before_hash: The hash of the content before mutation (``None``
             for initialize).
+        mode: Mutation mode — ``INITIALIZE`` or ``UPDATE``.
         audit: Audit context for this mutation.
         operation: The operation name for audit records.
         vault_root: The resolved Vault root path.
@@ -430,11 +486,11 @@ def _commit_mutation(
     _validate_mutation_environment(vault_root, audit_service)
 
     # b. Reauthorize world_time.json path against current topology
-    _check_component_symlinks(vault_root, _WORLD_TIME_RELATIVE)
-    _check_leaf_symlink(world_time_path)
+    _reauthorize_world_time_path(vault_root, world_time_path)
 
-    # c. Second check — verify hash matches for update
-    if before_hash is not None:
+    # c. Second check — verify content hasn't changed since intent
+    if mode == _MutationMode.UPDATE:
+        # Update: expect file to exist with matching hash
         try:
             with open(world_time_path, encoding="utf-8", newline="") as f:
                 current_text = f.read()
@@ -448,6 +504,16 @@ def _commit_mutation(
         if current_hash != before_hash:
             raise ConflictError(
                 f"world_time.json content changed after intent for operation {audit.operation_id}"
+            )
+    elif mode == _MutationMode.INITIALIZE:
+        # Initialize: expect file to remain absent (safe missing)
+        if world_time_path.is_symlink():
+            raise StorageError(
+                f"world_time.json became a symlink after intent for operation {audit.operation_id}"
+            )
+        if world_time_path.exists():
+            raise ConflictError(
+                f"world_time.json appeared after intent for operation {audit.operation_id}"
             )
 
     # Atomic write with candidate validator
@@ -618,6 +684,9 @@ class ObsidianWorldTimeRepository:
         """
         path = self._world_time_path
 
+        # Reauthorize canonical topology before any read
+        _reauthorize_world_time_path(self._vault_root, path)
+
         if not path.exists():
             raise NotFoundError(
                 "world_time.json not found \u2014 current world time has not been initialized"
@@ -661,15 +730,15 @@ class ObsidianWorldTimeRepository:
         if not system_dir.is_dir():
             raise StorageError(f"Canonical _system/ directory does not exist: {system_dir}")
 
-        # Verify world_time.json does NOT already exist
+        # Reauthorize canonical world-time path before existence decision
         path = self._world_time_path
+        _reauthorize_world_time_path(self._vault_root, path)
+
+        # Verify world_time.json does NOT already exist (safe missing only)
         if path.exists():
             raise ConflictError(
                 "world_time.json already exists \u2014 use set_current_world_time to update"
             )
-
-        # Check leaf symlink
-        _check_leaf_symlink(path)
 
         # Build candidate state
         candidate = CurrentWorldTime(
@@ -683,6 +752,7 @@ class ObsidianWorldTimeRepository:
             world_time_path=path,
             candidate=candidate,
             before_hash=None,
+            mode=_MutationMode.INITIALIZE,
             audit=audit,
             operation="world_time.initialize",
             vault_root=self._vault_root,
@@ -723,8 +793,10 @@ class ObsidianWorldTimeRepository:
         # Validate mutation environment
         _validate_mutation_environment(self._vault_root, self._audit_service)
 
-        # Read current state
+        # Reauthorize canonical world-time path before initial read
         path = self._world_time_path
+        _reauthorize_world_time_path(self._vault_root, path)
+
         if not path.exists():
             raise NotFoundError(
                 "world_time.json not found \u2014 use initialize_current_world_time first"
@@ -754,6 +826,7 @@ class ObsidianWorldTimeRepository:
             world_time_path=path,
             candidate=candidate,
             before_hash=before_hash,
+            mode=_MutationMode.UPDATE,
             audit=audit,
             operation="world_time.update",
             vault_root=self._vault_root,
