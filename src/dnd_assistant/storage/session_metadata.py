@@ -242,6 +242,56 @@ def _validate_audit_path(vault_root: Path, audit_log_path: Path) -> None:
 # ── Mutation environment validation ───────────────────────────────────────────
 
 
+# ── Session runtime root validation ────────────────────────────────────────────
+
+_SESSION_RUNTIME_ROOTS: tuple[str, ...] = (
+    "Sessions",
+    "_system",
+    "_system/raw",
+    "_system/raw/sessions",
+    "_system/audit",
+)
+
+
+def _validate_session_runtime_roots(vault_root: Path) -> None:
+    """Validate that canonical session runtime roots exist and are safe.
+
+    Checks that each required root path:
+    - is not a live or dangling symlink;
+    - exists and is a directory;
+    - resolves to a location beneath the canonical Vault root.
+
+    Args:
+        vault_root: The resolved Vault root path.
+
+    Raises:
+        StorageError: A root is missing, is a symlink, is a regular file,
+            or resolves outside the Vault root.
+    """
+    for relative in _SESSION_RUNTIME_ROOTS:
+        path = vault_root / relative
+
+        # Check symlink identity FIRST — dangling symlinks have
+        # is_symlink() == True but exists() == False.
+        if path.is_symlink():
+            raise StorageError(f"Session runtime root is a symlink, rejected for safety: {path}")
+
+        if not path.exists():
+            raise StorageError(f"Session runtime root does not exist: {path}")
+
+        if not path.is_dir():
+            raise StorageError(f"Session runtime root is not a directory: {path}")
+
+        # Verify resolved path stays within vault root
+        try:
+            resolved = path.resolve(strict=False)
+            resolved.relative_to(vault_root)
+        except ValueError:
+            raise StorageError(
+                f"Session runtime root resolves outside the Vault root: {path}"
+            ) from None
+
+
 # ── Exclusive-create for events.jsonl ─────────────────────────────────────────
 
 
@@ -263,9 +313,17 @@ def _create_exclusive_event_log(path: Path) -> None:
     try:
         fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o666)
         try:
-            os.close(fd)
-        except OSError:
-            pass
+            os.fsync(fd)
+        except OSError as exc:
+            raise StorageError(
+                f"Failed to fsync events.jsonl: {path}",
+                cause=exc,
+            ) from exc
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
     except FileExistsError:
         raise ConflictError(f"events.jsonl already exists: {path}") from None
     except OSError as exc:
@@ -386,10 +444,12 @@ class ObsidianSessionMetadataRepository:
     def allocate_next_session_id(self) -> str:
         """Allocate the next automatic session ID.
 
-        Scans both ``Sessions/`` and ``_system/raw/sessions/`` for existing
+        Validates that canonical session runtime roots exist, then scans
+        both ``Sessions/`` and ``_system/raw/sessions/`` for existing
         numeric IDs matching ``^S[0-9]+$`` and returns the next value
         formatted with minimum 3 digits.
         """
+        _validate_session_runtime_roots(self._vault_root)
         occupied = self._discover_occupied_numeric_ids()
 
         if not occupied:
@@ -414,12 +474,14 @@ class ObsidianSessionMetadataRepository:
         raw_root = vault_root / "_system" / "raw" / "sessions"
 
         for parent in (sessions_root, raw_root):
-            if not parent.exists():
-                continue
+            # Check symlink BEFORE exists() — dangling symlinks have
+            # is_symlink() == True but exists() == False.
             if parent.is_symlink():
                 raise StorageError(
                     f"Session parent directory is a symlink, rejected for safety: {parent}"
                 )
+            if not parent.exists():
+                continue
             if not parent.is_dir():
                 continue
 
@@ -432,6 +494,8 @@ class ObsidianSessionMetadataRepository:
                 ) from exc
 
             for entry in entries:
+                # Check symlink BEFORE is_dir — dangling symlinks have
+                # is_symlink() == True but is_dir() == False.
                 if entry.is_symlink():
                     raise StorageError(f"Session entry is a symlink, rejected for safety: {entry}")
                 if not entry.is_dir():
@@ -455,6 +519,7 @@ class ObsidianSessionMetadataRepository:
         Creates session directories, initializes an empty ``events.jsonl``,
         and atomically writes ``metadata.json``.
         """
+        _validate_session_runtime_roots(self._vault_root)
         session_id = session.id
 
         paths = resolve_session_storage_paths(self._vault_root, session_id)
@@ -501,9 +566,9 @@ class ObsidianSessionMetadataRepository:
                 f"events.jsonl is a symlink, rejected for safety: {paths.raw_events}"
             )
 
-        # Create session directories
+        # Create session directories (leaf-only — canonical parents must already exist)
         try:
-            paths.session_dir.mkdir(parents=True, exist_ok=False)
+            paths.session_dir.mkdir(exist_ok=False)
         except FileExistsError:
             raise ConflictError(f"Session directory already exists: {paths.session_dir}") from None
         except OSError as exc:
@@ -513,7 +578,7 @@ class ObsidianSessionMetadataRepository:
             ) from exc
 
         try:
-            paths.raw_dir.mkdir(parents=True, exist_ok=False)
+            paths.raw_dir.mkdir(exist_ok=False)
         except FileExistsError:
             raise ConflictError(f"Raw session directory already exists: {paths.raw_dir}") from None
         except OSError as exc:
@@ -598,6 +663,7 @@ class ObsidianSessionMetadataRepository:
         session_id: str,
     ) -> RawSessionMetadata:
         """Read raw session metadata for a specific session."""
+        _validate_session_runtime_roots(self._vault_root)
         paths = resolve_session_storage_paths(self._vault_root, session_id)
 
         if not paths.raw_metadata.exists():
@@ -610,14 +676,17 @@ class ObsidianSessionMetadataRepository:
 
     def list_session_metadata(self) -> list[RawSessionMetadata]:
         """List all raw session metadata records, sorted by session ID."""
+        _validate_session_runtime_roots(self._vault_root)
         raw_root = self._vault_root / "_system" / "raw" / "sessions"
 
-        if not raw_root.exists():
-            return []
+        # Check symlink identity BEFORE exists() — dangling symlinks have
+        # is_symlink() == True but exists() == False.
         if raw_root.is_symlink():
             raise StorageError(
                 f"Raw sessions directory is a symlink, rejected for safety: {raw_root}"
             )
+        if not raw_root.exists():
+            return []
         if not raw_root.is_dir():
             raise StorageError(f"Raw sessions path is not a directory: {raw_root}")
 
@@ -631,14 +700,30 @@ class ObsidianSessionMetadataRepository:
 
         results: list[RawSessionMetadata] = []
         for entry in entries:
-            if not entry.is_dir():
-                continue
+            # Check symlink BEFORE is_dir — dangling symlinks have
+            # is_symlink() == True but is_dir() == False.
             if entry.is_symlink():
                 raise StorageError(f"Raw session entry is a symlink, rejected for safety: {entry}")
-            metadata_path = entry / "metadata.json"
-            if not metadata_path.exists():
+            if not entry.is_dir():
+                continue
+
+            # Use the canonical path resolver for safe path resolution
+            paths = resolve_session_storage_paths(self._vault_root, entry.name)
+
+            # Verify the resolved raw_dir matches the discovered entry
+            if paths.raw_dir != entry.resolve(strict=False):
+                raise StorageError(f"Raw session entry {entry.name} resolved path mismatch")
+
+            # Reject leaf symlinks
+            if paths.raw_metadata.is_symlink():
+                raise StorageError(
+                    f"metadata.json is a symlink, rejected for safety: {paths.raw_metadata}"
+                )
+
+            if not paths.raw_metadata.exists():
                 raise StorageError(f"Raw session directory {entry.name} is missing metadata.json")
-            text = _read_exact_text(metadata_path)
+
+            text = _read_exact_text(paths.raw_metadata)
             meta = _deserialize(text, expected_id=entry.name)
             results.append(meta)
 

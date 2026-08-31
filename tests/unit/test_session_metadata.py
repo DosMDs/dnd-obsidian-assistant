@@ -637,3 +637,363 @@ class TestFailureIntegrity:
         # S006 must remain unchanged
         assert meta_path.read_text(encoding="utf-8") == original
         assert (vault_root / "Sessions" / "S006").is_dir()
+
+
+# ── Fsync tests ─────────────────────────────────────────────────────────────────
+
+
+class TestFsync:
+    """Tests for events.jsonl fsync semantics."""
+
+    def test_fsync_called_on_successful_creation(self, vault_root: Path, monkeypatch) -> None:
+        """Verify os.fsync is actually called for successful events.jsonl creation."""
+        fsync_called = False
+        original_fsync = os.fsync
+
+        def tracking_fsync(fd: int) -> None:
+            nonlocal fsync_called
+            fsync_called = True
+            return original_fsync(fd)
+
+        monkeypatch.setattr(os, "fsync", tracking_fsync)
+        repo = ObsidianSessionMetadataRepository(
+            vault_root,
+            AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+        )
+        session = _canonical_session(id="S006")
+        repo.create_session(session, audit=_make_audit_context(operation_id="fsync-001"))
+        assert fsync_called, "os.fsync was not called during events.jsonl creation"
+
+    def test_fsync_failure_raises_storage_error(self, vault_root: Path, monkeypatch) -> None:
+        """Verify fsync failure raises StorageError and no metadata is committed."""
+
+        def failing_fsync(fd: int) -> None:
+            raise OSError("Simulated fsync failure")
+
+        monkeypatch.setattr(os, "fsync", failing_fsync)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="fsync"):
+            ObsidianSessionMetadataRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).create_session(session, audit=_make_audit_context(operation_id="fsync-002"))
+
+        # No metadata.json should be committed
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        assert not meta_path.exists()
+
+        # No committed audit record
+        records = _read_audit_records(vault_root)
+        committed = [r for r in records if r.get("phase") == "committed"]
+        assert len(committed) == 0
+
+        # Pre-existing sessions unchanged
+        assert not (vault_root / "Sessions" / "S006").exists()
+
+    def test_fsync_failure_does_not_create_session_dir(self, vault_root: Path, monkeypatch) -> None:
+        """Verify fsync failure leaves no session directories."""
+
+        def failing_fsync(fd: int) -> None:
+            raise OSError("Simulated fsync failure")
+
+        monkeypatch.setattr(os, "fsync", failing_fsync)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="fsync"):
+            ObsidianSessionMetadataRepository(
+                vault_root,
+                AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+            ).create_session(session, audit=_make_audit_context(operation_id="fsync-003"))
+
+        assert not (vault_root / "Sessions" / "S006").exists()
+        assert not (vault_root / "_system" / "raw" / "sessions" / "S006").exists()
+
+
+# ── Root validation tests ────────────────────────────────────────────────────────
+
+
+class TestRootValidation:
+    """Tests for canonical session runtime root validation."""
+
+    def _make_repo(self, vault_root: Path) -> ObsidianSessionMetadataRepository:
+        return ObsidianSessionMetadataRepository(
+            vault_root,
+            AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+        )
+
+    def test_allocate_missing_sessions_raises_storage_error(self, vault_root: Path) -> None:
+        (vault_root / "Sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.allocate_next_session_id()
+
+    def test_allocate_missing_raw_sessions_raises_storage_error(self, vault_root: Path) -> None:
+        (vault_root / "_system" / "raw" / "sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.allocate_next_session_id()
+
+    def test_create_missing_sessions_raises_storage_error(self, vault_root: Path) -> None:
+        (vault_root / "Sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.create_session(session, audit=_make_audit_context(operation_id="root-001"))
+
+    def test_create_missing_raw_sessions_raises_storage_error(self, vault_root: Path) -> None:
+        (vault_root / "_system" / "raw" / "sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.create_session(session, audit=_make_audit_context(operation_id="root-002"))
+
+    def test_create_does_not_recreate_missing_parent(self, vault_root: Path) -> None:
+        (vault_root / "Sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.create_session(session, audit=_make_audit_context(operation_id="root-003"))
+        assert not (vault_root / "Sessions").exists()
+
+    def test_list_missing_raw_sessions_raises_storage_error(self, vault_root: Path) -> None:
+        (vault_root / "_system" / "raw" / "sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.list_session_metadata()
+
+    def test_get_active_session_missing_raw_sessions_raises_storage_error(
+        self, vault_root: Path
+    ) -> None:
+        (vault_root / "_system" / "raw" / "sessions").rmdir()
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="does not exist"):
+            repo.get_active_session()
+
+
+@pytest.mark.skipif(not _SYMLINKS_SUPPORTED, reason="OS does not support symlinks")
+class TestRootSymlinkValidation:
+    """Tests for symlink root rejection."""
+
+    def _make_repo(self, vault_root: Path) -> ObsidianSessionMetadataRepository:
+        return ObsidianSessionMetadataRepository(
+            vault_root,
+            AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+        )
+
+    def _replace_with_symlink(self, target: Path, link_target: Path) -> None:
+        target.rmdir()
+        target.symlink_to(link_target, target_is_directory=True)
+
+    def _replace_with_file(self, target: Path) -> None:
+        target.rmdir()
+        target.write_text("not a directory", encoding="utf-8")
+
+    def test_live_symlink_sessions_root_raises_storage_error(
+        self, vault_root: Path, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "outside_sessions"
+        outside.mkdir()
+        self._replace_with_symlink(vault_root / "Sessions", outside)
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.allocate_next_session_id()
+
+    def test_dangling_symlink_sessions_root_raises_storage_error(self, vault_root: Path) -> None:
+        self._replace_with_symlink(vault_root / "Sessions", vault_root / "_nonexistent")
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.allocate_next_session_id()
+
+    def test_sessions_root_replaced_by_file_raises_storage_error(self, vault_root: Path) -> None:
+        self._replace_with_file(vault_root / "Sessions")
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="not a directory"):
+            repo.allocate_next_session_id()
+
+    def test_live_symlink_raw_sessions_root_raises_storage_error(
+        self, vault_root: Path, tmp_path: Path
+    ) -> None:
+        outside = tmp_path / "outside_raw"
+        outside.mkdir()
+        self._replace_with_symlink(vault_root / "_system" / "raw" / "sessions", outside)
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.allocate_next_session_id()
+
+    def test_dangling_symlink_raw_sessions_root_raises_storage_error(
+        self, vault_root: Path
+    ) -> None:
+        self._replace_with_symlink(
+            vault_root / "_system" / "raw" / "sessions",
+            vault_root / "_nonexistent",
+        )
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.allocate_next_session_id()
+
+
+# ── Discovery symlink tests ─────────────────────────────────────────────────────
+
+
+@pytest.mark.skipif(not _SYMLINKS_SUPPORTED, reason="OS does not support symlinks")
+class TestDiscoverySymlinkSafety:
+    """Tests for symlink safety in list_session_metadata."""
+
+    def _make_repo(self, vault_root: Path) -> ObsidianSessionMetadataRepository:
+        return ObsidianSessionMetadataRepository(
+            vault_root,
+            AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+        )
+
+    def _create_valid_session(self, vault_root: Path, session_id: str) -> None:
+        raw_dir = vault_root / "_system" / "raw" / "sessions" / session_id
+        raw_dir.mkdir()
+        session = _canonical_session(id=session_id)
+        meta = RawSessionMetadata(session=session)
+        (raw_dir / "metadata.json").write_text(_serialize(meta), encoding="utf-8")
+
+    def test_rejects_live_raw_session_dir_symlink(self, vault_root: Path, tmp_path: Path) -> None:
+        self._create_valid_session(vault_root, "S001")
+        raw_root = vault_root / "_system" / "raw" / "sessions"
+        outside = tmp_path / "outside_s002"
+        outside.mkdir()
+        (outside / "metadata.json").write_text(
+            _serialize(RawSessionMetadata(session=_canonical_session(id="S002"))),
+            encoding="utf-8",
+        )
+        (raw_root / "S002").symlink_to(outside, target_is_directory=True)
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.list_session_metadata()
+
+    def test_rejects_dangling_raw_session_dir_symlink(self, vault_root: Path) -> None:
+        self._create_valid_session(vault_root, "S001")
+        raw_root = vault_root / "_system" / "raw" / "sessions"
+        (raw_root / "S002").symlink_to(vault_root / "_nonexistent", target_is_directory=True)
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.list_session_metadata()
+
+    def test_rejects_live_metadata_symlink(self, vault_root: Path, tmp_path: Path) -> None:
+        raw_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
+        raw_dir.mkdir()
+        outside = tmp_path / "outside_meta.json"
+        outside.write_text(
+            _serialize(RawSessionMetadata(session=_canonical_session(id="S001"))),
+            encoding="utf-8",
+        )
+        (raw_dir / "metadata.json").symlink_to(outside)
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.list_session_metadata()
+
+    def test_rejects_dangling_metadata_symlink(self, vault_root: Path) -> None:
+        raw_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
+        raw_dir.mkdir()
+        (raw_dir / "metadata.json").symlink_to(vault_root / "_nonexistent.json")
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.list_session_metadata()
+
+    def test_live_metadata_symlink_does_not_modify_external_target(
+        self, vault_root: Path, tmp_path: Path
+    ) -> None:
+        raw_dir = vault_root / "_system" / "raw" / "sessions" / "S001"
+        raw_dir.mkdir()
+        outside = tmp_path / "outside_meta.json"
+        outside.write_text(
+            _serialize(RawSessionMetadata(session=_canonical_session(id="S001"))),
+            encoding="utf-8",
+        )
+        original = outside.read_text(encoding="utf-8")
+        (raw_dir / "metadata.json").symlink_to(outside)
+        repo = self._make_repo(vault_root)
+        with pytest.raises(StorageError, match="symlink"):
+            repo.list_session_metadata()
+        # External target must not be modified
+        assert outside.read_text(encoding="utf-8") == original
+
+
+# ── Audit failure tests ─────────────────────────────────────────────────────────
+
+
+class TestAuditFailureIntegrity:
+    """Tests for audit failure integrity in create_session."""
+
+    def _make_repo(self, vault_root: Path) -> ObsidianSessionMetadataRepository:
+        return ObsidianSessionMetadataRepository(
+            vault_root,
+            AuditService(vault_root / "_system" / "audit" / "audit.jsonl"),
+        )
+
+    def test_audit_intent_failure_prevents_all_mutation(
+        self, vault_root: Path, monkeypatch
+    ) -> None:
+        """Audit intent failure raises StorageError; no filesystem mutation occurs."""
+        original_append = _meta_mod.AuditService.append
+
+        def failing_intent_append(self, record) -> None:
+            if getattr(record, "phase", None) == "intent":
+                raise StorageError("Simulated audit intent failure")
+            return original_append(self, record)
+
+        monkeypatch.setattr(_meta_mod.AuditService, "append", failing_intent_append)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="audit"):
+            self._make_repo(vault_root).create_session(
+                session, audit=_make_audit_context(operation_id="audit-fail-intent")
+            )
+
+        # No session artifacts created
+        assert not (vault_root / "Sessions" / "S006").exists()
+        assert not (vault_root / "_system" / "raw" / "sessions" / "S006").exists()
+        assert not (vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl").exists()
+        assert not (vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json").exists()
+
+        # No committed audit record
+        records = _read_audit_records(vault_root)
+        committed = [r for r in records if r.get("phase") == "committed"]
+        assert len(committed) == 0
+
+        # Pre-existing sessions unchanged
+        assert not (vault_root / "Sessions" / "S005").exists()
+
+    def test_audit_committed_failure_leaves_persisted_data(
+        self, vault_root: Path, monkeypatch
+    ) -> None:
+        """Audit committed failure raises StorageError; persisted session artifacts remain."""
+        original_append = _meta_mod.AuditService.append
+
+        def failing_committed_append(self, record) -> None:
+            if getattr(record, "phase", None) == "committed":
+                raise StorageError("Simulated audit committed failure")
+            return original_append(self, record)
+
+        monkeypatch.setattr(_meta_mod.AuditService, "append", failing_committed_append)
+        session = _canonical_session(id="S006")
+        with pytest.raises(StorageError, match="audit"):
+            self._make_repo(vault_root).create_session(
+                session, audit=_make_audit_context(operation_id="audit-fail-committed")
+            )
+
+        # Session artifacts remain persisted
+        assert (vault_root / "Sessions" / "S006").is_dir()
+        assert (vault_root / "_system" / "raw" / "sessions" / "S006").is_dir()
+        events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        assert events_path.exists()
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        assert meta_path.exists()
+        # metadata.json is valid
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert data["id"] == "S006"
+        assert data["status"] == "active"
+
+        # Audit log contains durable intent but no committed record
+        records = _read_audit_records(vault_root)
+        assert len(records) >= 1
+        assert records[0]["phase"] == "intent"
+        assert records[0]["operation_id"] == "audit-fail-committed"
+        committed = [r for r in records if r.get("phase") == "committed"]
+        assert len(committed) == 0
+
+        # Pre-existing sessions unchanged
+        assert not (vault_root / "Sessions" / "S005").exists()

@@ -46,7 +46,7 @@ existing code and ADRs:
 
 - [x] `S6-00` Session runtime kickoff + safe session-storage path contracts
 - [x] `S6-01` Canonical current-world-time persistence boundary
-- [ ] `S6-02` Raw session metadata persistence + ID allocation + start/status lifecycle
+- [x] `S6-02` Raw session metadata persistence + ID allocation + start/status lifecycle
 - [ ] `S6-03` Append-only raw note/event JSONL logging
 - [ ] `S6-04` Session end/close immutability + touched IDs + processing pending
 - [ ] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
@@ -607,4 +607,103 @@ Published S6-01 history was preserved; no rewrite was used.
 - No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
 - No Golden Vault fixture was modified.
 - `CalendarService`/world time were not mutated by session start.
+- No `Session.md`, `conversation.jsonl`, or event schema implemented.
+
+### S6-C02 — Session metadata root/discovery/durability hardening
+
+**Review base:** `e96e49be8fa2f0c2765853cbe327d5c80bf3461f`
+
+**Defects confirmed:**
+
+1. **C02-1 — events.jsonl creation is not durably fsynced.** The
+   `_create_exclusive_event_log` helper opened the file descriptor with
+   `os.open(O_CREAT | O_EXCL | O_WRONLY)` but closed it without calling
+   `os.fsync()`.
+
+2. **C02-2 — Missing canonical roots incorrectly treated as empty.** The
+   `allocate_next_session_id` method silently skipped missing `Sessions/`
+   or `_system/raw/sessions/` roots and returned `S001`. The
+   `list_session_metadata` method returned an empty list for a missing
+   `_system/raw/sessions/`.
+
+3. **C02-3 — `parents=True` bootstrap risk in `create_session`.** Both
+   `session_dir.mkdir(parents=True, exist_ok=False)` and
+   `raw_dir.mkdir(parents=True, exist_ok=False)` could recreate missing
+   canonical parent directories.
+
+4. **C02-4 — Dangling discovery entry silently skipped.** In
+   `list_session_metadata`, the `is_dir()` check came before
+   `is_symlink()`, so a dangling symlink entry (`is_symlink() == True`,
+   `is_dir() == False`) was silently ignored.
+
+5. **C02-5 — Metadata discovery could follow live symlink.** The
+   `metadata_path.exists()` check followed symlinks without first
+   verifying the leaf was not a symlink.
+
+6. **C02-6 — Missing audit intent failure regression.** No test verified
+   that an audit intent append failure prevents all filesystem mutation.
+
+7. **C02-7 — Missing audit committed failure regression.** No test verified
+   that an audit committed append failure leaves persisted session data
+   intact without destructive rollback.
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/session_metadata.py`:**
+   - `_create_exclusive_event_log`: added `os.fsync(fd)` before
+     `os.close(fd)`. If fsync fails, raises `StorageError`.
+   - Added `_validate_session_runtime_roots(vault_root)` — validates
+     `Sessions`, `_system`, `_system/raw`, `_system/raw/sessions`,
+     `_system/audit` are not symlinks (live or dangling), exist, are
+     directories, and resolve beneath the Vault root.
+   - `allocate_next_session_id()`: calls `_validate_session_runtime_roots`
+     before scanning IDs.
+   - `create_session()`: calls `_validate_session_runtime_roots` before
+     proceeding; uses `mkdir(exist_ok=False)` without `parents=True`.
+   - `get_session_metadata()`: calls `_validate_session_runtime_roots`.
+   - `list_session_metadata()`: calls `_validate_session_runtime_roots`;
+     checks `is_symlink()` before `is_dir()` for each entry; uses
+     `resolve_session_storage_paths` for path-safe discovery; rejects
+     leaf metadata symlinks.
+   - `_discover_occupied_numeric_ids()`: checks `is_symlink()` before
+     `exists()` for both parent directories and child entries.
+
+2. **`tests/unit/test_session_metadata.py`:** 22 new tests added:
+   - `TestFsync` (3 tests): fsync called on success, fsync failure →
+     `StorageError`, no session dirs on fsync failure.
+   - `TestRootValidation` (7 tests): missing Sessions/raw sessions on
+     allocate/create/list/get_active_session, no parent recreation.
+   - `TestRootSymlinkValidation` (5 tests, skipped when OS lacks symlink
+     support): live/dangling symlink Sessions/raw sessions, file
+     replacing directory.
+   - `TestDiscoverySymlinkSafety` (5 tests, skipped when OS lacks symlink
+     support): live/dangling raw session dir symlink, live/dangling
+     metadata symlink, external target not modified.
+   - `TestAuditFailureIntegrity` (2 tests): audit intent failure prevents
+     all mutation; audit committed failure leaves persisted data intact.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_metadata.py` — 61 passed, 14 skipped
+- `uv run pytest tests/unit/test_session_runtime.py` — 17 passed
+- `uv run pytest tests/contract/test_boundaries.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py` — 123 passed, 14 skipped
+- `uv run pytest tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/contract/test_boundaries.py` — 123 passed, 14 skipped (reverse order)
+- `uv run pytest tests/unit/test_session.py tests/unit/test_session_storage_paths.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/unit/test_world_time.py tests/unit/test_world_time_repository.py tests/unit/test_audit_protocol.py tests/contract/test_boundaries.py` — 371 passed, 29 skipped
+- `uv run pytest` (full suite) — **2182 passed, 85 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 200 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Correction commit SHA:** (set after commit)
+**Commit message:** `fix: harden session metadata persistence (S6-C02)`
+
+**Explicit deferrals:**
+
+- S6-03 (append-only event JSONL logging) is NOT started.
+- S6-04 (session end, touched IDs, processing pending) is NOT started.
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or event schema implemented.
