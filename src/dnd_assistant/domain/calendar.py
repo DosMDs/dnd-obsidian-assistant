@@ -38,13 +38,15 @@ S4-03 — implemented in DeterministicCalendarService
 - No repository/Vault dependency — caller supplies the events.
 - No runtime circular import (TYPE_CHECKING for TimelineEvent).
 
-S4-04 — deferred
-────────────────
+S4-04 — implemented in test_calendar_intercalary_hardening.py
+───────────────────────────────────────────────────────────────
 - Custom-calendar/intercalary hardening + property tests.
+- Cross-month intercalary declaration-order fix.
+- Hypothesis property-based test suite (P1-P12).
 
-S4-05 — deferred
-────────────────
-- Full Stage 4 verification/diff/status.
+S4-05 — completed
+─────────────────
+- Full Stage 4 verification, historical review, status completion.
 """
 
 from __future__ import annotations

@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S4-04)
+**Last updated:** 2026-08-31 (S4-05)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 4 — Calendar`
-**Status:** `IN PROGRESS`
+**Status:** `DONE`
 
 ## Status model
 
@@ -24,7 +24,7 @@ A task is not `DONE` merely because code was generated. Completion requires the 
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 |
 | 3. Vault Repository | DONE | 2026-08-30 | 2026-08-30 |
-| 4. Calendar | IN PROGRESS | 2026-08-30 | — |
+| 4. Calendar | DONE | 2026-08-30 | 2026-08-31 |
 | 5. Retrieval + Entity Resolution | NOT STARTED | — | — |
 | 6. Session Runtime without LLM | NOT STARTED | — | — |
 | 7. Tool Registry / Executor | NOT STARTED | — | — |
@@ -180,7 +180,7 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - [x] `S4-02` World-time arithmetic + relative-time operations
 - [x] `S4-03` TimelineEvent calendar queries
 - [x] `S4-04` Custom-calendar/intercalary hardening + property tests
-- [ ] `S4-05` Full Stage 4 verification/diff/status
+- [x] `S4-05` Full Stage 4 verification/diff/status
 
 ### Definition of Done
 
@@ -192,8 +192,10 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 - `CalendarService` core is stateless
 - current-world-time persistence is NOT CalendarService-owned
 - date conversion implemented in S4-01 (``DeterministicCalendarService``)
-- time arithmetic deferred to S4-02
-- TimelineEvent queries deferred to S4-03
+- time arithmetic implemented in S4-02
+- TimelineEvent calendar queries implemented in S4-03
+- custom-calendar/intercalary property hardening complete (S4-04)
+- full Stage 4 verification complete (S4-05)
 - no Stage-5 work
 
 ### S4-01 completion record
@@ -767,6 +769,101 @@ All 15 properties (P1-P12) now automatically run over calendars with genuinely v
 All repository files were read and edited only through built-in GigaCode/IDE file tools (Read, Write, Edit). No PowerShell, Bash, or Python scripts were used for repository file mutation.
 
 **ADR assessment:** No ADR required. The epoch strategy correction is a local implementation detail of the Hypothesis test strategy and does not change any public API or architectural boundary.
+
+### S4-05 Stage 4 completion record
+
+**Review base (pre-Stage-4):** `a8e81773f939c4b4b6963b68930df43a72bd896d`
+
+**Captured implementation review head:** `1ff7907fbdf7318e5ed774fce4dd5745ddaefeee`
+
+**Historical review range:** `a8e81773..1ff7907`
+
+**Commit inventory (9 commits):**
+
+| SHA | Classification |
+|---|---|
+| `2de1fb3` feat: define calendar domain contracts (S4-00) | implementation |
+| `6675a15` docs: add S4-00 completion record to development status | documentation/status |
+| `7bedc1d` feat: implement calendar date conversion (S4-01) | implementation |
+| `764d753` feat: implement calendar time arithmetic (S4-02) | implementation |
+| `4adaacb` fix: enforce tick_to_date WorldTick validation (S4-C01) | correction |
+| `b9ad278` feat: implement timeline event calendar queries (S4-03) | implementation |
+| `443700f` fix: correct overdue event ordering (S4-C02) | correction |
+| `5cc2a1d` test: harden calendar properties and fix intercalary offset ordering (S4-04) | correction |
+| `1ff7907` test: complete calendar epoch property coverage (S4-C03) | correction |
+
+**Production files reviewed:**
+- `src/dnd_assistant/domain/calendar.py`
+- `src/dnd_assistant/domain/events.py`
+- `src/dnd_assistant/domain/session.py`
+- `src/dnd_assistant/domain/__init__.py`
+- `docs/adr/0003-calendar-service-state-ownership.md`
+
+**Test files reviewed:**
+- `tests/unit/test_calendar_contracts.py`
+- `tests/unit/test_calendar_conversion.py`
+- `tests/unit/test_calendar_arithmetic.py`
+- `tests/unit/test_calendar_event_queries.py`
+- `tests/unit/test_calendar_intercalary_hardening.py`
+- `tests/unit/test_timeline_event.py`
+- `tests/property/test_calendar_properties.py`
+- `tests/property/test_calendar_properties_p2.py`
+
+**Architectural boundaries verified:**
+
+| Assertion | Status |
+|---|---|
+| Vault remains Source of Truth | ✓ |
+| CalendarService is deterministic | ✓ |
+| CalendarService is stateless regarding current campaign time | ✓ |
+| WorldTick is canonical elapsed-minute representation | ✓ |
+| calendar arithmetic is Python-only | ✓ |
+| calendar domain has no Ollama dependency | ✓ |
+| custom clocks supported | ✓ |
+| custom month lengths supported | ✓ |
+| intercalary days supported | ✓ |
+| negative years supported | ✓ |
+| year zero supported | ✓ |
+| negative ticks supported | ✓ |
+| holidays do not alter elapsed time | ✓ |
+| TimelineEvent uncertainty preserved | ✓ |
+| unknown-time events are not assigned fabricated ticks | ✓ |
+| Stage 5 remains untouched | ✓ |
+
+**Historical defect verification:**
+
+| Defect | Fix | Status |
+|---|---|---|
+| S4-00: invalid intercalary epoch name not validated | `_validate_date_against_definition` with `intercalary_names` param | ✓ preserved |
+| S4-C01: tick_to_date lacked strict WorldTick runtime validation | `_validate_world_tick(tick)` as first statement | ✓ preserved |
+| S4-C02: overdue_events used wrong start-first sort key | `_overdue_sort_key` with end-first ordering | ✓ preserved |
+| S4-04: intercalary name/offset parallel arrays broke cross-month ordering | `_intercalary_offsets_by_name` dict lookup | ✓ preserved |
+| S4-C03: epoch strategy was trivial; DEVELOPMENT_STATUS hierarchy damaged | Varied epoch generation; heading restored | ✓ preserved |
+
+**Defects discovered during S4-05:** None.
+
+**Code/test changes during S4-05:**
+- Production: fixed stale docstring in `calendar.py` (S4-04/S4-05 deferred → implemented/completed)
+- Test: None
+- Documentation/status: `DEVELOPMENT_STATUS.md` updated with completion record, DoD finalised, Stage 4 marked DONE
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_contracts.py tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py tests/unit/test_calendar_event_queries.py tests/unit/test_timeline_event.py tests/unit/test_calendar_intercalary_hardening.py tests/property/test_calendar_properties.py tests/property/test_calendar_properties_p2.py` — 514 passed
+- `uv run pytest` (full suite) — 1499 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 168 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**ADR assessment:** No new ADR required. All architectural decisions follow established patterns (Protocol for contracts, immutable derived layout data per ADR-0003, direct ordinal arithmetic, TYPE_CHECKING for circular imports, stateless service).
+
+**Final Stage status:**
+- Stage 4 — DONE
+- S4-05 — DONE
+- Stage 5 — NOT STARTED
+
+**Tool-usage compliance:**
+All repository files were read and edited only through built-in GigaCode/IDE file tools (Read, Write, Edit). Shell was used only for permitted development commands (git, pytest, ruff, dnd --help).
 
 ## Stage 3 — Vault Repository
 
