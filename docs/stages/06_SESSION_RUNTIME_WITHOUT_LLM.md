@@ -354,7 +354,7 @@ one logical commit. Published history was preserved; no rewrite was used.
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
 
 **Starting SHA:** `fcb6492953e1c1daaf254f3ac8e6e20215b1047c`
-**Implementation commit:** (set after commit)
+**Implementation commit:** `92131b71637c492b7b4cc42fa2a11f5b2afab5e6`
 **Commit message:** `feat: add canonical world time persistence (S6-01)`
 
 **Explicit deferrals:**
