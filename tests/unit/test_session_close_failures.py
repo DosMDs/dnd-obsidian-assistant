@@ -1,15 +1,16 @@
-"""S6-C04 correction tests — session close failure/race/integrity coverage.
+"""S6-C04/S6-C04F correction tests — session close failure/race/integrity coverage.
 
 Covers:
 - Exact before_hash and after_hash audit regression
-- Audit intent failure
-- Atomic metadata-write failure
+- Atomic metadata-write failure after durable intent
+- Genuine audit-intent failure (audit append raises before mutation)
 - Metadata changed after intent race
 - Events changed after intent before metadata close race
 - Events changed after metadata close race
 - Committed close audit failure
 - Canonical runtime root race
 - Post-write symlink-race
+- Strict Revision/WorldTick/scalar touched-ID/processing_status validation
 """
 
 from __future__ import annotations
@@ -24,11 +25,12 @@ import pytest
 
 import dnd_assistant.storage.session_metadata as _meta_mod
 from dnd_assistant.domain.session import Session
-from dnd_assistant.errors import ConflictError, StorageError
+from dnd_assistant.errors import ConflictError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_metadata import (
     ObsidianSessionMetadataRepository,
     RawSessionMetadata,
+    _read_exact_text,
     _serialize,
 )
 
@@ -185,13 +187,11 @@ class TestExactCloseAuditHash:
             )
 
 
-# ── Audit intent failure ───────────────────────────────────────────────────────
+# ── Atomic write failure ────────────────────────────────────────────────────────
 
 
-class TestAuditIntentFailure:
-    def test_audit_intent_failure_prevents_mutation(
-        self, vault_root: Path, repo, monkeypatch
-    ) -> None:
+class TestAtomicWriteFailure:
+    def test_atomic_write_failure_after_intent(self, vault_root: Path, repo, monkeypatch) -> None:
         _create_active_session(vault_root, "S006")
         meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
         events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
@@ -239,6 +239,79 @@ class TestAuditIntentFailure:
 
         committed_recs = [r for r in fail_recs if r.get("phase") == "committed"]
         assert len(committed_recs) == 0
+
+
+# ── Genuine audit-intent failure ────────────────────────────────────────────────
+
+
+class TestGenuineAuditIntentFailure:
+    """AuditService.append itself raises before writing the intent record.
+
+    Expected:
+        - close_session raises StorageError
+        - metadata bytes unchanged
+        - events bytes unchanged
+        - session remains active
+        - NO audit records for this operation_id
+        - atomic_write_text was NEVER called
+    """
+
+    def test_audit_intent_failure_prevents_mutation(
+        self, vault_root: Path, repo, monkeypatch
+    ) -> None:
+        _create_active_session(vault_root, "S006")
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        meta_before = meta_path.read_bytes()
+        events_before = events_path.read_bytes()
+
+        atomic_write_call_count = 0
+        original_atomic = _meta_mod.atomic_write_text
+
+        def tracking_atomic(target, content, *, validator):
+            nonlocal atomic_write_call_count
+            atomic_write_call_count += 1
+            return original_atomic(target=target, content=content, validator=validator)
+
+        monkeypatch.setattr(_meta_mod, "atomic_write_text", tracking_atomic)
+
+        original_append = repo._audit_service.append
+        call_count = 0
+
+        def failing_audit_intent(record):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise StorageError("simulated close audit intent failure")
+            original_append(record)
+
+        monkeypatch.setattr(repo._audit_service, "append", failing_audit_intent)
+
+        with pytest.raises(StorageError, match="simulated close audit intent failure"):
+            repo.close_session(
+                "S006",
+                expected_revision=1,
+                world_tick_end=15000,
+                touched_entity_ids=[],
+                audit=_make_audit_context(operation_id="fail-intent"),
+            )
+
+        assert meta_path.read_bytes() == meta_before
+        assert events_path.read_bytes() == events_before
+
+        active = repo.get_active_session()
+        assert active is not None
+        assert active.session.status == "active"
+
+        records = _read_audit_records(vault_root)
+        fail_recs = [r for r in records if r.get("operation_id") == "fail-intent"]
+        assert len(fail_recs) == 0, (
+            f"Expected zero audit records for failed intent, got {len(fail_recs)}"
+        )
+
+        assert atomic_write_call_count == 0, (
+            f"atomic_write_text was called {atomic_write_call_count} times, expected 0"
+        )
 
 
 # ── Metadata changed after intent race ─────────────────────────────────────────
@@ -525,3 +598,300 @@ class TestPostWriteSymlinkRace:
 
         committed_recs = [r for r in race_recs if r.get("phase") == "committed"]
         assert len(committed_recs) == 0
+
+
+# ── Strict expected_revision validation ────────────────────────────────────────
+
+
+class TestStrictRevisionValidation:
+    """Repository-level invalid expected_revision regressions.
+
+    Every invalid value must:
+    - raise ValidationError
+    - leave metadata bytes unchanged
+    - leave events bytes unchanged
+    - produce zero audit records for the operation
+    """
+
+    @pytest.mark.parametrize(
+        "bad_revision",
+        [
+            True,
+            False,
+            1.0,
+            "1",
+            0,
+            -1,
+        ],
+    )
+    def test_invalid_expected_revision_raises_validation_error(
+        self, vault_root: Path, repo, bad_revision
+    ) -> None:
+        _create_active_session(vault_root, "S006")
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        meta_before = meta_path.read_bytes()
+        events_before = events_path.read_bytes()
+
+        with pytest.raises(ValidationError):
+            repo.close_session(
+                "S006",
+                expected_revision=bad_revision,  # type: ignore[arg-type]
+                world_tick_end=15000,
+                touched_entity_ids=[],
+                audit=_make_audit_context(operation_id="bad-revision"),
+            )
+
+        assert meta_path.read_bytes() == meta_before
+        assert events_path.read_bytes() == events_before
+
+        records = _read_audit_records(vault_root)
+        bad_recs = [r for r in records if r.get("operation_id") == "bad-revision"]
+        assert len(bad_recs) == 0
+
+
+# ── Strict world_tick_end validation ───────────────────────────────────────────
+
+
+class TestStrictWorldTickValidation:
+    """Repository-level invalid world_tick_end regressions.
+
+    Every invalid value must:
+    - raise ValidationError
+    - leave metadata bytes unchanged
+    - leave events bytes unchanged
+    - produce zero audit records for the operation
+
+    Valid signed integer WorldTick values must still be accepted.
+    """
+
+    @pytest.mark.parametrize(
+        "bad_tick",
+        [
+            True,
+            False,
+            1.0,
+            "15000",
+        ],
+    )
+    def test_invalid_world_tick_end_raises_validation_error(
+        self, vault_root: Path, repo, bad_tick
+    ) -> None:
+        _create_active_session(vault_root, "S006")
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        meta_before = meta_path.read_bytes()
+        events_before = events_path.read_bytes()
+
+        with pytest.raises(ValidationError):
+            repo.close_session(
+                "S006",
+                expected_revision=1,
+                world_tick_end=bad_tick,  # type: ignore[arg-type]
+                touched_entity_ids=[],
+                audit=_make_audit_context(operation_id="bad-tick"),
+            )
+
+        assert meta_path.read_bytes() == meta_before
+        assert events_path.read_bytes() == events_before
+
+        records = _read_audit_records(vault_root)
+        bad_recs = [r for r in records if r.get("operation_id") == "bad-tick"]
+        assert len(bad_recs) == 0
+
+    def test_negative_world_tick_end_allowed(self, vault_root: Path, repo) -> None:
+        """Valid signed integer WorldTick values must be accepted."""
+        _create_active_session(vault_root, "S006")
+        result = repo.close_session(
+            "S006",
+            expected_revision=1,
+            world_tick_end=-500,
+            touched_entity_ids=[],
+            audit=_make_audit_context(operation_id="neg-tick"),
+        )
+        assert result.session.world_tick_end == -500
+
+
+# ── Scalar touched_entity_ids ──────────────────────────────────────────────────
+
+
+class TestScalarTouchedEntityIds:
+    """Repository-level scalar touched_entity_ids regressions.
+
+    Scalar str/bytes/bytearray must never be iterated as IDs.
+    Every case must:
+    - raise ValidationError
+    - leave metadata bytes unchanged
+    - leave events bytes unchanged
+    - produce zero audit records for the operation
+    """
+
+    @pytest.mark.parametrize(
+        "scalar",
+        [
+            "npc_varos",
+            b"npc_varos",
+            bytearray(b"npc_varos"),
+        ],
+    )
+    def test_scalar_touched_entity_ids_raises_validation_error(
+        self, vault_root: Path, repo, scalar
+    ) -> None:
+        _create_active_session(vault_root, "S006")
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        meta_before = meta_path.read_bytes()
+        events_before = events_path.read_bytes()
+
+        with pytest.raises(ValidationError, match="scalar"):
+            repo.close_session(
+                "S006",
+                expected_revision=1,
+                world_tick_end=15000,
+                touched_entity_ids=scalar,  # type: ignore[arg-type]
+                audit=_make_audit_context(operation_id="scalar-touch"),
+            )
+
+        assert meta_path.read_bytes() == meta_before
+        assert events_path.read_bytes() == events_before
+
+        records = _read_audit_records(vault_root)
+        bad_recs = [r for r in records if r.get("operation_id") == "scalar-touch"]
+        assert len(bad_recs) == 0
+
+
+# ── Persisted processing_status corruption ─────────────────────────────────────
+
+
+class TestProcessingStatusCorruption:
+    """Repository-level persisted processing_status corruption regressions.
+
+    Invalid persisted processing_status values must:
+    - raise StorageError
+    - leave metadata bytes unchanged
+    - leave events bytes unchanged
+    - produce zero close audit records
+    - session remains active
+
+    A pre-existing string processing_status must be accepted and replaced
+    with "pending".
+    """
+
+    @pytest.mark.parametrize(
+        "bad_extras",
+        [
+            {"processing_status": 123},
+            {"processing_status": None},
+            {"processing_status": ["pending"]},
+            {"processing_status": {"state": "pending"}},
+        ],
+    )
+    def test_corrupt_processing_status_raises_storage_error(
+        self, vault_root: Path, repo, bad_extras
+    ) -> None:
+        _create_active_session(vault_root, "S006", extras=bad_extras)
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        events_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        meta_before = meta_path.read_bytes()
+        events_before = events_path.read_bytes()
+
+        with pytest.raises(StorageError, match="processing_status"):
+            repo.close_session(
+                "S006",
+                expected_revision=1,
+                world_tick_end=15000,
+                touched_entity_ids=[],
+                audit=_make_audit_context(operation_id="bad-ps"),
+            )
+
+        assert meta_path.read_bytes() == meta_before
+        assert events_path.read_bytes() == events_before
+
+        active = repo.get_active_session()
+        assert active is not None
+        assert active.session.status == "active"
+
+        records = _read_audit_records(vault_root)
+        bad_recs = [r for r in records if r.get("operation_id") == "bad-ps"]
+        assert len(bad_recs) == 0
+
+    def test_existing_string_processing_status_replaced_with_pending(
+        self, vault_root: Path, repo
+    ) -> None:
+        """Pre-existing string processing_status is accepted and replaced."""
+        _create_active_session(vault_root, "S006", extras={"processing_status": "old_value"})
+        result = repo.close_session(
+            "S006",
+            expected_revision=1,
+            world_tick_end=15000,
+            touched_entity_ids=[],
+            audit=_make_audit_context(operation_id="ps-replace"),
+        )
+        assert result.extra_fields.get("processing_status") == "pending"
+
+
+# ── Strengthened after_hash audit regression ────────────────────────────────────
+
+
+class TestExactCloseAuditHashStrengthened:
+    """after_hash must be computed from the actual persisted metadata file."""
+
+    def test_after_hash_from_exact_persisted_file(self, vault_root: Path, repo) -> None:
+        _create_active_session(vault_root, "S006")
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+
+        repo.close_session(
+            "S006",
+            expected_revision=1,
+            world_tick_end=15000,
+            touched_entity_ids=[],
+            audit=_make_audit_context(operation_id="audit-after-exact"),
+        )
+
+        # Compute expected hash from the actual persisted metadata file
+        persisted_text = _read_exact_text(meta_path)
+        expected_after = _content_hash(persisted_text)
+
+        records = _read_audit_records(vault_root)
+        audit_recs = [r for r in records if r.get("operation_id") == "audit-after-exact"]
+
+        # Exactly two records: intent and committed
+        intent_recs = [r for r in audit_recs if r.get("phase") == "intent"]
+        committed_recs = [r for r in audit_recs if r.get("phase") == "committed"]
+        assert len(intent_recs) == 1, f"Expected 1 intent, got {len(intent_recs)}"
+        assert len(committed_recs) == 1, f"Expected 1 committed, got {len(committed_recs)}"
+
+        for r in audit_recs:
+            assert r["after_hash"] == expected_after, (
+                f"phase={r.get('phase')}: expected {expected_after}, got {r['after_hash']}"
+            )
+
+    def test_before_hash_with_exact_phase_counts(self, vault_root: Path, repo) -> None:
+        _create_active_session(vault_root, "S006")
+        meta_path = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+
+        # Compute expected before_hash from the actual persisted metadata file
+        before_text = _read_exact_text(meta_path)
+        expected_before = _content_hash(before_text)
+
+        repo.close_session(
+            "S006",
+            expected_revision=1,
+            world_tick_end=15000,
+            touched_entity_ids=[],
+            audit=_make_audit_context(operation_id="audit-before-exact"),
+        )
+
+        records = _read_audit_records(vault_root)
+        audit_recs = [r for r in records if r.get("operation_id") == "audit-before-exact"]
+
+        # Exactly two records: intent and committed
+        intent_recs = [r for r in audit_recs if r.get("phase") == "intent"]
+        committed_recs = [r for r in audit_recs if r.get("phase") == "committed"]
+        assert len(intent_recs) == 1, f"Expected 1 intent, got {len(intent_recs)}"
+        assert len(committed_recs) == 1, f"Expected 1 committed, got {len(committed_recs)}"
+
+        for r in audit_recs:
+            assert r["before_hash"] == expected_before, (
+                f"phase={r.get('phase')}: expected {expected_before}, got {r['before_hash']}"
+            )

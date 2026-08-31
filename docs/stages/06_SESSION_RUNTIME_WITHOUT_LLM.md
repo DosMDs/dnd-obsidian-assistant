@@ -1282,3 +1282,88 @@ This was inaccurate.  The correct semantics are:
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No recovery/truncation/repair logic.
 - No CLI commands for session lifecycle.
+
+### S6-C04F — Final close-validation / audit-intent regression coverage
+
+**Starting SHA:** `65a491edd6da360982004dad15eff216a5f636f3`
+
+**Review finding:**
+
+- the S6-C04 test named `TestAuditIntentFailure` actually exercised
+  atomic-write failure after a successful intent, not a genuine audit-intent
+  failure;
+- strict `Revision`/`WorldTick`/scalar `touched_entity_ids`/`processing_status`
+  production guards lacked repository-level regression coverage;
+- `after_hash` test used reserialization instead of actual persisted bytes.
+
+**Correction tests** (all in `tests/unit/test_session_close_failures.py`):
+
+1. **`TestAtomicWriteFailure`** — renamed from `TestAuditIntentFailure`.
+   Proves: audit intent succeeds, `atomic_write_text` fails before replacement,
+   `StorageError`, old metadata/events unchanged, session remains active,
+   exactly one intent record, zero committed records.
+
+2. **`TestGenuineAuditIntentFailure`** — new. Proves: `AuditService.append`
+   raises before writing the intent record, `StorageError`, metadata/events
+   unchanged, session remains active, **zero** audit records for the operation,
+   `atomic_write_text` call count == 0.
+
+3. **`TestStrictRevisionValidation`** — new parametrized class (6 cases:
+   `True`, `False`, `1.0`, `"1"`, `0`, `-1`). Every value: `ValidationError`,
+   metadata/events unchanged, zero audit records.
+
+4. **`TestStrictWorldTickValidation`** — new parametrized class (4 invalid
+   cases: `True`, `False`, `1.0`, `"15000"`). Same invariants. Also proves
+   negative valid tick (`-500`) is accepted.
+
+5. **`TestScalarTouchedEntityIds`** — new parametrized class (3 cases:
+   `"npc_varos"`, `b"npc_varos"`, `bytearray(b"npc_varos")`). Every value:
+   `ValidationError`, metadata/events unchanged, zero audit records.
+
+6. **`TestProcessingStatusCorruption`** — new parametrized class (4 cases:
+   `123`, `None`, `["pending"]`, `{"state": "pending"}`). Every value:
+   `StorageError`, metadata/events unchanged, zero audit records, session
+   remains active. Also proves pre-existing string `processing_status` is
+   accepted and replaced with `"pending"`.
+
+7. **`TestExactCloseAuditHashStrengthened`** — new. `test_after_hash_from_exact_persisted_file`:
+   computes expected hash from actual persisted metadata file via
+   `_read_exact_text`. Asserts exactly 1 intent + 1 committed record.
+   `test_before_hash_with_exact_phase_counts`: same exact-file approach with
+   explicit phase counts.
+
+**Production changes:** zero.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_close_failures.py` — 30 passed, 1 skipped
+- `uv run pytest tests/unit/test_session_close.py` — 37 passed, 3 skipped
+- `uv run pytest tests/unit/test_session_event_lifecycle.py` — 4 passed
+- `uv run pytest tests/unit/test_session_events.py` — 65 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03.py` — 41 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03f.py` — 9 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 45 passed
+- Boundary order A (boundaries first) — 281 passed, 8 skipped
+- Boundary order B (boundaries last) — 281 passed, 8 skipped
+- Broader lifecycle gate — 593 passed, 37 skipped
+- `uv run pytest` (full suite) — **2404 passed, 93 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 207 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — No whitespace errors
+
+**Correction commit:** (reported in Final Report)
+**Commit message:** `test: finalize session close hardening (S6-C04F)`
+
+**Explicit deferrals:**
+
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
+- No recovery/truncation/repair logic.
+- No CLI commands for session lifecycle.
