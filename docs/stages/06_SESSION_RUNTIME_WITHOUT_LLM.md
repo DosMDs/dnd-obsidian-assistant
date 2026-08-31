@@ -747,7 +747,7 @@ C03-10 required audit/race/write/fsync/finalization storage tests are missing
 - `uv run ruff format --check .` — 203 files already formatted
 - `uv run dnd --help` — CLI smoke test OK (Russian UI)
 
-**Correction commit SHA:** (set after commit)
+**Correction commit SHA:** `b1fda9dd1f509af54d649d5b6ce2e29c660c9f46`
 **Commit message:** `fix: harden session event persistence (S6-C03)`
 
 **Explicit deferrals:**
