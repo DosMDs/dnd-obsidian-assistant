@@ -832,6 +832,8 @@ class DeterministicCalendarService:
         Complexity: O(number of months + number of intercalary days),
         not O(abs(year)) or O(abs(tick)).
         """
+        _validate_world_tick(tick)
+
         # Absolute minute = epoch absolute minute + tick
         epoch_abs_minute = (
             self._epoch_year * self._days_per_year * self._minutes_per_day

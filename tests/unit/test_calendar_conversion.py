@@ -360,6 +360,51 @@ class TestValidation:
             svc.date_to_tick(GameDate(year=1, intercalary_day="DoesNotExist"))
 
 
+# S4-C01. tick_to_date WorldTick validation regression
+class TestTickToDateValidation:
+    """tick_to_date must reject non-int WorldTick values before arithmetic."""
+
+    def test_tick_to_date_true_rejected(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        with pytest.raises(ValueError, match="WorldTick must not be a bool"):
+            svc.tick_to_date(True)  # type: ignore[arg-type]
+
+    def test_tick_to_date_false_rejected(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        with pytest.raises(ValueError, match="WorldTick must not be a bool"):
+            svc.tick_to_date(False)  # type: ignore[arg-type]
+
+    def test_tick_to_date_str_rejected(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        with pytest.raises(ValueError, match="WorldTick must be an int"):
+            svc.tick_to_date("1")  # type: ignore[arg-type]
+
+    def test_tick_to_date_float_rejected(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        with pytest.raises(ValueError, match="WorldTick must be an int"):
+            svc.tick_to_date(1.0)  # type: ignore[arg-type]
+
+    def test_tick_to_date_none_rejected(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        with pytest.raises(ValueError, match="WorldTick must be an int"):
+            svc.tick_to_date(None)  # type: ignore[arg-type]
+
+    def test_tick_to_date_zero_accepted(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        result = svc.tick_to_date(0)
+        assert result == GameDate(year=1, month="First", day=1)
+
+    def test_tick_to_date_negative_accepted(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        result = svc.tick_to_date(-1440)
+        assert result == GameDate(year=0, month="Third", day=30)
+
+    def test_tick_to_date_positive_accepted(self) -> None:
+        svc = DeterministicCalendarService(_g())
+        result = svc.tick_to_date(1440)
+        assert result == GameDate(year=1, month="First", day=2)
+
+
 # 24. Invalid intercalary epoch regression (S4-00 defect)
 class TestInvalidIntercalaryEpochRegression:
     def test_invalid_intercalary_epoch_rejected(self) -> None:

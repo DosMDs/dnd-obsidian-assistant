@@ -384,6 +384,34 @@ Implement the deterministic fantasy calendar system: `WorldTick` canonical scala
 
 **ADR assessment:** No ADR required. All architectural decisions follow established patterns (signed integer arithmetic, strict input validation via static helpers, stateless service per ADR-0003, calendar-independent tick arithmetic).
 
+### S4-C01 correction record
+
+**Acceptance-review defect:**
+- `tick_to_date()` accepted `tick: WorldTick` as a type hint but did not call `_validate_world_tick(tick)` before arithmetic.
+- `bool` (`True`/`False`) is a Python subclass of `int` and could silently participate in tick arithmetic as `1`/`0`, violating the strict `WorldTick` contract.
+- `advance_world_time()` and `time_until()` already validated their `WorldTick` inputs correctly — only `tick_to_date()` was missing the guard.
+
+**Production change:**
+- Added `_validate_world_tick(tick)` as the first statement in `tick_to_date()`, before any arithmetic.
+- Reuses the existing canonical validator — no duplicate, no new DTO.
+
+**Regression tests added (8 tests in `TestTickToDateValidation` in `test_calendar_conversion.py`):**
+- `True` rejected, `False` rejected, `str` rejected, `float` rejected, `None` rejected
+- Positive control: `0` → epoch, negative `-1440` → correct date, positive `1440` → correct date
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_calendar_conversion.py tests/unit/test_calendar_arithmetic.py tests/unit/test_calendar_contracts.py` — 229 passed
+- `uv run pytest` (full suite) — 1351 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 163 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- S4-03 not started
+- S4-04 not started
+- Stage 5 not started
+
 ## Stage 3 — Vault Repository
 
 ### Goal
