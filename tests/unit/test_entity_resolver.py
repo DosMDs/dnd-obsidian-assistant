@@ -10,9 +10,11 @@ from collections.abc import Sequence
 from typing import cast
 
 import pytest
+from pydantic import ValidationError as PydanticValidationError
 
 from dnd_assistant.domain.types import EntityId, EntityType
-from dnd_assistant.errors import StorageError, ValidationError
+from dnd_assistant.errors import StorageError
+from dnd_assistant.errors import ValidationError as DndValidationError
 from dnd_assistant.retrieval import (
     Ambiguous,
     EntityResolver,
@@ -309,38 +311,59 @@ class TestValidation:
     def test_empty_string_rejected(self) -> None:
         fake = FakeSearchService(hits=[])
         resolver = SearchEntityResolver(fake)
-        with pytest.raises(ValidationError):
+        with pytest.raises(DndValidationError):
             resolver.resolve("")
 
     def test_whitespace_only_rejected(self) -> None:
         fake = FakeSearchService(hits=[])
         resolver = SearchEntityResolver(fake)
-        with pytest.raises(ValidationError):
+        with pytest.raises(DndValidationError):
             resolver.resolve("   ")
 
     def test_newline_rejected(self) -> None:
         fake = FakeSearchService(hits=[])
         resolver = SearchEntityResolver(fake)
-        with pytest.raises(ValidationError):
+        with pytest.raises(DndValidationError):
             resolver.resolve("\n")
 
     def test_control_characters_rejected(self) -> None:
         fake = FakeSearchService(hits=[])
         resolver = SearchEntityResolver(fake)
-        with pytest.raises(ValidationError):
+        with pytest.raises(DndValidationError):
             resolver.resolve("test\x00")
 
     def test_non_printable_rejected(self) -> None:
         fake = FakeSearchService(hits=[])
         resolver = SearchEntityResolver(fake)
-        with pytest.raises(ValidationError):
+        with pytest.raises(DndValidationError):
             resolver.resolve("test\x1f")
 
     def test_invalid_reference_does_not_call_search(self) -> None:
         fake = FakeSearchService(hits=[])
         resolver = SearchEntityResolver(fake)
-        with pytest.raises(ValidationError):
+        with pytest.raises(DndValidationError):
             resolver.resolve("")
+        assert fake.last_query is None
+
+    @pytest.mark.parametrize(
+        "invalid_ref",
+        [
+            "",
+            "   ",
+            "\n",
+            "test\x00",
+            "test\x1f",
+        ],
+    )
+    def test_validation_cause_is_pydantic_validation_error(self, invalid_ref: str) -> None:
+        """Prove that invalid input raises DndValidationError whose
+        __cause__ is the original PydanticValidationError."""
+        fake = FakeSearchService(hits=[])
+        resolver = SearchEntityResolver(fake)
+        with pytest.raises(DndValidationError) as exc_info:
+            resolver.resolve(invalid_ref)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+        # SearchService.search must not be called for invalid input
         assert fake.last_query is None
 
 
@@ -363,13 +386,13 @@ class TestErrorPropagation:
     def test_validation_error_from_search_propagates(self) -> None:
         class StrictSearchService:
             def search(self, query: SearchQuery, *, limit: int = 20) -> Sequence[SearchHit]:
-                raise ValidationError("query too long")
+                raise DndValidationError("query too long")
 
             def get_by_id(self, entity_id: EntityId) -> SearchHit | None:
                 return None
 
         resolver = SearchEntityResolver(StrictSearchService())
-        with pytest.raises(ValidationError, match="query too long"):
+        with pytest.raises(DndValidationError, match="query too long"):
             resolver.resolve("test")
 
 

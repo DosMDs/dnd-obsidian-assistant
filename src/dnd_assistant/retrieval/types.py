@@ -211,10 +211,14 @@ class SearchHit(BaseModel):
 
 
 class Resolved(BaseModel):
-    """A uniquely resolved entity.
+    """A uniquely and confidently resolved entity.
 
-    Returned when the resolver identifies exactly one entity matching
-    the input reference.
+    Returned when the resolver identifies one unique entity and the
+    match satisfies the resolver's accepted confidence policy.
+
+    A single candidate alone does not imply Resolved; low-confidence
+    matches such as fuzzy or lexical full-text candidates may require
+    ``Ambiguous`` / clarification.
     """
 
     entity_id: EntityId

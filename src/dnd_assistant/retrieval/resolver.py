@@ -19,8 +19,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
+from pydantic import ValidationError as PydanticValidationError
+
 from dnd_assistant.domain.types import EntityType
-from dnd_assistant.errors import ValidationError
+from dnd_assistant.errors import ValidationError as DndValidationError
 from dnd_assistant.retrieval.service import SearchService
 from dnd_assistant.retrieval.types import (
     Ambiguous,
@@ -113,10 +115,10 @@ class SearchEntityResolver:
                 text=reference,
                 entity_types={entity_type} if entity_type is not None else None,
             )
-        except (ValueError, ValidationError) as exc:
-            raise ValidationError(
+        except PydanticValidationError as exc:
+            raise DndValidationError(
                 str(exc),
-                cause=exc if isinstance(exc, ValidationError) else None,
+                cause=exc,
             ) from exc
 
         # Delegate candidate discovery to the search service.

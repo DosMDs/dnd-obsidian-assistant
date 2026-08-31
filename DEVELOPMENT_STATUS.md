@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-04)
+**Last updated:** 2026-08-31 (S5-C10)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Current stage:** `Stage 5 — Retrieval + Entity Resolution`
 **Status:** `IN PROGRESS`
@@ -2390,6 +2390,74 @@ threshold.
 **Explicit confirmation:**
 Golden-Vault hardening/S5-05, EntityResolver context ranking, and
 embeddings/vector work have NOT started. S5-05 = [ ].
+
+### S5-C10 correction record
+
+**Acceptance-review defects (2 items):**
+
+| Defect | Description | Fix |
+|---|---|---|
+| C10-1 | `Resolved` docstring stated "exactly one entity matching the input reference", implying one candidate = Resolved. After S5-04, single fuzzy/FTS candidates are Ambiguous, not Resolved. | Updated `Resolved` docstring to state: unique entity + accepted confidence policy; single candidate alone does not imply Resolved; low-confidence matches may require Ambiguous/clarification. |
+| C10-2 | Input validation in `resolver.py` caught `(ValueError, ValidationError)` without naming the Pydantic exception type explicitly. Exception chaining preserved the raw cause but the code did not express the intended Pydantic → project error translation contract. | Imports now use explicit aliases: `from pydantic import ValidationError as PydanticValidationError` and `from dnd_assistant.errors import ValidationError as DndValidationError`. The `try/except` now catches only `PydanticValidationError` (not broad `ValueError`). The raw Pydantic cause is preserved via `raise DndValidationError(..., cause=exc) from exc`. `SearchService.search()` errors remain outside the validation `try/except` and propagate unchanged. |
+
+**Production changes:**
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/retrieval/types.py` | `Resolved` docstring corrected: "A uniquely and confidently resolved entity" with explicit note that a single candidate alone does not imply Resolved. |
+| `src/dnd_assistant/retrieval/resolver.py` | Imports: `pydantic.ValidationError as PydanticValidationError`, `dnd_assistant.errors.ValidationError as DndValidationError`. Validation block catches only `PydanticValidationError`. Search-service errors remain outside the validation try/except. |
+
+**Test changes:**
+
+| File | Change |
+|---|---|
+| `tests/unit/test_entity_resolver.py` | Imports updated: `pydantic.ValidationError as PydanticValidationError`, `dnd_assistant.errors.ValidationError as DndValidationError`. All `pytest.raises(ValidationError)` → `pytest.raises(DndValidationError)`. Added `test_validation_cause_is_pydantic_validation_error` (5 parametrized cases: empty, whitespace, newline, control char, non-printable) proving invalid input → `DndValidationError` with `__cause__` being `PydanticValidationError`, and `SearchService.search` not called. |
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_entity_resolver.py` — 42 passed (was 37; +5 parametrized validation-cause tests)
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 160 passed (unchanged)
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed (unchanged)
+- `uv run pytest tests/unit/test_fuzzy_search.py` — 31 passed (unchanged)
+- `uv run pytest tests/unit/test_fts_search.py` — 12 passed (unchanged)
+- `uv run pytest tests/unit/test_fts_index.py` — 70 passed, 22 skipped (unchanged)
+- `uv run pytest` (full suite) — 1882 passed, 56 skipped (was 1877 passed, 56 skipped in S5-04; +5 resolver tests)
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 182 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd index --help` — OK
+- `uv run dnd index rebuild --help` — `--vault` present
+- `git diff --check` — no whitespace errors
+
+**Architecture review:**
+- `Resolved` docs no longer imply "one candidate = Resolved"
+- Pydantic `ValidationError` translation is explicit with clear aliases
+- Raw Pydantic cause is preserved via `__cause__`
+- Search-service `StorageError` propagates unchanged
+- Search-service project `ValidationError` propagates unchanged
+- Single fuzzy remains Ambiguous (no policy change)
+- Single FTS remains Ambiguous (no policy change)
+- No numeric threshold introduced
+- No storage/SQLite/RapidFuzz dependency in resolver
+- No S5-05 work started
+
+**Scope review:**
+- S5-04 = [x] (unchanged)
+- S5-05 = [ ] (unchanged)
+- No Golden-Vault integration, recent-context, embeddings, or vector work started
+- No S5-05 work
+
+**ADR assessment:**
+No ADR required. All changes are local corrections to documentation and exception-handling code within the existing S5-04 boundary.
+
+**Resulting Stage-5 status:**
+- S5-00 = [x]
+- S5-01 = [x]
+- S5-02 = [x]
+- S5-03 = [x]
+- S5-04 = [x]
+- S5-05 = [ ]
+- S5-06 = [ ]
+- Stage 5 = IN PROGRESS
 
 
 ---
