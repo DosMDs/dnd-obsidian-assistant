@@ -1,8 +1,7 @@
 ---
-
 apply: ALWAYS
 mode: AGENT
------------
+---
 
 # Incremental repository file editing
 

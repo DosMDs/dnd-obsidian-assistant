@@ -137,6 +137,59 @@ While editing:
 6. Use built-in GigaCode/IDE file-edit tools for repository text files. A JSON parsing error, oversized payload, timeout, or similar edit/write-tool failure is not permission to switch automatically to shell/PowerShell/Python file generation.
 7. After an edit/write-tool failure, inspect the working tree first, preserve already-correct partial work, and retry with smaller atomic create/edit/patch operations. For oversized tests, reduce needless duplication with parametrization/helpers without weakening required coverage.
 
+### Repository-edit rule
+
+Repository text files must be mutated through built-in GigaCode/IDE file tools.
+
+Shell-executed Python is still shell-based mutation. The following are explicitly prohibited without prior user approval:
+
+```text
+python -c "open(..., 'w').write(...)"
+python -c "open(..., 'a').write(...)"
+python -c "Path(...).write_text(...)"
+python -c "Path(...).open(...).write(...)"
+temporary Python/PowerShell/Bash generator or append scripts
+PowerShell file-write commands (Set-Content, Add-Content, Out-File)
+shell redirection (> / >>)
+base64/heredoc/generated-file workarounds
+```
+
+The detailed always-on rule defining allowed and prohibited writing mechanisms is:
+
+```text
+.gigacode/rules/06-tool-usage.md
+```
+
+### Large-file incremental editing
+
+When a built-in file edit/write operation fails or a file is too large for one reliable operation, the mandatory procedure is:
+
+```text
+inspect current file/partial state
+→ preserve correct work
+→ split by logical sections
+→ use small anchored IDE edits
+→ re-read each substantial changed region
+→ inspect per-file diff
+```
+
+For a large new test/source file:
+
+```text
+imports/helpers/skeleton
+→ one logical section at a time
+→ parametrization/helpers where appropriate
+→ focused validation
+```
+
+A failed large IDE payload does NOT authorize changing the writing mechanism.
+
+The detailed always-on rule for the incremental-edit algorithm is:
+
+```text
+.gigacode/rules/07-incremental-file-editing.md
+```
+
 ### File-edit recovery policy
 
 When a built-in file edit/write operation fails for a technical reason such as JSON parsing, payload size, timeout, or transport limits:
@@ -149,7 +202,39 @@ When a built-in file edit/write operation fails for a technical reason such as J
 6. Shell-based file mutation is allowed only when built-in file tools are genuinely unavailable or objectively cannot support the required operation independently of payload size. Report the reason to the user and obtain explicit approval before using that fallback.
 7. After recovery, inspect the final diff for truncation, partial writes, duplicated sections, or unrelated changes.
 
-The detailed always-on rule is `.gigacode/rules/06-tool-usage.md`. The rationale is recorded in `docs/adr/0002-agent-file-edit-recovery-policy.md`.
+The rationale for this policy is recorded in `docs/adr/0002-agent-file-edit-recovery-policy.md`.
+
+### Prompt-level repository-edit constraint
+
+Every implementation, correction, or review-fix task prompt prepared for GigaCode is expected to repeat a short mandatory repository-edit constraint directly in the task, even though the same policy exists in the always-on repository rules above.
+
+The canonical prompt-level block is:
+
+```text
+## Mandatory repository-edit constraint
+
+All repository text-file mutations must use built-in GigaCode/IDE file tools.
+
+Explicitly prohibited without prior user approval:
+- python -c with open(...).write(...)
+- python -c with Path.write_text()/Path.open()
+- temporary Python/PowerShell/Bash generator or append scripts
+- PowerShell file-write commands
+- shell redirection
+- base64/heredoc/generated-file workarounds
+
+If a file-tool operation is too large:
+inspect current partial state
+→ preserve correct edits
+→ split by logical section
+→ apply smaller anchored IDE edits
+→ re-read changed region
+→ inspect per-file diff.
+
+Do not switch writing mechanisms because a payload is large.
+```
+
+The repository rules remain mandatory even if a particular task prompt accidentally omits this repeated block. This is defense in depth, not an alternative policy.
 
 Before considering a task complete:
 1. Run targeted tests first.
