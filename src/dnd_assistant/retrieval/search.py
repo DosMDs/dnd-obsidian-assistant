@@ -48,8 +48,8 @@ def _extract_aliases(document: VaultDocument) -> list[str]:
 
     * ``aliases`` missing or ``None`` → no aliases.
     * ``aliases`` is a ``list`` / ``tuple`` → inspect each entry:
-      - strict ``str`` entry, non-empty after strip, printable → eligible.
-      - non-string, empty/whitespace-only, control-character → ignored.
+      - strict ``str`` entry, printable, non-empty after strip → eligible.
+      - non-string, non-printable, empty/whitespace-only → ignored.
     * ``aliases`` is a scalar ``str`` → malformed, no aliases (do NOT
       iterate characters).
     * ``aliases`` is a ``dict`` / other mapping → malformed, no aliases.
@@ -66,10 +66,10 @@ def _extract_aliases(document: VaultDocument) -> list[str]:
         for entry in raw:
             if not isinstance(entry, str):
                 continue
+            if not entry.isprintable():
+                continue
             stripped = entry.strip()
             if not stripped:
-                continue
-            if not stripped.isprintable():
                 continue
             if stripped not in seen:
                 seen.add(stripped)

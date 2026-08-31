@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31 (S5-01)
+**Last updated:** 2026-08-31 (S5-C05)
 **Current milestone:** `v0.1-dev — Vault Core`
-**Current stage:** `Stage 4 — Calendar`
-**Status:** `DONE`
+**Current stage:** `Stage 5 — Retrieval + Entity Resolution`
+**Status:** `IN PROGRESS`
 
 ## Status model
 
@@ -1341,6 +1341,63 @@ No ADR required. All architectural decisions follow established patterns (Protoc
 
 **Explicit confirmation:**
 Fuzzy/RapidFuzz/SQLite/FTS/EntityResolver work has NOT started. S5-02 = [ ].
+
+
+### S5-C05 correction record
+
+**Acceptance-review defects:**
+
+1. **Malformed alias control-character defect (C05-1):**
+   - `_extract_aliases()` in `search.py` called `entry.strip()` before `entry.isprintable()`.
+   - Control characters such as `\t`, `\n`, `\r` were stripped first, after which the remaining printable text passed `isprintable()` and became a valid searchable alias.
+   - This turned malformed Vault metadata (e.g. `"\tВарос"`, `"Варос\n"`, `"\rВарос"`) into legitimate alias matches.
+
+2. **Stale top-level status header (C05-2):**
+   - The canonical header said `Stage 4 — Calendar / DONE` while the Stage Progress table correctly said `Stage 5 — Retrieval + Entity Resolution / IN PROGRESS`.
+   - S5-00 and S5-01 were already marked `[x]`.
+
+**Production fix (C05-1):**
+- Reordered validation in `_extract_aliases()`:
+  - **Old order:** `isinstance(str)` → `strip()` → `non-empty` → `isprintable()`
+  - **Corrected order:** `isinstance(str)` → `isprintable()` → `strip()` → `non-empty`
+- The original value is now checked for printability before any stripping occurs.
+- Ordinary printable spaces around a valid alias (e.g. `"  Варос  "`) are still correctly stripped because space is printable.
+- Docstring updated to reflect the corrected order.
+
+**Status-header fix (C05-2):**
+- `Current stage:` changed from `Stage 4 — Calendar` to `Stage 5 — Retrieval + Entity Resolution`
+- `Status:` changed from `DONE` to `IN PROGRESS`
+- `Last updated:` changed from `2026-08-31 (S5-01)` to `2026-08-31 (S5-C05)`
+- Stage Progress table was already correct and is preserved unchanged.
+
+**Regression tests added (5 tests in `TestAliasMetadata` in `test_exact_search.py`):**
+
+| Test | Aliases | Query | Expected |
+|---|---|---|---|
+| `test_leading_tab_alias_rejected` | `["\tВарос"]` | `"Варос"` | No alias hit |
+| `test_trailing_newline_alias_rejected` | `["Варос\n"]` | `"Варос"` | No alias hit |
+| `test_carriage_return_alias_rejected` | `["\rВарос"]` | `"Варос"` | No alias hit |
+| `test_printable_space_alias_accepted` | `["  Варос  "]` | `"Варос"` | EXACT_ALIAS hit |
+| `test_mixed_alias_list_control_chars_rejected` | `["\tBad Alias", "Good Alias", "Bad Alias\n"]` | `"Good Alias"` → 1 hit; `"Bad Alias"` → 0 hits | Only printable eligible |
+
+**Preserved behavior:**
+- Existing malformed scalar/non-string/null/duplicate tests unchanged.
+- All S5-01 alias metadata edge cases preserved.
+- No changes to `VaultRepository`, `VaultDocument.extra_frontmatter["aliases"]` policy, `Entity` schema, player-only visibility, visibility filtering before tier selection, entity-type filtering before tier selection, `EXACT_ID > EXACT_NAME > EXACT_ALIAS`, literal stable-ID comparison, name/alias `strip → NFC → casefold` comparison, deterministic EntityId ordering, strict positive integer `limit`, repository error propagation, `SearchService` signatures, or public `VaultSearchService` export.
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_exact_search.py` — 63 passed (was 58; +5 regression tests)
+- `uv run pytest` (full suite) — 1714 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 173 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- S5-01 = [x] (unchanged)
+- S5-02 = [ ] (unchanged)
+- No fuzzy matching, RapidFuzz, SQLite, FTS5, EntityResolver, session runtime, ToolRegistry, ModelGateway/Ollama, embeddings, or vector DB implementation.
+- S5-02 remains NOT STARTED.
 
 
 ---

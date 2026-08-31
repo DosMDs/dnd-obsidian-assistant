@@ -626,6 +626,62 @@ class TestAliasMetadata:
         assert len(results) == 1
         assert results[0].match_kind == MatchKind.EXACT_ALIAS
 
+    # ── Control-character alias regression (S5-C05) ──────────────────────
+
+    def test_leading_tab_alias_rejected(self) -> None:
+        """Tab-prefixed alias must not match a clean query."""
+        doc = _make_doc("npc_varos", name="Varos", aliases=["\tВарос"])
+        repo: VaultRepository = FakeRepository([doc])
+        svc = VaultSearchService(repository=repo)
+        results = svc.search(SearchQuery(text="Варос"))
+        assert len(results) == 0
+
+    def test_trailing_newline_alias_rejected(self) -> None:
+        """Newline-suffixed alias must not match a clean query."""
+        doc = _make_doc("npc_varos", name="Varos", aliases=["Варос\n"])
+        repo: VaultRepository = FakeRepository([doc])
+        svc = VaultSearchService(repository=repo)
+        results = svc.search(SearchQuery(text="Варос"))
+        assert len(results) == 0
+
+    def test_carriage_return_alias_rejected(self) -> None:
+        """Carriage-return-prefixed alias must not match a clean query."""
+        doc = _make_doc("npc_varos", name="Varos", aliases=["\rВарос"])
+        repo: VaultRepository = FakeRepository([doc])
+        svc = VaultSearchService(repository=repo)
+        results = svc.search(SearchQuery(text="Варос"))
+        assert len(results) == 0
+
+    def test_printable_space_alias_accepted(self) -> None:
+        """Surrounding printable spaces must still be stripped and match."""
+        doc = _make_doc("npc_varos", name="Varos", aliases=["  Варос  "])
+        repo: VaultRepository = FakeRepository([doc])
+        svc = VaultSearchService(repository=repo)
+        results = svc.search(SearchQuery(text="Варос"))
+        assert len(results) == 1
+        assert results[0].match_kind == MatchKind.EXACT_ALIAS
+
+    def test_mixed_alias_list_control_chars_rejected(self) -> None:
+        """Only printable aliases in a mixed list must be eligible."""
+        doc = _make_doc(
+            "npc_varos",
+            name="Varos",
+            aliases=[
+                "\tBad Alias",
+                "Good Alias",
+                "Bad Alias\n",
+            ],
+        )
+        repo: VaultRepository = FakeRepository([doc])
+        svc = VaultSearchService(repository=repo)
+        # "Good Alias" must match
+        results = svc.search(SearchQuery(text="Good Alias"))
+        assert len(results) == 1
+        assert results[0].match_kind == MatchKind.EXACT_ALIAS
+        # "\tBad Alias" must NOT match
+        results2 = svc.search(SearchQuery(text="Bad Alias"))
+        assert len(results2) == 0
+
 
 # ── Repository error propagation ────────────────────────────────────────────
 
