@@ -97,6 +97,10 @@ def _validate_event_id(value: str) -> None:
 def _validate_aware_datetime(value: object) -> None:
     """Validate that value is a timezone-aware datetime.
 
+    Python awareness semantics require both a non-None ``tzinfo`` and a
+    non-None ``utcoffset()``.  A ``tzinfo`` subclass whose ``utcoffset()``
+    returns ``None`` is not semantically aware.
+
     Raises:
         StorageError: Validation failed.
     """
@@ -106,6 +110,8 @@ def _validate_aware_datetime(value: object) -> None:
         raise StorageError(f"real_time must be a datetime, got {type(value).__name__}")
     if value.tzinfo is None:
         raise StorageError("real_time must be timezone-aware")
+    if value.utcoffset() is None:
+        raise StorageError("real_time tzinfo must have a non-None utcoffset()")
 
 
 def _validate_world_tick_value(value: object) -> None:

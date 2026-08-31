@@ -658,6 +658,105 @@ Published S6-01 history was preserved; no rewrite was used.
 - No `Session.md`, `conversation.jsonl`, or `touched_entities` semantics.
 - No session end, processing_status, corrupt-tail repair, or CLI commands.
 
+### S6-C02 — Session metadata root/discovery/durability hardening
+
+**Review base:** `e96e49be8fa2f0c2765853cbe327d5c80bf3461f`
+
+**Defects confirmed:**
+
+1. **C02-1 — events.jsonl creation is not durably fsynced.** The
+   `_create_exclusive_event_log` helper opened the file descriptor with
+   `os.open(O_CREAT | O_EXCL | O_WRONLY)` but closed it without calling
+   `os.fsync()`.
+
+2. **C02-2 — Missing canonical roots incorrectly treated as empty.** The
+   `allocate_next_session_id` method silently skipped missing `Sessions/`
+   or `_system/raw/sessions/` roots and returned `S001`. The
+   `list_session_metadata` method returned an empty list for a missing
+   `_system/raw/sessions/`.
+
+3. **C02-3 — `parents=True` bootstrap risk in `create_session`.** Both
+   `session_dir.mkdir(parents=True, exist_ok=False)` and
+   `raw_dir.mkdir(parents=True, exist_ok=False)` could recreate missing
+   canonical parent directories.
+
+4. **C02-4 — Dangling discovery entry silently skipped.** In
+   `list_session_metadata`, the `is_dir()` check came before
+   `is_symlink()`, so a dangling symlink entry (`is_symlink() == True`,
+   `is_dir() == False`) was silently ignored.
+
+5. **C02-5 — Metadata discovery could follow live symlink.** The
+   `metadata_path.exists()` check followed symlinks without first
+   verifying the leaf was not a symlink.
+
+6. **C02-6 — Missing audit intent failure regression.** No test verified
+   that an audit intent append failure prevents all filesystem mutation.
+
+7. **C02-7 — Missing audit committed failure regression.** No test verified
+   that an audit committed append failure leaves persisted session data
+   intact without destructive rollback.
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/session_metadata.py`:**
+   - `_create_exclusive_event_log`: added `os.fsync(fd)` before
+     `os.close(fd)`. If fsync fails, raises `StorageError`.
+   - Added `_validate_session_runtime_roots(vault_root)` — validates
+     `Sessions`, `_system`, `_system/raw`, `_system/raw/sessions`,
+     `_system/audit` are not symlinks (live or dangling), exist, are
+     directories, and resolve beneath the Vault root.
+   - `allocate_next_session_id()`: calls `_validate_session_runtime_roots`
+     before scanning IDs.
+   - `create_session()`: calls `_validate_session_runtime_roots` before
+     proceeding; uses `mkdir(exist_ok=False)` without `parents=True`.
+   - `get_session_metadata()`: calls `_validate_session_runtime_roots`.
+   - `list_session_metadata()`: calls `_validate_session_runtime_roots`;
+     checks `is_symlink()` before `is_dir()` for each entry; uses
+     `resolve_session_storage_paths` for path-safe discovery; rejects
+     leaf metadata symlinks.
+   - `_discover_occupied_numeric_ids()`: checks `is_symlink()` before
+     `exists()` for both parent directories and child entries.
+
+2. **`tests/unit/test_session_metadata.py`:** 22 new tests added:
+   - `TestFsync` (3 tests): fsync called on success, fsync failure →
+     `StorageError`, no session dirs on fsync failure.
+   - `TestRootValidation` (7 tests): missing Sessions/raw sessions on
+     allocate/create/list/get_active_session, no parent recreation.
+   - `TestRootSymlinkValidation` (5 tests, skipped when OS lacks symlink
+     support): live/dangling symlink Sessions/raw sessions, file
+     replacing directory.
+   - `TestDiscoverySymlinkSafety` (5 tests, skipped when OS lacks symlink
+     support): live/dangling raw session dir symlink, live/dangling
+     metadata symlink, external target not modified.
+   - `TestAuditFailureIntegrity` (2 tests): audit intent failure prevents
+     all mutation; audit committed failure leaves persisted data intact.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_metadata.py` — 61 passed, 14 skipped
+- `uv run pytest tests/unit/test_session_runtime.py` — 17 passed
+- `uv run pytest tests/contract/test_boundaries.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py` — 123 passed, 14 skipped
+- `uv run pytest tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/contract/test_boundaries.py` — 123 passed, 14 skipped (reverse order)
+- `uv run pytest tests/unit/test_session.py tests/unit/test_session_storage_paths.py tests/unit/test_session_metadata.py tests/unit/test_session_runtime.py tests/unit/test_world_time.py tests/unit/test_world_time_repository.py tests/unit/test_audit_protocol.py tests/contract/test_boundaries.py` — 371 passed, 29 skipped
+- `uv run pytest` (full suite) — **2182 passed, 85 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 200 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Correction commit SHA:** (set after commit)
+**Commit message:** `fix: harden session metadata persistence (S6-C02)`
+
+**Explicit deferrals:**
+
+- S6-03 (append-only event JSONL logging) is NOT started.
+- S6-04 (session end, touched IDs, processing pending) is NOT started.
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or event schema implemented.
+
 ### S6-C03 — Event validation / portability / strict-reader hardening
 
 **Review base:** `623fb9ca81821bffb80bec52230f9e0df32c1ded`
@@ -887,3 +986,53 @@ This was inaccurate.  The correct semantics are:
 - No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or event schema implemented.
+
+### S6-C03F — History restoration and final event-failure coverage
+
+**Starting SHA:** `6f8529acd31fd36760f141321b50ec556e04c0e5`
+
+- restored accidentally deleted S6-C02 history from `623fb9c...`
+- added repository-level invalid-candidate/no-intent regression (5 cases:
+  empty event_type, bool world_tick, naive real_time, canonical extra-field
+  collision, non-JSON-compatible extra)
+- added direct ``os.write`` OSError translation regression (3 tests:
+  ``StorageError`` with cause chaining, descriptor closed, no retry)
+- hardened ``_validate_aware_datetime``: requires ``utcoffset() is not None``
+  in addition to ``tzinfo is not None``
+- S6-04 remains NOT STARTED
+
+**Files changed:**
+
+- `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` — restored S6-C02 history;
+  added S6-C03F section
+- `src/dnd_assistant/storage/session_events.py` — hardened
+  ``_validate_aware_datetime`` with ``utcoffset()`` check
+- `tests/unit/test_session_events_c03f.py` — new file (9 tests)
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_events.py` — 65 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03.py` — 41 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03f.py` — 9 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 29 passed
+- `uv run pytest tests/unit/test_session_events.py tests/unit/test_session_events_c03.py tests/unit/test_session_events_c03f.py tests/unit/test_session_runtime.py` — 144 passed, 4 skipped (order A)
+- `uv run pytest tests/unit/test_session_runtime.py tests/unit/test_session_events_c03f.py tests/unit/test_session_events_c03.py tests/unit/test_session_events.py` — 144 passed, 4 skipped (order B)
+- `uv run pytest tests/unit/test_session.py tests/unit/test_session_storage_paths.py tests/unit/test_session_metadata.py tests/unit/test_session_events.py tests/unit/test_session_events_c03.py tests/unit/test_session_events_c03f.py tests/unit/test_session_runtime.py tests/unit/test_world_time.py tests/unit/test_world_time_repository.py tests/unit/test_audit_protocol.py tests/contract/test_boundaries.py` — 506 passed, 33 skipped
+- `uv run pytest` (full suite) — **2317 passed, 89 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 204 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+
+**Correction commit:** (reported in Final Report)
+**Commit message:** `test: finalize session event hardening (S6-C03F)`
+
+**Explicit deferrals:**
+
+- S6-04 (session end, touched IDs, processing pending) is NOT started.
+- S6-05 (restart/recovery) is NOT started.
+- S6-06 (CLI orchestration) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or `touched_entities` semantics.
+- No session end, processing_status, corrupt-tail repair, or CLI commands.
