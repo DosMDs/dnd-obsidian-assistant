@@ -1052,6 +1052,78 @@ Establish the retrieval and entity-resolution layer with canonical typed contrac
 
 **Commit SHA:** `bf68b45`
 
+**Historical test-count correction:**
+- S5-C01 documentation claimed 25 tests in `TestAstImportChecker` and 117 total.
+- The actual increase from S5-C00 (100 tests) to S5-C01 (117 tests) is **17 test cases**, not 25.
+- The 25 figure was the count within `TestAstImportChecker` alone, but the net targeted-test increase was 17.
+- This is now corrected in the S5-C02 record below.
+
+### S5-C02 correction record
+
+**Acceptance-review defect — relative imports not resolved:**
+
+The S5-C01 AST import checker preserved full dotted paths for absolute imports but did **not** handle relative `ImportFrom` nodes.  `node.level` was ignored, so inside `dnd_assistant.retrieval.service` an import such as:
+
+```python
+from ..storage import VaultRepository
+```
+
+was represented as `"storage"` instead of `"dnd_assistant.storage"` and therefore bypassed forbidden-prefix matching against `"dnd_assistant.storage"`.
+
+**Production fix (test file only — no production source changed):**
+
+1. **`_get_package_name(module_path)`** — new module-level helper that determines whether a module path refers to a package (has `__path__`) or a submodule, returning the appropriate package name.
+
+2. **`_resolve_relative_import(module_path, level, relative_module)`** — new module-level helper that resolves a relative `ImportFrom` (using `node.level` and `node.module`) to an absolute module path using deterministic Python-native logic (not `importlib.util.resolve_name`).
+
+3. **`_parse_imports_from_source(source, *, module_path=None)`** — new shared module-level helper that replaces both `TestBoundaries._ast_imports()` and `TestAstImportChecker._parse_imports()`.  When `module_path` is provided, relative imports are resolved to absolute paths.  When `module_path` is `None`, relative imports are collected as-is (for regression testing).
+
+4. **`_has_forbidden_prefix()`** — extracted to a module-level function shared by both `TestBoundaries` and `TestAstImportChecker`.
+
+5. **`TestBoundaries._ast_imports()`** — refactored to delegate to `_parse_imports_from_source(source, module_path=module_path)`.
+
+6. **`TestAstImportChecker._parse_imports()`** — refactored to delegate to `_parse_imports_from_source(source)`.
+
+7. **`TestAstImportChecker._has_forbidden_prefix()`** — refactored to delegate to the module-level `_has_forbidden_prefix`.
+
+8. **AST documentation corrected** — `_ast_imports()` and `_parse_imports_from_source()` docstrings now accurately state that `ast.walk()` inspects all syntactically present import nodes (including `TYPE_CHECKING` blocks, functions, classes, and conditional branches), not only top-level imports.
+
+**Relative-import regression tests added (7 tests in `TestAstImportChecker`):**
+
+| Test | Source | Context | Resolved | Expected |
+|---|---|---|---|---|
+| `test_relative_retrieval_types_allowed` | `from .types import SearchHit` | `retrieval.service` | `dnd_assistant.retrieval.types` | NOT rejected |
+| `test_relative_domain_import_allowed` | `from ..domain.types import EntityId` | `retrieval.service` | `dnd_assistant.domain.types` | NOT rejected |
+| `test_relative_storage_import_detected` | `from ..storage import VaultRepository` | `retrieval.service` | `dnd_assistant.storage` | DETECTED |
+| `test_relative_models_import_detected` | `from ..models.gateway import ModelGateway` | `retrieval.service` | `dnd_assistant.models.gateway` | DETECTED |
+| `test_relative_tools_import_detected` | `from ..tools.registry import ToolRegistry` | `retrieval.service` | `dnd_assistant.tools.registry` | DETECTED |
+| `test_regression_old_code_missed_relative_storage` | `from ..storage import VaultRepository` | old vs new | old: `"storage"`, new: `"dnd_assistant.storage"` | Regression proof |
+| `test_regression_old_code_missed_relative_models` | `from ..models.gateway import ModelGateway` | old vs new | old: `"models.gateway"`, new: `"dnd_assistant.models.gateway"` | Regression proof |
+
+**Quality-gate results:**
+- `uv run pytest tests/unit/test_retrieval_contracts.py` — 124 passed (was 117)
+- `uv run pytest` (full suite) — 1623 passed, 34 skipped
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 171 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — no whitespace errors
+
+**Scope exclusions confirmed:**
+- No production source files changed (only test file `tests/unit/test_retrieval_contracts.py`)
+- S5-00 = [x] (unchanged)
+- S5-01 = [ ] (unchanged)
+- No S5-01 implementation started
+- No exact ID/name/alias search implementation
+- No RapidFuzz search
+- No SQLite/FTS
+- No EntityResolver implementation
+- No confidence thresholds
+- No session context
+- No CLI commands
+- No tool layer
+- No ModelGateway/Ollama
+- No embeddings/vector DB
+
 ---
 
 ## Stage 3 — Vault Repository

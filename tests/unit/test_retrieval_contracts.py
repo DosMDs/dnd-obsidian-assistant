@@ -465,6 +465,121 @@ class TestEntityResolverProtocol:
         assert isinstance(FakeResolver(), EntityResolver)
 
 
+# ── Shared AST import helpers ───────────────────────────────────────────────
+
+
+def _get_package_name(module_path: str) -> str:
+    """Return the package name for *module_path*.
+
+    If *module_path* is itself a package (has ``__path__``), returns
+    *module_path* unchanged.  Otherwise returns the parent package
+    (e.g. ``"dnd_assistant.retrieval.service"`` → ``"dnd_assistant.retrieval"``).
+    """
+    import importlib
+
+    mod = importlib.import_module(module_path)
+    return module_path if hasattr(mod, "__path__") else module_path.rsplit(".", 1)[0]
+
+
+def _resolve_relative_import(module_path: str, level: int, relative_module: str | None) -> str:
+    """Resolve a relative ``ImportFrom`` to an absolute module path.
+
+    Parameters
+    ----------
+    module_path:
+        The fully-qualified module being inspected
+        (e.g. ``"dnd_assistant.retrieval.service"``).
+    level:
+        The ``node.level`` from the AST ``ImportFrom`` node
+        (1 = ``.``, 2 = ``..``, etc.).
+    relative_module:
+        The ``node.module`` from the AST ``ImportFrom`` node
+        (e.g. ``"types"``, ``"storage"``), or ``None`` for a bare
+        relative import such as ``from . import X``.
+
+    Returns
+    -------
+    The resolved absolute module path.
+
+    Raises
+    ------
+    ValueError
+        If *level* is < 1 or exceeds the package depth.
+    """
+    if level < 1:
+        raise ValueError(f"Relative import level must be >= 1, got {level}")
+
+    package = _get_package_name(module_path)
+    parts = package.split(".")
+    if level > len(parts):
+        raise ValueError(f"Relative import level {level} exceeds package depth of {package!r}")
+    base = parts[: len(parts) - (level - 1)] if level > 1 else parts
+    if relative_module:
+        base.extend(relative_module.split("."))
+    return ".".join(base)
+
+
+def _parse_imports_from_source(source: str, *, module_path: str | None = None) -> set[str]:
+    """Parse *source* as Python code and return the set of full imported
+    module paths.
+
+    Inspects all syntactically present import nodes in the module AST,
+    including imports inside ``TYPE_CHECKING`` blocks, functions, classes,
+    and conditional branches.  This is intentional: dependency-boundary
+    verification must catch all syntactically present imports, not only
+    those that execute at runtime.
+
+    When *module_path* is provided, relative ``ImportFrom`` nodes
+    (``from .foo import X``, ``from ..bar import Y``) are resolved to
+    absolute module paths relative to the given module.  When
+    *module_path* is ``None``, relative imports are collected as-is
+    (their ``node.module`` value without resolution).
+
+    Parameters
+    ----------
+    source:
+        Python source text to parse.
+    module_path:
+        Fully-qualified module path for resolving relative imports
+        (e.g. ``"dnd_assistant.retrieval.service"``).
+
+    Returns
+    -------
+    Set of imported module paths (absolute when *module_path* is given).
+    """
+    import ast
+
+    tree = ast.parse(source)
+    result: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                result.add(alias.name)
+        elif isinstance(node, ast.ImportFrom):
+            if node.level and node.level > 0:
+                # Relative import
+                if module_path is not None:
+                    resolved = _resolve_relative_import(module_path, node.level, node.module)
+                    result.add(resolved)
+                elif node.module:
+                    result.add(node.module)
+            elif node.module:
+                result.add(node.module)
+    return result
+
+
+def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
+    """Check if *module* matches any prefix in *forbidden_prefixes*.
+
+    Semantics: ``module == prefix or module.startswith(prefix + ".")``
+    for any prefix in *forbidden_prefixes*.
+    """
+    for prefix in forbidden_prefixes:
+        if module == prefix or module.startswith(prefix + "."):
+            return True
+    return False
+
+
 class TestBoundaries:
     """Verify architectural boundaries are preserved.
 
@@ -546,46 +661,28 @@ class TestBoundaries:
         """Return the set of full imported module paths
         found via AST in the given module's source file.
 
-        Only inspects top-level import statements (not TYPE_CHECKING
-        blocks or function-local imports).
+        Inspects all syntactically present import nodes (including
+        ``TYPE_CHECKING`` blocks, functions, classes, and conditional
+        branches) via ``ast.walk()``.
+
+        Relative imports are resolved to absolute module paths using
+        *module_path* as the context.
 
         Examples
         --------
         ``import sqlite3`` → ``{"sqlite3"}``
         ``import dnd_assistant.storage.types`` → ``{"dnd_assistant.storage.types"}``
         ``from dnd_assistant.storage import VaultRepository`` → ``{"dnd_assistant.storage"}``
-        ``from dnd_assistant.models.gateway import ModelGateway`` → ``{"dnd_assistant.models.gateway"}``
+        ``from .types import SearchHit`` → ``{"dnd_assistant.retrieval.types"}``
         """
-        import ast
+        import importlib
 
-        importlib = __import__("importlib")
         mod = importlib.import_module(module_path)
         assert mod.__file__ is not None
         with open(mod.__file__, encoding="utf-8") as f:
-            tree = ast.parse(f.read())
+            source = f.read()
 
-        result: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    result.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    result.add(node.module)
-        return result
-
-    @staticmethod
-    def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
-        """Check if *module* matches *forbidden_prefixes* or any of their
-        sub-packages.
-
-        Semantics: ``module == prefix or module.startswith(prefix + ".")``
-        for any prefix in *forbidden_prefixes*.
-        """
-        for prefix in forbidden_prefixes:
-            if module == prefix or module.startswith(prefix + "."):
-                return True
-        return False
+        return _parse_imports_from_source(source, module_path=module_path)
 
     def test_retrieval_types_no_forbidden_imports(self) -> None:
         imports = self._ast_imports("dnd_assistant.retrieval.types")
@@ -596,7 +693,7 @@ class TestBoundaries:
             "dnd_assistant.application",
             "ollama",
         }
-        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
         assert not actual, f"retrieval/types.py imports forbidden modules: {actual}"
 
     def test_retrieval_service_no_forbidden_imports(self) -> None:
@@ -608,7 +705,7 @@ class TestBoundaries:
             "dnd_assistant.application",
             "ollama",
         }
-        actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
         assert not actual, f"retrieval/service.py imports forbidden modules: {actual}"
 
     def test_no_sqlite_import_in_retrieval(self) -> None:
@@ -653,27 +750,21 @@ class TestAstImportChecker:
     @staticmethod
     def _parse_imports(source: str) -> set[str]:
         """Parse *source* as Python code and return the set of full
-        imported module paths found at the top level.
-        """
-        import ast
+        imported module paths.
 
-        tree = ast.parse(source)
-        result: set[str] = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    result.add(alias.name)
-            elif isinstance(node, ast.ImportFrom):
-                if node.module:
-                    result.add(node.module)
-        return result
+        Delegates to the module-level ``_parse_imports_from_source``
+        without a *module_path*, so relative imports are collected
+        as-is (not resolved).
+        """
+        return _parse_imports_from_source(source)
 
     @staticmethod
     def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
-        for prefix in forbidden_prefixes:
-            if module == prefix or module.startswith(prefix + "."):
-                return True
-        return False
+        """Check if *module* matches any prefix in *forbidden_prefixes*.
+
+        Delegates to the module-level ``_has_forbidden_prefix``.
+        """
+        return _has_forbidden_prefix(module, forbidden_prefixes)
 
     # ── Full dotted paths preserved ──────────────────────────────────────
 
@@ -806,3 +897,127 @@ class TestAstImportChecker:
         forbidden = {"dnd_assistant.tools"}
         actual = {i for i in imports if self._has_forbidden_prefix(i, forbidden)}
         assert actual == {"dnd_assistant.tools.registry"}
+
+    # ── Relative-import resolution ────────────────────────────────────────
+
+    def test_relative_retrieval_types_allowed(self) -> None:
+        """``from .types import SearchHit`` in retrieval/service context
+        resolves to ``dnd_assistant.retrieval.types`` and is NOT rejected.
+        """
+        imports = _parse_imports_from_source(
+            "from .types import SearchHit",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert imports == {"dnd_assistant.retrieval.types"}
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual
+
+    def test_relative_domain_import_allowed(self) -> None:
+        """``from ..domain.types import EntityId`` in retrieval/service
+        context resolves to ``dnd_assistant.domain.types`` and is NOT
+        rejected by the S5-00 forbidden set.
+        """
+        imports = _parse_imports_from_source(
+            "from ..domain.types import EntityId",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert imports == {"dnd_assistant.domain.types"}
+        forbidden = {
+            "dnd_assistant.storage",
+            "dnd_assistant.models",
+            "dnd_assistant.tools",
+            "dnd_assistant.application",
+        }
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert not actual
+
+    def test_relative_storage_import_detected(self) -> None:
+        """``from ..storage import VaultRepository`` in retrieval/service
+        context resolves to ``dnd_assistant.storage`` and MUST be detected.
+        """
+        imports = _parse_imports_from_source(
+            "from ..storage import VaultRepository",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert imports == {"dnd_assistant.storage"}
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.storage"}
+
+    def test_relative_models_import_detected(self) -> None:
+        """``from ..models.gateway import ModelGateway`` in retrieval/service
+        context resolves to ``dnd_assistant.models.gateway`` and MUST be
+        detected.
+        """
+        imports = _parse_imports_from_source(
+            "from ..models.gateway import ModelGateway",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert imports == {"dnd_assistant.models.gateway"}
+        forbidden = {"dnd_assistant.models"}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.models.gateway"}
+
+    def test_relative_tools_import_detected(self) -> None:
+        """``from ..tools.registry import ToolRegistry`` in retrieval/service
+        context resolves to ``dnd_assistant.tools.registry`` and MUST be
+        detected.
+        """
+        imports = _parse_imports_from_source(
+            "from ..tools.registry import ToolRegistry",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert imports == {"dnd_assistant.tools.registry"}
+        forbidden = {"dnd_assistant.tools"}
+        actual = {i for i in imports if _has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.tools.registry"}
+
+    # ── Regression: previous S5-C01 ignored node.level ────────────────────
+
+    def test_regression_old_code_missed_relative_storage(self) -> None:
+        """Prove that the old S5-C01 implementation (which ignored
+        ``node.level`` and only collected ``node.module``) would
+        represent ``from ..storage import VaultRepository`` as
+        ``\"storage\"`` (not ``\"dnd_assistant.storage\"``) and therefore
+        bypass the ``\"dnd_assistant.storage\"`` prefix check.
+        """
+        # Old behaviour: just collect node.module, ignore node.level
+        old_imports = _parse_imports_from_source(
+            "from ..storage import VaultRepository",
+            # No module_path → relative imports collected as-is
+        )
+        assert old_imports == {"storage"}
+        assert "dnd_assistant.storage" not in old_imports
+
+        # Correct behaviour with module_path
+        resolved = _parse_imports_from_source(
+            "from ..storage import VaultRepository",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert resolved == {"dnd_assistant.storage"}
+        forbidden = {"dnd_assistant.storage"}
+        actual = {i for i in resolved if _has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.storage"}
+
+    def test_regression_old_code_missed_relative_models(self) -> None:
+        """Same regression proof for relative models import."""
+        old_imports = _parse_imports_from_source(
+            "from ..models.gateway import ModelGateway",
+        )
+        assert old_imports == {"models.gateway"}
+        assert "dnd_assistant.models" not in old_imports
+
+        resolved = _parse_imports_from_source(
+            "from ..models.gateway import ModelGateway",
+            module_path="dnd_assistant.retrieval.service",
+        )
+        assert resolved == {"dnd_assistant.models.gateway"}
+        forbidden = {"dnd_assistant.models"}
+        actual = {i for i in resolved if _has_forbidden_prefix(i, forbidden)}
+        assert actual == {"dnd_assistant.models.gateway"}
