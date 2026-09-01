@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from dnd_assistant.cli.main import app
@@ -332,6 +333,43 @@ class TestNoteCommand:
         assert result.exit_code == 1
         assert "Ошибка" in result.stderr
 
+    @pytest.mark.parametrize(
+        ("invalid_text",),
+        [
+            pytest.param(" leading whitespace", id="leading-whitespace"),
+            pytest.param("trailing whitespace ", id="trailing-whitespace"),
+        ],
+    )
+    def test_note_invalid_text_exits_1(self, tmp_path: Path, invalid_text: str) -> None:
+        vault_root = _create_vault(tmp_path)
+        _init_world_time(vault_root)
+        _start_session_via_repo(vault_root)
+
+        result = runner.invoke(app, ["note", invalid_text, "--vault", str(vault_root)])
+
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr
+
+    @pytest.mark.parametrize(
+        ("invalid_text",),
+        [
+            pytest.param(" leading whitespace", id="leading-whitespace"),
+            pytest.param("trailing whitespace ", id="trailing-whitespace"),
+        ],
+    )
+    def test_note_invalid_text_does_not_persist(self, tmp_path: Path, invalid_text: str) -> None:
+        vault_root = _create_vault(tmp_path)
+        _init_world_time(vault_root)
+        _start_session_via_repo(vault_root)
+
+        runner.invoke(app, ["note", invalid_text, "--vault", str(vault_root)])
+
+        audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        audit_svc = AuditService(str(audit_log_path))
+        event_repo = ObsidianSessionEventRepository(vault_root, audit_svc)
+        events = event_repo.list_events("S001")
+        assert len(events) == 0
+
 
 # ── End command tests ──────────────────────────────────────────────────────
 
@@ -574,6 +612,36 @@ class TestRecoveryPreflight:
         after_bytes = audit_path.read_bytes()
         assert after_bytes == corrupt_bytes
         assert after_bytes != before_bytes
+
+    def test_status_blocks_on_partial_audit_tail(self, tmp_path: Path) -> None:
+        vault_root = _create_vault(tmp_path)
+        _init_world_time(vault_root)
+        _start_session_via_repo(vault_root)
+
+        audit_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        content = audit_path.read_text(encoding="utf-8")
+        audit_path.write_text(content.rstrip("\n"), encoding="utf-8")
+
+        result = runner.invoke(app, ["session", "status", "--vault", str(vault_root)])
+
+        assert result.exit_code != 0
+        assert "Обнаружено" in result.stderr
+        assert "audit_partial_tail" in result.stderr
+
+    def test_status_read_only_on_partial_audit_tail(self, tmp_path: Path) -> None:
+        vault_root = _create_vault(tmp_path)
+        _init_world_time(vault_root)
+        _start_session_via_repo(vault_root)
+
+        audit_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        content = audit_path.read_text(encoding="utf-8")
+        audit_path.write_text(content.rstrip("\n"), encoding="utf-8")
+        corrupt_bytes = audit_path.read_bytes()
+
+        runner.invoke(app, ["session", "status", "--vault", str(vault_root)])
+
+        audit_after = audit_path.read_bytes()
+        assert audit_after == corrupt_bytes
 
 
 # ── Helper function unit tests ─────────────────────────────────────────────

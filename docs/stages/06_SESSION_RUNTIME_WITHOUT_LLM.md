@@ -1873,3 +1873,59 @@ No entity resolution, fuzzy lookup, or model inference.
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No CLI commands for session lifecycle.
+
+### S6-C06 — Complete mandatory CLI regression coverage
+
+**Explicit deferrals (S6-C06):**
+
+- S6-06 (CLI orchestration) — DONE (S6-C06 correction applied).
+- S6-07 (Golden-Vault integration) — NOT STARTED.
+- S6-08 (Stage-6 review) — NOT STARTED.
+- Stage 7 (Tool Registry) — NOT STARTED.
+
+**Defect C06-1 — missing invalid-note CLI regression**
+
+The S6-06 test suite did not prove that the CLI delegates note-text
+validation to `SessionRuntimeService.record_note()` and does not persist
+on validation failure.
+
+Added parametrized tests for:
+- `" leading whitespace"` (leading whitespace)
+- `"trailing whitespace "` (trailing whitespace)
+
+Each verifies:
+- `exit_code == 1`
+- `"Ошибка"` in stderr
+- zero events persisted via `ObsidianSessionEventRepository.list_events("S001")`
+
+**Defect C06-2 — missing status recovery-preflight regression**
+
+The S6-06 test suite did not lock the behavior that `dnd session status`
+calls `_recovery_preflight()` before presenting status.
+
+Added tests:
+- `test_status_blocks_on_partial_audit_tail` — audit file without trailing
+  LF causes `exit_code != 0`, stderr contains `"Обнаружено"` and
+  `"audit_partial_tail"`.
+- `test_status_read_only_on_partial_audit_tail` — after blocked status
+  invocation, audit file bytes are identical to the pre-invocation
+  corrupted state (no auto-repair, no mutation).
+
+**Quality gates:**
+- Full pytest: 2815 passed, 94 skipped — 0 failed, 0 errors
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 232 files already formatted
+- `uv run dnd --help`, `uv run dnd session --help`, `uv run dnd note --help` — OK
+- `git diff --check` — No whitespace errors
+- Boundary order A (contract → entrypoint → session): 106 passed
+- Boundary order B (entrypoint → session → contract): 106 passed
+- SessionRuntime: 45 passed
+- Session restart integration: 7 passed
+- Session recovery: 125 passed, 1 skipped
+- Maintainability: 216 passed — no new production/test exception, no correction-history filename
+
+**No production changes.**
+Only file changed: `tests/unit/test_cli_session.py` (+68 lines, 707 physical lines final).
+
+**Correction commit:** (reported in Final Report)
+**Commit message:** `test: complete session CLI regressions (S6-C06)`
