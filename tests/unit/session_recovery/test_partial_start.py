@@ -410,6 +410,54 @@ class TestPartialCleanupBlockedByMissingLfAudit:
         assert not any(r.operation == "session.recovery.partial_start" for r in records)
 
 
+class TestPartialBlockedByMissingLfExactBytes:
+    """Exact byte and directory-state invariants for missing-LF refusal."""
+
+    def test_audit_exact_bytes_unchanged_on_refusal(self, vault_root: Path, audit_svc) -> None:
+        _setup_partial_start(vault_root, audit_svc)
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        audit_before = audit_svc.log_path.read_bytes()
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        events_before = ev.read_bytes()
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError, match="repair_audit_tail"):
+            repo.cleanup_partial_start("S006", audit=make_audit_context())
+        assert audit_svc.log_path.read_bytes() == audit_before
+        assert ev.read_bytes() == events_before
+
+    def test_session_directory_state_unchanged_on_refusal(
+        self, vault_root: Path, audit_svc
+    ) -> None:
+        _setup_partial_start(vault_root, audit_svc)
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        session_dir = vault_root / "Sessions" / "S006"
+        raw_dir = vault_root / "_system" / "raw" / "sessions" / "S006"
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError, match="repair_audit_tail"):
+            repo.cleanup_partial_start("S006", audit=make_audit_context())
+        assert session_dir.is_dir()
+        assert raw_dir.is_dir()
+        assert list(session_dir.iterdir()) == []
+        assert list(raw_dir.iterdir()) == [raw_dir / "events.jsonl"]
+
+    def test_zero_partial_start_recovery_intent_exact(self, vault_root: Path, audit_svc) -> None:
+        _setup_partial_start(vault_root, audit_svc)
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        before_count = len(audit_svc.read_all())
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError):
+            repo.cleanup_partial_start("S006", audit=make_audit_context())
+        records = audit_svc.read_all()
+        assert len(records) == before_count
+        assert not any(r.operation == "session.recovery.partial_start" for r in records)
+
+
 class TestRepairAuditFirstWorkflowC05F:
     """Prove that repair_audit_tail -> normal recovery works."""
 

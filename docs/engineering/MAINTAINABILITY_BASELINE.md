@@ -20,15 +20,15 @@ legacy exceptions enforced by `tests/contract/test_maintainability.py`.
 into a package with the following modules:
 
 | Module | Lines (MNT-02) | Lines (MNT-C02) | Responsibility |
-|---|---|---|---|
+|---|---|---|---|---|
 | `session_recovery/types.py` | 218 | 218 | Recovery DTOs (RecoveryIssue, SessionRecoveryReport, RecoveryActionResult) |
-| `session_recovery/support.py` | 217 | 216 | Shared recovery primitives (hash, audit, snapshot) |
-| `session_recovery/audit_tail.py` | 272 | 378 | Audit inspection and self-targeting repair |
-| `session_recovery/partial_start.py` | 373 | 374 | Partial-start ownership verification and cleanup |
-| `session_recovery/event_tail.py` | 499 | 501 | Event-tail validation and repair |
+| `session_recovery/support.py` | 216 | 216 | Shared recovery primitives (hash, audit, snapshot) |
+| `session_recovery/audit_tail.py` | 378 | 378 | Audit inspection and self-targeting repair |
+| `session_recovery/partial_start.py` | 374 | 374 | Partial-start ownership verification and cleanup |
+| `session_recovery/event_tail.py` | 500 | 501 | Event-tail validation and repair |
 | `session_recovery/inspection.py` | 322 | 322 | Read-only session runtime inspection |
 | `session_recovery/repository.py` | 177 | 177 | ObsidianSessionRecoveryRepository orchestration facade |
-| `session_recovery/__init__.py` | 40 | 31 | Public package facade |
+| `session_recovery/__init__.py` | 39 | 46 | Public package facade |
 
 All new production modules satisfy the <= 700 line hard limit.
 No new production legacy exceptions were added.
@@ -42,16 +42,16 @@ Old files removed:
 - `tests/unit/test_session_recovery_c05.py` — 915 lines (26 tests)
 - `tests/unit/test_session_recovery_c05f.py` — 740 lines (26 tests)
 
-New topical test files (MNT-C02 final):
+New topical test files (MNT-C02F final):
 
 | Module | Lines | Responsibility |
 |---|---|---|
 | `session_recovery/conftest.py` | 179 | Shared fixtures and helpers |
 | `session_recovery/test_types.py` | 125 | Recovery DTO value/equality/hash |
-| `session_recovery/test_audit_tail.py` | 353 | Audit inspection, repair, UTF-8, CRLF, I/O errors |
+| `session_recovery/test_audit_tail.py` | 352 | Audit inspection, repair, UTF-8, CRLF, I/O errors |
 | `session_recovery/test_inspection.py` | 367 | Read-only inspection, partial start, events, metadata |
-| `session_recovery/test_partial_start.py` | 477 | Partial cleanup, ownership, races, blocked-by-LF, repair-audit-first |
-| `session_recovery/test_event_tail.py` | 434 | Event repair, metadata prereq, audit prereq, I/O errors, missing-LF refusal, invalid UTF-8 metadata |
+| `session_recovery/test_partial_start.py` | 527 | Partial cleanup, ownership, races, blocked-by-LF, repair-audit-first, exact-byte invariants |
+| `session_recovery/test_event_tail.py` | 863 | Event repair, metadata prereq, audit prereq, I/O errors, missing-LF refusal, invalid UTF-8 metadata, phase-specific races |
 | `contract/test_session_recovery_facade.py` | 117 | Facade import and signature contract tests |
 
 All new test modules satisfy the <= 1000 line hard limit.

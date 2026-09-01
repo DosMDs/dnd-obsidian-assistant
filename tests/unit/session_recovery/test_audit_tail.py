@@ -12,7 +12,6 @@ Covers:
 
 from __future__ import annotations
 
-import os as _os
 from pathlib import Path
 
 import pytest
@@ -211,7 +210,7 @@ class TestLowLevelErrorTranslationC05:
         def failing_open(path, flags, *args):
             raise OSError("simulated open failure")
 
-        monkeypatch.setattr(_os, "open", failing_open)
+        monkeypatch.setattr(_audit_tail_mod.os, "open", failing_open)
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
         with pytest.raises(StorageError):
             repo.repair_audit_tail(audit=make_audit_context())
@@ -225,7 +224,7 @@ class TestLowLevelErrorTranslationC05:
         def short_write(fd, data):
             return 0
 
-        monkeypatch.setattr(_os, "write", short_write)
+        monkeypatch.setattr(_audit_tail_mod.os, "write", short_write)
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
         with pytest.raises(StorageError, match="Short write"):
             repo.repair_audit_tail(audit=make_audit_context())
@@ -239,7 +238,7 @@ class TestLowLevelErrorTranslationC05:
         def failing_fsync(fd):
             raise OSError("simulated fsync failure")
 
-        monkeypatch.setattr(_os, "fsync", failing_fsync)
+        monkeypatch.setattr(_audit_tail_mod.os, "fsync", failing_fsync)
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
         with pytest.raises(StorageError):
             repo.repair_audit_tail(audit=make_audit_context())
