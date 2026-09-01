@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-08-31
+**Last updated:** 2026-09-01
 **Current milestone:** `v0.1-dev — Vault Core`
 **Roadmap position:** Stage 6 in progress
 **Active stage:** Stage 6 — Session Runtime without LLM
@@ -73,7 +73,7 @@ Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/sta
 | S6-02 — Raw session metadata persistence + ID allocation + start/status lifecycle | DONE |
 | S6-03 — Append-only raw note/event JSONL logging | DONE |
 | S6-04 — Session end/close immutability + touched IDs + processing pending | DONE |
-| S6-05 — Restart/recovery + corrupt-state/failure-path integrity | NOT STARTED |
+| S6-05 — Restart/recovery + corrupt-state/failure-path integrity | DONE |
 | S6-06 — Thin CLI orchestration: session start/status/end + note | NOT STARTED |
 | S6-07 — Golden-Vault temp-copy integration + cross-platform/failure hardening | NOT STARTED |
 | S6-08 — Full Stage-6 historical review / verification / status completion | NOT STARTED |

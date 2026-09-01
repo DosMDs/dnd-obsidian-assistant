@@ -39,6 +39,10 @@ if TYPE_CHECKING:
     from dnd_assistant.storage.patch import EntityPatch
     from dnd_assistant.storage.session_events import RawSessionEvent
     from dnd_assistant.storage.session_metadata import RawSessionMetadata
+    from dnd_assistant.storage.session_recovery import (
+        RecoveryActionResult,
+        SessionRecoveryReport,
+    )
 
 
 # ── Entity directory mapping ───────────────────────────────────────────────
@@ -602,5 +606,136 @@ class SessionEventRepository(Protocol):
                 I/O error occurred.
             ConflictError: The events file changed between intent and
                 append.
+        """
+        ...
+
+
+@runtime_checkable
+class SessionRecoveryRepository(Protocol):
+    """Protocol for session runtime recovery operations.
+
+    ``SessionRecoveryRepository`` owns read-only inspection and explicit
+    recovery operations for failure states left by partial session starts,
+    corrupt event tails, and corrupt audit tails.
+
+    This is a separate persistence aggregate from ``SessionMetadataRepository``,
+    ``SessionEventRepository``, and ``WorldTimeRepository`` — recovery
+    operations are exceptional mutation paths, not normal session lifecycle.
+
+    All mutations require explicit ``AuditContext``.
+    """
+
+    def inspect_runtime(self) -> SessionRecoveryReport:
+        """Read-only inspection of current Vault runtime state.
+
+        Scans canonical session runtime roots and produces a deterministic
+        ``SessionRecoveryReport`` with all discovered issues.  This method
+        must NOT write, truncate, delete, or modify any filesystem state.
+
+        Returns:
+            A ``SessionRecoveryReport`` with ordered issues.
+
+        Raises:
+            StorageError: A canonical runtime root is unsafe (symlink,
+                missing, or outside Vault).
+        """
+        ...
+
+    def repair_audit_tail(
+        self,
+        *,
+        audit: AuditContext,
+    ) -> RecoveryActionResult:
+        """Repair a provably partial final audit-log tail.
+
+        Recovery is allowed only when all complete LF-terminated prefix
+        records are valid and corruption is isolated to the final
+        unterminated tail.  Uses information-preserving repair:
+        - valid record missing LF: append exactly one LF
+        - invalid incomplete tail: truncate exactly the invalid fragment
+
+        This is an exceptional self-targeting recovery path.  The audit
+        log cannot write a durable intent into itself while corrupt, so
+        the normal two-phase audit is replaced by:
+        repair → verify → append recovery marker.
+
+        Args:
+            audit: Audit context for the recovery marker.  ``operation``
+                should be ``"audit.recovery.tail"``.
+
+        Returns:
+            A ``RecoveryActionResult`` with before/after hashes.
+
+        Raises:
+            ConflictError: The audit log changed between inspection and
+                repair.
+            StorageError: The corruption is not limited to the final tail,
+                or the repair itself failed.
+        """
+        ...
+
+    def cleanup_partial_start(
+        self,
+        session_id: str,
+        *,
+        audit: AuditContext,
+    ) -> RecoveryActionResult:
+        """Clean up a provably owned partial session start.
+
+        A partial start is recoverable when:
+        - metadata.json is absent
+        - at least one candidate session artifact exists
+        - one unmatched ``session.start`` audit intent exists for that
+          session with no corresponding ``committed`` record
+        - all existing candidate artifacts are structurally safe (empty
+          directories, zero-byte events.jsonl)
+
+        Only exact known-empty artifacts are removed.  No recursive
+        deletion.  No unexpected content is removed.
+
+        Args:
+            session_id: The session identifier to clean up.
+            audit: Audit context for this recovery operation.
+
+        Returns:
+            A ``RecoveryActionResult`` with before/after composite
+            snapshot hashes.
+
+        Raises:
+            ConflictError: The partial-start state changed between
+                inspection and cleanup.
+            StorageError: The state is not safely recoverable, or a
+                filesystem operation failed.
+        """
+        ...
+
+    def repair_event_tail(
+        self,
+        session_id: str,
+        *,
+        audit: AuditContext,
+    ) -> RecoveryActionResult:
+        """Repair a provably partial final event-log tail.
+
+        Recovery is allowed only when all complete LF-terminated prefix
+        events are valid and corruption is isolated to the final
+        unterminated tail.  Uses information-preserving repair:
+        - valid event missing LF: append exactly one LF
+        - invalid incomplete tail: truncate exactly the invalid fragment
+
+        Complete earlier events are never modified.
+
+        Args:
+            session_id: The session identifier.
+            audit: Audit context for this recovery operation.
+
+        Returns:
+            A ``RecoveryActionResult`` with before/after hashes.
+
+        Raises:
+            ConflictError: The events file changed between inspection and
+                repair.
+            StorageError: The corruption is not limited to the final tail,
+                or the repair itself failed.
         """
         ...

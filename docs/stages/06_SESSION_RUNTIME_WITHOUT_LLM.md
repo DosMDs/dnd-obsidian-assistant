@@ -1155,7 +1155,161 @@ This was inaccurate.  The correct semantics are:
 - No recovery/truncation/repair logic.
 - No CLI commands for session lifecycle.
 
-### S6-C04 — Session-close validation / TOCTOU / failure-coverage hardening
+### S6-05 — Restart/recovery + corrupt-state/failure-path integrity
+
+**Scope implemented:**
+
+1. `src/dnd_assistant/storage/types.py` — `SessionRecoveryRepository` protocol
+   with `inspect_runtime()`, `repair_audit_tail()`, `cleanup_partial_start()`,
+   and `repair_event_tail()`.
+
+2. `src/dnd_assistant/storage/session_recovery.py` — new module defining:
+   - `RecoveryIssue` — typed issue with code, session_id, operation_id,
+     recoverable flag, and detail string.
+   - `SessionRecoveryReport` — ordered collection of issues, sorted by
+     (code, session_id, operation_id).
+   - `RecoveryActionResult` — result of a recovery operation with
+     before/after hashes.
+   - `_content_hash()` — SHA-256 of UTF-8 content.
+   - `_build_partial_start_snapshot()` — deterministic composite hash of
+     partial-start artifacts (session dir, raw dir, events.jsonl).
+   - `ObsidianSessionRecoveryRepository` — concrete filesystem-backed
+     implementation with:
+     - **inspect_runtime()**: read-only inspection of audit log, session
+       directories, events files, and metadata. Detects: audit_partial_tail,
+       audit_corrupt, partial_start, event_partial_tail, event_corrupt,
+       metadata_corrupt, multiple_active_sessions, unresolved_audit_intent,
+       unsafe_session_path.
+     - **repair_audit_tail()**: self-targeting recovery for final audit tail.
+       No intent phase (audit cannot write intent into corrupt self).
+       Repair modes: append_missing_newline, truncate_invalid_tail.
+       Recovery marker appended after verified repair.
+     - **cleanup_partial_start()**: two-phase audit (intent → committed)
+       cleanup of provably owned partial session starts. Requires unmatched
+       session.start intent, safe empty artifacts only. No recursive deletion.
+     - **repair_event_tail()**: two-phase audit repair of final event-log
+       tail. Valid missing-LF record preserved via append. Invalid incomplete
+       tail truncated. Complete earlier events unchanged.
+
+3. `src/dnd_assistant/application/session_recovery.py` — `SessionRecoveryService`
+   composing `SessionRecoveryRepository`. No filesystem calls. No model/tool
+   imports.
+
+4. `src/dnd_assistant/storage/__init__.py` — added `ObsidianSessionRecoveryRepository`,
+   `RecoveryActionResult`, `RecoveryIssue`, `SessionRecoveryReport`,
+   `SessionRecoveryRepository` exports.
+
+5. `src/dnd_assistant/application/__init__.py` — added `SessionRecoveryService`
+   export.
+
+6. `tests/unit/test_session_recovery.py` — 29 tests covering:
+   - `RecoveryIssue`, `SessionRecoveryReport`, `RecoveryActionResult` value
+     semantics (construct, defaults, equality, hash, repr).
+   - Inspection read-only: no file creation, clean active/completed session.
+   - Partial start detection: with intent (recoverable), without intent
+     (not recoverable), unexpected file (not recoverable), non-empty events
+     (not recoverable).
+   - Event tail detection: missing LF (recoverable), incomplete tail
+     (recoverable), middle-line corrupt (not recoverable), duplicate IDs
+     (not recoverable).
+   - Metadata corruption detection.
+   - Multiple active sessions detection.
+   - Unresolved audit intent diagnostics.
+   - Audit tail detection: missing LF (parseable — no issue), incomplete
+     tail (recoverable), middle-line corrupt (not recoverable).
+
+7. `tests/unit/test_session_recovery_failures.py` — 22 tests covering:
+   - `cleanup_partial_start`: safe cleanup succeeds, only known-empty
+     artifacts removed, other sessions untouched.
+   - `cleanup_partial_start` failures: unexpected file, non-empty events,
+     missing intent all raise StorageError.
+   - `cleanup_partial_start` audit: intent+committed records, exact
+     before/after composite hash, intent failure → zero cleanup.
+   - `repair_event_tail`: missing-LF append, invalid tail truncation,
+     clean log raises StorageError, middle-line corrupt raises StorageError.
+   - `repair_event_tail` audit: intent+committed, exact hashes, intent
+     failure → bytes unchanged.
+   - `repair_audit_tail`: missing-LF append, invalid tail truncation,
+     middle-line corrupt raises StorageError.
+   - `repair_audit_tail` marker: correct semantics (operation, phase,
+     session/entity_id None, before/after hashes), race → ConflictError,
+     marker append failure → repaired audit remains.
+
+8. `tests/integration/test_session_restart.py` — 7 tests covering:
+   - Start → notes/events → destroy → reconstruct → status works.
+   - Event ID continuity after reconstruction (evt_001 → evt_002 → evt_003).
+   - World time read from persisted world_time.json after reconstruction.
+   - Active session can be ended after reconstruction.
+   - Completed session survives reconstruction (twice).
+   - Closed events readable after reconstruction.
+   - Append to completed session still rejected after reconstruction.
+
+**Contract decisions:**
+
+- Recovery is **explicit**, never constructor-side magic. Normal repository
+  reads continue to fail loudly on corruption.
+- `inspect_runtime()` is read-only — no writes, truncations, or deletions.
+- `SessionRecoveryRepository` is a separate persistence aggregate from
+  `SessionMetadataRepository`, `SessionEventRepository`, and
+  `WorldTimeRepository`.
+- Partial-start cleanup requires unmatched `session.start` intent + safe
+  empty artifacts. No audit ownership → no auto-recovery.
+- No recursive deletion (`shutil.rmtree`). Only exact known-empty artifacts
+  are removed.
+- Event-tail recovery touches only the final unterminated tail. Complete
+  earlier events are never modified.
+- Audit-tail recovery is a self-targeting exception: no intent phase
+  (audit cannot write intent into corrupt self). Recovery marker appended
+  after verified repair.
+- No synthesized historical committed records. Unmatched intents are
+  reported as diagnostics, not repaired.
+- Multiple active sessions are reported but not auto-resolved.
+- Corrupt metadata is reported but not reconstructed.
+- Restart uses persisted Vault state only — no authoritative in-memory
+  session registry. Event IDs allocated from persisted log.
+- World time read from persisted `world_time.json` after restart.
+- No lock manager — exact hashes + path reauthorization + optimistic race
+  detection.
+- No recovery of derived files (Session.md, Notes.md, Summary.md, etc.).
+- No `conversation.jsonl`.
+- No Golden Vault fixture modification.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_recovery.py` — 29 passed
+- `uv run pytest tests/unit/test_session_recovery_failures.py` — 22 passed
+- `uv run pytest tests/integration/test_session_restart.py` — 7 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 45 passed
+- `uv run pytest tests/unit/test_session_events.py` — 65 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03.py` — 41 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03f.py` — 9 passed
+- `uv run pytest tests/unit/test_session_close.py` — 37 passed, 3 skipped
+- `uv run pytest tests/unit/test_session_close_failures.py` — 30 passed, 1 skipped
+- `uv run pytest tests/unit/test_session_event_lifecycle.py` — 4 passed
+- `uv run pytest tests/unit/test_audit_protocol.py` — 6 passed
+- Boundary order A (boundaries first) — 351 passed, 13 skipped
+- Boundary order B (boundaries last) — 351 passed, 13 skipped
+- Broader Stage-6 gate — 651 passed, 37 skipped
+- `uv run pytest` (full suite) — **2462 passed, 93 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 214 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — No whitespace errors
+
+**Starting SHA:** `16e049c0d5b358e7467ec749fb18e3adcde82aad`
+**Implementation commit:** (reported in Final Report)
+**Commit message:** `feat: add session runtime recovery (S6-05)`
+
+**Explicit deferrals:**
+
+- S6-06 (CLI orchestration) is NOT started.
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
+- No CLI commands for session lifecycle.
 
 **Review base:**
 `46a9909967cbfe282c1d05e3d0a3957299d1c19a`
