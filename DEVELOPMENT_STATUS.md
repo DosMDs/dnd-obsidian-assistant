@@ -80,6 +80,13 @@ Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/sta
 
 Details: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md)
 
+## Maintenance gate before S6-06
+
+| Task | Status |
+|---|---|
+| MNT-01 — Maintainability rules + baseline + ratchet | DONE |
+| MNT-02 — Behavior-preserving Stage-6 hotspot decomposition | NOT STARTED |
+
 ## Current blockers
 
 None known.

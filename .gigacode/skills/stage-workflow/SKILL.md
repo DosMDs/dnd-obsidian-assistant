@@ -67,6 +67,18 @@ Record unresolved risk/blockers explicitly.
 5. Write detailed final review/completion record into the stage document.
 6. Do not start the next stage automatically.
 
+## Git finalization (self-SHA rule)
+
+Before task commit:
+
+- finish all status/stage-doc updates;
+- use `(reported in Final Report)` for the current commit SHA.
+
+After task commit:
+
+- no repository mutation for self-reporting;
+- report SHA externally in Final Report.
+
 ## Advance a stage
 
 Only after explicit user direction or an already-established project policy

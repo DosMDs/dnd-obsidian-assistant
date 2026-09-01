@@ -28,6 +28,57 @@ mode: AGENT
 
 Если обычный push отклонён, остановись и сообщи причину.
 
+## Single-task-commit finalization invariant
+
+Для обычной задачи (implementation / correction / maintenance):
+
+```text
+все изменения исходников
+все тесты
+все обновления DEVELOPMENT_STATUS.md
+все изменения stage-документации
+все ADR / документация, требуемые задачей
+
+ДОЛЖНЫ быть подготовлены ДО intended task commit
+```
+
+Затем:
+
+```text
+quality gates
+→ финальный diff
+→ один логичный commit
+→ push
+→ проверка HEAD == upstream
+→ ОСТАНОВКА репозиторных мутаций
+```
+
+После task commit **запрещено**:
+
+- редактировать docs для вставки только что созданного SHA;
+- делать amend только для добавления self-SHA;
+- создавать второй docs-only self-SHA commit;
+- создавать второй status-only commit;
+- изменять Final Report evidence внутри репозитория.
+
+Полученный commit SHA принадлежит:
+
+```text
+Final Report
+```
+
+не тому же самому commit.
+
+Репозиторная документация должна использовать:
+
+```text
+(reported in Final Report)
+```
+
+или опускать текущий task SHA.
+
+Исторические SHA из более ранних commit'ов документируются обычным образом.
+
 Для commit message используй Conventional Commits, например:
 
 - feat: implement session domain schema

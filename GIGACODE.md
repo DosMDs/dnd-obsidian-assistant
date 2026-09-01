@@ -257,6 +257,42 @@ Before considering a task complete:
 5. Review the diff for boundary violations, accidental generated files, secrets and unrelated edits.
 6. State what was changed, tests executed and any remaining risk.
 
+## Repository maintainability
+
+### Cohesion before file size
+
+A module should represent one coherent responsibility. File size is a
+diagnostic signal, not architecture by itself.
+
+See:
+- `.gigacode/rules/15-module-decomposition.md` — production module policy.
+- `.gigacode/rules/35-test-decomposition.md` — test decomposition policy.
+
+### Soft decomposition thresholds
+
+- Production: ~500 lines triggers review.
+- Test: ~700 lines triggers review.
+
+### Hard-limit ratchet
+
+- New production modules: 700 physical lines max.
+- New test modules: 1000 physical lines max.
+
+Existing oversized files are recorded as legacy exceptions and may not
+silently grow.
+
+### Topic-oriented tests
+
+Tests are organised by stable behaviour / capability, not by ticket number
+or correction history.
+
+New correction-number test filenames (e.g. `_c06`, `_fix2`) are prohibited.
+
+### Stable facade during decomposition
+
+When a large module is split into a package, public contracts should be
+preserved through `__init__.py` re-exports where practical.
+
 ## Safety for agent actions
 
 Never perform automatically:
@@ -312,5 +348,20 @@ uv run dnd --help
 Если push не удался из-за authentication, conflicts, branch protection или remote changes — остановиться и сообщить пользователю, не обходить защиту автоматически.
 
 Commit должен содержать только изменения текущей задачи.
+
+### Single-task-commit finalization
+
+Все docs/status edits должны быть завершены до task commit.
+
+После task commit запрещено:
+- редактировать docs для вставки только что созданного SHA;
+- делать amend для добавления self-SHA;
+- создавать второй docs-only или status-only commit.
+
+Полученный commit SHA указывается только в Final Report, не в том же
+commit.
+
+Репозиторная документация использует `(reported in Final Report)` или
+опускает текущий task SHA.
 
 Prefer these commands over platform-specific wrappers.

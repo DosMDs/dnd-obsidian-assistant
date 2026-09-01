@@ -12,3 +12,4 @@ mode: ALL
 - File tests must use temporary directories and real filesystem operations where storage semantics matter.
 - Every bug fix should add a regression test when practical.
 - Before completion run targeted tests, then `uv run pytest`, `uv run ruff check .`, and `uv run ruff format --check .` when feasible.
+- Organise tests by stable behaviour/capability, not development history. See `.gigacode/rules/35-test-decomposition.md` for the detailed test decomposition policy.
