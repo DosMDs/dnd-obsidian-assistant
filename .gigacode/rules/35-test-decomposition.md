@@ -43,6 +43,9 @@ Correction IDs belong in:
 Historical correction-specific files already in the repository are temporary
 legacy debt and may remain until explicitly migrated.
 
+Legacy correction exceptions are path-specific: a file with the same basename
+at a different path does not inherit the exception.
+
 From MNT-01 onward:
 
 - do **not** create new correction-number test files.

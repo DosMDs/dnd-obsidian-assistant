@@ -75,6 +75,17 @@ cli / tools / models  (as appropriate)
 
 Follow existing architectural boundaries defined in `GIGACODE.md`.
 
+## Avoid micro-file architecture
+
+Decomposition follows meaningful responsibility boundaries.
+
+Do not create one-function-per-file structure merely to satisfy line-count
+thresholds. Closely coupled helpers that implement one cohesive algorithm
+may stay together. A new module should represent a meaningful responsibility
+worth naming. Reducing line count alone is not a valid extraction rationale.
+
+**Cohesion is primary. Line count is only a diagnostic signal.**
+
 ## Size thresholds
 
 These are **diagnostic signals**, not architectural targets.

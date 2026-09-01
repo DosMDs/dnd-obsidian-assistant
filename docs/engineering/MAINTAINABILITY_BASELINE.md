@@ -125,12 +125,15 @@ They may remain until explicitly migrated in MNT-02+.
 5. `tests/unit/test_storage_patch_repository.py` — 1103 lines
 6. `tests/unit/test_storage_vault_repository.py` — 1102 lines
 
-### Legacy correction-test filename allowlist
+### Legacy correction-test path allowlist
 
-1. `test_session_events_c03.py`
-2. `test_session_events_c03f.py`
-3. `test_session_recovery_c05.py`
-4. `test_session_recovery_c05f.py`
+These exact paths (relative to `tests/`) are grandfathered. A file with the
+same basename at a different path does NOT inherit the exception.
+
+1. `unit/test_session_events_c03.py`
+2. `unit/test_session_events_c03f.py`
+3. `unit/test_session_recovery_c05.py`
+4. `unit/test_session_recovery_c05f.py`
 
 ---
 

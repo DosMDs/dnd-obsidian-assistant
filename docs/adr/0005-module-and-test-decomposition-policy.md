@@ -19,13 +19,13 @@ Large cohesive code is not automatically bad, but very large files increase:
 
 Specific hotspots include:
 
-- `storage/session_recovery.py` — 1652 lines, multiple distinct workflows;
-- `storage/session_metadata.py` — 939 lines, mixed responsibilities;
-- `storage/session_events.py` — 873 lines, event logging + repair;
-- `storage/vault_repository.py` — 1108 lines, general Vault operations;
-- `domain/calendar.py` — 1047 lines, parsing + arithmetic + queries;
-- `storage/world_time.py` — 659 lines, persistence + serialization;
-- `storage/types.py` — 581 lines, multiple DTO families.
+- `storage/session_recovery.py` — 1947 lines, multiple distinct workflows;
+- `storage/session_metadata.py` — 1138 lines, mixed responsibilities;
+- `storage/session_events.py` — 1096 lines, event logging + repair;
+- `storage/vault_repository.py` — 1379 lines, general Vault operations;
+- `domain/calendar.py` — 1295 lines, parsing + arithmetic + queries;
+- `storage/world_time.py` — 834 lines, persistence + serialization;
+- `storage/types.py` — 741 lines, multiple DTO families.
 
 Test files have similar growth patterns, with several exceeding 1000 lines
 and correction-specific test files accumulating over time.
