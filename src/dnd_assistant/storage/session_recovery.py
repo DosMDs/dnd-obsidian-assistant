@@ -302,6 +302,63 @@ def _read_audit_log(audit_service: AuditService) -> tuple[list[AuditRecord], str
     return records, text
 
 
+def _require_clean_audit_log(audit_service: AuditService) -> list[AuditRecord]:
+    """Read and validate the audit log, requiring physical JSONL append safety.
+
+    Contract:
+    - Missing audit file → return [] (empty valid state).
+    - Empty audit file (``b""``) → return [].
+    - Non-empty audit file MUST end with ``b"\\n"``, otherwise ``StorageError``.
+    - All complete bytes are parsed and validated strictly.
+    - Invalid UTF-8, blank lines, malformed JSON, non-object JSON, and invalid
+      ``AuditRecord`` all raise ``StorageError``.
+
+    This is a read-only check — no temporary files, no repair, no appended
+    records, no filesystem mutation.
+
+    Returns:
+        All valid ``AuditRecord`` values in physical order.
+
+    Raises:
+        StorageError: The audit log is missing a final LF (physically partial),
+            contains invalid UTF-8, or has structural corruption.
+    """
+    log_path = audit_service.log_path
+
+    if not log_path.exists():
+        return []
+
+    raw_bytes = _read_exact_bytes(log_path)
+
+    if not raw_bytes:
+        return []
+
+    # UTF-8 check — must not leak UnicodeDecodeError
+    try:
+        raw_bytes.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise StorageError(
+            "Audit log contains invalid UTF-8 — repair audit tail first",
+            cause=exc,
+        ) from exc
+
+    # Non-empty audit MUST end with physical LF
+    if not raw_bytes.endswith(b"\n"):
+        raise StorageError(
+            "Audit log has a valid final record missing trailing newline — "
+            "repair_audit_tail() must be performed before recovery"
+        )
+
+    # Parse and validate all complete bytes strictly
+    try:
+        return audit_service.read_all()
+    except (StorageError, UnicodeDecodeError) as exc:
+        raise StorageError(
+            "Audit log has structural corruption in a completed record",
+            cause=exc,
+        ) from exc
+
+
 # ── Composite snapshot for partial-start state ─────────────────────────────────
 
 
@@ -795,11 +852,14 @@ class ObsidianSessionRecoveryRepository:
         )
 
         # Verify audit ownership — exactly one unmatched operation
+        # Requires physically clean audit (no missing final LF)
         try:
-            records, _ = _read_audit_log(self._audit_service)
+            records = _require_clean_audit_log(self._audit_service)
         except StorageError as exc:
             raise StorageError(
-                f"Cannot verify audit ownership for session {session_id}: audit log is corrupt",
+                f"Cannot verify audit ownership for session {session_id}: "
+                f"audit log is corrupt or physically partial — "
+                f"repair_audit_tail() must be performed first",
                 cause=exc,
             ) from exc
 
@@ -859,8 +919,9 @@ class ObsidianSessionRecoveryRepository:
             )
 
         # Revalidate ownership — recovery intent must not confuse the check
+        # The newly appended intent ends with LF and should be physically clean
         try:
-            records2, _ = _read_audit_log(self._audit_service)
+            records2 = _require_clean_audit_log(self._audit_service)
         except StorageError as exc:
             raise StorageError(
                 f"Cannot revalidate audit ownership for session {session_id}",
@@ -1053,7 +1114,13 @@ class ObsidianSessionRecoveryRepository:
             raise StorageError(f"metadata.json for {session_id} is a directory")
 
         meta_bytes = _read_exact_bytes(metadata_path)
-        meta_text = meta_bytes.decode("utf-8")
+        try:
+            meta_text = meta_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise StorageError(
+                f"metadata.json for {session_id} contains invalid UTF-8",
+                cause=exc,
+            ) from exc
         meta = _deserialize_metadata(meta_text, expected_id=session_id)
 
         if meta.session.status not in ("active", "completed"):
@@ -1109,12 +1176,18 @@ class ObsidianSessionRecoveryRepository:
             session_id, paths
         )
 
-        # Require clean audit log first
+        # Require physically clean audit log first
+        # _require_clean_audit_log checks both structural validity AND
+        # physical final-LF append safety.  A logically parseable record
+        # without trailing LF is rejected — repair_audit_tail() must be
+        # performed before event recovery.
         try:
-            self._audit_service.read_all()
-        except (StorageError, UnicodeDecodeError) as exc:
+            _require_clean_audit_log(self._audit_service)
+        except StorageError as exc:
             raise StorageError(
-                f"Audit log is corrupt — repair audit tail before repairing events for {session_id}",
+                f"Audit log is corrupt or physically partial — "
+                f"repair_audit_tail() must be performed before "
+                f"repairing events for {session_id}",
                 cause=exc,
             ) from exc
 
@@ -1190,7 +1263,13 @@ class ObsidianSessionRecoveryRepository:
                 f"Session metadata for {session_id} changed before event-tail repair intent"
             )
         # Revalidate metadata status
-        meta_current_text = meta_current_bytes.decode("utf-8")
+        try:
+            meta_current_text = meta_current_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise StorageError(
+                f"metadata.json for {session_id} now contains invalid UTF-8",
+                cause=exc,
+            ) from exc
         meta_current = _deserialize_metadata(meta_current_text, expected_id=session_id)
         if meta_current.session.status not in ("active", "completed"):
             raise StorageError(

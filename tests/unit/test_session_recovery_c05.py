@@ -527,7 +527,7 @@ class TestEventTailCleanAuditPrerequisiteC05:
         audit_log.write_bytes(b"\xff\xfe")
 
         repo = _create_recovery_repo(vault_root)
-        with pytest.raises(StorageError, match="repair audit tail"):
+        with pytest.raises(StorageError, match="repair_audit_tail"):
             repo.repair_event_tail("S006", audit=_make_audit_context(session="S006"))
 
 
