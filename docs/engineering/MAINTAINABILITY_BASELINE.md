@@ -20,7 +20,7 @@ legacy exceptions enforced by `tests/contract/test_maintainability.py`.
 into a package with the following modules:
 
 | Module | Lines (MNT-02) | Lines (MNT-C02) | Responsibility |
-|---|---|---|---|---|
+|---|---|---|---|
 | `session_recovery/types.py` | 218 | 218 | Recovery DTOs (RecoveryIssue, SessionRecoveryReport, RecoveryActionResult) |
 | `session_recovery/support.py` | 216 | 216 | Shared recovery primitives (hash, audit, snapshot) |
 | `session_recovery/audit_tail.py` | 378 | 378 | Audit inspection and self-targeting repair |
@@ -65,7 +65,7 @@ No new test legacy exceptions were added.
 ### Behavioral gates
 
 - Pre-refactor recovery test baseline: 117 passed, 1 skipped (historical at `fd91034`)
-- Post-refactor recovery test suite (MNT-C02): 111 passed, 1 skipped
+- Post-refactor recovery test suite (MNT-C02F/MNT-C02FF final): 125 passed, 1 skipped
 - Facade contract test: 11 passed
 - Full pytest: (reported in Final Report)
 - ruff check: (reported in Final Report)
@@ -94,6 +94,7 @@ No new test legacy exceptions were added.
 
 | Path | Lines | Notes |
 |---|---|---|
+| `src/dnd_assistant/storage/session_recovery/event_tail.py` | 501 | Cohesive event-tail recovery |
 | `src/dnd_assistant/retrieval/index.py` | 632 | FTS index logic |
 | `src/dnd_assistant/storage/audit.py` | 337 | OK |
 | `src/dnd_assistant/storage/paths.py` | 287 | OK |
@@ -101,7 +102,7 @@ No new test legacy exceptions were added.
 
 ### All other production files
 
-Under 250 lines — OK.
+All remaining production modules are below the listed soft-review range.
 
 ---
 
@@ -122,6 +123,7 @@ Under 250 lines — OK.
 
 | Path | Lines | Notes |
 |---|---|---|
+| `tests/unit/session_recovery/test_event_tail.py` | 863 | Event-tail recovery tests |
 | `tests/unit/test_world_time_repository.py` | 722 | Watch |
 | `tests/integration/test_vault_repository_path_races.py` | 722 | Watch |
 | `tests/unit/test_calendar_event_queries.py` | 715 | Watch |
@@ -130,7 +132,7 @@ Under 250 lines — OK.
 
 ### All other test files
 
-Under 700 lines — OK.
+All remaining test modules are below the test soft-review threshold.
 
 ---
 
@@ -155,7 +157,7 @@ They may remain until explicitly migrated in MNT-02+.
 | DECOMPOSE (P0) | 2 | `session_metadata.py`, `session_events.py` |
 | DECOMPOSE (P1) | 3 | `vault_repository.py`, `calendar.py`, `world_time.py` |
 | DECOMPOSE (P2) | 1 | `types.py` |
-| OK | 40 | All others (session_recovery decomposed into 8 modules) |
+| OK | 42 | All remaining production modules |
 
 ### Test modules
 
@@ -164,7 +166,7 @@ They may remain until explicitly migrated in MNT-02+.
 | DECOMPOSE (P1) | 1 | `test_session_metadata.py` |
 | DECOMPOSE (P2) | 5 | `test_retrieval_contracts.py`, `test_storage_append_fact.py`, `test_fts_index.py`, `test_storage_patch_repository.py`, `test_storage_vault_repository.py` |
 | WATCH | 6 | Various (700–1000 lines) |
-| OK | 48 | All others |
+| OK | 55 | All remaining test modules |
 
 ---
 

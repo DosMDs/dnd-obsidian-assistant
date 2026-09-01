@@ -473,7 +473,7 @@ class TestEventRecoveryRaces:
 
     # ── A. Metadata changes before recovery intent ──────────────────────────
 
-    def test_metadata_changes_before_intent(self, vault_root: Path, audit_svc) -> None:
+    def test_metadata_changes_before_intent(self, vault_root: Path, audit_svc, monkeypatch) -> None:
         import dnd_assistant.storage.session_recovery.event_tail as _event_tail_mod
 
         start_session(vault_root)
@@ -489,24 +489,21 @@ class TestEventRecoveryRaces:
                 meta.write_bytes(self._mutated_metadata_bytes())
             return original_validate(root)
 
-        monkeypatch = pytest.MonkeyPatch()
         monkeypatch.setattr(
             _event_tail_mod,
             "_validate_session_runtime_roots",
             racing_validate,
         )
-        try:
+        with pytest.raises(
+            _event_tail_mod.ConflictError,
+            match="changed before event-tail repair intent",
+        ):
             _event_tail_mod.repair_event_tail(
                 vault_root,
                 audit_svc,
                 "S006",
                 audit=make_audit_context(session="S006"),
             )
-            pytest.fail("Expected ConflictError but none was raised")
-        except Exception as exc:
-            assert "changed" in str(exc), f"Unexpected exception: {exc}"
-        finally:
-            monkeypatch.undo()
 
     def test_metadata_before_intent_no_intent_appended(
         self, vault_root: Path, audit_svc, monkeypatch
@@ -531,16 +528,16 @@ class TestEventRecoveryRaces:
             "_validate_session_runtime_roots",
             racing_validate,
         )
-        try:
+        with pytest.raises(
+            _event_tail_mod.ConflictError,
+            match="changed before event-tail repair intent",
+        ):
             _event_tail_mod.repair_event_tail(
                 vault_root,
                 audit_svc,
                 "S006",
                 audit=make_audit_context(session="S006"),
             )
-            pytest.fail("Expected ConflictError")
-        except Exception as exc:
-            assert "changed" in str(exc), f"Unexpected exception: {exc}"
         records = audit_svc.read_all()
         assert not any(
             r.operation == "session.recovery.events_tail" and r.phase == "intent" for r in records
@@ -570,16 +567,16 @@ class TestEventRecoveryRaces:
             "_validate_session_runtime_roots",
             racing_validate,
         )
-        try:
+        with pytest.raises(
+            _event_tail_mod.ConflictError,
+            match="changed before event-tail repair intent",
+        ):
             _event_tail_mod.repair_event_tail(
                 vault_root,
                 audit_svc,
                 "S006",
                 audit=make_audit_context(session="S006"),
             )
-            pytest.fail("Expected ConflictError")
-        except Exception as exc:
-            assert "changed" in str(exc), f"Unexpected exception: {exc}"
         assert ev.read_bytes() == events_before
 
     # ── B. Events change after durable intent ───────────────────────────────
@@ -755,16 +752,16 @@ class TestEventRecoveryRaces:
         ):
             mock_read.side_effect = racing_read
             mock_read2.side_effect = racing_read
-            try:
+            with pytest.raises(
+                _event_tail_mod.StorageError,
+                match="changed after event-tail physical repair",
+            ):
                 _event_tail_mod.repair_event_tail(
                     vault_root,
                     audit_svc,
                     "S006",
                     audit=make_audit_context(session="S006"),
                 )
-                pytest.fail("Expected StorageError")
-            except Exception as exc:
-                assert "changed after" in str(exc), f"Unexpected exception: {exc}"
 
     def test_metadata_after_repair_event_repair_persisted(
         self, vault_root: Path, audit_svc
@@ -796,16 +793,16 @@ class TestEventRecoveryRaces:
         ):
             mock_read.side_effect = racing_read
             mock_read2.side_effect = racing_read
-            try:
+            with pytest.raises(
+                _event_tail_mod.StorageError,
+                match="changed after event-tail physical repair",
+            ):
                 _event_tail_mod.repair_event_tail(
                     vault_root,
                     audit_svc,
                     "S006",
                     audit=make_audit_context(session="S006"),
                 )
-                pytest.fail("Expected StorageError")
-            except Exception:
-                pass
         assert ev.read_bytes().endswith(b"\n")
 
     def test_metadata_after_repair_one_intent_no_committed(
@@ -838,16 +835,16 @@ class TestEventRecoveryRaces:
         ):
             mock_read.side_effect = racing_read
             mock_read2.side_effect = racing_read
-            try:
+            with pytest.raises(
+                _event_tail_mod.StorageError,
+                match="changed after event-tail physical repair",
+            ):
                 _event_tail_mod.repair_event_tail(
                     vault_root,
                     audit_svc,
                     "S006",
                     audit=make_audit_context(session="S006"),
                 )
-                pytest.fail("Expected StorageError")
-            except Exception:
-                pass
         records = audit_svc.read_all()
         intents = [
             r
