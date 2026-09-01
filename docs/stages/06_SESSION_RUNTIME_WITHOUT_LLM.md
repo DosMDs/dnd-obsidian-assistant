@@ -49,7 +49,7 @@ existing code and ADRs:
 - [x] `S6-02` Raw session metadata persistence + ID allocation + start/status lifecycle
 - [x] `S6-03` Append-only raw note/event JSONL logging
 - [x] `S6-04` Session end/close immutability + touched IDs + processing pending
-- [ ] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
+- [x] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
 - [ ] `S6-06` Thin CLI orchestration: session start/status/end + note
 - [ ] `S6-07` Golden-Vault temp-copy integration + cross-platform/failure hardening
 - [ ] `S6-08` Full Stage-6 historical review / verification / status completion
@@ -1648,6 +1648,150 @@ This was inaccurate.  The correct semantics are:
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No CLI commands for session lifecycle.
+
+### S6-06 — Thin CLI orchestration: session start/status/end + note
+
+**Starting SHA:** `6723b1678ea447e45a0879719f31a0ac5ff6bf57`
+
+**Scope implemented:**
+
+1. **`src/dnd_assistant/cli/session.py`** — new module defining:
+   - `_now_utc()` / `_new_operation_id()` — testable time/ID helpers.
+   - `_build_audit_context()` — AuditContext factory with `source="cli"`,
+     `model_profile=None`, `prompt_version=None`.
+   - `_compose_runtime()` — wires `AuditService` → `ObsidianSessionMetadataRepository`
+     → `ObsidianSessionEventRepository` → `ObsidianWorldTimeRepository` →
+     `SessionRuntimeService`.
+   - `_compose_recovery()` — wires `AuditService` → `ObsidianSessionRecoveryRepository`
+     → `SessionRecoveryService`.
+   - `_recovery_preflight()` — read-only recovery inspection before every
+     mutating operation. Issues printed in Russian to stderr; exits 1.
+   - `session_app` Typer subgroup with `start`, `status`, `end` commands.
+   - `_note_command()` — root-level command for adding notes.
+
+2. **`src/dnd_assistant/cli/main.py`** — registered `session_app` Typer subgroup
+   and `_note_command` as root command. Existing `index` group preserved.
+
+3. **`tests/unit/test_cli_session.py`** — 46 tests covering:
+   - Help text (7 tests): session subgroup exposes start/status/end, root help
+     exposes note and session, per-command `--vault` and `--touched-id`.
+   - Start (8 tests): success, persists S001, output contains ID, canonical
+     world tick, `source="cli"` audit, existing active → exit 1, missing world
+     time → exit 1, no unintended second session on failure.
+   - Status (4 tests): no active → exit 0 + clear Russian message, active →
+     correct ID/status/tick, reconstructs from Vault.
+   - Note (8 tests): active session succeeds, event type is "note", text
+     preserved exactly (Cyrillic), event_id persisted, world_tick from canonical,
+     without active → exit 1, after completed session → exit 1.
+   - End (10 tests): active session succeeds, world_tick_end shown, revision
+     shown, no active → exit 1, note after end → exit 1, status after end →
+     no active, `--touched-id` repeatable (2 IDs), touched_entities persisted,
+     processing_status="pending".
+   - Audit (4 tests): source="cli", non-empty operation_id with "cli-" prefix,
+     timezone-aware real_time, different operation IDs per invocation.
+   - Recovery preflight (4 tests): corrupt audit (missing final LF) blocks
+     start/note/end, corrupt audit does not mutate audit bytes.
+   - Helper unit tests (3 tests): `_now_utc` returns aware datetime,
+     `_new_operation_id` has prefix, unique across 100 calls.
+   - Import/boundary (3 tests): `cli.session` does not import models, ollama,
+     or tools.
+
+**Command surface:**
+
+```text
+dnd session start --vault PATH
+dnd session status --vault PATH
+dnd note TEXT --vault PATH
+dnd session end --vault PATH [--touched-id ID ...]
+```
+
+**Runtime composition design:**
+
+```text
+AuditService
+ObsidianSessionMetadataRepository
+ObsidianSessionEventRepository
+ObsidianWorldTimeRepository
+        ↓
+SessionRuntimeService
+```
+
+**Recovery preflight:**
+
+- Read-only `SessionRecoveryService.inspect_runtime()` called before every
+  mutating operation.
+- If issues found: Russian message printed to stderr, exit code 1.
+- No auto-repair. No recovery writes.
+- Read-only: no filesystem mutation during preflight.
+
+**AuditContext generation:**
+
+```text
+source = "cli"
+operation_id = f"cli-{prefix}-{uuid4().hex}"
+real_time = datetime.now(UTC)
+model_profile = None
+prompt_version = None
+```
+
+**Error/exit-code policy:**
+
+- `DndAssistantError` → Russian message on stderr, exit code 1.
+- No active session on status → exit 0 with clear message.
+- Typer input errors → native non-zero usage exit.
+
+**Confirmation — no direct session filesystem writes in CLI:**
+All lifecycle operations delegate to `SessionRuntimeService`. CLI does not
+parse/write JSON, open events.jsonl, append audit lines, allocate IDs,
+calculate world ticks, or change revisions.
+
+**Confirmation — no world-tick calculation in CLI:**
+World ticks come from `ObsidianWorldTimeRepository.get_current_world_time()`.
+
+**Confirmation — no ID allocation in CLI:**
+Session IDs come from `ObsidianSessionMetadataRepository.allocate_next_session_id()`.
+Event IDs come from `ObsidianSessionEventRepository.append_event()`.
+
+**Confirmation — no EntityResolver/model/tool usage:**
+`--touched-id` passes raw strings to `SessionRuntimeService.end_session()`.
+No entity resolution, fuzzy lookup, or model inference.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_cli_session.py` — 46 passed
+- Boundary order A (boundaries first) — 100 passed
+- Boundary order B (boundaries last) — 100 passed
+- `uv run pytest tests/unit/test_session_runtime.py tests/integration/test_session_restart.py` — 52 passed
+- `uv run pytest tests/unit/session_recovery` — 125 passed, 1 skipped
+- Broader Stage-6 gate — 295 passed, 28 skipped
+- `uv run pytest tests/contract/test_maintainability.py` — 216 passed
+- `uv run pytest` (full suite) — **2809 passed, 94 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — All files formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `uv run dnd session --help` — OK
+- `uv run dnd note --help` — OK
+- `git diff --check` — No whitespace errors
+
+**cli/session.py physical line count:** (reported in Final Report)
+**New CLI test module physical line count:** (reported in Final Report)
+**No new maintainability exception added.**
+**No correction-history test filename.**
+
+**Implementation commit:** (reported in Final Report)
+**Commit message:** `feat: add session runtime CLI (S6-06)`
+
+**Explicit deferrals:**
+
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
+- No recovery CLI commands.
+- No world-time CLI commands.
+- No generic event CLI.
 
 ### S6-C05F — Physical audit cleanliness before audited recovery
 

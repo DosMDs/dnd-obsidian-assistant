@@ -10,6 +10,7 @@ from pathlib import Path
 
 import typer
 
+from dnd_assistant.cli.session import _note_command, session_app
 from dnd_assistant.errors import StorageError
 from dnd_assistant.retrieval.index import SqliteFtsIndex
 from dnd_assistant.storage.audit import AuditService
@@ -19,6 +20,14 @@ app = typer.Typer(
     name="dnd",
     help="D&D Session Assistant — локальный помощник для долговременной памяти кампании.",
 )
+
+# ── Session command group ───────────────────────────────────────────────────
+
+app.add_typer(session_app)
+
+# ── Note root command ───────────────────────────────────────────────────────
+
+app.command(name="note")(_note_command)
 
 # ── Index command group ─────────────────────────────────────────────────────
 
