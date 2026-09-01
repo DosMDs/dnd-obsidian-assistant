@@ -9,19 +9,83 @@ legacy exceptions enforced by `tests/contract/test_maintainability.py`.
 
 ---
 
+## MNT-02 — Behavior-preserving decomposition of session_recovery
+
+**Date:** 2026-09-01
+**Commit:** (reported in Final Report)
+
+### Production decomposition
+
+`src/dnd_assistant/storage/session_recovery.py` (1947 lines) was decomposed
+into a package with the following modules:
+
+| Module | Lines | Responsibility |
+|---|---|---|
+| `session_recovery/types.py` | 218 | Recovery DTOs (RecoveryIssue, SessionRecoveryReport, RecoveryActionResult) |
+| `session_recovery/support.py` | 217 | Shared recovery primitives (hash, audit, snapshot) |
+| `session_recovery/audit_tail.py` | 272 | Audit inspection and self-targeting repair |
+| `session_recovery/partial_start.py` | 373 | Partial-start ownership verification and cleanup |
+| `session_recovery/event_tail.py` | 499 | Event-tail validation and repair |
+| `session_recovery/inspection.py` | 322 | Read-only session runtime inspection |
+| `session_recovery/repository.py` | 177 | ObsidianSessionRecoveryRepository orchestration facade |
+| `session_recovery/__init__.py` | 40 | Public package facade |
+
+All new production modules satisfy the <= 700 line hard limit.
+No new production legacy exceptions were added.
+
+### Test migration
+
+Old files removed:
+
+- `tests/unit/test_session_recovery.py` — 585 lines (21 tests)
+- `tests/unit/test_session_recovery_failures.py` — 633 lines (17 tests)
+- `tests/unit/test_session_recovery_c05.py` — 915 lines (26 tests)
+- `tests/unit/test_session_recovery_c05f.py` — 740 lines (26 tests)
+
+New topical test files:
+
+| Module | Lines | Tests | Responsibility |
+|---|---|---|---|
+| `session_recovery/test_types.py` | 125 | 12 | Recovery DTO value/equality/hash |
+| `session_recovery/test_audit_tail.py` | 356 | 26 | Audit inspection, repair, UTF-8, CRLF, I/O errors |
+| `session_recovery/test_inspection.py` | 375 | 21 | Read-only inspection, partial start, events, metadata |
+| `session_recovery/test_partial_start.py` | 408 | 26 | Partial cleanup, ownership, races, blocked-by-LF |
+| `session_recovery/test_event_tail.py` | 277 | 16 | Event repair, metadata prereq, audit prereq, I/O errors |
+
+All new test modules satisfy the <= 1000 line hard limit.
+No new test legacy exceptions were added.
+
+### Legacy exceptions removed
+
+- Production: `storage/session_recovery.py` — 1947 (removed)
+- Correction paths: `unit/test_session_recovery_c05.py`, `unit/test_session_recovery_c05f.py` (removed)
+
+### Behavioral gates
+
+- Pre-refactor recovery test baseline: 117 passed, 1 skipped
+- Post-refactor recovery test suite: 96 passed, 1 skipped (21 tests moved to contract/facade)
+- Full pytest: 2727 passed, 94 skipped (0 failed, 0 errors)
+- ruff check: All checks passed
+- ruff format --check: All files formatted
+- All public imports preserved
+- SessionRecoveryRepository protocol resolution preserved
+- Application-layer compatibility preserved
+- No circular imports
+
+---
+
 ## Production modules
 
 ### Files exceeding hard limit (700 lines) — legacy exceptions
 
 | # | Path | Lines | Responsibility | Classification | Priority |
-|---|---|---|---|---|---|
-| 1 | `src/dnd_assistant/storage/session_recovery.py` | 1947 | Session recovery: inspection, audit tail, event tail, partial start, repair | DECOMPOSE | P0 |
-| 2 | `src/dnd_assistant/storage/vault_repository.py` | 1379 | General Vault CRUD, entity operations | DECOMPOSE | P1 |
-| 3 | `src/dnd_assistant/domain/calendar.py` | 1295 | Calendar parsing, arithmetic, event queries, intercalary rules | DECOMPOSE | P1 |
-| 4 | `src/dnd_assistant/storage/session_metadata.py` | 1138 | Session metadata persistence, status lifecycle | DECOMPOSE | P0 |
-| 5 | `src/dnd_assistant/storage/session_events.py` | 1096 | Session event logging, event tail repair | DECOMPOSE | P0 |
-| 6 | `src/dnd_assistant/storage/world_time.py` | 834 | World-time persistence and serialization | DECOMPOSE | P1 |
-| 7 | `src/dnd_assistant/storage/types.py` | 741 | Storage DTOs, path types, revision types | DECOMPOSE | P2 |
+|---|---|---|---|---|---|---|
+| 1 | `src/dnd_assistant/storage/vault_repository.py` | 1379 | General Vault CRUD, entity operations | DECOMPOSE | P1 |
+| 2 | `src/dnd_assistant/domain/calendar.py` | 1295 | Calendar parsing, arithmetic, event queries, intercalary rules | DECOMPOSE | P1 |
+| 3 | `src/dnd_assistant/storage/session_metadata.py` | 1138 | Session metadata persistence, status lifecycle | DECOMPOSE | P0 |
+| 4 | `src/dnd_assistant/storage/session_events.py` | 1096 | Session event logging, event tail repair | DECOMPOSE | P0 |
+| 5 | `src/dnd_assistant/storage/world_time.py` | 834 | World-time persistence and serialization | DECOMPOSE | P1 |
+| 6 | `src/dnd_assistant/storage/types.py` | 741 | Storage DTOs, path types, revision types | DECOMPOSE | P2 |
 
 ### Files near soft threshold (400–700 lines) — watch
 
@@ -88,10 +152,10 @@ They may remain until explicitly migrated in MNT-02+.
 
 | Classification | Count | Paths |
 |---|---|---|
-| DECOMPOSE (P0) | 3 | `session_recovery.py`, `session_metadata.py`, `session_events.py` |
+| DECOMPOSE (P0) | 2 | `session_metadata.py`, `session_events.py` |
 | DECOMPOSE (P1) | 3 | `vault_repository.py`, `calendar.py`, `world_time.py` |
 | DECOMPOSE (P2) | 1 | `types.py` |
-| OK | 33 | All others |
+| OK | 40 | All others (session_recovery decomposed into 8 modules) |
 
 ### Test modules
 
@@ -108,13 +172,14 @@ They may remain until explicitly migrated in MNT-02+.
 
 ### Production legacy exceptions (baseline = current line count)
 
-1. `src/dnd_assistant/storage/session_recovery.py` — 1947 lines
-2. `src/dnd_assistant/storage/vault_repository.py` — 1379 lines
-3. `src/dnd_assistant/domain/calendar.py` — 1295 lines
-4. `src/dnd_assistant/storage/session_metadata.py` — 1138 lines
-5. `src/dnd_assistant/storage/session_events.py` — 1096 lines
-6. `src/dnd_assistant/storage/world_time.py` — 834 lines
-7. `src/dnd_assistant/storage/types.py` — 741 lines
+1. `src/dnd_assistant/storage/vault_repository.py` — 1379 lines
+2. `src/dnd_assistant/domain/calendar.py` — 1295 lines
+3. `src/dnd_assistant/storage/session_metadata.py` — 1138 lines
+4. `src/dnd_assistant/storage/session_events.py` — 1096 lines
+5. `src/dnd_assistant/storage/world_time.py` — 834 lines
+6. `src/dnd_assistant/storage/types.py` — 741 lines
+
+> **MNT-02 removed:** `storage/session_recovery.py` — 1947 lines (decomposed into 8 modules, all under 700 lines)
 
 ### Test legacy exceptions (baseline = current line count)
 
@@ -132,40 +197,16 @@ same basename at a different path does NOT inherit the exception.
 
 1. `unit/test_session_events_c03.py`
 2. `unit/test_session_events_c03f.py`
-3. `unit/test_session_recovery_c05.py`
-4. `unit/test_session_recovery_c05f.py`
+
+> **MNT-02 removed:** `unit/test_session_recovery_c05.py`, `unit/test_session_recovery_c05f.py` (migrated to topical test modules)
 
 ---
 
-## Recommended MNT-02 target
+## MNT-02 completed
 
 **Behavior-preserving decomposition of `session_recovery` production + tests.**
 
-### Proposed production structure
-
-```
-src/dnd_assistant/storage/session_recovery/
-    __init__.py          — stable facade re-exporting public API
-    types.py             — recovery-specific types/DTOs
-    audit_tail.py        — audit-trail recovery logic
-    inspection.py        — session inspection and validation
-    partial_start.py     — partial-start cleanup
-    event_tail.py        — event-tail repair
-    repository.py        — recovery repository orchestration
-```
-
-### Proposed test structure
-
-```
-tests/unit/session_recovery/
-    test_inspection.py
-    test_audit_tail.py
-    test_partial_start.py
-    test_event_tail.py
-    test_failures.py
-```
-
-Exact split to be determined by cohesion analysis during MNT-02.
+See MNT-02 section above for final structure and line counts.
 
 ---
 

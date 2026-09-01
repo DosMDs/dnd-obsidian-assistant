@@ -85,7 +85,7 @@ Details: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSIO
 | Task | Status |
 |---|---|
 | MNT-01 — Maintainability rules + baseline + ratchet | DONE |
-| MNT-02 — Behavior-preserving Stage-6 hotspot decomposition | NOT STARTED |
+| MNT-02 — Behavior-preserving Stage-6 hotspot decomposition | DONE |
 
 ## Current blockers
 

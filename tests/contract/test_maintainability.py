@@ -46,7 +46,6 @@ TEST_ROOT = REPO_ROOT / "tests"
 # They may shrink but must not grow.
 
 PRODUCTION_LEGACY_EXCEPTIONS: dict[str, int] = {
-    "storage/session_recovery.py": 1947,
     "storage/vault_repository.py": 1379,
     "domain/calendar.py": 1295,
     "storage/session_metadata.py": 1138,
@@ -73,8 +72,6 @@ TEST_LEGACY_EXCEPTIONS: dict[str, int] = {
 LEGACY_CORRECTION_PATHS: set[str] = {
     "unit/test_session_events_c03.py",
     "unit/test_session_events_c03f.py",
-    "unit/test_session_recovery_c05.py",
-    "unit/test_session_recovery_c05f.py",
 }
 
 
@@ -300,7 +297,7 @@ class TestCorrectionPathAllowlist:
 
     def test_exact_legacy_path_allowed(self, tmp_path: Path) -> None:
         """An exact legacy path passes the allowlist check."""
-        rel = "unit/test_session_recovery_c05.py"
+        rel = "unit/test_session_events_c03.py"
         assert rel in LEGACY_CORRECTION_PATHS
 
     def test_same_basename_different_path_rejected(self) -> None:
