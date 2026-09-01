@@ -12,23 +12,23 @@ legacy exceptions enforced by `tests/contract/test_maintainability.py`.
 ## MNT-02 — Behavior-preserving decomposition of session_recovery
 
 **Date:** 2026-09-01
-**Commit:** (reported in Final Report)
+**Commit:** `599fbcdcb09084b1420d3f37fe5b47fb30c7a400`
 
 ### Production decomposition
 
 `src/dnd_assistant/storage/session_recovery.py` (1947 lines) was decomposed
 into a package with the following modules:
 
-| Module | Lines | Responsibility |
-|---|---|---|
-| `session_recovery/types.py` | 218 | Recovery DTOs (RecoveryIssue, SessionRecoveryReport, RecoveryActionResult) |
-| `session_recovery/support.py` | 217 | Shared recovery primitives (hash, audit, snapshot) |
-| `session_recovery/audit_tail.py` | 272 | Audit inspection and self-targeting repair |
-| `session_recovery/partial_start.py` | 373 | Partial-start ownership verification and cleanup |
-| `session_recovery/event_tail.py` | 499 | Event-tail validation and repair |
-| `session_recovery/inspection.py` | 322 | Read-only session runtime inspection |
-| `session_recovery/repository.py` | 177 | ObsidianSessionRecoveryRepository orchestration facade |
-| `session_recovery/__init__.py` | 40 | Public package facade |
+| Module | Lines (MNT-02) | Lines (MNT-C02) | Responsibility |
+|---|---|---|---|
+| `session_recovery/types.py` | 218 | 218 | Recovery DTOs (RecoveryIssue, SessionRecoveryReport, RecoveryActionResult) |
+| `session_recovery/support.py` | 217 | 216 | Shared recovery primitives (hash, audit, snapshot) |
+| `session_recovery/audit_tail.py` | 272 | 378 | Audit inspection and self-targeting repair |
+| `session_recovery/partial_start.py` | 373 | 374 | Partial-start ownership verification and cleanup |
+| `session_recovery/event_tail.py` | 499 | 501 | Event-tail validation and repair |
+| `session_recovery/inspection.py` | 322 | 322 | Read-only session runtime inspection |
+| `session_recovery/repository.py` | 177 | 177 | ObsidianSessionRecoveryRepository orchestration facade |
+| `session_recovery/__init__.py` | 40 | 31 | Public package facade |
 
 All new production modules satisfy the <= 700 line hard limit.
 No new production legacy exceptions were added.
@@ -42,15 +42,17 @@ Old files removed:
 - `tests/unit/test_session_recovery_c05.py` — 915 lines (26 tests)
 - `tests/unit/test_session_recovery_c05f.py` — 740 lines (26 tests)
 
-New topical test files:
+New topical test files (MNT-C02 final):
 
-| Module | Lines | Tests | Responsibility |
-|---|---|---|---|
-| `session_recovery/test_types.py` | 125 | 12 | Recovery DTO value/equality/hash |
-| `session_recovery/test_audit_tail.py` | 356 | 26 | Audit inspection, repair, UTF-8, CRLF, I/O errors |
-| `session_recovery/test_inspection.py` | 375 | 21 | Read-only inspection, partial start, events, metadata |
-| `session_recovery/test_partial_start.py` | 408 | 26 | Partial cleanup, ownership, races, blocked-by-LF |
-| `session_recovery/test_event_tail.py` | 277 | 16 | Event repair, metadata prereq, audit prereq, I/O errors |
+| Module | Lines | Responsibility |
+|---|---|---|
+| `session_recovery/conftest.py` | 179 | Shared fixtures and helpers |
+| `session_recovery/test_types.py` | 125 | Recovery DTO value/equality/hash |
+| `session_recovery/test_audit_tail.py` | 353 | Audit inspection, repair, UTF-8, CRLF, I/O errors |
+| `session_recovery/test_inspection.py` | 367 | Read-only inspection, partial start, events, metadata |
+| `session_recovery/test_partial_start.py` | 477 | Partial cleanup, ownership, races, blocked-by-LF, repair-audit-first |
+| `session_recovery/test_event_tail.py` | 434 | Event repair, metadata prereq, audit prereq, I/O errors, missing-LF refusal, invalid UTF-8 metadata |
+| `contract/test_session_recovery_facade.py` | 117 | Facade import and signature contract tests |
 
 All new test modules satisfy the <= 1000 line hard limit.
 No new test legacy exceptions were added.
@@ -62,11 +64,12 @@ No new test legacy exceptions were added.
 
 ### Behavioral gates
 
-- Pre-refactor recovery test baseline: 117 passed, 1 skipped
-- Post-refactor recovery test suite: 96 passed, 1 skipped (21 tests moved to contract/facade)
-- Full pytest: 2727 passed, 94 skipped (0 failed, 0 errors)
-- ruff check: All checks passed
-- ruff format --check: All files formatted
+- Pre-refactor recovery test baseline: 117 passed, 1 skipped (historical at `fd91034`)
+- Post-refactor recovery test suite (MNT-C02): 111 passed, 1 skipped
+- Facade contract test: 11 passed
+- Full pytest: (reported in Final Report)
+- ruff check: (reported in Final Report)
+- ruff format --check: (reported in Final Report)
 - All public imports preserved
 - SessionRecoveryRepository protocol resolution preserved
 - Application-layer compatibility preserved
@@ -119,7 +122,6 @@ Under 250 lines — OK.
 
 | Path | Lines | Notes |
 |---|---|---|
-| `tests/unit/test_session_recovery_c05.py` | 729 | Correction-specific; legacy |
 | `tests/unit/test_world_time_repository.py` | 722 | Watch |
 | `tests/integration/test_vault_repository_path_races.py` | 722 | Watch |
 | `tests/unit/test_calendar_event_queries.py` | 715 | Watch |
@@ -141,8 +143,6 @@ They may remain until explicitly migrated in MNT-02+.
 |---|---|---|
 | `tests/unit/test_session_events_c03.py` | 569 | Correction C03 |
 | `tests/unit/test_session_events_c03f.py` | 279 | Correction C03 follow-up |
-| `tests/unit/test_session_recovery_c05.py` | 729 | Correction C05 |
-| `tests/unit/test_session_recovery_c05f.py` | 616 | Correction C05 follow-up |
 
 ---
 
@@ -198,7 +198,7 @@ same basename at a different path does NOT inherit the exception.
 1. `unit/test_session_events_c03.py`
 2. `unit/test_session_events_c03f.py`
 
-> **MNT-02 removed:** `unit/test_session_recovery_c05.py`, `unit/test_session_recovery_c05f.py` (migrated to topical test modules)
+> **MNT-C02 removed:** `unit/test_session_recovery_c05.py`, `unit/test_session_recovery_c05f.py` (migrated to topical test modules)
 
 ---
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dnd_assistant.errors import StorageError
-from dnd_assistant.storage.audit import AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_metadata import (
     _validate_session_runtime_roots,
 )
@@ -95,7 +95,7 @@ class ObsidianSessionRecoveryRepository:
     def repair_audit_tail(
         self,
         *,
-        audit,
+        audit: AuditContext,
     ) -> RecoveryActionResult:
         """Repair a provably partial final audit-log tail.
 
@@ -124,7 +124,7 @@ class ObsidianSessionRecoveryRepository:
         self,
         session_id: str,
         *,
-        audit,
+        audit: AuditContext,
     ) -> RecoveryActionResult:
         """Clean up a provably owned partial session start.
 
@@ -153,7 +153,7 @@ class ObsidianSessionRecoveryRepository:
         self,
         session_id: str,
         *,
-        audit,
+        audit: AuditContext,
     ) -> RecoveryActionResult:
         """Repair a provably partial final event-log tail.
 

@@ -15,7 +15,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dnd_assistant.errors import ConflictError, StorageError
-from dnd_assistant.storage.audit import AuditRecord
+from dnd_assistant.storage.audit import AuditContext, AuditRecord
 from dnd_assistant.storage.session_metadata import (
     _validate_session_runtime_roots,
 )
@@ -227,7 +227,7 @@ def cleanup_partial_start(
     audit_service,
     session_id: str,
     *,
-    audit,
+    audit: AuditContext,
 ) -> RecoveryActionResult:
     """Clean up a provably owned partial session start.
 

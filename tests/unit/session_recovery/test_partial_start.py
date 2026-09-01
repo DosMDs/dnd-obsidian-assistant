@@ -31,7 +31,9 @@ from tests.unit.session_recovery.conftest import (
     make_audit_context,
     make_audit_record,
     make_session,
+    start_session,
     valid_audit_record_str,
+    valid_event_record_str,
 )
 
 
@@ -406,3 +408,72 @@ class TestPartialCleanupBlockedByMissingLfAudit:
             repo.cleanup_partial_start("S006", audit=make_audit_context())
         records = audit_svc.read_all()
         assert not any(r.operation == "session.recovery.partial_start" for r in records)
+
+
+class TestRepairAuditFirstWorkflowC05F:
+    """Prove that repair_audit_tail -> normal recovery works."""
+
+    def test_repair_audit_then_partial_cleanup_succeeds(self, vault_root: Path, audit_svc) -> None:
+        # Create partial-start artifacts
+        (vault_root / "Sessions" / "S006").mkdir()
+        (vault_root / "_system" / "raw" / "sessions" / "S006").mkdir()
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text("", encoding="utf-8", newline="")
+        # Write start intent WITHOUT trailing LF (single record, no LF)
+        import json
+
+        start_intent = json.dumps(
+            {
+                "schema_version": 1,
+                "operation_id": "start-S006",
+                "real_time": "2026-09-01T10:00:00+00:00",
+                "operation": "session.start",
+                "entity_id": None,
+                "before_hash": None,
+                "after_hash": "abc",
+                "source": "test",
+                "session": "S006",
+                "model_profile": None,
+                "prompt_version": None,
+                "phase": "intent",
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        audit_svc.log_path.write_text(start_intent, encoding="utf-8", newline="")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        # Step 1: repair audit tail
+        result = repo.repair_audit_tail(audit=make_audit_context())
+        assert result.operation == "audit.recovery.tail"
+        # Step 2: partial-start cleanup should now succeed
+        result2 = repo.cleanup_partial_start("S006", audit=make_audit_context(session="S006"))
+        assert result2.operation == "session.recovery.partial_start"
+        assert not (vault_root / "Sessions" / "S006").exists()
+
+    def test_repair_audit_then_event_recovery_succeeds(self, vault_root: Path, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        # Replace audit with valid record WITHOUT trailing LF
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        # Step 1: repair audit tail
+        result = repo.repair_audit_tail(audit=make_audit_context())
+        assert result.operation == "audit.recovery.tail"
+        # Step 2: event recovery should now succeed
+        result2 = repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        assert result2.operation == "session.recovery.events_tail"
+        assert ev.read_bytes().endswith(b"\n")
+
+
+class TestNoAppendBehindCorruptAuditPartialC05F:
+    """Partial cleanup must never append behind corrupt audit."""
+
+    def test_invalid_utf8_audit_blocks_partial_cleanup(self, vault_root: Path, audit_svc) -> None:
+        _setup_partial_start(vault_root, audit_svc)
+        audit_svc.log_path.write_bytes(b"\xff\xfe")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError):
+            repo.cleanup_partial_start("S006", audit=make_audit_context())

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 
 from dnd_assistant.errors import ConflictError, StorageError
+from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.storage.session_events import (
     _O_BINARY,
     _parse_events_jsonl,
@@ -211,7 +212,7 @@ def repair_event_tail(
     audit_service,
     session_id: str,
     *,
-    audit,
+    audit: AuditContext,
 ) -> RecoveryActionResult:
     """Repair a provably partial final event-log tail.
 

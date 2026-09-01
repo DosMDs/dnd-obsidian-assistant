@@ -15,7 +15,7 @@ import json
 import os
 
 from dnd_assistant.errors import ConflictError, StorageError
-from dnd_assistant.storage.audit import AuditRecord
+from dnd_assistant.storage.audit import AuditContext, AuditRecord
 from dnd_assistant.storage.session_events import _O_BINARY
 from dnd_assistant.storage.session_recovery.support import (
     _build_audit_record,
@@ -210,7 +210,7 @@ def _inspect_audit(audit_service) -> list[RecoveryIssue]:
 def repair_audit_tail(
     audit_service,
     *,
-    audit,
+    audit: AuditContext,
 ) -> RecoveryActionResult:
     """Repair a provably partial final audit-log tail.
 

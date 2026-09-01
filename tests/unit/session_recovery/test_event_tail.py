@@ -28,6 +28,7 @@ from dnd_assistant.storage.session_recovery import (
 from tests.unit.session_recovery.conftest import (
     make_audit_context,
     start_session,
+    valid_audit_record_str,
     valid_event_line,
     valid_event_record_str,
 )
@@ -272,3 +273,169 @@ class TestCommittedAuditFailureC05:
         with pytest.raises(StorageError, match="audit finalization failed"):
             repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
         assert ev.read_bytes().endswith(b"\n")
+
+
+class TestEventRepairBlockedByMissingLfAuditC05F:
+    """repair_event_tail must refuse when audit has valid record without LF."""
+
+    def test_repair_refused_without_audit_lf(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        # Replace audit with valid record WITHOUT trailing LF
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError, match="repair_audit_tail"):
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+
+    def test_events_exact_bytes_unchanged_on_refusal(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        before = ev.read_bytes()
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except StorageError:
+            pass
+        assert ev.read_bytes() == before
+
+    def test_metadata_exact_bytes_unchanged_on_refusal(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        meta = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        before = meta.read_bytes()
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except StorageError:
+            pass
+        assert meta.read_bytes() == before
+
+    def test_audit_exact_bytes_unchanged_on_refusal(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        before = audit_svc.log_path.read_bytes()
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except StorageError:
+            pass
+        assert audit_svc.log_path.read_bytes() == before
+
+    def test_zero_recovery_intent_on_refusal(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        audit_svc.log_path.write_text(
+            valid_audit_record_str("orphan"), encoding="utf-8", newline=""
+        )
+        before_count = len(audit_svc.read_all())
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except StorageError:
+            pass
+        assert len(audit_svc.read_all()) == before_count
+
+
+class TestInvalidUtf8MetadataC05F:
+    """Invalid UTF-8 metadata must raise StorageError, not UnicodeDecodeError."""
+
+    def test_invalid_utf8_metadata_raises_storage_error(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        meta = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        meta.write_bytes(b"\xff\xfe")
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError, match="invalid UTF-8"):
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+
+    def test_not_unicode_decode_error(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        meta = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        meta.write_bytes(b"\xff\xfe")
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except UnicodeDecodeError:
+            pytest.fail("UnicodeDecodeError leaked instead of StorageError")
+        except StorageError:
+            pass
+
+    def test_events_unchanged_on_invalid_utf8_metadata(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        meta = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        meta.write_bytes(b"\xff\xfe")
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        before = ev.read_bytes()
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except StorageError:
+            pass
+        assert ev.read_bytes() == before
+
+    def test_no_recovery_intent_on_invalid_utf8_metadata(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        meta = vault_root / "_system" / "raw" / "sessions" / "S006" / "metadata.json"
+        meta.write_bytes(b"\xff\xfe")
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        before_count = len(audit_svc.read_all())
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        try:
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        except StorageError:
+            pass
+        assert len(audit_svc.read_all()) == before_count
+
+
+class TestEmptyAndValidAuditStillSupportedC05F:
+    """Empty audit and fully valid LF-terminated audit must still work."""
+
+    def test_empty_audit_event_repair_still_works(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        result = repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        assert result.operation == "session.recovery.events_tail"
+
+    def test_valid_lf_audit_event_repair_still_works(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        result = repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))
+        assert result.operation == "session.recovery.events_tail"
+
+
+class TestNoAppendBehindCorruptAuditC05F:
+    """Ordinary recovery must never append behind partial or corrupt audit."""
+
+    def test_invalid_utf8_audit_blocks_event_repair(self, vault_root, audit_svc) -> None:
+        start_session(vault_root)
+        ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
+        ev.write_text(valid_event_record_str("evt_001"), encoding="utf-8", newline="")
+        audit_svc.log_path.write_bytes(b"\xff\xfe")
+        repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
+        with pytest.raises(StorageError, match="repair_audit_tail"):
+            repo.repair_event_tail("S006", audit=make_audit_context(session="S006"))

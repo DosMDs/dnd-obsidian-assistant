@@ -221,25 +221,29 @@ class TestUnresolvedAuditIntents:
 
 
 class TestSessionsOnlyPartialStartC05:
-    """Partial start discovered from Sessions/ only."""
+    """Partial start discovered from Sessions/ only — no raw session directory."""
 
     def test_sessions_only_discovered(self, vault_root: Path, audit_svc) -> None:
-        _setup_partial_start_with_intent(vault_root, audit_svc)
+        _setup_sessions_only_partial_start(vault_root, audit_svc)
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
         report = repo.inspect_runtime()
         codes = [i.code for i in report.issues]
         assert "partial_start" in codes
+        # Verify raw session directory does NOT exist
+        assert not (vault_root / "_system" / "raw" / "sessions" / "S006").exists()
 
 
 class TestRawOnlyPartialStartC05:
-    """Partial start discovered from _system/raw/sessions/ only."""
+    """Partial start discovered from _system/raw/sessions/ only — no Sessions/<id> directory."""
 
     def test_raw_only_discovered(self, vault_root: Path, audit_svc) -> None:
-        _setup_partial_start_with_intent(vault_root, audit_svc)
+        _setup_raw_only_partial_start(vault_root, audit_svc)
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
         report = repo.inspect_runtime()
         codes = [i.code for i in report.issues]
         assert "partial_start" in codes
+        # Verify Sessions directory does NOT exist
+        assert not (vault_root / "Sessions" / "S006").exists()
 
 
 # ── Unsafe session path ───────────────────────────────────────────────────────
@@ -318,6 +322,32 @@ def _setup_partial_start_no_intent(vault_root: Path) -> None:
     (vault_root / "_system" / "raw" / "sessions" / "S006").mkdir()
     ev = vault_root / "_system" / "raw" / "sessions" / "S006" / "events.jsonl"
     ev.write_text("", encoding="utf-8", newline="")
+
+
+def _setup_sessions_only_partial_start(vault_root: Path, audit_svc) -> None:
+    """Create a partial start with only Sessions/<id> directory (no raw dir)."""
+    (vault_root / "Sessions" / "S006").mkdir()
+    ctx = make_audit_context(operation_id="start-op-001", session="S006")
+    audit_svc.append(
+        make_audit_record(
+            ctx,
+            operation="session.start",
+            phase="intent",
+        )
+    )
+
+
+def _setup_raw_only_partial_start(vault_root: Path, audit_svc) -> None:
+    """Create a partial start with only _system/raw/sessions/<id> (no Sessions/<id>)."""
+    (vault_root / "_system" / "raw" / "sessions" / "S006").mkdir()
+    ctx = make_audit_context(operation_id="start-op-001", session="S006")
+    audit_svc.append(
+        make_audit_record(
+            ctx,
+            operation="session.start",
+            phase="intent",
+        )
+    )
 
 
 def _setup_dual_unmatched_intent(vault_root: Path, audit_svc) -> None:
