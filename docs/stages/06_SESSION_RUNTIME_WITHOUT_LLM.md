@@ -1648,3 +1648,84 @@ This was inaccurate.  The correct semantics are:
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No CLI commands for session lifecycle.
+
+### S6-C05F — Physical audit cleanliness before audited recovery
+
+**Review base:**
+`1433c8ff6a219e2074b4784ce64129d95649b363`
+
+**Confirmed defects:**
+
+1. **C05F-01 — `AuditService.read_all()` logical parseability was insufficient to prove physical JSONL append safety.** A valid final `AuditRecord` without trailing LF could pass `read_all()` and allow a subsequent `AuditService.append(recovery_intent)` to physically concatenate onto the last record, corrupting the append-only audit log.
+
+2. **C05F-02 — `cleanup_partial_start` used `_read_audit_log` (which delegates to `AuditService.read_all()`) for audit ownership verification before recovery intent.** It did not require physical final-LF append safety, so a logically parseable but physically partial audit could allow a recovery intent to be appended unsafely.
+
+3. **C05F-03 — `repair_event_tail` used `self._audit_service.read_all()` as its clean-audit prerequisite.** Same logical-parseability gap — a valid record without LF was accepted, and the subsequent recovery intent could corrupt the audit log.
+
+4. **C05F-04 — `_validate_metadata_for_event_recovery` performed `meta_bytes.decode("utf-8")` without catching `UnicodeDecodeError`.** A corrupt metadata file with invalid UTF-8 could leak a raw `UnicodeDecodeError` from `repair_event_tail()`.
+
+5. **C05F-05 — Post-intent metadata status revalidation in `repair_event_tail` also used unprotected `decode("utf-8")`.** Same leak risk for the second metadata read.
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/session_recovery.py`:**
+   - Added `_require_clean_audit_log(audit_service)` — a shared private helper that:
+     - Returns `[]` for missing or empty audit files.
+     - For non-empty audit: requires `endswith(b"\n")` (physical final LF), otherwise raises `StorageError` with a clear message that `repair_audit_tail()` must be performed first.
+     - Validates UTF-8, structural integrity, and `AuditRecord` validity strictly.
+     - Is read-only — no temporary files, no repair, no filesystem mutation.
+   - `cleanup_partial_start` — both audit reads (pre-intent ownership and post-intent revalidation) now use `_require_clean_audit_log` instead of `_read_audit_log`.
+   - `repair_event_tail` — the clean-audit prerequisite now uses `_require_clean_audit_log` instead of `self._audit_service.read_all()`.
+   - `_validate_metadata_for_event_recovery` — `meta_bytes.decode("utf-8")` wrapped in `try/except UnicodeDecodeError` that raises `StorageError` with cause chaining.
+   - Post-intent metadata status revalidation in `repair_event_tail` — same `UnicodeDecodeError` → `StorageError` wrapping.
+
+**Tests added** (in `tests/unit/test_session_recovery_c05f.py`, 31 tests):
+
+- `TestRequireCleanAuditLog` (7 tests): missing file → `[]`, empty file → `[]`, valid LF-terminated → records, valid without LF → `StorageError`, invalid UTF-8 → `StorageError`, malformed JSON → `StorageError`, read-only no filesystem mutation.
+- `TestEventRepairBlockedByMissingLfAudit` (5 tests): repair refused, events exact bytes unchanged, metadata exact bytes unchanged, audit exact bytes unchanged, zero recovery intent on refusal.
+- `TestPartialCleanupBlockedByMissingLfAudit` (5 tests): cleanup refused, session dir unchanged, raw dir unchanged, events unchanged, audit unchanged, zero partial-start recovery intent.
+- `TestRepairAuditFirstWorkflow` (2 tests): `repair_audit_tail` → `repair_event_tail` succeeds; `repair_audit_tail` → `cleanup_partial_start` succeeds.
+- `TestInspectRuntimeMissingLf` (2 tests): `inspect_runtime` still reports `audit_partial_tail` with `recoverable=True`; `repair_audit_tail` still works.
+- `TestInvalidUtf8Metadata` (4 tests): invalid UTF-8 metadata → `StorageError` (not `UnicodeDecodeError`), events unchanged, no recovery intent.
+- `TestEmptyAndValidAuditStillSupported` (3 tests): empty audit event repair works, valid LF audit event repair works, valid LF audit partial cleanup works.
+- `TestNoAppendBehindCorruptAudit` (2 tests): invalid UTF-8 audit blocks event repair and partial cleanup.
+
+**Updated tests:**
+
+- `tests/unit/test_session_recovery_c05.py` — `test_corrupt_audit_prevents_event_repair` match pattern updated from `"repair audit tail"` to `"repair_audit_tail"` to match new error message.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_recovery.py` — 29 passed
+- `uv run pytest tests/unit/test_session_recovery_failures.py` — 22 passed
+- `uv run pytest tests/unit/test_session_recovery_c05.py` — 35 passed, 1 skipped
+- `uv run pytest tests/unit/test_session_recovery_c05f.py` — 31 passed
+- `uv run pytest tests/integration/test_session_restart.py` — 7 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 45 passed
+- `uv run pytest tests/unit/test_session_events.py tests/unit/test_session_events_c03.py tests/unit/test_session_events_c03f.py` — 115 passed, 4 skipped
+- `uv run pytest tests/unit/test_session_close.py tests/unit/test_session_close_failures.py` — 67 passed, 4 skipped
+- `uv run pytest tests/unit/test_session_event_lifecycle.py` — 4 passed
+- `uv run pytest tests/unit/test_audit_protocol.py tests/unit/test_world_time_repository.py` — 45 passed, 6 skipped
+- Boundary order A (boundaries first) — 167 passed, 1 skipped
+- Boundary order B (boundaries last) — 167 passed, 1 skipped
+- Broader Stage-6 gate — 717 passed, 38 skipped
+- `uv run pytest` (full suite) — **2528 passed, 94 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 214 files already formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — No whitespace errors
+
+**Correction commit:** `ad9492b95e5c3c00aebe64f65900a5c56e379907`
+**Commit message:** `fix: require clean audit before session recovery (S6-C05F)`
+
+**Explicit deferrals:**
+
+- S6-06 (CLI orchestration) is NOT started.
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No module/repository decomposition (`.gigacode/rules/15-module-decomposition.md`, new ADR, `session_recovery/` package split, test package reorganization, repository-wide large-file refactor).
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
+- No CLI commands for session lifecycle.
