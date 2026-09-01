@@ -532,12 +532,13 @@ class TestAuditTailDetection:
 
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
         report = repo.inspect_runtime()
-        # AuditService.read_all() uses splitlines() which tolerates missing final LF,
-        # so a single complete record without LF is valid.  For multi-record files,
-        # the last record without LF is also parsed correctly by splitlines().
-        # Therefore a valid record missing only the final LF is NOT detected as
-        # an issue by inspection (it's still parseable).
-        assert not report.has_issues
+        # Physical JSONL contract is stricter than splitlines(): a valid final record
+        # without LF is a partial tail, even though AuditService.read_all() happens
+        # to parse it.
+        assert report.has_issues
+        tail_issues = [i for i in report.issues if i.code == "audit_partial_tail"]
+        assert len(tail_issues) == 1
+        assert tail_issues[0].recoverable is True
 
     def test_audit_incomplete_tail_recoverable(self, tmp_path: Path) -> None:
         vault_root = _create_vault(tmp_path)

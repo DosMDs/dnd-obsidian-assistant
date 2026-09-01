@@ -1311,6 +1311,8 @@ This was inaccurate.  The correct semantics are:
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No CLI commands for session lifecycle.
 
+### S6-C04 — Session-close validation / TOCTOU / failure-coverage hardening
+
 **Review base:**
 `46a9909967cbfe282c1d05e3d0a3957299d1c19a`
 
@@ -1520,4 +1522,129 @@ This was inaccurate.  The correct semantics are:
 - No Golden Vault fixture was modified.
 - No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No recovery/truncation/repair logic.
+- No CLI commands for session lifecycle.
+
+### S6-C05 — Recovery inspection / ownership / physical-tail integrity hardening
+
+**Review base:**
+`dffe1f60fa62258033e1f7d6d88eda326c6848c5`
+
+**Confirmed defects:**
+
+1. **C05-01 — `_check_audit_prefix_valid` / `_check_audit_text_valid` wrote temporary files.** Both helpers created `._audit_check_*.tmp` files in the audit directory for validation, violating `inspect_runtime()` read-only contract.
+
+2. **C05-02 — Valid audit final record without LF was incorrectly treated as clean.** The previous implementation used `splitlines()` normalization which tolerates missing final LF, so a valid final record without trailing newline was not reported as an issue.
+
+3. **C05-03 — Malformed LF-terminated final audit record could be misclassified as recoverable.** When the file ended with LF but the last line was corrupt, the old code checked if the prefix was valid and then treated the last line as a partial tail.
+
+4. **C05-04 — UTF-8 corruption could leak raw `UnicodeDecodeError`.** The `_read_audit_log` helper and `_build_partial_start_snapshot` did not guard against non-UTF-8 content.
+
+5. **C05-05 — Sessions/<id>-only partial start was not discovered.** Inspection only scanned `_system/raw/sessions/*` for candidate session IDs, missing sessions that only had a `Sessions/<id>/` directory.
+
+6. **C05-06 — Raw-session symlink entries were silently skipped.** The old `_inspect_sessions` simply `continue`d past symlink entries without reporting them.
+
+7. **C05-07 — Multiple unmatched session.start intents were not rejected as ambiguous.** The old code checked for any intent record, but did not group by `operation_id` to detect multiple competing start operations.
+
+8. **C05-08 — Partial-start cleanup could commit success with artifacts still present.** The cleanup code removed artifacts inline without a final absence verification step.
+
+9. **C05-09 — Partial-start audit ownership was not revalidated after recovery intent.** After writing the recovery intent, the code did not re-read the audit log to verify the original ownership was still unambiguous.
+
+10. **C05-10 — Event-tail metadata was not revalidated after durable recovery intent.** The `repair_event_tail` path did not re-check metadata hash and status after the intent was written.
+
+11. **C05-11 — Event-tail repair did not require valid canonical metadata.** The old code allowed event-tail repair even when metadata was missing or corrupt.
+
+12. **C05-12 — Event-tail repair did not require clean/readable audit before audited repair.** The old code attempted event repair even when the audit log was itself corrupt.
+
+13. **C05-13 — Normalized-line truncation could corrupt CRLF physical prefix.** The old code used `splitlines()` + `"\n".join()` which normalized `\r\n` to `\n`, then computed truncation offsets from the normalized form, potentially corrupting CRLF bytes in the preserved prefix.
+
+14. **C05-14 — `os.open` errors / `os.write` short writes were not fully translated.** Some `os.open` and `os.write` calls lacked error translation to `StorageError`, and no short-write detection existed.
+
+15. **C05-15 — S6-C04 documentation heading was deleted while inserting S6-05.** The `### S6-C04 — Session-close validation / TOCTOU / failure-coverage hardening` heading was lost.
+
+**Production fixes:**
+
+1. **`src/dnd_assistant/storage/session_recovery.py`:**
+   - Replaced `_check_audit_prefix_valid` and `_check_audit_text_valid` (temp-file-based) with pure in-memory `_parse_audit_jsonl_bytes` and `_validate_audit_prefix_bytes`.
+   - Replaced `splitlines()` / `"\n".join()` normalization with exact physical byte splitting via `_split_final_unterminated_tail()` using `data.rfind(b"\n")`.
+   - Added `_bytes_hash()` for direct byte-level SHA-256 hashing (no decode→encode round-trip).
+   - Changed all hash computations from `_content_hash(bytes.decode())` to `_bytes_hash(bytes)`.
+   - Physical-LF classification: `endswith(b"\n")` → strict parse → clean or corrupt; no-LF → split at last `\n` → validate prefix → classify tail.
+   - `_build_partial_start_snapshot` uses `read_bytes()` + `_bytes_hash()` instead of `read_text()` + `_content_hash()`.
+   - `_inspect_sessions` discovers candidate IDs from union of `Sessions/*` and `_system/raw/sessions/*`.
+   - Symlink entries in session roots are reported as `unsafe_session_path` instead of silently skipped.
+   - `_find_unmatched_start_operation` groups `session.start` records by `operation_id` and requires exactly one unmatched operation.
+   - `cleanup_partial_start` now uses `_build_cleanup_plan` → `_execute_cleanup_plan` → `_verify_cleanup_absence` pattern with strict pre-unlink checks (exists, regular file, not symlink, size == 0).
+   - Post-intent ownership revalidation via `_find_unmatched_start_operation` on re-read audit log.
+   - `_validate_metadata_for_event_recovery` requires valid metadata with `active` or `completed` status before event-tail repair.
+   - `repair_event_tail` requires clean audit via `self._audit_service.read_all()` before proceeding.
+   - Post-intent metadata/events hash recheck after durable intent.
+   - Post-repair metadata hash recheck after physical event repair.
+   - All `os.open` calls wrapped in `try/except OSError → StorageError`.
+   - `os.write` return value checked for short writes (`written != 1` → `StorageError`).
+   - `os.ftruncate` and `os.fsync` wrapped in `try/except OSError → StorageError`.
+   - Exact repaired-byte verification (`repaired_bytes == expected_bytes`).
+
+2. **`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`:**
+   - Restored missing `### S6-C04 — Session-close validation / TOCTOU / failure-coverage hardening` heading.
+   - Added this S6-C05 correction record.
+
+**Tests added** (in `tests/unit/test_session_recovery_c05.py`):
+
+- `TestBytesHashC05` — `_bytes_hash` exact and non-UTF-8 coverage.
+- `TestInspectReadOnlyC05` — read-only under corrupt audit (file listing, byte equality before/after).
+- `TestAuditPhysicalLfC05` — valid missing-LF → partial tail; LF-terminated corrupt → corrupt; repair refused.
+- `TestUtf8CorruptionC05` — invalid UTF-8 audit/events → corrupt; repair → StorageError.
+- `TestSessionsOnlyPartialStartC05` — Sessions-only partial start discovered.
+- `TestRawOnlyPartialStartC05` — raw-only partial start discovered.
+- `TestUnsafeSessionPathC05` — raw session symlink reported unsafe.
+- `TestAmbiguousStartOwnershipC05` — two unmatched intents → not recoverable; cleanup refused.
+- `TestOwnershipRecheckC05` — ownership changed after intent → ConflictError.
+- `TestStrictCleanupC05` — events became non-empty after intent → ConflictError; cleanup absence verified.
+- `TestEventTailMetadataPrerequisiteC05` — missing/corrupt metadata → StorageError.
+- `TestEventTailCleanAuditPrerequisiteC05` — corrupt audit → StorageError.
+- `TestCrlfPreservationC05` — audit/events CRLF prefix not corrupted after repair.
+- `TestLowLevelErrorTranslationC05` — os.open/write/short-write/ftruncate/fsync → StorageError for both audit and events.
+- `TestCommittedAuditFailureC05` — committed audit failure leaves repaired event file.
+
+**Updated tests:**
+
+- `tests/unit/test_session_recovery.py` — `test_audit_missing_lf_recoverable` now expects `report.has_issues` (physical JSONL contract is stricter than `splitlines()`).
+- `tests/unit/test_session_recovery_failures.py` — updated error message match string.
+
+**Quality-gate results:**
+
+- `uv run pytest tests/unit/test_session_recovery.py` — 29 passed
+- `uv run pytest tests/unit/test_session_recovery_failures.py` — 22 passed
+- `uv run pytest tests/unit/test_session_recovery_c05.py` — 30 passed, 1 skipped
+- `uv run pytest tests/integration/test_session_restart.py` — 7 passed
+- `uv run pytest tests/unit/test_session_runtime.py` — 45 passed
+- `uv run pytest tests/unit/test_session_events.py` — 65 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03.py` — 41 passed, 2 skipped
+- `uv run pytest tests/unit/test_session_events_c03f.py` — 9 passed
+- `uv run pytest tests/unit/test_session_close.py` — 37 passed, 3 skipped
+- `uv run pytest tests/unit/test_session_close_failures.py` — 30 passed, 1 skipped
+- `uv run pytest tests/unit/test_session_event_lifecycle.py` — 4 passed
+- `uv run pytest tests/unit/test_audit_protocol.py` — 6 passed
+- `uv run pytest tests/unit/test_world_time_repository.py` — 20 passed
+- Boundary order A (boundaries first) — passed
+- Boundary order B (boundaries last) — passed
+- Broader Stage-6 gate — passed
+- `uv run pytest` (full suite) — **0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — All files formatted
+- `uv run dnd --help` — CLI smoke test OK (Russian UI)
+- `git diff --check` — No whitespace errors
+
+**Correction commit:** (reported in Final Report)
+**Commit message:** `fix: harden session recovery integrity (S6-C05)`
+
+**Explicit deferrals:**
+
+- S6-06 (CLI orchestration) is NOT started.
+- S6-07 (Golden-Vault integration) is NOT started.
+- S6-08 (Stage-6 review) is NOT started.
+- Stage 7 (Tool Registry) remains NOT STARTED.
+- No Ollama, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No Golden Vault fixture was modified.
+- No `Session.md`, `conversation.jsonl`, or derived session artifacts.
 - No CLI commands for session lifecycle.

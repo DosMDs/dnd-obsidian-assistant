@@ -246,7 +246,12 @@ class RecoveryActionResult:
         return hash((self._operation, self._session_id, self._before_hash, self._after_hash))
 
 
-# ── Hash helper ────────────────────────────────────────────────────────────────
+# ── Hash helpers ────────────────────────────────────────────────────────────────
+
+
+def _bytes_hash(data: bytes) -> str:
+    """SHA-256 hash of exact bytes."""
+    return hashlib.sha256(data).hexdigest()
 
 
 def _content_hash(text: str) -> str:
@@ -286,8 +291,14 @@ def _read_audit_log(audit_service: AuditService) -> tuple[list[AuditRecord], str
     """
     if not audit_service.log_path.exists():
         return [], ""
-    text = _read_meta_text(audit_service.log_path)
-    records = audit_service.read_all()
+    try:
+        text = _read_meta_text(audit_service.log_path)
+    except (StorageError, UnicodeDecodeError) as exc:
+        raise StorageError("Audit log is unreadable", cause=exc) from exc
+    try:
+        records = audit_service.read_all()
+    except (StorageError, UnicodeDecodeError) as exc:
+        raise StorageError("Audit log is corrupt", cause=exc) from exc
     return records, text
 
 
@@ -303,7 +314,8 @@ def _build_partial_start_snapshot(
 
     The snapshot contains only recovery-owned facts, serialized as
     compact sorted JSON.  Platform-dependent absolute paths are NOT
-    included.
+    included.  Uses exact bytes for events — no ``read_text`` that
+    could raise ``UnicodeDecodeError`` on non-UTF-8 content.
 
     Returns:
         A SHA-256 hex digest of the canonical snapshot.
@@ -325,11 +337,16 @@ def _build_partial_start_snapshot(
     # metadata.json
     facts["metadata_exists"] = raw_dir.exists() and (raw_dir / "metadata.json").exists()
 
-    # events.jsonl
+    # events.jsonl — use exact bytes, no read_text
     facts["events_exists"] = events_path.exists()
     if events_path.exists() and not events_path.is_symlink() and not events_path.is_dir():
-        facts["events_size"] = events_path.stat().st_size
-        facts["events_hash"] = _content_hash(events_path.read_text(encoding="utf-8"))
+        try:
+            facts["events_size"] = events_path.stat().st_size
+            events_bytes = events_path.read_bytes()
+            facts["events_hash"] = _bytes_hash(events_bytes)
+        except OSError:
+            facts["events_size"] = -1
+            facts["events_hash"] = None
 
     snapshot = json.dumps(facts, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return _content_hash(snapshot)
@@ -477,113 +494,69 @@ class ObsidianSessionRecoveryRepository:
         if not raw_bytes:
             return issues
 
-        text = raw_bytes.decode("utf-8")
+        # UTF-8 corruption check — must not leak UnicodeDecodeError
+        try:
+            raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            issues.append(
+                RecoveryIssue(
+                    code="audit_corrupt",
+                    detail="Audit log contains invalid UTF-8",
+                    recoverable=False,
+                )
+            )
+            return issues
 
-        # Normalize line endings: splitlines() handles \r\n, \n, \r uniformly
-        raw_lines = text.splitlines()
-        # Reconstruct with \n only for deterministic splitting
-        normalized = "\n".join(raw_lines)
-        if text.endswith("\n"):
-            normalized += "\n"
-
-        # Check if the audit log has a partial tail (does not end with LF)
-        if not normalized.endswith("\n"):
-            # Try strict parsing first — some parsers may tolerate missing final LF
-            try:
-                self._audit_service.read_all()
-                # If strict parsing succeeds, no issue
-                return issues
-            except StorageError:
-                pass
-
-            # Split into complete prefix and final unterminated tail
-            lines = normalized.split("\n")
-            if lines and lines[-1] == "":
-                lines = lines[:-1]
-
-            if len(lines) >= 1:
-                complete_prefix = "\n".join(lines[:-1])
-                if complete_prefix:
-                    complete_prefix += "\n"
-                final_tail = lines[-1]
-
-                # Check if the complete prefix is valid by parsing it
-                prefix_valid = self._check_audit_prefix_valid(complete_prefix)
-                if not prefix_valid:
-                    issues.append(
-                        RecoveryIssue(
-                            code="audit_corrupt",
-                            detail="Audit log has corruption in a completed record",
-                            recoverable=False,
-                        )
-                    )
-                    return issues
-
-                # Check if the tail is a complete record missing LF
-                tail_with_lf = final_tail + "\n"
-                if self._check_audit_text_valid(tail_with_lf):
-                    issues.append(
-                        RecoveryIssue(
-                            code="audit_partial_tail",
-                            detail="Audit log has a final record missing trailing newline",
-                            recoverable=True,
-                        )
-                    )
-                else:
-                    issues.append(
-                        RecoveryIssue(
-                            code="audit_partial_tail",
-                            detail="Audit log has an incomplete final record",
-                            recoverable=True,
-                        )
-                    )
-        else:
+        # Physical-LF classification
+        if raw_bytes.endswith(b"\n"):
             # File ends with LF — try strict parsing
             try:
                 self._audit_service.read_all()
+                return issues  # clean
             except StorageError:
-                # read_all() failed. Check if the last LF-terminated line is
-                # an incomplete record (partial tail) or a corrupt completed line.
-                lines = normalized.split("\n")
-                if lines and lines[-1] == "":
-                    lines = lines[:-1]
+                # Strict parsing failed — a completed LF-terminated line is corrupt
+                issues.append(
+                    RecoveryIssue(
+                        code="audit_corrupt",
+                        detail="Audit log has corruption in a completed record",
+                        recoverable=False,
+                    )
+                )
+                return issues
 
-                if len(lines) >= 1:
-                    complete_prefix = "\n".join(lines[:-1])
-                    if complete_prefix:
-                        complete_prefix += "\n"
-                    final_line = lines[-1]
+        # File does NOT end with LF — split at last physical \n
+        prefix_bytes, tail_bytes = self._split_final_unterminated_tail(raw_bytes)
 
-                    # Check if the complete prefix is valid
-                    prefix_valid = self._check_audit_prefix_valid(complete_prefix)
-                    if prefix_valid:
-                        # The last line is the problem — check if it's a partial tail
-                        tail_with_lf = final_line + "\n"
-                        if self._check_audit_text_valid(tail_with_lf):
-                            issues.append(
-                                RecoveryIssue(
-                                    code="audit_partial_tail",
-                                    detail="Audit log has a final record missing trailing newline",
-                                    recoverable=True,
-                                )
-                            )
-                        else:
-                            # The last line is incomplete even with LF
-                            issues.append(
-                                RecoveryIssue(
-                                    code="audit_partial_tail",
-                                    detail="Audit log has an incomplete final record",
-                                    recoverable=True,
-                                )
-                            )
-                    else:
-                        issues.append(
-                            RecoveryIssue(
-                                code="audit_corrupt",
-                                detail="Audit log has corruption in a completed record",
-                                recoverable=False,
-                            )
-                        )
+        # Validate the complete prefix strictly
+        if not self._validate_audit_prefix_bytes(prefix_bytes):
+            issues.append(
+                RecoveryIssue(
+                    code="audit_corrupt",
+                    detail="Audit log has corruption in a completed record",
+                    recoverable=False,
+                )
+            )
+            return issues
+
+        # Check if the tail bytes + LF form one valid AuditRecord
+        tail_with_lf = tail_bytes + b"\n"
+        try:
+            self._parse_audit_jsonl_bytes(tail_with_lf)
+            issues.append(
+                RecoveryIssue(
+                    code="audit_partial_tail",
+                    detail="Audit log has a final record missing trailing newline",
+                    recoverable=True,
+                )
+            )
+        except StorageError:
+            issues.append(
+                RecoveryIssue(
+                    code="audit_partial_tail",
+                    detail="Audit log has an incomplete final fragment",
+                    recoverable=True,
+                )
+            )
 
         return issues
 
@@ -618,65 +591,69 @@ class ObsidianSessionRecoveryRepository:
         if not log_path.exists():
             raise StorageError("Audit log does not exist")
 
-        # Snapshot exact before state
-        before_bytes = _read_exact_bytes(log_path)
-        before_hash = _content_hash(before_bytes.decode("utf-8"))
-
         # Reauthorize audit path
         if log_path.is_symlink():
             raise StorageError("Audit log is a symlink, rejected for safety")
 
+        # Snapshot exact before state
+        before_bytes = _read_exact_bytes(log_path)
+        before_hash = _bytes_hash(before_bytes)
+
         # Re-read and verify same before hash
         current_bytes = _read_exact_bytes(log_path)
-        current_hash = _content_hash(current_bytes.decode("utf-8"))
-        if current_hash != before_hash:
+        if _bytes_hash(current_bytes) != before_hash:
             raise ConflictError("Audit log changed between inspection and repair")
 
-        text = before_bytes.decode("utf-8")
+        # UTF-8 check
+        try:
+            before_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise StorageError(
+                "Audit log contains invalid UTF-8 — cannot safely repair tail",
+                cause=exc,
+            ) from exc
 
         # Check if the file already ends with LF using the ORIGINAL bytes
-        # (before_bytes, not normalized text, to correctly detect \n even
-        # when the file uses \r\n line endings on Windows)
         if before_bytes.endswith(b"\n"):
             raise StorageError("Audit log already ends with newline — no repair needed")
 
-        # Normalize line endings: splitlines() handles \r\n, \n, \r uniformly
-        raw_lines = text.splitlines()
-        normalized = "\n".join(raw_lines)
+        # Split at last physical \n — exact bytes, no normalization
+        prefix_bytes, tail_bytes = self._split_final_unterminated_tail(before_bytes)
 
-        # Split into complete prefix and final tail
-        lines = normalized.split("\n")
-        if lines and lines[-1] == "":
-            lines = lines[:-1]
-
-        if len(lines) < 1:
-            raise StorageError("Audit log has no content to repair")
-
-        complete_prefix = "\n".join(lines[:-1])
-        if complete_prefix:
-            complete_prefix += "\n"
-        final_tail = lines[-1]
-
-        # Verify complete prefix is valid
-        if not self._check_audit_prefix_valid(complete_prefix):
+        # Verify complete prefix is valid (pure in-memory, may be empty for single-line)
+        if not self._validate_audit_prefix_bytes(prefix_bytes):
             raise StorageError(
                 "Audit log corruption is not limited to the final tail — "
                 "manual intervention required"
             )
 
         # Determine repair mode
-        tail_with_lf = final_tail + "\n"
-        if self._check_audit_text_valid(tail_with_lf):
+        tail_with_lf = tail_bytes + b"\n"
+        try:
+            self._parse_audit_jsonl_bytes(tail_with_lf)
             repair_mode = "append_missing_newline"
-        else:
+        except StorageError:
             repair_mode = "truncate_invalid_tail"
 
         # Perform repair
         if repair_mode == "append_missing_newline":
-            fd = os.open(str(log_path), os.O_WRONLY | os.O_APPEND | _O_BINARY)
+            expected_bytes = before_bytes + b"\n"
             try:
-                os.write(fd, b"\n")
+                fd = os.open(str(log_path), os.O_WRONLY | os.O_APPEND | _O_BINARY)
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to open audit log for append: {log_path}",
+                    cause=exc,
+                ) from exc
+            try:
+                written = os.write(fd, b"\n")
+                if written != 1:
+                    raise StorageError(
+                        f"Short write when appending LF to audit log: wrote {written} of 1 byte"
+                    )
                 os.fsync(fd)
+            except StorageError:
+                raise
             except OSError as exc:
                 raise StorageError(
                     f"Failed to append LF to audit log: {log_path}",
@@ -688,8 +665,15 @@ class ObsidianSessionRecoveryRepository:
                 except OSError:
                     pass
         else:
-            prefix_bytes = complete_prefix.encode("utf-8")
-            fd = os.open(str(log_path), os.O_WRONLY | _O_BINARY)
+            # Truncate to exact prefix bytes
+            expected_bytes = prefix_bytes
+            try:
+                fd = os.open(str(log_path), os.O_WRONLY | _O_BINARY)
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to open audit log for truncation: {log_path}",
+                    cause=exc,
+                ) from exc
             try:
                 os.ftruncate(fd, len(prefix_bytes))
                 os.fsync(fd)
@@ -704,9 +688,11 @@ class ObsidianSessionRecoveryRepository:
                 except OSError:
                     pass
 
-        # Verify repair
+        # Verify exact repair bytes
         repaired_bytes = _read_exact_bytes(log_path)
-        after_hash = _content_hash(repaired_bytes.decode("utf-8"))
+        if repaired_bytes != expected_bytes:
+            raise StorageError("Audit tail repair produced unexpected bytes")
+        after_hash = _bytes_hash(repaired_bytes)
 
         # Strict AuditService.read_all() verification
         try:
@@ -748,6 +734,33 @@ class ObsidianSessionRecoveryRepository:
 
     # ── cleanup_partial_start — explicit cleanup ──────────────────────────
 
+    def _find_unmatched_start_operation(
+        self, session_id: str, records: list[AuditRecord]
+    ) -> str | None:
+        """Find the exactly one unmatched ``session.start`` operation ID.
+
+        Groups records by ``operation_id`` and requires exactly one
+        operation with intent(s) and zero committed records.
+
+        Returns:
+            The owning operation ID, or ``None`` if none or ambiguous.
+        """
+        start_by_op: dict[str, list[AuditRecord]] = {}
+        for r in records:
+            if r.operation == "session.start" and r.session == session_id:
+                start_by_op.setdefault(r.operation_id, []).append(r)
+
+        unmatched: list[str] = []
+        for op_id, op_records in start_by_op.items():
+            has_intent = any(r.phase == "intent" for r in op_records)
+            has_committed = any(r.phase == "committed" for r in op_records)
+            if has_intent and not has_committed:
+                unmatched.append(op_id)
+
+        if len(unmatched) == 1:
+            return unmatched[0]
+        return None
+
     def cleanup_partial_start(
         self,
         session_id: str,
@@ -781,7 +794,7 @@ class ObsidianSessionRecoveryRepository:
             paths.session_dir, paths.raw_dir, paths.raw_events
         )
 
-        # Verify audit ownership
+        # Verify audit ownership — exactly one unmatched operation
         try:
             records, _ = _read_audit_log(self._audit_service)
         except StorageError as exc:
@@ -790,26 +803,11 @@ class ObsidianSessionRecoveryRepository:
                 cause=exc,
             ) from exc
 
-        matching_intents = [
-            r
-            for r in records
-            if r.operation == "session.start" and r.session == session_id and r.phase == "intent"
-        ]
-        matching_committed = [
-            r
-            for r in records
-            if r.operation == "session.start" and r.session == session_id and r.phase == "committed"
-        ]
-
-        if not matching_intents:
+        owning_op = self._find_unmatched_start_operation(session_id, records)
+        if owning_op is None:
             raise StorageError(
-                f"No unmatched session.start intent found for {session_id} — "
+                f"No single unmatched session.start intent found for {session_id} — "
                 "cannot prove ownership of partial start"
-            )
-
-        if matching_committed:
-            raise StorageError(
-                f"Session {session_id} has a committed session.start record — not a partial start"
             )
 
         # Verify safe state
@@ -860,38 +858,29 @@ class ObsidianSessionRecoveryRepository:
                 f"Partial-start state for {session_id} changed after recovery intent"
             )
 
-        # Remove only exact known-empty artifacts
-        if paths.raw_events.exists():
-            if paths.raw_events.stat().st_size == 0:
-                try:
-                    paths.raw_events.unlink()
-                except OSError as exc:
-                    raise StorageError(
-                        f"Failed to remove events.jsonl for {session_id}",
-                        cause=exc,
-                    ) from exc
+        # Revalidate ownership — recovery intent must not confuse the check
+        try:
+            records2, _ = _read_audit_log(self._audit_service)
+        except StorageError as exc:
+            raise StorageError(
+                f"Cannot revalidate audit ownership for session {session_id}",
+                cause=exc,
+            ) from exc
 
-        if paths.raw_dir.exists():
-            try:
-                contents = list(paths.raw_dir.iterdir())
-                if not contents:
-                    paths.raw_dir.rmdir()
-            except OSError as exc:
-                raise StorageError(
-                    f"Failed to remove raw session directory for {session_id}",
-                    cause=exc,
-                ) from exc
+        owning_op2 = self._find_unmatched_start_operation(session_id, records2)
+        if owning_op2 is None or owning_op2 != owning_op:
+            raise ConflictError(
+                f"Session {session_id} start ownership changed after recovery intent"
+            )
 
-        if paths.session_dir.exists():
-            try:
-                contents = list(paths.session_dir.iterdir())
-                if not contents:
-                    paths.session_dir.rmdir()
-            except OSError as exc:
-                raise StorageError(
-                    f"Failed to remove session directory for {session_id}",
-                    cause=exc,
-                ) from exc
+        # Snapshot the expected cleanup plan before mutation
+        cleanup_plan = self._build_cleanup_plan(paths)
+
+        # Remove only exact known-empty artifacts — strict mutation semantics
+        self._execute_cleanup_plan(cleanup_plan, session_id)
+
+        # Verify final absence — all expected artifacts are gone
+        self._verify_cleanup_absence(cleanup_plan, session_id)
 
         # Build after snapshot
         after_hash = _build_partial_start_snapshot(
@@ -927,6 +916,154 @@ class ObsidianSessionRecoveryRepository:
             detail=f"Partial start for {session_id} cleaned up",
         )
 
+    @staticmethod
+    def _build_cleanup_plan(paths) -> dict[str, object]:
+        """Build a deterministic plan of what to remove during cleanup.
+
+        Returns:
+            A dict with artifact names as keys and expected pre-removal
+            state as values.
+        """
+        plan: dict[str, object] = {}
+        plan["events_expected_exists"] = paths.raw_events.exists()
+        if paths.raw_events.exists():
+            plan["events_expected_size"] = paths.raw_events.stat().st_size
+        plan["raw_dir_expected_exists"] = paths.raw_dir.exists()
+        plan["session_dir_expected_exists"] = paths.session_dir.exists()
+        return plan
+
+    def _execute_cleanup_plan(self, plan: dict[str, object], session_id: str) -> None:
+        """Execute the cleanup plan with strict mutation semantics.
+
+        Raises:
+            ConflictError: An artifact changed from expected state.
+            StorageError: A filesystem operation failed.
+        """
+        paths = None  # resolved lazily
+
+        # Remove events.jsonl
+        if plan.get("events_expected_exists"):
+            # Need paths to find the actual file
+            paths = resolve_session_storage_paths(self._vault_root, session_id)
+            ev = paths.raw_events
+            if not ev.exists():
+                raise ConflictError(f"events.jsonl for {session_id} disappeared before cleanup")
+            if ev.is_symlink():
+                raise ConflictError(
+                    f"events.jsonl for {session_id} became a symlink before cleanup"
+                )
+            if not ev.is_file():
+                raise ConflictError(f"events.jsonl for {session_id} is not a regular file")
+            if ev.stat().st_size != 0:
+                raise ConflictError(
+                    f"events.jsonl for {session_id} became non-empty before cleanup"
+                )
+            try:
+                ev.unlink()
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to remove events.jsonl for {session_id}",
+                    cause=exc,
+                ) from exc
+
+        # Remove raw_dir if empty
+        if plan.get("raw_dir_expected_exists"):
+            if paths is None:
+                paths = resolve_session_storage_paths(self._vault_root, session_id)
+            rd = paths.raw_dir
+            if rd.exists():
+                try:
+                    contents = list(rd.iterdir())
+                except OSError as exc:
+                    raise StorageError(
+                        f"Failed to list raw session directory for {session_id}",
+                        cause=exc,
+                    ) from exc
+                if contents:
+                    raise ConflictError(
+                        f"Raw session directory for {session_id} is not empty before cleanup"
+                    )
+                try:
+                    rd.rmdir()
+                except OSError as exc:
+                    raise StorageError(
+                        f"Failed to remove raw session directory for {session_id}",
+                        cause=exc,
+                    ) from exc
+
+        # Remove session_dir if empty
+        if plan.get("session_dir_expected_exists"):
+            if paths is None:
+                paths = resolve_session_storage_paths(self._vault_root, session_id)
+            sd = paths.session_dir
+            if sd.exists():
+                try:
+                    contents = list(sd.iterdir())
+                except OSError as exc:
+                    raise StorageError(
+                        f"Failed to list session directory for {session_id}",
+                        cause=exc,
+                    ) from exc
+                if contents:
+                    raise ConflictError(
+                        f"Session directory for {session_id} is not empty before cleanup"
+                    )
+                try:
+                    sd.rmdir()
+                except OSError as exc:
+                    raise StorageError(
+                        f"Failed to remove session directory for {session_id}",
+                        cause=exc,
+                    ) from exc
+
+    def _verify_cleanup_absence(self, plan: dict[str, object], session_id: str) -> None:
+        """Verify all expected artifacts are absent after cleanup.
+
+        Raises:
+            StorageError: An artifact that should be absent still exists.
+        """
+        paths = resolve_session_storage_paths(self._vault_root, session_id)
+
+        if plan.get("events_expected_exists") and paths.raw_events.exists():
+            raise StorageError(f"events.jsonl for {session_id} was not removed during cleanup")
+        if plan.get("raw_dir_expected_exists") and paths.raw_dir.exists():
+            raise StorageError(
+                f"Raw session directory for {session_id} was not removed during cleanup"
+            )
+        if plan.get("session_dir_expected_exists") and paths.session_dir.exists():
+            raise StorageError(f"Session directory for {session_id} was not removed during cleanup")
+
+    # ── Event-tail metadata prerequisite ──────────────────────────────────
+
+    def _validate_metadata_for_event_recovery(self, session_id: str, paths) -> tuple[bytes, str]:
+        """Validate that metadata exists, is valid, and has allowed status.
+
+        Returns:
+            ``(metadata_bytes, metadata_hash)``.
+
+        Raises:
+            StorageError: Metadata is missing, corrupt, or has disallowed status.
+        """
+        metadata_path = paths.raw_metadata
+        if not metadata_path.exists():
+            raise StorageError(f"Session {session_id} has no metadata.json — cannot repair events")
+        if metadata_path.is_symlink():
+            raise StorageError(f"metadata.json for {session_id} is a symlink — rejected for safety")
+        if metadata_path.is_dir():
+            raise StorageError(f"metadata.json for {session_id} is a directory")
+
+        meta_bytes = _read_exact_bytes(metadata_path)
+        meta_text = meta_bytes.decode("utf-8")
+        meta = _deserialize_metadata(meta_text, expected_id=session_id)
+
+        if meta.session.status not in ("active", "completed"):
+            raise StorageError(
+                f"Session {session_id} has status {meta.session.status!r} — "
+                "event-tail recovery requires active or completed status"
+            )
+
+        return meta_bytes, _bytes_hash(meta_bytes)
+
     # ── repair_event_tail — append-LF or truncate ─────────────────────────
 
     def repair_event_tail(
@@ -937,9 +1074,9 @@ class ObsidianSessionRecoveryRepository:
     ) -> RecoveryActionResult:
         """Repair a provably partial final event-log tail.
 
-        Recovery is allowed only when all complete LF-terminated prefix
-        events are valid and corruption is isolated to the final
-        unterminated tail.
+        Recovery is allowed only when:
+        - Canonical metadata exists with active/completed status.
+        - The audit log is clean (no partial tail, no corruption).
 
         Args:
             session_id: The session identifier.
@@ -967,71 +1104,69 @@ class ObsidianSessionRecoveryRepository:
         if events_path.is_dir():
             raise StorageError(f"events.jsonl is a directory: {events_path}")
 
-        # Snapshot metadata hash for race detection
-        metadata_path = paths.raw_metadata
-        if metadata_path.exists():
-            meta_before_text = _read_meta_text(metadata_path)
-            meta_before_hash = _content_hash(meta_before_text)
-        else:
-            meta_before_hash = None
+        # Require valid metadata with allowed status
+        meta_before_bytes, meta_before_hash = self._validate_metadata_for_event_recovery(
+            session_id, paths
+        )
+
+        # Require clean audit log first
+        try:
+            self._audit_service.read_all()
+        except (StorageError, UnicodeDecodeError) as exc:
+            raise StorageError(
+                f"Audit log is corrupt — repair audit tail before repairing events for {session_id}",
+                cause=exc,
+            ) from exc
 
         # Snapshot exact before state
         before_bytes = _read_exact_bytes(events_path)
-        before_hash = _content_hash(before_bytes.decode("utf-8"))
+        before_hash = _bytes_hash(before_bytes)
+
+        # UTF-8 check
+        try:
+            before_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise StorageError(
+                f"events.jsonl for {session_id} contains invalid UTF-8",
+                cause=exc,
+            ) from exc
 
         # Try strict parsing first
-        text = before_bytes.decode("utf-8")
-        parse_ok = False
+        parse_succeeded = False
         try:
-            _parse_events_jsonl(text)
-            parse_ok = True
+            _parse_events_jsonl(before_bytes.decode("utf-8"))
+            parse_succeeded = True
         except StorageError:
             pass
 
-        if parse_ok:
+        if parse_succeeded:
             raise StorageError(f"events.jsonl for {session_id} is already valid — no repair needed")
 
-        # Normalize line endings: splitlines() handles \r\n, \n, \r uniformly
-        raw_lines = text.splitlines()
-        normalized = "\n".join(raw_lines)
-
         # Check if the file already ends with LF using the ORIGINAL bytes
-        # (before_bytes, not normalized text, to correctly detect \n even
-        # when the file uses \r\n line endings on Windows)
         if before_bytes.endswith(b"\n"):
             raise StorageError(
                 f"events.jsonl for {session_id} ends with newline but is corrupt — "
                 "corruption is not limited to the final tail"
             )
 
-        # Split into complete prefix and final tail
-        lines = normalized.split("\n")
-        if lines and lines[-1] == "":
-            lines = lines[:-1]
+        # Split at last physical \n — exact bytes, no normalization
+        prefix_bytes, tail_bytes = self._split_final_unterminated_tail(before_bytes)
 
-        if len(lines) < 1:
-            raise StorageError(f"events.jsonl for {session_id} has no content to repair")
-
-        complete_prefix = "\n".join(lines[:-1])
-        if complete_prefix:
-            complete_prefix += "\n"
-        final_tail = lines[-1]
-
-        # Verify complete prefix is valid
-        try:
-            if complete_prefix:
-                _parse_events_jsonl(complete_prefix)
-        except StorageError as exc:
-            raise StorageError(
-                f"events.jsonl for {session_id}: corruption is not limited to "
-                "the final tail — manual intervention required",
-                cause=exc,
-            ) from exc
+        # Verify complete prefix is valid (may be empty for single-line file)
+        if prefix_bytes:
+            try:
+                _parse_events_jsonl(prefix_bytes.decode("utf-8"))
+            except StorageError as exc:
+                raise StorageError(
+                    f"events.jsonl for {session_id}: corruption is not limited to "
+                    "the final tail — manual intervention required",
+                    cause=exc,
+                ) from exc
 
         # Determine repair mode
-        tail_with_lf = final_tail + "\n"
+        tail_with_lf = tail_bytes + b"\n"
         try:
-            _parse_events_jsonl(tail_with_lf)
+            _parse_events_jsonl(tail_with_lf.decode("utf-8"))
             repair_mode = "append_missing_newline"
         except StorageError:
             repair_mode = "truncate_invalid_tail"
@@ -1043,21 +1178,25 @@ class ObsidianSessionRecoveryRepository:
 
         # Re-read and verify unchanged
         current_bytes = _read_exact_bytes(events_path)
-        current_hash = _content_hash(current_bytes.decode("utf-8"))
-        if current_hash != before_hash:
+        if _bytes_hash(current_bytes) != before_hash:
             raise ConflictError(
                 f"events.jsonl for {session_id} changed between inspection and repair"
             )
 
         # Re-check metadata unchanged
-        if meta_before_hash is not None:
-            if metadata_path.exists():
-                meta_current_text = _read_meta_text(metadata_path)
-                meta_current_hash = _content_hash(meta_current_text)
-                if meta_current_hash != meta_before_hash:
-                    raise ConflictError(
-                        f"Session metadata for {session_id} changed after event-tail repair intent"
-                    )
+        meta_current_bytes = _read_exact_bytes(paths.raw_metadata)
+        if _bytes_hash(meta_current_bytes) != meta_before_hash:
+            raise ConflictError(
+                f"Session metadata for {session_id} changed before event-tail repair intent"
+            )
+        # Revalidate metadata status
+        meta_current_text = meta_current_bytes.decode("utf-8")
+        meta_current = _deserialize_metadata(meta_current_text, expected_id=session_id)
+        if meta_current.session.status not in ("active", "completed"):
+            raise StorageError(
+                f"Session {session_id} status changed to {meta_current.session.status!r} "
+                "before event-tail repair"
+            )
 
         # Audit intent
         intent_record = _build_audit_record(
@@ -1079,18 +1218,35 @@ class ObsidianSessionRecoveryRepository:
         paths = resolve_session_storage_paths(self._vault_root, session_id)
         events_path = paths.raw_events
 
-        # Re-read and verify unchanged
+        # Re-read and verify events unchanged
         current_bytes2 = _read_exact_bytes(events_path)
-        current_hash2 = _content_hash(current_bytes2.decode("utf-8"))
-        if current_hash2 != before_hash:
+        if _bytes_hash(current_bytes2) != before_hash:
             raise ConflictError(f"events.jsonl for {session_id} changed after recovery intent")
+
+        # Recheck metadata unchanged after intent
+        meta_post_intent_bytes = _read_exact_bytes(paths.raw_metadata)
+        if _bytes_hash(meta_post_intent_bytes) != meta_before_hash:
+            raise ConflictError(f"Session metadata for {session_id} changed after recovery intent")
 
         # Perform repair
         if repair_mode == "append_missing_newline":
-            fd = os.open(str(events_path), os.O_WRONLY | os.O_APPEND | _O_BINARY)
+            expected_bytes = before_bytes + b"\n"
             try:
-                os.write(fd, b"\n")
+                fd = os.open(str(events_path), os.O_WRONLY | os.O_APPEND | _O_BINARY)
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to open events.jsonl for append: {events_path}",
+                    cause=exc,
+                ) from exc
+            try:
+                written = os.write(fd, b"\n")
+                if written != 1:
+                    raise StorageError(
+                        f"Short write when appending LF to events.jsonl: wrote {written} of 1 byte"
+                    )
                 os.fsync(fd)
+            except StorageError:
+                raise
             except OSError as exc:
                 raise StorageError(
                     f"Failed to append LF to events.jsonl: {events_path}",
@@ -1102,8 +1258,14 @@ class ObsidianSessionRecoveryRepository:
                 except OSError:
                     pass
         else:
-            prefix_bytes = complete_prefix.encode("utf-8")
-            fd = os.open(str(events_path), os.O_WRONLY | _O_BINARY)
+            expected_bytes = prefix_bytes
+            try:
+                fd = os.open(str(events_path), os.O_WRONLY | _O_BINARY)
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to open events.jsonl for truncation: {events_path}",
+                    cause=exc,
+                ) from exc
             try:
                 os.ftruncate(fd, len(prefix_bytes))
                 os.fsync(fd)
@@ -1118,9 +1280,11 @@ class ObsidianSessionRecoveryRepository:
                 except OSError:
                     pass
 
-        # Verify repair — re-read exact bytes
+        # Verify exact repair bytes
         repaired_bytes = _read_exact_bytes(events_path)
-        after_hash = _content_hash(repaired_bytes.decode("utf-8"))
+        if repaired_bytes != expected_bytes:
+            raise StorageError(f"Event-tail repair for {session_id} produced unexpected bytes")
+        after_hash = _bytes_hash(repaired_bytes)
 
         # Strictly parse entire event log
         try:
@@ -1131,10 +1295,17 @@ class ObsidianSessionRecoveryRepository:
                 cause=exc,
             ) from exc
 
+        # Recheck metadata after physical repair
+        meta_final_bytes = _read_exact_bytes(paths.raw_metadata)
+        if _bytes_hash(meta_final_bytes) != meta_before_hash:
+            raise StorageError(
+                f"Session metadata for {session_id} changed after event-tail physical repair"
+            )
+
         # Verify all complete prior events unchanged
-        if complete_prefix:
+        if prefix_bytes:
             try:
-                prior_events = _parse_events_jsonl(complete_prefix)
+                prior_events = _parse_events_jsonl(prefix_bytes.decode("utf-8"))
             except StorageError as exc:
                 raise StorageError(
                     f"Event-tail repair for {session_id} completed but "
@@ -1179,88 +1350,134 @@ class ObsidianSessionRecoveryRepository:
             detail=f"events.jsonl repaired: {repair_mode}",
         )
 
-    def _check_audit_prefix_valid(self, text: str) -> bool:
-        """Check if audit text (complete prefix) is strictly valid.
+    # ── Pure in-memory audit validation ──────────────────────────────────
 
-        Writes to a temp file and uses AuditService.read_all() to validate.
-        Uses ``newline=""`` to prevent platform ``\\n`` → ``\\r\\n`` translation.
+    @staticmethod
+    def _parse_audit_jsonl_bytes(data: bytes) -> list[AuditRecord]:
+        """Parse audit JSONL bytes in-memory.
+
+        Uses the same strict logic as ``AuditService.read_all()`` but
+        operates on a bytes buffer instead of a file.
+
+        Returns:
+            All valid ``AuditRecord`` values in order.
+
+        Raises:
+            StorageError: Malformed JSON, invalid record, or blank line.
+        """
+        if not data:
+            return []
+
+        try:
+            text = data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise StorageError("Audit data is not valid UTF-8", cause=exc) from exc
+
+        records: list[AuditRecord] = []
+        for line_no, raw_line in enumerate(text.splitlines(keepends=False), start=1):
+            stripped = raw_line.strip()
+            if not stripped:
+                raise StorageError(f"Audit corruption at line {line_no}: unexpected blank line")
+            try:
+                parsed = json.loads(raw_line)
+            except json.JSONDecodeError as exc:
+                raise StorageError(
+                    f"Audit corruption at line {line_no}: malformed JSON",
+                    cause=exc,
+                ) from exc
+            if not isinstance(parsed, dict):
+                raise StorageError(
+                    f"Audit corruption at line {line_no}: expected JSON object, "
+                    f"got {type(parsed).__name__}"
+                )
+            try:
+                records.append(AuditRecord.model_validate(parsed))
+            except Exception as exc:
+                raise StorageError(
+                    f"Audit corruption at line {line_no}: invalid AuditRecord",
+                    cause=exc,
+                ) from exc
+        return records
+
+    @staticmethod
+    def _validate_audit_prefix_bytes(prefix_bytes: bytes) -> bool:
+        """Check if complete audit prefix bytes are strictly valid.
+
+        Pure in-memory — no temporary files.
 
         Returns:
             True if valid, False if corrupt.
         """
-        if not text:
+        if not prefix_bytes:
             return True
-        log_path = self._audit_service.log_path
-        temp_path = log_path.with_name(f"._audit_check_{os.urandom(4).hex()}.tmp")
         try:
-            temp_path.write_text(text, encoding="utf-8", newline="")
-            temp_service = AuditService(temp_path)
-            temp_service.read_all()
+            ObsidianSessionRecoveryRepository._parse_audit_jsonl_bytes(prefix_bytes)
             return True
-        except (StorageError, OSError):
+        except StorageError:
             return False
-        finally:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
 
-    def _check_audit_text_valid(self, text: str) -> bool:
-        """Check if audit text is a valid complete audit log.
-
-        Uses ``newline=""`` to prevent platform ``\\n`` → ``\\r\\n`` translation.
+    @staticmethod
+    def _split_final_unterminated_tail(
+        data: bytes,
+    ) -> tuple[bytes, bytes]:
+        """Split bytes at the last physical ``\\n``.
 
         Returns:
-            True if valid, False if corrupt.
+            ``(prefix_bytes, tail_bytes)`` where ``prefix_bytes`` includes
+            the final ``\\n`` (if any), and ``tail_bytes`` is everything
+            after it.
         """
-        if not text:
-            return True
-        log_path = self._audit_service.log_path
-        temp_path = log_path.with_name(f"._audit_check_{os.urandom(4).hex()}.tmp")
-        try:
-            temp_path.write_text(text, encoding="utf-8", newline="")
-            temp_service = AuditService(temp_path)
-            temp_service.read_all()
-            return True
-        except (StorageError, OSError):
-            return False
-        finally:
-            if temp_path.exists():
-                try:
-                    temp_path.unlink()
-                except OSError:
-                    pass
+        last_lf = data.rfind(b"\n")
+        if last_lf >= 0:
+            return data[: last_lf + 1], data[last_lf + 1 :]
+        return b"", data
 
     # ── Session inspection ────────────────────────────────────────────────
 
     def _inspect_sessions(self) -> list[RecoveryIssue]:
         """Scan session directories for issues.
 
+        Discovers candidate session IDs from the union of:
+        - ``Sessions/*``
+        - ``_system/raw/sessions/*``
+
         Returns:
             A list of issues (may be empty).
         """
         issues: list[RecoveryIssue] = []
+        sessions_root = self._vault_root / "Sessions"
         raw_root = self._vault_root / "_system" / "raw" / "sessions"
 
-        if not raw_root.exists() or not raw_root.is_dir():
-            return issues
+        # Collect candidate IDs from both roots
+        candidate_ids: set[str] = set()
 
-        try:
-            entries = sorted(raw_root.iterdir(), key=lambda p: p.name)
-        except OSError:
-            return issues
+        for root in (sessions_root, raw_root):
+            if not root.exists() or not root.is_dir():
+                continue
+            try:
+                for entry in sorted(root.iterdir(), key=lambda p: p.name):
+                    # Report unsafe entries rather than silently skipping
+                    if entry.is_symlink():
+                        sid = entry.name
+                        if sid:
+                            issues.append(
+                                RecoveryIssue(
+                                    code="unsafe_session_path",
+                                    session_id=sid,
+                                    detail=f"Session path {entry} is a symlink",
+                                    recoverable=False,
+                                )
+                            )
+                        continue
+                    if not entry.is_dir():
+                        continue
+                    candidate_ids.add(entry.name)
+            except OSError:
+                continue
 
         active_count = 0
 
-        for entry in entries:
-            if entry.is_symlink():
-                continue
-            if not entry.is_dir():
-                continue
-
-            session_id = entry.name
-
+        for session_id in sorted(candidate_ids):
             # Check for unsafe paths
             try:
                 paths = resolve_session_storage_paths(self._vault_root, session_id)
@@ -1382,62 +1599,29 @@ class ObsidianSessionRecoveryRepository:
         if not raw_bytes:
             return issues
 
-        text = raw_bytes.decode("utf-8")
+        # UTF-8 check
+        try:
+            raw_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            issues.append(
+                RecoveryIssue(
+                    code="event_corrupt",
+                    session_id=session_id,
+                    detail=f"events.jsonl for {session_id} contains invalid UTF-8",
+                    recoverable=False,
+                )
+            )
+            return issues
 
         # Try strict parsing first
         try:
-            _parse_events_jsonl(text)
+            _parse_events_jsonl(raw_bytes.decode("utf-8"))
             return issues  # No issues
         except StorageError:
             pass
 
-        # Check if the issue is a partial tail
-        if not text.endswith("\n"):
-            lines = text.split("\n")
-            if lines and lines[-1] == "":
-                lines = lines[:-1]
-
-            if len(lines) >= 1:
-                complete_prefix = "\n".join(lines[:-1])
-                if complete_prefix:
-                    complete_prefix += "\n"
-                final_tail = lines[-1]
-
-                # Check if the complete prefix is valid
-                try:
-                    if complete_prefix:
-                        _parse_events_jsonl(complete_prefix)
-                    # If we get here, the complete prefix is valid
-                    tail_with_lf = final_tail + "\n"
-                    try:
-                        _parse_events_jsonl(tail_with_lf)
-                        issues.append(
-                            RecoveryIssue(
-                                code="event_partial_tail",
-                                session_id=session_id,
-                                detail=f"events.jsonl for {session_id} has a final record missing trailing newline",
-                                recoverable=True,
-                            )
-                        )
-                    except StorageError:
-                        issues.append(
-                            RecoveryIssue(
-                                code="event_partial_tail",
-                                session_id=session_id,
-                                detail=f"events.jsonl for {session_id} has an incomplete final record",
-                                recoverable=True,
-                            )
-                        )
-                except StorageError:
-                    issues.append(
-                        RecoveryIssue(
-                            code="event_corrupt",
-                            session_id=session_id,
-                            detail=f"events.jsonl for {session_id} has corruption in a completed record",
-                            recoverable=False,
-                        )
-                    )
-        else:
+        # Physical-LF classification
+        if raw_bytes.endswith(b"\n"):
             # Ends with LF but parsing failed — corruption in middle
             issues.append(
                 RecoveryIssue(
@@ -1447,11 +1631,57 @@ class ObsidianSessionRecoveryRepository:
                     recoverable=False,
                 )
             )
+            return issues
+
+        # Split at last physical \n — exact bytes
+        prefix_bytes, tail_bytes = self._split_final_unterminated_tail(raw_bytes)
+
+        # Validate the complete prefix (may be empty for single-line file)
+        if prefix_bytes:
+            try:
+                _parse_events_jsonl(prefix_bytes.decode("utf-8"))
+            except StorageError:
+                issues.append(
+                    RecoveryIssue(
+                        code="event_corrupt",
+                        session_id=session_id,
+                        detail=f"events.jsonl for {session_id} has corruption in a completed record",
+                        recoverable=False,
+                    )
+                )
+                return issues
+
+        # Check if the tail bytes + LF form one valid event
+        tail_with_lf = tail_bytes + b"\n"
+        try:
+            _parse_events_jsonl(tail_with_lf.decode("utf-8"))
+            issues.append(
+                RecoveryIssue(
+                    code="event_partial_tail",
+                    session_id=session_id,
+                    detail=f"events.jsonl for {session_id} has a final record missing trailing newline",
+                    recoverable=True,
+                )
+            )
+        except StorageError:
+            issues.append(
+                RecoveryIssue(
+                    code="event_partial_tail",
+                    session_id=session_id,
+                    detail=f"events.jsonl for {session_id} has an incomplete final fragment",
+                    recoverable=True,
+                )
+            )
 
         return issues
 
     def _inspect_partial_start(self, session_id: str, paths) -> list[RecoveryIssue]:
         """Check if a session directory without metadata is a recoverable partial start.
+
+        Ownership is determined by grouping ``session.start`` records by
+        ``operation_id``.  An unmatched start operation has at least one
+        intent record and zero committed records.  Exactly one such
+        operation must exist for automatic recovery.
 
         Returns:
             A list of issues (may be empty).
@@ -1465,25 +1695,32 @@ class ObsidianSessionRecoveryRepository:
         if not has_session_dir and not has_raw_dir:
             return issues
 
-        # Check for unmatched session.start intent
+        # Check for unmatched session.start intent by operation_id
         try:
             records, _ = _read_audit_log(self._audit_service)
         except StorageError:
             return issues
 
-        matching_intents = [
-            r
-            for r in records
-            if r.operation == "session.start" and r.session == session_id and r.phase == "intent"
-        ]
-        matching_committed = [
-            r
-            for r in records
-            if r.operation == "session.start" and r.session == session_id and r.phase == "committed"
-        ]
+        # Group session.start records for this session by operation_id
+        start_by_op: dict[str, list[AuditRecord]] = {}
+        for r in records:
+            if r.operation == "session.start" and r.session == session_id:
+                start_by_op.setdefault(r.operation_id, []).append(r)
 
-        if not matching_intents:
-            # No audit ownership — not auto-recoverable
+        # Find unmatched operation IDs (have intent, no committed)
+        unmatched_ops: list[str] = []
+        for op_id, op_records in start_by_op.items():
+            has_intent = any(r.phase == "intent" for r in op_records)
+            has_committed = any(r.phase == "committed" for r in op_records)
+            if has_intent and not has_committed:
+                unmatched_ops.append(op_id)
+
+        if not unmatched_ops:
+            # No unmatched intent — not a recoverable partial start
+            if start_by_op:
+                # Has committed records — not a partial start, return no issue
+                return issues
+            # No audit ownership at all
             issues.append(
                 RecoveryIssue(
                     code="partial_start",
@@ -1494,9 +1731,23 @@ class ObsidianSessionRecoveryRepository:
             )
             return issues
 
-        if matching_committed:
-            # Has committed record — not a partial start
+        if len(unmatched_ops) > 1:
+            # Multiple unmatched start operations — ambiguous ownership
+            issues.append(
+                RecoveryIssue(
+                    code="partial_start",
+                    session_id=session_id,
+                    detail=(
+                        f"Session {session_id} has {len(unmatched_ops)} unmatched "
+                        "session.start operations — ambiguous ownership"
+                    ),
+                    recoverable=False,
+                )
+            )
             return issues
+
+        # Exactly one unmatched operation
+        owning_op_id = unmatched_ops[0]
 
         # Check if all artifacts are safe
         if not self._is_safe_partial_start(session_id, paths):
@@ -1514,6 +1765,7 @@ class ObsidianSessionRecoveryRepository:
             RecoveryIssue(
                 code="partial_start",
                 session_id=session_id,
+                operation_id=owning_op_id,
                 detail=f"Session {session_id} is a recoverable partial start",
                 recoverable=True,
             )

@@ -229,7 +229,7 @@ class TestCleanupPartialStartFailures:
         audit_svc = _create_audit_service(vault_root)
         (vault_root / "Sessions" / "S006").mkdir()
         repo = ObsidianSessionRecoveryRepository(vault_root, audit_svc)
-        with pytest.raises(StorageError, match="No unmatched session.start intent"):
+        with pytest.raises(StorageError, match="No single unmatched session.start intent"):
             repo.cleanup_partial_start(
                 "S006", audit=_make_audit_context(operation_id="rec-001", session="S006")
             )
