@@ -30,15 +30,34 @@
 
 ## Current-stage compatibility
 
-Текущий Stage 3 `VaultRepository` должен сканировать только:
+### Stage 3 — VaultRepository
+
+`VaultRepository` сканирует только:
 - Characters/NPCs
 - Locations
 - Quests
 - Items
 
-Sessions, Events и State заложены для следующих stages и не должны случайно
-восприниматься как MVP Entity files текущим repository discovery.
+Sessions, Events и State не должны случайно восприниматься как MVP Entity files.
 
-## Suggested repository location
+### Stage 6 — Session Runtime (S6-07)
 
-`tests/fixtures/golden_vault/`
+Фикстура совместима со Stage 6 Session Runtime:
+
+- 5 completed historical sessions (S001–S005).
+- 20 canonical raw events (evt_001–evt_004 per session).
+- Canonical `_system/world_time.json` (current_world_tick=13800, revision=1).
+- `conversation.jsonl` остаётся пустым — schema не определена.
+- Audit log — пустой seed (исторические фикстуры не имеют fabricated audit).
+- Все writable тесты используют `tmp_path` копии.
+
+### Stage 6 — raw event IDs
+
+Raw event IDs приведены к каноническому формату `evt_<positive integer>`.
+
+Легаси-формат `raw_S*_*` был заменён в S6-07. Производственный код не содержит
+обратной совместимости с легаси-форматом.
+
+## Repository location
+
+`tests/fixtures/golden_test_vault/`

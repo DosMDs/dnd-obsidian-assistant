@@ -51,7 +51,7 @@ existing code and ADRs:
 - [x] `S6-04` Session end/close immutability + touched IDs + processing pending
 - [x] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
 - [ ] `S6-06` Thin CLI orchestration: session start/status/end + note
-- [ ] `S6-07` Golden-Vault temp-copy integration + cross-platform/failure hardening
+- [x] `S6-07` Golden-Vault temp-copy integration + cross-platform/failure hardening
 - [ ] `S6-08` Full Stage-6 historical review / verification / status completion
 
 ## Definition of Done
@@ -1925,7 +1925,95 @@ Added tests:
 - Maintainability: 216 passed — no new production/test exception, no correction-history filename
 
 **No production changes.**
-Only file changed: `tests/unit/test_cli_session.py` (+68 lines, 707 physical lines final).
+Only non-documentation repository file changed: `tests/unit/test_cli_session.py` (+68 lines, 707 physical lines final).
 
 **Correction commit:** (reported in Final Report)
 **Commit message:** `test: complete session CLI regressions (S6-C06)`
+
+### S6-07 — Golden-Vault temp-copy integration + cross-platform/failure hardening
+
+**Starting SHA:** `f0a04c661e6e31096f84e678ad045996102db379`
+
+**Scope implemented:**
+
+1. **Golden fixture canonicalization:**
+   - Migrated all 20 raw event IDs from legacy `raw_S*_*` format to canonical
+     `evt_001`–`evt_004` per session (S001–S005).
+   - Added `_system/world_time.json` with `current_world_tick=13800`,
+     `revision=1` matching S005 `world_tick_end`.
+   - Updated `TEST_VAULT_README.md` with Stage-6 compatibility documentation
+     and corrected stale suggested path.
+   - No entity/lore/quest/item/NPC content was modified.
+   - No production migration framework was added.
+   - No `conversation.jsonl` schema was defined.
+   - Audit log remains empty (historical fixture seed).
+
+2. **`tests/integration/test_session_golden_vault.py`** — new integration test
+   module (827 physical lines) covering:
+   - Source immutability proof (byte-level SHA-256 snapshot before/after lifecycle).
+   - Baseline Stage-6 compatibility (world time, 5 completed sessions, 20 events,
+     clean recovery, next ID = S006).
+   - S006 lifecycle via repositories (start, note, status, end with touched IDs).
+   - World time update and tick propagation to notes/end.
+   - Audit correctness (CLI source, test source).
+   - Historical S001–S005 byte-for-byte preservation after lifecycle.
+   - S006 raw artifact verification (no conversation.jsonl, no derived docs).
+   - Restart lifecycle (destroy/reconstruct, rediscover active session).
+   - Duplicate-start failure (ConflictError, no S007 artifacts).
+   - Invalid-note failure (ValidationError, zero persisted events).
+   - Closed append immutability (NotFoundError/ConflictError, CLI exit non-zero).
+   - Event-tail corruption detection and explicit repair.
+   - CLI blocked by corrupt event tail.
+   - Post-repair CLI continuation.
+   - Symlink hardening (unsafe_session_path detection, skipped when OS lacks
+     symlink support).
+   - Full CLI lifecycle (status → start → status → note → end → status).
+
+3. **Documentation updates:**
+   - `DEVELOPMENT_STATUS.md` — S6-07 → DONE.
+   - `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` — S6-07 checkbox checked,
+     this completion record appended.
+   - `docs/engineering/MAINTAINABILITY_BASELINE.md` — added
+     `test_session_golden_vault.py` (827) and `test_cli_session.py` (707) to
+     WATCH list; updated WATCH count from 6 to 8.
+   - Fixed S6-C06 wording: "Only file changed" → "Only non-documentation
+     repository file changed".
+
+**Contract decisions:**
+
+- Temp-copy destination includes spaces and Unicode ("Golden Vault Kopiya").
+- Source immutability uses SHA-256 of exact file bytes, not timestamps.
+- All writable tests operate on `tmp_path` copies only.
+- No production `src/` changes were needed.
+- No production contracts were weakened.
+- No LLM, Tool Layer, ModelGateway, or conversation schema work.
+
+**Quality-gate results:**
+
+- Golden integration focused: 34 passed, 1 skipped (symlink on Windows)
+- Golden retrieval regression: 58 passed (unchanged)
+- Boundary order A (boundaries first): 142 passed, 1 skipped
+- Boundary order B (boundaries last): 142 passed, 1 skipped
+- SessionRuntime + restart + recovery + CLI: 229 passed, 1 skipped
+- Broader Stage-6 storage/lifecycle: 295 passed, 28 skipped
+- Maintainability: 218 passed — no new legacy exception
+- Full pytest: **2851 passed, 95 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 233 files already formatted
+- `uv run dnd --help`, `uv run dnd session --help`, `uv run dnd note --help` — OK
+- `git diff --check` — No whitespace errors
+- No production `src/` changes.
+- No production defects discovered.
+- No production contracts weakened.
+
+**Implementation commit:** (reported in Final Report)
+**Commit message:** `test: integrate session runtime with Golden Vault (S6-07)`
+
+**Explicit deferrals:**
+
+- S6-08 (Stage-6 historical review) — NOT STARTED.
+- Stage 7 (Tool Registry) — NOT STARTED.
+- No LLM, ModelGateway, Fast Agent, ChangeSet, or post-session processing.
+- No `conversation.jsonl` schema.
+- No general migration framework.
+- No dependency added.

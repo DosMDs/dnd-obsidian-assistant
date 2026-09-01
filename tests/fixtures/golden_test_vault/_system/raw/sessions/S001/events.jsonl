@@ -1,4 +1,4 @@
-{"event_id":"raw_S001_001","real_time":"2026-01-10T18:20:00Z","world_tick":10080,"type":"note","text":"Магистр Варос просит проверить северную дорогу."}
-{"event_id":"raw_S001_002","real_time":"2026-01-10T18:50:00Z","world_tick":10170,"type":"npc_interaction","text":"Ролан говорит, что караван пропал примерно три дня назад."}
-{"event_id":"raw_S001_003","real_time":"2026-01-10T19:20:00Z","world_tick":10290,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
-{"event_id":"raw_S001_004","real_time":"2026-01-10T19:50:00Z","world_tick":10410,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S001.","entity":"quest_missing_caravan"}
+{"event_id":"evt_001","real_time":"2026-01-10T18:20:00Z","world_tick":10080,"type":"note","text":"Магистр Варос просит проверить северную дорогу."}
+{"event_id":"evt_002","real_time":"2026-01-10T18:50:00Z","world_tick":10170,"type":"npc_interaction","text":"Ролан говорит, что караван пропал примерно три дня назад."}
+{"event_id":"evt_003","real_time":"2026-01-10T19:20:00Z","world_tick":10290,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
+{"event_id":"evt_004","real_time":"2026-01-10T19:50:00Z","world_tick":10410,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S001.","entity":"quest_missing_caravan"}

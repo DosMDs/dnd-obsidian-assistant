@@ -1,4 +1,4 @@
-{"event_id":"raw_S004_001","real_time":"2026-01-31T18:20:00Z","world_tick":12480,"type":"note","text":"Следы ведут к Чёрным топям."}
-{"event_id":"raw_S004_002","real_time":"2026-01-31T18:50:00Z","world_tick":12570,"type":"npc_interaction","text":"Найден фрагмент карты; Доран исследовал серебряный ключ."}
-{"event_id":"raw_S004_003","real_time":"2026-01-31T19:20:00Z","world_tick":12690,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
-{"event_id":"raw_S004_004","real_time":"2026-01-31T19:50:00Z","world_tick":12810,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S004.","entity":"item_doran_blade"}
+{"event_id":"evt_001","real_time":"2026-01-31T18:20:00Z","world_tick":12480,"type":"note","text":"Следы ведут к Чёрным топям."}
+{"event_id":"evt_002","real_time":"2026-01-31T18:50:00Z","world_tick":12570,"type":"npc_interaction","text":"Найден фрагмент карты; Доран исследовал серебряный ключ."}
+{"event_id":"evt_003","real_time":"2026-01-31T19:20:00Z","world_tick":12690,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
+{"event_id":"evt_004","real_time":"2026-01-31T19:50:00Z","world_tick":12810,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S004.","entity":"item_doran_blade"}

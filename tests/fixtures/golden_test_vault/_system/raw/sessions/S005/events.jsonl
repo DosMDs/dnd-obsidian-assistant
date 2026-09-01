@@ -1,4 +1,4 @@
-{"event_id":"raw_S005_001","real_time":"2026-02-07T18:20:00Z","world_tick":13280,"type":"note","text":"Стало известно о Затопленной крипте."}
-{"event_id":"raw_S005_002","real_time":"2026-02-07T18:50:00Z","world_tick":13370,"type":"npc_interaction","text":"Варос требует амулет и назначает встречу."}
-{"event_id":"raw_S005_003","real_time":"2026-02-07T19:20:00Z","world_tick":13490,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
-{"event_id":"raw_S005_004","real_time":"2026-02-07T19:50:00Z","world_tick":13610,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S005.","entity":"item_red_seal"}
+{"event_id":"evt_001","real_time":"2026-02-07T18:20:00Z","world_tick":13280,"type":"note","text":"Стало известно о Затопленной крипте."}
+{"event_id":"evt_002","real_time":"2026-02-07T18:50:00Z","world_tick":13370,"type":"npc_interaction","text":"Варос требует амулет и назначает встречу."}
+{"event_id":"evt_003","real_time":"2026-02-07T19:20:00Z","world_tick":13490,"type":"party_decision","text":"Партия решила не делать необратимых выводов без проверки."}
+{"event_id":"evt_004","real_time":"2026-02-07T19:50:00Z","world_tick":13610,"type":"item_acquired","text":"Зафиксировано изменение/улика сессии S005.","entity":"item_red_seal"}

@@ -75,7 +75,7 @@ Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/sta
 | S6-04 — Session end/close immutability + touched IDs + processing pending | DONE |
 | S6-05 — Restart/recovery + corrupt-state/failure-path integrity | DONE |
 | S6-06 — Thin CLI orchestration: session start/status/end + note | DONE |
-| S6-07 — Golden-Vault temp-copy integration + cross-platform/failure hardening | NOT STARTED |
+| S6-07 — Golden-Vault temp-copy integration + cross-platform/failure hardening | DONE |
 | S6-08 — Full Stage-6 historical review / verification / status completion | NOT STARTED |
 
 Details: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md)

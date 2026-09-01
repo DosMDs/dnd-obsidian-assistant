@@ -124,9 +124,11 @@ All remaining production modules are below the listed soft-review range.
 | Path | Lines | Notes |
 |---|---|---|
 | `tests/unit/session_recovery/test_event_tail.py` | 863 | Event-tail recovery tests |
+| `tests/integration/test_session_golden_vault.py` | 827 | S6-07 Golden integration tests |
 | `tests/unit/test_world_time_repository.py` | 722 | Watch |
 | `tests/integration/test_vault_repository_path_races.py` | 722 | Watch |
 | `tests/unit/test_calendar_event_queries.py` | 715 | Watch |
+| `tests/unit/test_cli_session.py` | 707 | S6-06 CLI tests |
 | `tests/unit/test_session_close_failures.py` | 707 | Watch |
 | `tests/unit/test_session_close.py` | 706 | Watch |
 
@@ -165,7 +167,7 @@ They may remain until explicitly migrated in MNT-02+.
 |---|---|---|
 | DECOMPOSE (P1) | 1 | `test_session_metadata.py` |
 | DECOMPOSE (P2) | 5 | `test_retrieval_contracts.py`, `test_storage_append_fact.py`, `test_fts_index.py`, `test_storage_patch_repository.py`, `test_storage_vault_repository.py` |
-| WATCH | 6 | Various (700–1000 lines) |
+| WATCH | 8 | Various (700–1000 lines) |
 | OK | 55 | All remaining test modules |
 
 ---
