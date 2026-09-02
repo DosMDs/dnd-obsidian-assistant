@@ -78,7 +78,9 @@ def _copy_golden(tmp_path: Path) -> Path:
     The destination path contains spaces and Unicode to exercise portable
     ``Path`` handling.
     """
-    dest = tmp_path / "Golden Vault Kopiya"
+    dest = tmp_path / "Golden Vault Копия"
+    assert " " in dest.name
+    assert any(ord(ch) > 127 for ch in dest.name)
     shutil.copytree(_GOLDEN_SOURCE, dest)
     return dest
 
@@ -189,6 +191,14 @@ class TestGoldenSourceImmutability:
 
 class TestGoldenBaselineCompatibility:
     """Prove the Golden Vault is a valid Stage-6 fixture."""
+
+    def test_world_time_physical_format(self, golden_copy: Path) -> None:
+        """world_time.json must have exactly one trailing LF and valid content."""
+        world_time_path = golden_copy / "_system" / "world_time.json"
+        raw = world_time_path.read_bytes()
+        assert raw.endswith(b"\n")
+        assert not raw.endswith(b"\n\n")
+        assert raw.count(b"\n") == 1
 
     def test_world_time_reads_canonical(self, golden_copy: Path) -> None:
         audit_svc = AuditService(str(golden_copy / "_system" / "audit" / "audit.jsonl"))
@@ -696,11 +706,11 @@ class TestGoldenRecoveryIntegration:
         )
         del runtime, audit_svc
 
-        # Remove trailing LF from events.jsonl
+        # Remove trailing LF from events.jsonl — remove exactly one byte
         events_path = golden_copy / "_system" / "raw" / "sessions" / session.id / "events.jsonl"
         data = events_path.read_bytes()
         assert data.endswith(b"\n")
-        events_path.write_bytes(data.rstrip(b"\n"))
+        events_path.write_bytes(data[:-1])
 
         recovery = _build_recovery(golden_copy)
         report = recovery.inspect_runtime()
@@ -722,7 +732,7 @@ class TestGoldenRecoveryIntegration:
 
         events_path = golden_copy / "_system" / "raw" / "sessions" / session.id / "events.jsonl"
         data = events_path.read_bytes()
-        events_path.write_bytes(data.rstrip(b"\n"))
+        events_path.write_bytes(data[:-1])
 
         result = runner.invoke(
             app,
@@ -747,8 +757,12 @@ class TestGoldenRecoveryIntegration:
         del runtime, audit_svc
 
         events_path = golden_copy / "_system" / "raw" / "sessions" / session.id / "events.jsonl"
-        data = events_path.read_bytes()
-        events_path.write_bytes(data.rstrip(b"\n"))
+        valid_before = events_path.read_bytes()
+        assert valid_before.endswith(b"\n")
+
+        # Remove exactly the final physical LF — do NOT use rstrip
+        damaged = valid_before[:-1]
+        events_path.write_bytes(damaged)
 
         recovery = _build_recovery(golden_copy)
         result = recovery.repair_event_tail(
@@ -762,7 +776,7 @@ class TestGoldenRecoveryIntegration:
         assert result.after_hash is not None
 
         repaired = events_path.read_bytes()
-        assert repaired.endswith(b"\n")
+        assert repaired == valid_before, "Repair must restore exact original bytes"
 
         _, audit_svc2, _, event_repo2, _ = _build_runtime(golden_copy)
         events = event_repo2.list_events(session.id)
@@ -783,7 +797,7 @@ class TestGoldenRecoveryIntegration:
 
         events_path = golden_copy / "_system" / "raw" / "sessions" / session.id / "events.jsonl"
         data = events_path.read_bytes()
-        events_path.write_bytes(data.rstrip(b"\n"))
+        events_path.write_bytes(data[:-1])
 
         recovery = _build_recovery(golden_copy)
         recovery.repair_event_tail(

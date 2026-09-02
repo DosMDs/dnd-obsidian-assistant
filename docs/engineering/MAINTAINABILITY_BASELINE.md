@@ -124,7 +124,7 @@ All remaining production modules are below the listed soft-review range.
 | Path | Lines | Notes |
 |---|---|---|
 | `tests/unit/session_recovery/test_event_tail.py` | 863 | Event-tail recovery tests |
-| `tests/integration/test_session_golden_vault.py` | 827 | S6-07 Golden integration tests |
+| `tests/integration/test_session_golden_vault.py` | 882 | S6-07 Golden integration tests (original commit) |
 | `tests/unit/test_world_time_repository.py` | 722 | Watch |
 | `tests/integration/test_vault_repository_path_races.py` | 722 | Watch |
 | `tests/unit/test_calendar_event_queries.py` | 715 | Watch |
@@ -213,6 +213,23 @@ same basename at a different path does NOT inherit the exception.
 See MNT-02 section above for final structure and line counts.
 
 ---
+
+## S6-C07 — Golden Vault portability and exact-byte contracts
+
+**Date:** 2026-09-02
+
+Correction pass for S6-07:
+
+- `tests/fixtures/golden_test_vault/_system/world_time.json` — added missing
+  trailing LF (81 bytes, one final LF).
+- `tests/integration/test_session_golden_vault.py` — strengthened event-tail
+  repair to require exact original-byte restoration; changed temp-copy path
+  to genuinely non-ASCII ("Golden Vault Копия"); added physical world-time
+  format assertion; replaced `rstrip(b"\n")` with exact `[:-1]` corruption.
+- Corrected S6-07 line-count record from 827 → 882 (original commit).
+- Final current line count: **896** (after S6-C07 additions).
+- Remains WATCH (896 < 1000). No legacy exception needed.
+- Zero `src/` production changes.
 
 ## Notes
 

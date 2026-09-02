@@ -50,7 +50,7 @@ existing code and ADRs:
 - [x] `S6-03` Append-only raw note/event JSONL logging
 - [x] `S6-04` Session end/close immutability + touched IDs + processing pending
 - [x] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
-- [ ] `S6-06` Thin CLI orchestration: session start/status/end + note
+- [x] `S6-06` Thin CLI orchestration: session start/status/end + note
 - [x] `S6-07` Golden-Vault temp-copy integration + cross-platform/failure hardening
 - [ ] `S6-08` Full Stage-6 historical review / verification / status completion
 
@@ -1949,7 +1949,7 @@ Only non-documentation repository file changed: `tests/unit/test_cli_session.py`
    - Audit log remains empty (historical fixture seed).
 
 2. **`tests/integration/test_session_golden_vault.py`** — new integration test
-   module (827 physical lines) covering:
+    module (882 physical lines at the original S6-07 commit) covering:
    - Source immutability proof (byte-level SHA-256 snapshot before/after lifecycle).
    - Baseline Stage-6 compatibility (world time, 5 completed sessions, 20 events,
      clean recovery, next ID = S006).
@@ -2017,3 +2017,50 @@ Only non-documentation repository file changed: `tests/unit/test_cli_session.py`
 - No `conversation.jsonl` schema.
 - No general migration framework.
 - No dependency added.
+
+### S6-C07 — Finalize Golden-Vault portability and exact-byte contracts
+
+**Starting SHA:** `421ee7dd4b37eff17b30b228258a6601581020c2`
+
+**Scope (zero `src/` production changes):**
+
+1. **C07-1 — world_time.json trailing LF.** Added exactly one final `\n` byte
+   to `tests/fixtures/golden_test_vault/_system/world_time.json`. Same field
+   values (`current_world_tick=13800`, `revision=1`). File is now 81 bytes,
+   ends with `b"\n"`, does not end with `b"\n\n"`.
+
+2. **C07-2 — Genuinely non-ASCII temp-copy path.** Changed `_copy_golden`
+   destination from `"Golden Vault Kopiya"` to `"Golden Vault Копия"`.
+   Added inline assertions: `assert " " in dest.name` and
+   `assert any(ord(ch) > 127 for ch in dest.name)`. The shared fixture
+   supplies the Unicode path to all existing lifecycle/recovery/CLI tests.
+
+3. **C07-3 — Exact-byte event-tail repair.** Strengthened
+   `test_explicit_event_tail_repair`: captures `valid_before` bytes before
+   corruption, removes exactly the final byte (`valid_before[:-1]`), and
+   asserts `repaired == valid_before` after repair. All four corruption
+   helpers changed from `data.rstrip(b"\n")` to `data[:-1]` to avoid
+   multi-LF ambiguity.
+
+4. **C07-4 — Correct line-count claims.** Original S6-07 committed file was
+   882 physical lines (not 827). Corrected in S6-07 record and
+   MAINTAINABILITY_BASELINE.md.
+
+5. **Physical world-time format test.** Added
+   `test_world_time_physical_format` in `TestGoldenBaselineCompatibility`
+   proving `endswith(b"\n")`, `not endswith(b"\n\n")`, and `count(b"\n") == 1`.
+
+**Files changed:**
+
+- `tests/fixtures/golden_test_vault/_system/world_time.json` — one LF added.
+- `tests/integration/test_session_golden_vault.py` — Unicode path,
+  exact-byte repair, physical format test, `rstrip`→`[:-1]`.
+- `docs/engineering/MAINTAINABILITY_BASELINE.md` — S6-C07 correction record;
+  original S6-07 line count corrected to 882; final current count 896.
+- `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` — S6-C07 record; S6-06
+  checklist corrected to `[x]`; S6-07 line-count corrected to 882.
+
+**Quality-gate results:** (reported in Final Report)
+
+**Correction commit:** (reported in Final Report)
+**Commit message:** `test: finalize Golden Vault integration (S6-C07)`
