@@ -8,7 +8,10 @@ This package provides the foundational Tool Layer contracts:
 - ``ToolDefinition`` — provider-neutral tool metadata.
 - ``ExecutionContext`` — trusted Python execution context.
 
-No concrete campaign tools are defined in this package.
+No concrete campaign tools are imported at package root.  Concrete tool
+implementations (e.g. ``entity_reads``) must be imported explicitly by
+composition code and registered through ``ToolRegistry.register()``.
+
 This package must not import Ollama, ModelGateway, or any provider package.
 """
 

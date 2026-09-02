@@ -200,6 +200,21 @@ def test_tools_types_does_not_import_ollama() -> None:
     assert not mod_names, f"tools.types triggered ollama import: {mod_names}"
 
 
+# ── dnd_assistant.tools package must not import storage or retrieval ────
+
+
+def test_tools_package_does_not_import_storage() -> None:
+    _clean_import("dnd_assistant.tools")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
+    assert not mod_names, f"tools package imported storage modules: {mod_names}"
+
+
+def test_tools_package_does_not_import_retrieval() -> None:
+    _clean_import("dnd_assistant.tools")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
+    assert not mod_names, f"tools package imported retrieval modules: {mod_names}"
+
+
 # ── no module pulls in ollama ────────────────────────────────────────────
 
 

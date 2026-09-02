@@ -78,7 +78,7 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 | S7-C00 — Correction pass for S7-00: exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization | DONE |
 | S7-C01 — Finalize Stage-7 status/document consistency after S7-C00 review | DONE |
 | S7-C02 — Correct Stage-7 malformed status-table separator | DONE |
-| S7-01 — Entity read tools | NOT STARTED |
+| S7-01 — Entity read tools | DONE |
 | S7-02 — Session read tools | NOT STARTED |
 | S7-03 — Session mutation tools | NOT STARTED |
 | S7-04 — World-time read + deterministic calendar read surface | NOT STARTED |

@@ -26,7 +26,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-C00 | DONE | Correction pass for S7-00: fix exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization |
 | S7-C01 | DONE | Finalize Stage-7 status/document consistency after S7-C00 review |
 | S7-C02 | DONE | Correct Stage-7 malformed status-table separator |
-| S7-01 | NOT STARTED | Entity read tools |
+| S7-01 | DONE | Entity read tools |
 | S7-02 | NOT STARTED | Session read tools |
 | S7-03 | NOT STARTED | Session mutation tools |
 | S7-04 | NOT STARTED | World-time read + deterministic calendar read surface |
@@ -285,6 +285,26 @@ Documentation-only consistency pass. No production code or test behavior changed
 ---
 
 ## S7-C02 — Correction record
+
+### Scope
+
+Documentation-only consistency pass. No production code or test behavior changed.
+
+### Defects found
+
+1. **C02-1**: `DEVELOPMENT_STATUS.md` Current stage tasks table had a malformed Markdown separator — `|---|---|---|` (3 columns) for a 2-column header `| Task | Status |`.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `DEVELOPMENT_STATUS.md` | Corrected table separator from `|---|---|---|` to `|---|---|` |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | Added S7-C02 to task map; appended this correction record |
+
+### Stage status
+
+- Stage 7 remains **IN PROGRESS**.
+- S7-01 is **DONE**.
 
 ### Scope
 
