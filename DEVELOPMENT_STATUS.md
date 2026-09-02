@@ -90,7 +90,7 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 | S7-C07 — Correct S7-C06 verification documentation | DONE |
 | S7-C08 — Correct separated maintainability gate count | DONE |
 | S7-06 — Safe entity mutation tools | DONE |
-| S7-07 — Cross-family integration / public registry schema / Golden-Vault hardening | NOT STARTED |
+| S7-07 — Cross-family integration / public registry schema / Golden-Vault hardening | DONE |
 | S7-08 — Full Stage-7 historical review / verification / completion | NOT STARTED |
 
 Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)

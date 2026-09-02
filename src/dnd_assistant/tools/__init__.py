@@ -7,6 +7,9 @@ This package provides the foundational Tool Layer contracts:
 - ``Permission``, ``SideEffect``, ``SessionMode`` — typed metadata vocabulary.
 - ``ToolDefinition`` — provider-neutral tool metadata.
 - ``ExecutionContext`` — trusted Python execution context.
+- ``ToolPublicDefinition``, ``ToolRegistrySchema`` — provider-neutral
+  public catalog DTOs.
+- ``build_tool_registry_schema`` — generic catalog builder.
 
 No concrete campaign tools are imported at package root.  Concrete tool
 implementations (e.g. ``entity_reads``) must be imported explicitly by
@@ -15,6 +18,11 @@ composition code and registered through ``ToolRegistry.register()``.
 This package must not import Ollama, ModelGateway, or any provider package.
 """
 
+from dnd_assistant.tools.catalog import (
+    ToolPublicDefinition,
+    ToolRegistrySchema,
+    build_tool_registry_schema,
+)
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
@@ -33,6 +41,9 @@ __all__: list[str] = [
     "SideEffect",
     "ToolDefinition",
     "ToolExecutor",
+    "ToolPublicDefinition",
     "ToolRegistry",
+    "ToolRegistrySchema",
+    "build_tool_registry_schema",
     "convert_pydantic_validation_error",
 ]

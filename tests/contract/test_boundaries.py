@@ -570,3 +570,63 @@ def test_storage_session_events_does_not_import_cli() -> None:
     _clean_import("dnd_assistant.storage.session_events")
     mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
     assert not mod_names, f"storage.session_events imported CLI modules: {mod_names}"
+
+
+# ── dnd_assistant.tools.catalog must not depend on models/cli/storage/retrieval/application ──
+
+
+def test_tools_catalog_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.catalog")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"tools.catalog imported model modules: {mod_names}"
+
+
+def test_tools_catalog_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.tools.catalog")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"tools.catalog imported CLI modules: {mod_names}"
+
+
+def test_tools_catalog_does_not_import_storage() -> None:
+    _clean_import("dnd_assistant.tools.catalog")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
+    assert not mod_names, f"tools.catalog imported storage modules: {mod_names}"
+
+
+def test_tools_catalog_does_not_import_retrieval() -> None:
+    _clean_import("dnd_assistant.tools.catalog")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
+    assert not mod_names, f"tools.catalog imported retrieval modules: {mod_names}"
+
+
+def test_tools_catalog_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.tools.catalog")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"tools.catalog imported application modules: {mod_names}"
+
+
+def test_tools_catalog_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.catalog")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"tools.catalog triggered ollama import: {mod_names}"
+
+
+# ── dnd_assistant.tools.mvp_registry must not depend on models/cli/ollama ──
+
+
+def test_tools_mvp_registry_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.mvp_registry")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"tools.mvp_registry imported model modules: {mod_names}"
+
+
+def test_tools_mvp_registry_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.tools.mvp_registry")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"tools.mvp_registry imported CLI modules: {mod_names}"
+
+
+def test_tools_mvp_registry_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.mvp_registry")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"tools.mvp_registry triggered ollama import: {mod_names}"

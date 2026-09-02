@@ -38,7 +38,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-C07 | DONE | Correct S7-C06 verification documentation |
 | S7-C08 | DONE | Correct separated maintainability gate count |
 | S7-06 | DONE | Safe entity mutation tools |
-| S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
+| S7-07 | DONE | Cross-family integration / public registry schema / Golden-Vault hardening |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
 
 ## S7-00 scope and contracts
@@ -1772,4 +1772,214 @@ Entity writes do NOT automatically:
 - S7-06 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
 - S7-07 remains **NOT STARTED**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-07 — Cross-family integration, public registry schema, and Golden-Vault hardening
+
+### Scope
+
+Complete Stage-7 implementation by providing:
+
+1. One trusted composition point for the complete accepted MVP Tool Registry.
+2. One provider-neutral, JSON-serializable public registry/catalog schema.
+3. Cross-family integration against a writable copy of the canonical Golden Vault.
+
+No new domain capabilities, tool families, or provider adapters were added.
+
+### Exact 18-tool MVP surface
+
+**10 READ / 8 WRITE:**
+
+| Family | Tools |
+|---|---|
+| Entity reads (READ) | `search_entities`, `get_entity` |
+| Entity mutations (WRITE) | `patch_entity`, `append_entity_fact` |
+| Session reads (READ) | `get_active_session`, `get_session`, `list_sessions`, `list_session_events` |
+| Session mutations (WRITE) | `start_session`, `record_event`, `record_note`, `end_session` |
+| World-time reads (READ) | `get_world_time`, `world_tick_to_date`, `game_date_to_world_tick`, `time_between_world_ticks` |
+| World-time mutations (WRITE) | `set_world_time`, `advance_world_time` |
+
+**Side-effect counts:** ENTITY_MUTATION=2, SESSION_MUTATION=4, WORLD_TIME_MUTATION=2
+
+### Six family registration sources
+
+Composition delegates to the six accepted family registration functions:
+
+- `register_entity_read_tools`
+- `register_entity_mutation_tools`
+- `register_session_read_tools`
+- `register_session_mutation_tools`
+- `register_world_time_read_tools`
+- `register_world_time_mutation_tools`
+
+### Module shape
+
+```
+src/dnd_assistant/tools/
+    catalog.py        — NEW: public provider-neutral registry schema
+    mvp_registry.py   — NEW: MVP tool registry composition
+```
+
+### build_mvp_tool_registry composition API
+
+```python
+def build_mvp_tool_registry(
+    *,
+    search_service: SearchService,
+    repository: VaultRepository,
+    runtime_service: SessionRuntimeService,
+    recovery_service: SessionRecoveryService,
+    session_repository: SessionMetadataRepository,
+    event_repository: SessionEventRepository,
+    world_time_repository: WorldTimeRepository,
+    calendar_service: CalendarService,
+) -> ToolRegistry:
+```
+
+- Creates one new `ToolRegistry`.
+- Registers all six accepted tool families.
+- Does NOT instantiate concrete repos/services.
+- No global singleton, module-level mutable registry, service locator, or DI framework.
+- Dependencies are supplied by trusted outer composition code.
+
+### Public provider-neutral registry schema
+
+**DTO shape:**
+
+```python
+class ToolPublicDefinition(BaseModel):
+    name: str
+    description: str
+    input_schema: dict[str, JsonValue]
+    output_schema: dict[str, JsonValue]
+    permission: Permission
+    side_effects: list[SideEffect]
+    allowed_session_modes: list[SessionMode]
+    model_config = {"extra": "forbid", "frozen": True}
+
+
+class ToolRegistrySchema(BaseModel):
+    tools: list[ToolPublicDefinition]
+    model_config = {"extra": "forbid", "frozen": True}
+```
+
+**Catalog builder:**
+
+```python
+def build_tool_registry_schema(registry: ToolRegistry) -> ToolRegistrySchema:
+```
+
+- Requires an actual `ToolRegistry`.
+- Obtains definitions through `registry.list_definitions()`.
+- Preserves registry deterministic name ordering.
+- Derives schemas only through `definition.input_schema.model_json_schema()` and `definition.output_schema.model_json_schema()`.
+- Preserves permission metadata.
+- Converts side-effect sets to deterministic lists sorted by enum value.
+- Converts allowed session modes to deterministic lists sorted by enum value.
+- Returns typed provider-neutral schema.
+- Works for any valid `ToolRegistry`, not only the MVP registry.
+
+**Provider-neutral guarantees:**
+- No Ollama/OpenAI-specific structures (`type: function`, `function.name`, etc.).
+- No `OllamaTool`, `OpenAITool`, `function_call`, `tool_choice`.
+- No provider-native schema mapping.
+- No handlers, callables, Python class objects, or module paths in serialized payload.
+- `model_dump(mode="json")` + `json.dumps(sort_keys=True)` succeeds without custom encoders.
+
+### Root-package export decision
+
+`dnd_assistant.tools.__init__` exports only generic catalog APIs:
+
+- `ToolPublicDefinition`
+- `ToolRegistrySchema`
+- `build_tool_registry_schema`
+
+`build_mvp_tool_registry` is NOT root-exported.  It must be imported explicitly:
+
+```python
+from dnd_assistant.tools.mvp_registry import build_mvp_tool_registry
+```
+
+This keeps `import dnd_assistant.tools` lightweight — no concrete family modules, application, retrieval, storage, or calendar modules are eagerly loaded from package root.
+
+### Golden Vault integration
+
+**Copy strategy:** `shutil.copytree` to `tmp_path / "Golden Vault Копия"` (spaces + Unicode for portable Path coverage).
+
+**Source immutability:** SHA-256 snapshot before/after — proven unchanged.
+
+**Real dependency stack:** AuditService, ObsidianVaultRepository, VaultSearchService, ObsidianWorldTimeRepository, ObsidianSessionMetadataRepository, ObsidianSessionEventRepository, SessionRuntimeService, ObsidianSessionRecoveryRepository, SessionRecoveryService, DeterministicCalendarService, build_mvp_tool_registry, ToolExecutor, build_tool_registry_schema.
+
+**Baseline assertions:**
+- `world_time.current_world_tick == 13800`, `revision == 1`
+- No active session
+- Completed sessions S001..S005 exist
+- Next session ID is S006
+- `npc_varos`: id=`npc_varos`, name=`Магистр Варос`, visibility=PLAYER, revision=4
+
+**Cross-family flows verified:**
+- Entity read: `get_entity(npc_varos)` returns revision 4 with body
+- Entity patch: `patch_entity` with revision 4 → revision 5, body preserved, extra frontmatter preserved
+- Entity append: `append_entity_fact` with revision 4 → revision 5, body prefix preserved
+- Hidden entity: `get_entity(npc_archivist_kell)` → NotFoundError; `patch_entity` → NotFoundError
+- World-time read: `get_world_time` returns 13800/1
+- World-time advance: `advance_world_time(minutes=120, expected_revision=1)` → 13920/2
+- Session lifecycle: start S006 → record_note → list_session_events → end_session → get_session → get_active_session=None
+- Audit: entity/world-time/session mutations produce audit records (lower-layer owned)
+- Permission isolation: READ cannot call WRITE tools; no mutation on denial
+- Typed results: ToolExecutor returns registered output models
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/catalog.py` | **NEW** — ToolPublicDefinition, ToolRegistrySchema, build_tool_registry_schema |
+| `src/dnd_assistant/tools/mvp_registry.py` | **NEW** — build_mvp_tool_registry composition |
+| `src/dnd_assistant/tools/__init__.py` | **EDITED** — added generic catalog exports |
+| `tests/unit/test_tool_catalog.py` | **NEW** — 30 catalog unit tests |
+| `tests/unit/test_mvp_tool_registry.py` | **NEW** — 21 MVP registry unit tests |
+| `tests/integration/test_tool_layer_golden_vault.py` | **NEW** — 43 Golden Vault integration tests |
+| `tests/contract/test_boundaries.py` | **EDITED** — added catalog + mvp_registry boundary tests (9 new) |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — added this record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — S7-07 DONE |
+
+### Tests and quality gates
+
+- 30/30 catalog unit tests pass.
+- 21/21 MVP registry unit tests pass.
+- 43/43 Golden Vault integration tests pass.
+- 96/96 boundary tests pass (was 87, +9 new catalog/mvp_registry tests).
+- 93/93 existing Golden retrieval tests pass.
+- All existing Golden session tests pass.
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Maintainability
+
+- `catalog.py`: under 700 production hard limit.
+- `mvp_registry.py`: under 700 production hard limit.
+- `test_tool_catalog.py`: under 1000 test hard limit.
+- `test_mvp_tool_registry.py`: under 1000 test hard limit.
+- `test_tool_layer_golden_vault.py`: under 1000 test hard limit.
+- No new legacy exceptions added.
+
+### Explicit non-goals
+
+- ModelGateway/Ollama integration.
+- Provider-native schema adaptation.
+- Fast Agent.
+- ChangeSet/post-session processing.
+- New tool families or domain capabilities.
+- S7-08 historical review (not started).
+- Stage 8 work (not started).
+
+### Completion state
+
+- S7-07 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-08 remains **NOT STARTED**.
 - Stage 8 remains **NOT STARTED**.
