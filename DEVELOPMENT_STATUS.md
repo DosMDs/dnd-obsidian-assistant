@@ -29,7 +29,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 ## Stage overview
 
 | Stage | Status | Started | Completed | Details |
-|---|---|---|---|---|---|
+|---|---|---|---|---|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 | — |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 | [`docs/stages/01_PROJECT_SKELETON_AND_CONTRACTS.md`](docs/stages/01_PROJECT_SKELETON_AND_CONTRACTS.md) |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 | [`docs/stages/02_DOMAIN_SCHEMAS.md`](docs/stages/02_DOMAIN_SCHEMAS.md) |
@@ -74,23 +74,8 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 
 | Task | Status |
 |---|---|
-| S6-00 — Session runtime kickoff + safe session-storage path contracts | DONE |
-| S6-01 — Canonical current-world-time persistence boundary | DONE |
-| S6-02 — Raw session metadata persistence + ID allocation + start/status lifecycle | DONE |
-| S6-03 — Append-only raw note/event JSONL logging | DONE |
-| S6-04 — Session end/close immutability + touched IDs + processing pending | DONE |
-| S6-05 — Restart/recovery + corrupt-state/failure-path integrity | DONE |
-| S6-06 — Thin CLI orchestration: session start/status/end + note | DONE |
-| S6-07 — Golden-Vault temp-copy integration + cross-platform/failure hardening | DONE |
-| S6-08 — Full Stage-6 historical review / verification / status completion | DONE |
-
-Details: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md)
-
-## Current stage tasks
-
-| Task | Status |
-|---|---|
 | S7-00 — Foundational tool contracts: typed metadata, ToolRegistry, ToolExecutor, permissions, side effects, session modes, tests, documentation | DONE |
+| S7-C00 — Correction pass for S7-00: exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization | DONE |
 
 Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)
 

@@ -20,6 +20,7 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
     ToolDefinition,
+    convert_pydantic_validation_error,
 )
 
 __all__: list[str] = [
@@ -30,4 +31,5 @@ __all__: list[str] = [
     "ToolDefinition",
     "ToolExecutor",
     "ToolRegistry",
+    "convert_pydantic_validation_error",
 ]

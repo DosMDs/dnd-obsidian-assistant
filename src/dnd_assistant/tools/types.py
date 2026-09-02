@@ -9,16 +9,25 @@ This module belongs to the tools layer and must not import from:
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, field_validator
 from pydantic import ValidationError as PydanticValidationError
 
 from dnd_assistant.errors import ValidationError
 
-# ── Permission ───────────────────────────────────────────────────────────────
+if TYPE_CHECKING:
+    from dnd_assistant.storage.audit import AuditContext
+
+# ── Stable tool-name grammar ─────────────────────────────────────────────
+
+_TOOL_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$")
+
+# ── Permission ───────────────────────────────────────────────────────────
 
 
 class Permission(StrEnum):
@@ -32,7 +41,7 @@ class Permission(StrEnum):
     WRITE = "write"
 
 
-# ── Side effect ──────────────────────────────────────────────────────────────
+# ── Side effect ──────────────────────────────────────────────────────────
 
 
 class SideEffect(StrEnum):
@@ -47,7 +56,7 @@ class SideEffect(StrEnum):
     WORLD_TIME_MUTATION = "world_time_mutation"
 
 
-# ── Session mode ─────────────────────────────────────────────────────────────
+# ── Session mode ─────────────────────────────────────────────────────────
 
 
 class SessionMode(StrEnum):
@@ -60,7 +69,7 @@ class SessionMode(StrEnum):
     ACTIVE_SESSION = "active_session"
 
 
-# ── Tool name validation ─────────────────────────────────────────────────────
+# ── Tool name validation ─────────────────────────────────────────────────
 
 
 def _validate_tool_name(value: str) -> str:
@@ -70,7 +79,7 @@ def _validate_tool_name(value: str) -> str:
     - non-empty string
     - printable
     - no leading/trailing whitespace
-    - snake_case: lowercase ASCII letters, digits, underscores only
+    - stable ASCII snake_case: ``^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$``
     """
     if not isinstance(value, str):
         raise ValueError("tool name must be a string")
@@ -80,9 +89,11 @@ def _validate_tool_name(value: str) -> str:
         raise ValueError("tool name must not have leading or trailing whitespace")
     if not value.isprintable():
         raise ValueError("tool name must not contain non-printable characters")
-    if not value.replace("_", "").isalnum() or value != value.lower():
+    if not _TOOL_NAME_RE.match(value):
         raise ValueError(
-            "tool name must be snake_case: lowercase ASCII letters, digits, and underscores only"
+            "tool name must be stable ASCII snake_case: "
+            "lowercase ASCII letters, digits, and underscores only "
+            "(^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$)"
         )
     return value
 
@@ -100,7 +111,7 @@ def _validate_non_empty_printable(value: str, field_name: str) -> str:
     return value
 
 
-# ── ToolDefinition ───────────────────────────────────────────────────────────
+# ── ToolDefinition ───────────────────────────────────────────────────────
 
 
 class ToolDefinition(BaseModel):
@@ -181,10 +192,12 @@ class ToolDefinition(BaseModel):
         return value
 
 
-# ── ToolBinding ──────────────────────────────────────────────────────────────
+# ── ToolBinding ──────────────────────────────────────────────────────────
 
-# Handler type: receives validated typed input and returns a BaseModel.
-Handler = Callable[..., BaseModel]
+# Handler: receives validated typed input and execution context, returns
+# arbitrary output.  ToolExecutor owns output validation against the
+# registered output_schema.
+Handler = Callable[[BaseModel, "ExecutionContext"], object]
 
 
 class ToolBinding(BaseModel):
@@ -207,14 +220,16 @@ class ToolBinding(BaseModel):
             raise ValidationError(str(exc), cause=exc) from exc
 
 
-# ── ExecutionContext ─────────────────────────────────────────────────────────
+# ── ExecutionContext ─────────────────────────────────────────────────────
 
 
-class ExecutionContext(BaseModel):
+@dataclass(frozen=True, slots=True)
+class ExecutionContext:
     """Trusted Python execution context for tool invocation.
 
     This is orchestration input provided by the application layer, not a
-    model-output schema.
+    model-output schema.  A frozen dataclass is used to avoid a runtime
+    dependency on ``storage.audit`` while preserving static type information.
 
     Attributes:
         granted_permission: The permission level granted to this execution.
@@ -225,42 +240,41 @@ class ExecutionContext(BaseModel):
 
     granted_permission: Permission
     session_mode: SessionMode
-    audit: Any = None
-    """Audit context for write operations.
-
-    At runtime this is expected to be an ``AuditContext`` instance or
-    ``None``.  The type is ``Any`` to avoid a runtime dependency on
-    ``storage.audit`` at the tools layer.  Static type checkers see the
-    ``TYPE_CHECKING`` import above.
-    """
-
-    model_config = {"frozen": True, "extra": "forbid"}
-
-    def __init__(self, **data: Any) -> None:
-        """Construct an ExecutionContext, converting Pydantic validation errors."""
-        try:
-            super().__init__(**data)
-        except PydanticValidationError as exc:
-            raise ValidationError(str(exc), cause=exc) from exc
+    audit: AuditContext | None = None
 
 
-# ── Public conversion helpers ────────────────────────────────────────────────
+# ── Public conversion helpers ────────────────────────────────────────────
 
 
-def convert_validation_error(exc: Exception) -> ValidationError:
-    """Convert a Pydantic/library validation error to a project ValidationError.
+def convert_pydantic_validation_error(exc: Exception) -> ValidationError:
+    """Convert a Pydantic validation error to a project ValidationError.
 
-    This is used at the Tool Layer API boundary to ensure that validation
-    failures are surfaced as project exceptions rather than leaking
-    provider/library exception types.
+    This is used at the Tool Layer API boundary to ensure that Pydantic
+    schema validation failures are surfaced as project exceptions rather
+    than leaking provider/library exception types.
+
+    Only ``PydanticValidationError`` is converted.  Unexpected exceptions
+    from custom validators or programming bugs are not swallowed.
 
     Args:
         exc: The caught exception.
 
     Returns:
         A ``ValidationError`` wrapping the original message.
+
+    Raises:
+        TypeError: If ``exc`` is not a ``PydanticValidationError``.
     """
+    if not isinstance(exc, PydanticValidationError):
+        raise TypeError(
+            f"convert_pydantic_validation_error expects PydanticValidationError, "
+            f"got {type(exc).__name__}"
+        )
     msg = str(exc) if str(exc) else "Validation failed"
-    if isinstance(exc, ValidationError):
-        return exc
-    return ValidationError(msg, cause=exc if isinstance(exc, Exception) else None)
+    return ValidationError(msg, cause=exc)
+
+
+# Rebuild ToolBinding now that ExecutionContext is defined.
+# Handler references "ExecutionContext" as a forward-reference string,
+# so Pydantic needs a late rebuild to resolve it.
+ToolBinding.model_rebuild()

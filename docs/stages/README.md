@@ -14,7 +14,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 ## Index
 
 | Stage | Document |
-|---|---|---|
+|---|---|
 | Stage 1 — Project skeleton + contracts | `01_PROJECT_SKELETON_AND_CONTRACTS.md` |
 | Stage 2 — Domain schemas | `02_DOMAIN_SCHEMAS.md` |
 | Stage 3 — Vault Repository | `03_VAULT_REPOSITORY.md` |

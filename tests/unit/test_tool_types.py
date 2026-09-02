@@ -18,7 +18,7 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
     ToolDefinition,
-    convert_validation_error,
+    convert_pydantic_validation_error,
 )
 
 # ── Dummy schemas for testing ────────────────────────────────────────────────
@@ -187,9 +187,83 @@ class TestToolDefinitionInvalidName:
             )
 
     def test_name_with_spaces(self) -> None:
-        with pytest.raises(ValidationError, match="snake_case"):
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
             ToolDefinition(
                 name="my tool",
+                description="desc",
+                input_schema=DummyInput,
+                output_schema=DummyOutput,
+                permission=Permission.READ,
+                side_effects=frozenset(),
+                allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION}),
+            )
+
+
+class TestToolDefinitionNonAsciiName:
+    def test_cyrillic_name_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
+            ToolDefinition(
+                name="инструмент",
+                description="desc",
+                input_schema=DummyInput,
+                output_schema=DummyOutput,
+                permission=Permission.READ,
+                side_effects=frozenset(),
+                allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION}),
+            )
+
+    def test_cjk_name_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
+            ToolDefinition(
+                name="工具",
+                description="desc",
+                input_schema=DummyInput,
+                output_schema=DummyOutput,
+                permission=Permission.READ,
+                side_effects=frozenset(),
+                allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION}),
+            )
+
+    def test_accented_latin_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
+            ToolDefinition(
+                name="éxample",
+                description="desc",
+                input_schema=DummyInput,
+                output_schema=DummyOutput,
+                permission=Permission.READ,
+                side_effects=frozenset(),
+                allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION}),
+            )
+
+    def test_leading_underscore_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
+            ToolDefinition(
+                name="_tool",
+                description="desc",
+                input_schema=DummyInput,
+                output_schema=DummyOutput,
+                permission=Permission.READ,
+                side_effects=frozenset(),
+                allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION}),
+            )
+
+    def test_trailing_underscore_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
+            ToolDefinition(
+                name="tool_",
+                description="desc",
+                input_schema=DummyInput,
+                output_schema=DummyOutput,
+                permission=Permission.READ,
+                side_effects=frozenset(),
+                allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION}),
+            )
+
+    def test_double_underscore_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="stable ASCII snake_case"):
+            ToolDefinition(
+                name="tool__name",
                 description="desc",
                 input_schema=DummyInput,
                 output_schema=DummyOutput,
@@ -335,30 +409,30 @@ class TestExecutionContext:
             granted_permission=Permission.READ,
             session_mode=SessionMode.NO_ACTIVE_SESSION,
         )
-        with pytest.raises(PydanticValidationError):
+        with pytest.raises(AttributeError):
             ctx.granted_permission = Permission.WRITE  # type: ignore[misc]
 
 
-# ── convert_validation_error ─────────────────────────────────────────────────
+# ── convert_pydantic_validation_error ────────────────────────────────────────
 
 
-class TestConvertValidationError:
-    def test_preserves_validation_error(self) -> None:
-        original = ValidationError("already valid")
-        result = convert_validation_error(original)
-        assert result is original
+class TestConvertPydanticValidationError:
+    def test_converts_pydantic_validation_error(self) -> None:
+        try:
+            DummyInput.model_validate({"wrong": "x"})
+        except PydanticValidationError as exc:
+            result = convert_pydantic_validation_error(exc)
+            assert isinstance(result, ValidationError)
+            assert "wrong" in str(result)
 
-    def test_wraps_value_error(self) -> None:
-        result = convert_validation_error(ValueError("bad value"))
-        assert isinstance(result, ValidationError)
-        assert "bad value" in str(result)
-
-    def test_wraps_type_error(self) -> None:
-        result = convert_validation_error(TypeError("wrong type"))
-        assert isinstance(result, ValidationError)
-        assert "wrong type" in str(result)
+    def test_rejects_non_pydantic_exception(self) -> None:
+        with pytest.raises(TypeError, match="expects PydanticValidationError"):
+            convert_pydantic_validation_error(ValueError("bad value"))
 
     def test_empty_message_fallback(self) -> None:
-        result = convert_validation_error(Exception())
-        assert isinstance(result, ValidationError)
-        assert "Validation failed" in str(result)
+        try:
+            # Trigger a PydanticValidationError with a minimal message
+            DummyInput.model_validate(42)  # type: ignore[arg-type]
+        except PydanticValidationError as exc:
+            result = convert_pydantic_validation_error(exc)
+            assert isinstance(result, ValidationError)

@@ -23,11 +23,15 @@ provider-schema-free, and ChangeSet-free.
 | Task | Status | Description |
 |---|---|---|
 | S7-00 | DONE | Foundational contracts: typed metadata, ToolRegistry, ToolExecutor, permissions, side effects, session modes, tests, documentation |
-| S7-01 | NOT STARTED | Concrete read-only entity/session tools |
-| S7-02 | NOT STARTED | Concrete write entity/session tools |
-| S7-03 | NOT STARTED | Calendar/World-time tools |
-| S7-04 | NOT STARTED | Provider-native schema adaptation (ModelGateway integration) |
-| S7-05 | NOT STARTED | Tool-layer hardening and edge-case coverage |
+| S7-C00 | DONE | Correction pass for S7-00: fix exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization |
+| S7-01 | NOT STARTED | Entity read tools |
+| S7-02 | NOT STARTED | Session read tools |
+| S7-03 | NOT STARTED | Session mutation tools |
+| S7-04 | NOT STARTED | World-time read + deterministic calendar read surface |
+| S7-05 | NOT STARTED | World-time mutation tools |
+| S7-06 | NOT STARTED | Safe entity mutation tools |
+| S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
+| S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
 
 ## S7-00 scope and contracts
 
@@ -108,13 +112,14 @@ src/dnd_assistant/tools/
 | Session mode denied | `ConflictError` |
 | WRITE without AuditContext | `ValidationError` |
 | Handler raises `DndAssistantError` | Propagated unchanged |
-| Handler raises unexpected exception | `ValidationError` |
+| Handler raises unexpected exception | Propagated unchanged (programming bugs, runtime failures remain visible) |
 
 ### AuditContext ownership
 
-- `ExecutionContext.audit` is typed as `Any` to avoid a runtime dependency
-  on `storage.audit` at the tools layer.
-- Static type checkers see `AuditContext` through a `TYPE_CHECKING` import.
+- `ExecutionContext` is a frozen dataclass (not a Pydantic model) to avoid
+  a runtime dependency on `storage.audit` at the tools layer.
+- `audit: AuditContext | None` is the canonical type; static type checkers
+  see the real type through a `TYPE_CHECKING` import.
 - ToolExecutor checks that `audit is not None` for WRITE invocations.
 - ToolExecutor does NOT create or write audit records.
 - The existing application/repository pattern owns mutation audit.
@@ -174,6 +179,76 @@ src/dnd_assistant/tools/
 
 - SHA: (reported in Final Report)
 - Message: `feat: establish tool registry and executor core (S7-00)`
+
+### Stage status
+
+- Stage 7 remains **IN PROGRESS**.
+- S7-01 has **NOT** been started.
+
+---
+
+## S7-C00 — Correction record
+
+### Defects found
+
+1. **C00-1**: `ToolExecutor.execute()` caught arbitrary `Exception` from handler and converted to `ValidationError`, masking programming bugs and runtime failures.
+2. **C00-2**: `convert_validation_error()` was too broad — accepted any `Exception` and converted `ValueError`, `TypeError`, and generic `Exception` into project `ValidationError`.
+3. **C00-3**: `ExecutionContext.audit` was typed as `Any` with a non-existent `TYPE_CHECKING` import, providing no static type safety.
+4. **C00-4**: `Handler = Callable[..., BaseModel]` was too weak — didn't represent actual handler signature or allow non-BaseModel return values.
+5. **C00-5**: Tool-name validation used `str.isalnum()` which accepts non-ASCII Unicode letters, contradicting the documented "lowercase ASCII" contract.
+6. **C00-6**: Stage-7 task map incorrectly included S7-04 "Provider-native schema adaptation (ModelGateway integration)" which belongs to Stage 8.
+7. **C00-7**: `DEVELOPMENT_STATUS.md` had duplicate "Current stage tasks" sections — one still containing the entire completed Stage-6 task list.
+8. **C00-8**: Markdown table separators had wrong column counts in `DEVELOPMENT_STATUS.md` (6 columns for 5-column header) and `docs/stages/README.md` (3 columns for 2-column header).
+
+### Root cause
+
+S7-00 implementation was reviewed and merged without a focused architectural review pass.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/types.py` | **REWRITTEN** — `ExecutionContext` changed from Pydantic model to frozen dataclass with `AuditContext \| None`; `convert_validation_error` → `convert_pydantic_validation_error` (narrow, only accepts `PydanticValidationError`); `Handler` tightened to `Callable[[BaseModel, ExecutionContext], object]`; tool-name validation uses explicit ASCII regex `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$` |
+| `src/dnd_assistant/tools/executor.py` | **EDITED** — removed broad `except Exception` handler wrapper; input/output validation uses narrow `convert_pydantic_validation_error`; added `PydanticValidationError` import; removed unused `DndAssistantError` import |
+| `src/dnd_assistant/tools/__init__.py` | **EDITED** — export `convert_pydantic_validation_error` |
+| `tests/unit/test_tool_types.py` | **EDITED** — updated conversion tests for narrow helper; added 6 non-ASCII/underscore tool-name rejection tests; fixed `ExecutionContext` frozen test for dataclass `FrozenInstanceError` |
+| `tests/unit/test_tool_executor.py` | **EDITED** — added `test_handler_runtime_error_propagates_unchanged` regression; `write_context` fixture uses real `AuditContext` instead of `object()` |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected task map (removed Stage-8 S7-04, added S7-C00..S7-08); corrected error mapping; corrected AuditContext documentation; added this correction record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — removed duplicate Stage-6 task section; fixed table separator column count |
+| `docs/stages/README.md` | **EDITED** — fixed table separator column count |
+
+### Corrected contracts
+
+- **Exception propagation**: Handler `RuntimeError`, `TypeError`, `AssertionError` etc. propagate unchanged. Only `DndAssistantError` subclasses are propagated as-is (no wrapping). Only `PydanticValidationError` from input/output schema validation is converted to project `ValidationError`.
+- **Input/output validation conversion**: `convert_pydantic_validation_error()` accepts only `PydanticValidationError`. Non-Pydantic exceptions raise `TypeError`.
+- **ExecutionContext.audit type**: `AuditContext | None` via `TYPE_CHECKING` import. No runtime storage dependency. Frozen dataclass instead of Pydantic model.
+- **Handler type**: `Callable[[BaseModel, ExecutionContext], object]`.
+- **Tool-name grammar**: `^[a-z][a-z0-9]*(?:_[a-z0-9]+)*$` — rejects Cyrillic, CJK, accented Latin, leading/trailing/double underscores.
+
+### Regression tests added
+
+- `test_handler_runtime_error_propagates_unchanged` — handler `RuntimeError("boom")` reaches caller as `RuntimeError`.
+- `test_cyrillic_name_rejected` — `инструмент` rejected.
+- `test_cjk_name_rejected` — `工具` rejected.
+- `test_accented_latin_rejected` — `éxample` rejected.
+- `test_leading_underscore_rejected` — `_tool` rejected.
+- `test_trailing_underscore_rejected` — `tool_` rejected.
+- `test_double_underscore_rejected` — `tool__name` rejected.
+- `test_rejects_non_pydantic_exception` — `convert_pydantic_validation_error(ValueError(...))` raises `TypeError`.
+
+### Quality-gate evidence
+
+- 74/74 tool layer unit tests pass (was 68/68 before corrections).
+- 59/59 boundary tests pass.
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — no formatting issues.
+- `git diff --check` — no whitespace errors.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: `fix: correct foundational tool contracts (S7-C00)`
 
 ### Stage status
 

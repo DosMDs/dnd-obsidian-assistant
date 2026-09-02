@@ -7,10 +7,13 @@ Vault, no concrete tools, no model providers.
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from pydantic import BaseModel
 
 from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
+from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
@@ -145,7 +148,11 @@ def write_context() -> ExecutionContext:
     return ExecutionContext(
         granted_permission=Permission.WRITE,
         session_mode=SessionMode.ACTIVE_SESSION,
-        audit=object(),  # type: ignore[arg-type]
+        audit=AuditContext(
+            operation_id="test-op",
+            real_time=datetime(2026, 9, 2, tzinfo=UTC),
+            source="test",
+        ),
     )
 
 
@@ -472,4 +479,23 @@ class TestToolExecutorErrorPropagation:
             session_mode=SessionMode.ACTIVE_SESSION,
         )
         with pytest.raises(NotFoundError, match="handler-level not found"):
+            exe.execute("read_tool", input_data={"value": "x"}, context=ctx)
+
+    def test_handler_runtime_error_propagates_unchanged(
+        self, read_tool_def: ToolDefinition
+    ) -> None:
+        """A non-DndAssistantError from the handler must propagate unchanged."""
+
+        def failing_handler(input_model: StringInput, context: object) -> StringOutput:
+            raise RuntimeError("boom")
+
+        reg = ToolRegistry()
+        reg.register(read_tool_def, failing_handler)
+        exe = ToolExecutor(reg)
+
+        ctx = ExecutionContext(
+            granted_permission=Permission.READ,
+            session_mode=SessionMode.ACTIVE_SESSION,
+        )
+        with pytest.raises(RuntimeError, match="boom"):
             exe.execute("read_tool", input_data={"value": "x"}, context=ctx)

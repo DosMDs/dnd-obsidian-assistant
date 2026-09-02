@@ -21,11 +21,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from dnd_assistant.errors import ConflictError, DndAssistantError, NotFoundError, ValidationError
+from pydantic import ValidationError as PydanticValidationError
+
+from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
 from dnd_assistant.tools.types import (
     ExecutionContext,
     Permission,
-    convert_validation_error,
+    convert_pydantic_validation_error,
 )
 
 if TYPE_CHECKING:
@@ -79,6 +81,9 @@ class ToolExecutor:
                 prerequisites.
             ConflictError: Permission or session-mode policy denial.
             DndAssistantError: Propagated unchanged from the handler.
+            Exception: Any non-DndAssistantError exception raised by the
+                handler propagates unchanged (programming bugs, runtime
+                failures, etc.).
         """
         # 1. Registry lookup
         try:
@@ -92,8 +97,8 @@ class ToolExecutor:
         # 2. Raw input validation
         try:
             validated_input = definition.input_schema.model_validate(input_data)
-        except Exception as exc:
-            raise convert_validation_error(exc) from exc
+        except PydanticValidationError as exc:
+            raise convert_pydantic_validation_error(exc) from exc
 
         # 3. Permission validation
         if (
@@ -114,19 +119,16 @@ class ToolExecutor:
         if definition.permission == Permission.WRITE and context.audit is None:
             raise ValidationError(f"WRITE tool '{tool_name}' requires a non-None AuditContext")
 
-        # 6. Handler invocation exactly once
-        try:
-            raw_output = handler(validated_input, context)
-        except DndAssistantError:
-            raise
-        except Exception as exc:
-            raise convert_validation_error(exc) from exc
+        # 6. Handler invocation exactly once.
+        # Non-DndAssistantError exceptions propagate unchanged so that
+        # programming bugs and runtime failures remain visible.
+        raw_output = handler(validated_input, context)
 
         # 7. Output validation
         try:
             validated_output = definition.output_schema.model_validate(raw_output)
-        except Exception as exc:
-            raise convert_validation_error(exc) from exc
+        except PydanticValidationError as exc:
+            raise convert_pydantic_validation_error(exc) from exc
 
         # 8. Return typed output
         return validated_output
