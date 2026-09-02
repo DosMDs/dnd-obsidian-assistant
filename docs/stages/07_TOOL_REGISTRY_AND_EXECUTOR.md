@@ -306,22 +306,223 @@ Documentation-only consistency pass. No production code or test behavior changed
 - Stage 7 remains **IN PROGRESS**.
 - S7-01 is **DONE**.
 
+---
+
+## S7-01 — Entity read tools
+
 ### Scope
 
-Documentation-only consistency pass. No production code or test behavior changed.
+Implement two concrete entity read tools (`search_entities` and `get_entity`)
+that expose existing deterministic Python retrieval/storage behaviour through
+the ToolRegistry/ToolExecutor contracts.
 
-### Defects found
+### Module shape
 
-1. **C02-1**: `DEVELOPMENT_STATUS.md` Current stage tasks table had a malformed Markdown separator — `|---|---|---|` (3 columns) for a 2-column header `| Task | Status |`.
+```
+src/dnd_assistant/tools/
+    entity_reads.py    — NEW: search_entities and get_entity tools
+```
 
-### Changes
+### search_entities
+
+- Input: `SearchEntitiesInput` (text, optional entity_types, limit).
+- Output: `SearchEntitiesOutput` (ordered list of `EntitySearchResult`).
+- Flow: `SearchQuery` → `SearchService.search()` → hydrate through
+  `VaultRepository.get_entity()` → fail-closed consistency checks →
+  typed output.
+- Preserves SearchService ordering.
+
+### get_entity
+
+- Input: `GetEntityInput` (entity_id).
+- Output: `GetEntityOutput` (Entity + Markdown body).
+- Flow: `SearchService.get_by_id()` (player-visibility gate) →
+  requested-ID vs SearchHit-ID consistency check →
+  `VaultRepository.get_entity()` using original requested ID →
+  hydrated-document ID consistency check → player-visibility check →
+  typed output.
+
+### SearchService visibility-gate decision
+
+`SearchService` is the player-visibility gate. Only `Visibility.PLAYER`
+entities may be returned. `None` from `get_by_id` produces a generic
+`NotFoundError` indistinguishable from "entity does not exist".
+
+### Fail-closed hydration design
+
+After hydration, two consistency checks are enforced:
+
+1. `doc.entity.id == requested_id` (hydrated document matches the
+   original validated input).
+2. `doc.entity.visibility == Visibility.PLAYER` (no DM/system entity
+   leaks through a compromised or inconsistent gate).
+
+Both failures raise `StorageError` with a non-disclosing generic message
+that does not reveal hidden entity IDs, visibility values, or filesystem
+details.
+
+### Input/output DTOs
+
+- `SearchEntitiesInput` — validated text, optional entity_types, limit (>= 1).
+- `SearchEntitiesOutput` — ordered list of `EntitySearchResult`.
+- `EntitySearchResult` — entity_id, entity_type, name, status, match_kind,
+  optional score.
+- `GetEntityInput` — validated EntityId.
+- `GetEntityOutput` — Entity + body (extra_frontmatter deferred).
+
+### Registration/composition design
+
+`register_entity_read_tools(registry, *, search_service, repository)` is
+the public registration API. It accepts a `ToolRegistry` instance (typed
+and validated with `isinstance`) and wires both tools with their
+dependencies via closures.
+
+### extra_frontmatter deferral
+
+`GetEntityOutput` does not include `extra_frontmatter`. The S7-01 scope
+does not yet have an accepted stable model-facing serialisation contract
+for arbitrary unknown YAML values.
+
+### Core-package lightweight-import decision
+
+`dnd_assistant.tools.__init__` does not import `entity_reads`. Concrete
+tools must be imported explicitly by composition code. This keeps the
+core package import lightweight and avoids eager loading of retrieval
+and storage contracts at package root.
+
+### Files changed
 
 | File | Change |
 |---|---|
-| `DEVELOPMENT_STATUS.md` | Corrected table separator from `|---|---|---|` to `|---|---|` |
-| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | Added S7-C02 to task map; appended this correction record |
+| `src/dnd_assistant/tools/entity_reads.py` | **NEW** — search_entities and get_entity tools |
+| `tests/unit/test_entity_read_tools.py` | **NEW** — handler behaviour, executor integration, mutation-safety tests |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added tools-package lightweight-import tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added S7-01 to task map; this record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-01 DONE |
+
+### Tests and quality gates
+
+- 68 tool layer unit tests pass (including 27 new entity-read tests).
+- 65 boundary tests pass (including 6 new tools-package tests).
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — no formatting issues.
+- `git diff --check` — no whitespace errors.
+
+### Explicit non-goals
+
+- Session read tools (S7-02).
+- Session mutation tools (S7-03).
+- World-time tools (S7-04, S7-05).
+- Entity mutation tools (S7-06).
+- Cross-family integration (S7-07).
+- Provider schema adaptation.
+- ModelGateway/Ollama integration.
+- Fast Agent.
+- ChangeSet.
+- Post-session processing.
+- Global registry bootstrap.
+
+### S7-01 completion state
+
+- S7-01 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+
+---
+
+## S7-C03 — Correction record
+
+### Defects found
+
+1. **C03-1**: `get_entity` did not check `requested_id == hit.entity_id`
+   before hydration. If `SearchService.get_by_id(A)` incorrectly returned
+   a hit for B, the handler would hydrate B and return a perfectly valid
+   PLAYER B to the caller, bypassing the intended identity chain.
+
+2. **C03-2**: Fail-closed consistency errors revealed internal state:
+   - `StorageError` messages included `hit.entity_id`, `doc.entity.id`,
+     and `visibility.value` (e.g. `"dm"`, `"system"`).
+   - `NotFoundError` for gate-None included the requested entity ID.
+   These disclosures could leak hidden campaign state to a model caller.
+
+3. **C03-3**: `register_entity_read_tools` used `registry: object` with a
+   `hasattr(registry, "register")` duck-type check, providing no static
+   type safety and accepting any object with a `register` method.
+
+4. **C03-5**: Stage-7 documentation had a duplicated S7-C02 record and
+   contradictory status text (`"S7-01 is DONE"` followed by
+   `"S7-01 remains NOT STARTED"`). No real S7-01 implementation record
+   existed.
+
+### Root cause
+
+S7-01 was implemented without a formal identity-chain review. The
+requested-ID vs SearchHit-ID check was not part of the original design.
+Error messages were written for developer debugging rather than
+model-facing safety. Registration typing used weak duck-typing inherited
+from earlier prototype conventions. Documentation was not reviewed after
+the S7-01 merge.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/entity_reads.py` | **EDITED** — added requested-ID vs SearchHit-ID check; hydrate via `requested_id`; non-disclosing error messages; `ToolRegistry` type + `isinstance` check |
+| `tests/unit/test_entity_read_tool_contracts.py` | **NEW** — DTO validation, registration metadata, registration API tests (extracted from oversized handler test file) |
+| `tests/unit/test_entity_read_tools.py` | **EDITED** — removed DTO/registration tests (moved to contracts file); added C03 regression tests for identity chain and non-disclosing errors |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added entity_reads import-boundary tests (no models/CLI/Ollama/application, imports domain/retrieval/storage) |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — removed duplicate C02 record; corrected S7-01 status; added real S7-01 record; added this correction record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-C03 DONE |
+
+### Corrected safety contracts
+
+- **Identity chain**: `requested_id == hit.entity_id` is checked before
+  hydration. Repository hydration uses the original validated
+  `requested_id`, not an independently trusted value from SearchHit.
+- **Non-disclosing errors**: All consistency failures raise `StorageError`
+  with generic messages (`"Entity read consistency check failed"`,
+  `"Entity search hydration consistency check failed"`). No hidden entity
+  ID, visibility value, or filesystem detail is exposed.
+- **Registration typing**: `register_entity_read_tools` accepts
+  `registry: ToolRegistry` with `isinstance(registry, ToolRegistry)`
+  validation.
+
+### Regression tests added
+
+- `test_requested_a_hit_b_raises_storage_error`
+- `test_requested_a_hit_b_repository_not_called`
+- `test_requested_a_hit_b_error_does_not_reveal_b`
+- `test_requested_a_hit_a_hydrated_b_raises_storage_error`
+- `test_requested_a_hit_a_hydrated_b_error_does_not_reveal_b`
+- `test_requested_a_hit_a_hydrated_dm_system_raises_storage_error`
+- `test_hydrated_dm_error_does_not_reveal_visibility`
+- `test_requested_a_hit_a_player_a_returns_success`
+- `test_gate_none_repository_not_called`
+- `test_search_hit_id_hydrated_different_id_raises_storage_error`
+- `test_search_hit_id_hydrated_different_id_error_non_disclosing`
+- `test_search_hit_hydrated_dm_raises_storage_error`
+- `test_search_hit_hydrated_dm_error_non_disclosing`
+- `test_search_hydrated_player_success`
+- `test_search_fail_closed_error_does_not_leak_details`
+- `test_search_fail_closed_on_id_mismatch_does_not_leak_ids`
+
+### Quality-gate evidence
+
+- All entity-read handler tests pass.
+- All entity-read contract tests pass.
+- All boundary tests pass (including 7 new entity_reads boundary tests).
+- Maintainability tests pass (test-module decomposition within limits).
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — no formatting issues.
+- `git diff --check` — no whitespace errors.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: `fix: harden entity read tools (S7-C03)`
 
 ### Stage status
 
 - Stage 7 remains **IN PROGRESS**.
-- S7-01 remains **NOT STARTED**.
+- S7-02 remains **NOT STARTED**.

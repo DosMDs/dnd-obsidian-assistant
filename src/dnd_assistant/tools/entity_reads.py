@@ -24,6 +24,7 @@ from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.types import EntityId, EntityType, Visibility
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
 from dnd_assistant.retrieval.types import MatchKind, SearchQuery
+from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
     ExecutionContext,
     Permission,
@@ -215,15 +216,9 @@ def _search_entities_handler(
 
         # Fail-closed consistency check.
         if doc.entity.id != hit.entity_id:
-            raise StorageError(
-                f"Entity ID mismatch: SearchService returned {hit.entity_id!r}, "
-                f"repository returned {doc.entity.id!r}"
-            )
+            raise StorageError("Entity read consistency check failed")
         if doc.entity.visibility != Visibility.PLAYER:
-            raise StorageError(
-                f"Entity {hit.entity_id!r} has visibility "
-                f"{doc.entity.visibility.value!r}, expected 'player'"
-            )
+            raise StorageError("Entity read consistency check failed")
 
         results.append(
             EntitySearchResult(
@@ -251,30 +246,30 @@ def _get_entity_handler(
     Flow:
     1. SearchService.get_by_id — player-visibility gate.
     2. None → generic NotFoundError (no leak of hidden-vs-missing).
-    3. Hydrate through VaultRepository.
-    4. Fail-closed consistency check.
+    3. Requested-ID vs SearchHit-ID consistency check.
+    4. Hydrate through VaultRepository using the original requested ID.
+    5. Hydrated-document ID consistency check.
+    6. Player-visibility check after hydration.
     """
-    entity_id = input_model.entity_id
+    requested_id = input_model.entity_id
 
     # 1. Visibility gate.
-    hit = search_service.get_by_id(entity_id)
+    hit = search_service.get_by_id(requested_id)
     if hit is None:
-        raise NotFoundError(f"Entity '{entity_id}' not found or not accessible")
+        raise NotFoundError("Entity not found or not accessible")
 
-    # 2. Hydrate through repository.
-    doc = repository.get_entity(hit.entity_id)
+    # 2. Requested-ID vs SearchHit-ID consistency check.
+    if hit.entity_id != requested_id:
+        raise StorageError("Entity search hydration consistency check failed")
 
-    # 3. Fail-closed consistency check.
-    if doc.entity.id != hit.entity_id:
-        raise StorageError(
-            f"Entity ID mismatch: SearchService returned {hit.entity_id!r}, "
-            f"repository returned {doc.entity.id!r}"
-        )
+    # 3. Hydrate through repository using the original validated requested ID.
+    doc = repository.get_entity(requested_id)
+
+    # 4. Fail-closed consistency checks.
+    if doc.entity.id != requested_id:
+        raise StorageError("Entity read consistency check failed")
     if doc.entity.visibility != Visibility.PLAYER:
-        raise StorageError(
-            f"Entity {hit.entity_id!r} has visibility "
-            f"{doc.entity.visibility.value!r}, expected 'player'"
-        )
+        raise StorageError("Entity read consistency check failed")
 
     return GetEntityOutput(entity=doc.entity, body=doc.body)
 
@@ -283,7 +278,7 @@ def _get_entity_handler(
 
 
 def register_entity_read_tools(
-    registry: object,
+    registry: ToolRegistry,
     *,
     search_service: SearchService,
     repository: VaultRepository,
@@ -305,8 +300,7 @@ def register_entity_read_tools(
             handler wiring is invalid.
         ConflictError: A tool with the same name is already registered.
     """
-    # Duck-type check: must have a ``register`` method.
-    if not hasattr(registry, "register"):
+    if not isinstance(registry, ToolRegistry):
         raise ValidationError("registry must be a ToolRegistry instance")
 
     def _make_search_handler(

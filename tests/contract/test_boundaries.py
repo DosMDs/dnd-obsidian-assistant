@@ -215,6 +215,51 @@ def test_tools_package_does_not_import_retrieval() -> None:
     assert not mod_names, f"tools package imported retrieval modules: {mod_names}"
 
 
+# ── dnd_assistant.tools.entity_reads must not import models or CLI ──────
+
+
+def test_entity_reads_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"entity_reads imported model modules: {mod_names}"
+
+
+def test_entity_reads_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"entity_reads imported CLI modules: {mod_names}"
+
+
+def test_entity_reads_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"entity_reads triggered ollama import: {mod_names}"
+
+
+def test_entity_reads_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"entity_reads imported application modules: {mod_names}"
+
+
+def test_entity_reads_imports_domain() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.domain")}
+    assert mod_names, "entity_reads should import domain modules"
+
+
+def test_entity_reads_imports_retrieval() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
+    assert mod_names, "entity_reads should import retrieval modules"
+
+
+def test_entity_reads_imports_storage() -> None:
+    _clean_import("dnd_assistant.tools.entity_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
+    assert mod_names, "entity_reads should import storage modules (TYPE_CHECKING only)"
+
+
 # ── no module pulls in ollama ────────────────────────────────────────────
 
 
