@@ -39,6 +39,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-C08 | DONE | Correct separated maintainability gate count |
 | S7-06 | DONE | Safe entity mutation tools |
 | S7-07 | DONE | Cross-family integration / public registry schema / Golden-Vault hardening |
+| S7-C09 | DONE | Correct S7-07 catalog type safety and verification baseline |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
 
 ## S7-00 scope and contracts
@@ -1940,16 +1941,19 @@ This keeps `import dnd_assistant.tools` lightweight — no concrete family modul
 | `src/dnd_assistant/tools/__init__.py` | **EDITED** — added generic catalog exports |
 | `tests/unit/test_tool_catalog.py` | **NEW** — 30 catalog unit tests |
 | `tests/unit/test_mvp_tool_registry.py` | **NEW** — 21 MVP registry unit tests |
-| `tests/integration/test_tool_layer_golden_vault.py` | **NEW** — 43 Golden Vault integration tests |
+| `tests/integration/test_tool_layer_golden_vault.py` | **NEW** — 26 Golden Vault integration tests (entity, world-time, catalog) |
+| `tests/integration/test_tool_layer_golden_vault_session.py` | **NEW** — 17 Golden Vault integration tests (session lifecycle, cross-family audit, permission isolation, typed-result verification) |
 | `tests/contract/test_boundaries.py` | **EDITED** — added catalog + mvp_registry boundary tests (9 new) |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — added this record |
 | `DEVELOPMENT_STATUS.md` | **EDITED** — S7-07 DONE |
 
 ### Tests and quality gates
 
-- 30/30 catalog unit tests pass.
+- 32/32 catalog unit tests pass.
 - 21/21 MVP registry unit tests pass.
-- 43/43 Golden Vault integration tests pass.
+- 26/26 main Golden Vault integration tests pass (entity, world-time, catalog).
+- 17/17 session/cross-family Golden Vault integration tests pass (session lifecycle, cross-family audit, permission isolation, typed-result verification).
+- 43/43 combined S7-07 Golden Tool Layer suite passes.
 - 96/96 boundary tests pass (was 87, +9 new catalog/mvp_registry tests).
 - 93/93 existing Golden retrieval tests pass.
 - All existing Golden session tests pass.
@@ -1960,11 +1964,12 @@ This keeps `import dnd_assistant.tools` lightweight — no concrete family modul
 
 ### Maintainability
 
-- `catalog.py`: under 700 production hard limit.
+- `catalog.py`: 109 lines, under 700 production hard limit.
 - `mvp_registry.py`: under 700 production hard limit.
-- `test_tool_catalog.py`: under 1000 test hard limit.
-- `test_mvp_tool_registry.py`: under 1000 test hard limit.
-- `test_tool_layer_golden_vault.py`: under 1000 test hard limit.
+- `test_tool_catalog.py`: 485 lines, under 1000 test hard limit.
+- `test_mvp_tool_registry.py`: 251 lines, under 1000 test hard limit.
+- `test_tool_layer_golden_vault.py`: 533 lines, under 1000 test hard limit.
+- `test_tool_layer_golden_vault_session.py`: 351 lines, under 1000 test hard limit.
 - No new legacy exceptions added.
 
 ### Explicit non-goals
@@ -1982,4 +1987,75 @@ This keeps `import dnd_assistant.tools` lightweight — no concrete family modul
 - S7-07 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
 - S7-08 remains **NOT STARTED**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-C09 — Correct S7-07 catalog type safety and verification baseline
+
+### Independent review findings
+
+1. **Catalog builder accepted duck-typed registry-like objects**: `build_tool_registry_schema` used `hasattr(registry, "list_definitions")` instead of `isinstance(registry, ToolRegistry)`, allowing any object with a `list_definitions` method to pass as a valid registry.
+
+2. **S7-07 changed-file inventory omitted the split session/cross-family Golden module**: `tests/integration/test_tool_layer_golden_vault_session.py` was created in S7-07 but not listed in the `Files changed` table.
+
+3. **S7-07 test evidence did not distinguish the two Golden modules**: The combined 43/43 count was correct, but the individual module counts (26 main, 17 session) and their distinct responsibilities were not documented.
+
+### Corrections
+
+- `build_tool_registry_schema` now requires `isinstance(registry, ToolRegistry)` via local import, with an MRO-based class-name fallback for resilience against `importlib.reload` patterns in boundary tests. The previous `hasattr(registry, "list_definitions")` duck-type check was removed.
+- Regression test added for registry-like impostor (`_FakeRegistryLike` with `list_definitions` → `TypeError`).
+- Regression test added for `ToolRegistry` subclass acceptance.
+- S7-07 `Files changed` table corrected to include `tests/integration/test_tool_layer_golden_vault_session.py` with its real responsibility.
+- S7-07 test evidence corrected to report both Golden modules independently and combined.
+- No Stage-8 work was started.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/catalog.py` | **EDITED** — replaced `hasattr` duck-type check with `isinstance(registry, ToolRegistry)` via local import + MRO class-name fallback |
+| `tests/unit/test_tool_catalog.py` | **EDITED** — added `test_registry_like_impostor_rejected` and `test_tool_registry_subclass_accepted` regression tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-07 file inventory and test evidence; added this correction record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — added S7-C09 DONE |
+
+### Quality-gate evidence
+
+- 32/32 catalog unit tests pass (including 2 new regression tests).
+- 21/21 MVP registry unit tests pass.
+- 26/26 main Golden Vault integration tests pass.
+- 17/17 session/cross-family Golden Vault integration tests pass.
+- 43/43 combined S7-07 Golden Tool Layer suite passes.
+- 96/96 boundary tests pass.
+- 276/276 maintainability tests pass.
+- Full `uv run pytest`: 0 failed, 0 errors.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Maintainability
+
+- `catalog.py`: 109 physical lines (under 700 production hard limit).
+- `test_tool_catalog.py`: 485 physical lines (under 1000 test hard limit).
+- `test_tool_layer_golden_vault.py`: 533 physical lines (under 1000 test hard limit).
+- `test_tool_layer_golden_vault_session.py`: 351 physical lines (under 1000 test hard limit).
+- No new legacy exceptions added.
+- `PRODUCTION_HARD_LIMIT` (700) and `TEST_HARD_LIMIT` (1000) unchanged.
+
+### Golden fixture immutability
+
+- `tests/fixtures/golden_test_vault`: zero diff vs HEAD.
+- `tests/integration/conftest.py`: zero diff vs HEAD (restored from published HEAD before testing).
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: `fix: correct S7-07 catalog verification (S7-C09)`
+
+### Stage status
+
+- S7-07 remains **DONE**.
+- S7-C09 is **DONE**.
+- S7-08 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.

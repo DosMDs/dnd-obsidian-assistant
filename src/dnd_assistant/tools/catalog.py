@@ -73,10 +73,15 @@ def build_tool_registry_schema(registry: ToolRegistry) -> ToolRegistrySchema:
         every registered tool.
 
     Raises:
-        TypeError: If ``registry`` is not a ``ToolRegistry`` or does
-            not have the required ``list_definitions`` method.
+        TypeError: If ``registry`` is not a ``ToolRegistry`` instance.
     """
-    if not hasattr(registry, "list_definitions"):
+    from dnd_assistant.tools.registry import ToolRegistry as _ToolRegistry
+
+    if not isinstance(registry, _ToolRegistry) and not any(
+        c.__name__ == "ToolRegistry"
+        and getattr(c, "__module__", None) == "dnd_assistant.tools.registry"
+        for c in type(registry).__mro__
+    ):
         raise TypeError("registry must be a ToolRegistry instance")
 
     definitions = registry.list_definitions()

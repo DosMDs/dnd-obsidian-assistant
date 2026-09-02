@@ -190,6 +190,26 @@ class TestBuildToolRegistrySchema:
         with pytest.raises(TypeError, match="ToolRegistry"):
             build_tool_registry_schema("not a registry")  # type: ignore[arg-type]
 
+    def test_registry_like_impostor_rejected(self) -> None:
+        """A duck-typed object with list_definitions must not be accepted."""
+
+        class _FakeRegistryLike:
+            def list_definitions(self) -> tuple[object, ...]:
+                return ()
+
+        with pytest.raises(TypeError, match="ToolRegistry"):
+            build_tool_registry_schema(_FakeRegistryLike())  # type: ignore[arg-type]
+
+    def test_tool_registry_subclass_accepted(self) -> None:
+        """A ToolRegistry subclass must be accepted by isinstance."""
+
+        class _SubRegistry(ToolRegistry):
+            pass
+
+        schema = build_tool_registry_schema(_SubRegistry())
+        assert isinstance(schema, ToolRegistrySchema)
+        assert schema.tools == []
+
     def test_empty_registry(self) -> None:
         registry = ToolRegistry()
         schema = build_tool_registry_schema(registry)
