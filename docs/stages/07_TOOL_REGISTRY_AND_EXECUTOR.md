@@ -35,6 +35,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-04 | DONE | World-time read + deterministic calendar read surface |
 | S7-05 | DONE | World-time mutation tools |
 | S7-C06 | DONE | Restore S7-05 maintainability ratchet |
+| S7-C07 | DONE | Correct S7-C06 verification documentation |
 | S7-06 | NOT STARTED | Safe entity mutation tools |
 | S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
@@ -1379,8 +1380,8 @@ legacy oversized exception.
 |---|---|---|
 | `tests/unit/test_world_time_mutation_tool_contracts.py` | 428 | DTO validation, registration metadata, registration API |
 | `tests/unit/test_world_time_mutation_tools.py` | 998 | Handler behaviour: initialize, update, advance, signed minutes, concurrency, calendar validation |
-| `tests/unit/test_world_time_mutation_tool_safety.py` | 432 | Permission gating, audit gating, invalid-input-before-handler, session modes, no implicit initialization |
-| `tests/unit/test_world_time_mutation_integration.py` | 87 | Real ObsidianWorldTimeRepository + ToolExecutor end-to-end |
+| `tests/unit/test_world_time_mutation_tool_safety.py` | 477 | Permission gating, audit gating, invalid-input-before-handler, session modes, no implicit initialization |
+| `tests/unit/test_world_time_mutation_integration.py` | 89 | Real ObsidianWorldTimeRepository + ToolExecutor end-to-end |
 
 All four files are at or below the `TEST_HARD_LIMIT` of 1000 lines.
 
@@ -1418,8 +1419,8 @@ subsequently corrected by S7-C06.
 | File | Change |
 |---|---|
 | `tests/unit/test_world_time_mutation_tools.py` | **EDITED** — removed safety tests and integration test (moved to split files); reduced from 1377 to 998 lines |
-| `tests/unit/test_world_time_mutation_tool_safety.py` | **NEW** — safety/permission/audit/invalid-input tests (432 lines) |
-| `tests/unit/test_world_time_mutation_integration.py` | **NEW** — real repository integration test (87 lines) |
+| `tests/unit/test_world_time_mutation_tool_safety.py` | **NEW** — safety/permission/audit/invalid-input tests (477 lines) |
+| `tests/unit/test_world_time_mutation_integration.py` | **NEW** — real repository integration test (89 lines) |
 | `tests/contract/test_maintainability.py` | **EDITED** — removed invalid `test_world_time_mutation_tools.py` legacy exception |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-05 file inventory; added this correction record |
 | `DEVELOPMENT_STATUS.md` | **EDITED** — S7-C06 DONE |
@@ -1430,7 +1431,8 @@ subsequently corrected by S7-C06.
 - 30/30 world-time mutation behaviour tests pass.
 - 10/10 world-time mutation safety tests pass.
 - 2/2 world-time mutation integration tests pass.
-- 342/342 maintainability and boundary tests pass.
+- Maintainability: 342/342
+- Boundary: 83/83
 - 155/155 S7-04 read + core Tool Layer regression tests pass.
 - Full `uv run pytest`: all tests pass.
 - `uv run ruff check .` — no errors.
@@ -1449,6 +1451,58 @@ subsequently corrected by S7-C06.
 
 - S7-05 remains **DONE**.
 - S7-C06 is **DONE**.
+- S7-06 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-C07 — Correct S7-C06 verification documentation
+
+### Defect
+
+S7-C06 successfully restored the maintainability ratchet, but its canonical
+documentation contained stale physical line counts:
+- `test_world_time_mutation_tool_safety.py`: documented as 432 lines, actual 477 lines.
+- `test_world_time_mutation_integration.py`: documented as 87 lines, actual 89 lines.
+- Quality-gate evidence combined maintainability and boundary into a single
+  misleading count instead of reporting separate results.
+
+### Correction
+
+- Corrected S7-C06 Final decomposition table to actual physical line counts.
+- Corrected S7-C06 Files-changed descriptions to actual physical line counts.
+- Separated quality-gate evidence into distinct maintainability and boundary results.
+- Verified maintainability ratchet itself was already correct and was not changed.
+- No production or test files were modified.
+
+### Actual verified four-file line counts
+
+| File | Lines |
+|---|---|
+| `tests/unit/test_world_time_mutation_tool_contracts.py` | 428 |
+| `tests/unit/test_world_time_mutation_tools.py` | 998 |
+| `tests/unit/test_world_time_mutation_tool_safety.py` | 477 |
+| `tests/unit/test_world_time_mutation_integration.py` | 89 |
+
+### Quality-gate evidence
+
+- Maintainability: 342/342
+- Boundary: 83/83
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: `docs: correct S7-C06 verification record (S7-C07)`
+
+### Stage status
+
+- S7-C06 remains **DONE**.
+- S7-C07 is **DONE**.
 - S7-06 remains **NOT STARTED**.
 - Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.
