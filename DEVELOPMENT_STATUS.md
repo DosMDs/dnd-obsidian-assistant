@@ -88,6 +88,7 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 | S7-05 — World-time mutation tools | DONE |
 | S7-C06 — Restore S7-05 maintainability ratchet | DONE |
 | S7-C07 — Correct S7-C06 verification documentation | DONE |
+| S7-C08 — Correct separated maintainability gate count | DONE |
 | S7-06 — Safe entity mutation tools | NOT STARTED |
 | S7-07 — Cross-family integration / public registry schema / Golden-Vault hardening | NOT STARTED |
 | S7-08 — Full Stage-7 historical review / verification / completion | NOT STARTED |

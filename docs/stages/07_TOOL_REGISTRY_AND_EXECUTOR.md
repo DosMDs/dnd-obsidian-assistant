@@ -36,6 +36,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-05 | DONE | World-time mutation tools |
 | S7-C06 | DONE | Restore S7-05 maintainability ratchet |
 | S7-C07 | DONE | Correct S7-C06 verification documentation |
+| S7-C08 | DONE | Correct separated maintainability gate count |
 | S7-06 | NOT STARTED | Safe entity mutation tools |
 | S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
@@ -1431,7 +1432,7 @@ subsequently corrected by S7-C06.
 - 30/30 world-time mutation behaviour tests pass.
 - 10/10 world-time mutation safety tests pass.
 - 2/2 world-time mutation integration tests pass.
-- Maintainability: 342/342
+- Maintainability: 259/259
 - Boundary: 83/83
 - 155/155 S7-04 read + core Tool Layer regression tests pass.
 - Full `uv run pytest`: all tests pass.
@@ -1466,7 +1467,9 @@ documentation contained stale physical line counts:
 - `test_world_time_mutation_tool_safety.py`: documented as 432 lines, actual 477 lines.
 - `test_world_time_mutation_integration.py`: documented as 87 lines, actual 89 lines.
 - Quality-gate evidence combined maintainability and boundary into a single
-  misleading count instead of reporting separate results.
+  misleading count (342 = 259 + 83) instead of reporting separate results.
+  The aggregated count 342 was incorrectly retained as the maintainability-only
+  count.
 
 ### Correction
 
@@ -1487,7 +1490,7 @@ documentation contained stale physical line counts:
 
 ### Quality-gate evidence
 
-- Maintainability: 342/342
+- Maintainability: 259/259
 - Boundary: 83/83
 - Full `uv run pytest`: all tests pass.
 - `uv run ruff check .` — no errors.
@@ -1504,5 +1507,48 @@ documentation contained stale physical line counts:
 - S7-C06 remains **DONE**.
 - S7-C07 is **DONE**.
 - S7-06 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-C08 — Correct separated maintainability gate count
+
+### Defect
+
+S7-C07 successfully separated maintainability and boundary reporting, but the
+old aggregate count 342 (259 + 83) was incorrectly retained as the
+maintainability-only count in both the S7-C06 and S7-C07 quality-gate evidence
+sections.
+
+### Correction
+
+- Re-ran maintainability suite independently: 259/259.
+- Re-ran boundary suite independently: 83/83.
+- Corrected S7-C06 quality-gate evidence: `Maintainability: 259/259`, `Boundary: 83/83`.
+- Corrected S7-C07 quality-gate evidence: `Maintainability: 259/259`, `Boundary: 83/83`.
+- Updated S7-C07 defect narrative to clarify that 342 was the old aggregate
+  (259 + 83) and was not a valid maintainability-only count.
+- Line-count corrections from S7-C07 remain unchanged: 428/998/477/89.
+- Maintainability policy unchanged (`TEST_HARD_LIMIT` = 1000).
+- No production or test files modified.
+
+### Quality-gate evidence
+
+- Maintainability: 259/259
+- Boundary: 83/83
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Stage status
+
+- S7-C06 remains **DONE**.
+- S7-C07 remains **DONE**.
+- S7-C08 is **DONE**.
+- S7-06 remains **NOT STARTED**.
+- S7-07 remains **NOT STARTED**.
+- S7-08 remains **NOT STARTED**.
 - Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.
