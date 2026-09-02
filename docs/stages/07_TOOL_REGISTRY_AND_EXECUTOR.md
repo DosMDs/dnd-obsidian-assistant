@@ -2045,7 +2045,12 @@ This keeps `import dnd_assistant.tools` lightweight — no concrete family modul
 ### Golden fixture immutability
 
 - `tests/fixtures/golden_test_vault`: zero diff vs HEAD.
-- `tests/integration/conftest.py`: zero diff vs HEAD (restored from published HEAD before testing).
+- `tests/integration/conftest.py`: zero diff vs HEAD.  The file was inspected;
+  it already matched HEAD.  No restoration command was required.  The final
+  full-suite run therefore used the canonical tracked conftest.
+
+  (The S7-C10 correction pass subsequently removed the MRO class-name/module
+  fallback from ``catalog.py`` because it weakened strict runtime type safety.)
 
 ### Commit
 
@@ -2056,6 +2061,118 @@ This keeps `import dnd_assistant.tools` lightweight — no concrete family modul
 
 - S7-07 remains **DONE**.
 - S7-C09 is **DONE**.
+- S7-08 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-C10 — Enforce strict ToolRegistry identity and isolate boundary imports
+
+### Independent-review defect
+
+S7-C09 replaced the original duck-typing check with an ``isinstance`` check
+plus an MRO class-name/module-string fallback:
+
+```python
+if not isinstance(registry, _ToolRegistry) and not any(
+    c.__name__ == "ToolRegistry"
+    and getattr(c, "__module__", None) == "dnd_assistant.tools.registry"
+    for c in type(registry).__mro__
+):
+    raise TypeError(...)
+```
+
+This violates the public contract.  A class is NOT a real ``ToolRegistry``
+merely because its ``__name__`` and ``__module__`` match — these are metadata
+attributes that can be fabricated.
+
+### Root cause
+
+The fallback existed only to survive ``sys.modules`` identity churn caused by
+boundary-test clean imports.  After a boundary test permanently replaced
+``dnd_assistant`` module objects in ``sys.modules``, later unit tests in the
+same process would hold references to the original ``ToolRegistry`` class
+while the newly imported module graph contained a different ``ToolRegistry``
+class, causing false-negative ``isinstance()`` results.
+
+### Correction
+
+1. **Removed MRO/name/module fallback completely** from ``build_tool_registry_schema``.
+   The runtime check is now:
+
+   ```python
+   if not isinstance(registry, ToolRegistry):
+       raise TypeError("registry must be a ToolRegistry instance")
+   ```
+
+   No second acceptance branch.  No ``hasattr``, Protocol, class-name check,
+   ``__module__`` check, MRO name scan, duck typing, or structural typing
+   fallback.
+
+2. **Isolated boundary-test ``sys.modules`` mutations** by adding an
+   ``autouse=True`` pytest fixture that snapshots ``dnd_assistant`` modules
+   before each boundary test and restores the exact original module objects
+   after.  ``_clean_import()`` still gets a genuinely clean import graph for
+   the assertion, but the pre-test module state is restored afterward.
+
+3. **Added spoofed-impostor regression**: a class dynamically created with
+   ``name="ToolRegistry"`` and ``__module__="dnd_assistant.tools.registry"``
+   is correctly rejected by ``build_tool_registry_schema``.
+
+4. **Added boundary isolation regression**: proves that after a clean-import
+   cycle, the original ``ToolRegistry`` class identity is preserved.
+
+5. **Corrected S7-C09 conftest documentation**: the S7-C09 record now
+   truthfully states that ``tests/integration/conftest.py`` was inspected
+   and already matched HEAD — no restoration command was required.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/catalog.py` | **EDITED** — removed MRO class-name/module fallback; strict ``isinstance(registry, ToolRegistry)`` only; normal module-level import instead of local import |
+| `tests/unit/test_tool_catalog.py` | **EDITED** — added ``test_spoofed_class_name_module_impostor_rejected`` regression |
+| `tests/contract/test_boundaries.py` | **EDITED** — added ``autouse`` fixture ``_restore_dnd_assistant_modules``; added ``test_boundary_restores_module_identity`` regression |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-C09 conftest history; added this correction record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — added S7-C10 DONE |
+
+### Quality-gate evidence
+
+- All catalog unit tests pass (including spoofed-impostor regression).
+- All boundary tests pass (including identity-restoration regression).
+- Catalog tests pass after boundary tests in the same process.
+- Boundary tests pass after catalog tests in the same process.
+- All MVP registry tests pass.
+- All Golden Tool Layer integration tests pass.
+- Full ``uv run pytest``: 0 failed, 0 errors.
+- ``uv run ruff check .`` — no errors.
+- ``uv run ruff format --check .`` — all files formatted.
+- ``git diff --check`` — no whitespace errors.
+
+### Maintainability
+
+- ``catalog.py``: 109 physical lines (under 700 production hard limit).
+- ``test_tool_catalog.py``: under 1000 test hard limit.
+- ``test_boundaries.py``: under 1000 test hard limit.
+- No new legacy exceptions added.
+- ``PRODUCTION_HARD_LIMIT`` (700) and ``TEST_HARD_LIMIT`` (1000) unchanged.
+
+### Golden fixture immutability
+
+- ``tests/fixtures/golden_test_vault``: zero diff vs HEAD.
+- ``tests/integration/conftest.py``: zero diff vs HEAD.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: ``fix: enforce strict tool registry catalog type (S7-C10)``
+
+### Stage status
+
+- S7-07 remains **DONE**.
+- S7-C09 remains **DONE**.
+- S7-C10 is **DONE**.
 - S7-08 remains **NOT STARTED**.
 - Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.

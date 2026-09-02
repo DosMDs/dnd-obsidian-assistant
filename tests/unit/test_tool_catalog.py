@@ -210,6 +210,27 @@ class TestBuildToolRegistrySchema:
         assert isinstance(schema, ToolRegistrySchema)
         assert schema.tools == []
 
+    def test_spoofed_class_name_module_impostor_rejected(self) -> None:
+        """A class named ToolRegistry with matching __module__ must be rejected.
+
+        The S7-C09 MRO fallback checked class name and module string,
+        which are metadata attributes that can be fabricated.  This
+        regression proves no such escape hatch exists.
+        """
+        FakeToolRegistry = type(
+            "ToolRegistry",
+            (),
+            {
+                "__module__": "dnd_assistant.tools.registry",
+                "list_definitions": lambda self: (),
+            },
+        )
+
+        fake = FakeToolRegistry()
+        assert not isinstance(fake, ToolRegistry)
+        with pytest.raises(TypeError, match="ToolRegistry"):
+            build_tool_registry_schema(fake)  # type: ignore[arg-type]
+
     def test_empty_registry(self) -> None:
         registry = ToolRegistry()
         schema = build_tool_registry_schema(registry)

@@ -675,9 +675,8 @@ class TestCliSessionBoundaries:
         import sys
 
         for mod in list(sys.modules):
-            if mod.startswith("dnd_assistant.cli.session"):
+            if mod.startswith("dnd_assistant"):
                 del sys.modules[mod]
-
         importlib.import_module("dnd_assistant.cli.session")
         loaded = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
         assert not loaded, f"cli.session imported model modules: {loaded}"
@@ -687,9 +686,8 @@ class TestCliSessionBoundaries:
         import sys
 
         for mod in list(sys.modules):
-            if mod.startswith("dnd_assistant.cli.session"):
+            if mod.startswith("dnd_assistant"):
                 del sys.modules[mod]
-
         importlib.import_module("dnd_assistant.cli.session")
         loaded = {m for m in sys.modules if m.startswith("ollama")}
         assert not loaded, f"cli.session triggered ollama import: {loaded}"
@@ -699,9 +697,8 @@ class TestCliSessionBoundaries:
         import sys
 
         for mod in list(sys.modules):
-            if mod.startswith("dnd_assistant.cli.session"):
+            if mod.startswith("dnd_assistant"):
                 del sys.modules[mod]
-
         importlib.import_module("dnd_assistant.cli.session")
         loaded = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
         assert not loaded, f"cli.session imported tool modules: {loaded}"

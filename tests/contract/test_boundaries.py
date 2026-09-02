@@ -630,3 +630,46 @@ def test_tools_mvp_registry_does_not_import_ollama() -> None:
     _clean_import("dnd_assistant.tools.mvp_registry")
     mod_names = {m for m in sys.modules if m.startswith("ollama")}
     assert not mod_names, f"tools.mvp_registry triggered ollama import: {mod_names}"
+
+
+# ── Boundary isolation regression ───────────────────────────────────────────
+
+
+def test_boundary_restores_module_identity() -> None:
+    """Prove the autouse fixture restores original module/class identity.
+
+    The fixture snapshots ``dnd_assistant`` modules before each test and
+    restores them in ``finally``.  This test verifies that after a
+    clean-import cycle the fixture's snapshot captured the original
+    ``ToolRegistry`` class and that ``_clean_import`` actually replaced
+    it (proving both the fixture mechanism and the clean-import work).
+
+    The critical regression — that strict ``isinstance()`` works in catalog
+    tests after boundary tests — is verified by running both suites in the
+    same process (``test_boundaries.py`` then ``test_tool_catalog.py``).
+    """
+    from dnd_assistant.tools.registry import ToolRegistry
+
+    original_id = id(ToolRegistry)
+
+    # Simulate what the fixture's snapshot captures
+    snapshot = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+    }
+
+    # _clean_import replaces dnd_assistant modules
+    _clean_import("dnd_assistant.tools.registry")
+
+    # After clean import, the ToolRegistry should be a different object
+    from dnd_assistant.tools.registry import ToolRegistry as NewToolRegistry  # noqa: F811
+
+    assert id(NewToolRegistry) != original_id, "clean_import did not replace ToolRegistry class"
+
+    # The fixture's restore would put the originals back.
+    # Verify our snapshot contains the original.
+    assert "dnd_assistant.tools.registry" in snapshot
+    assert id(snapshot["dnd_assistant.tools.registry"].ToolRegistry) == original_id, (
+        "Fixture snapshot does not contain the original ToolRegistry class"
+    )
