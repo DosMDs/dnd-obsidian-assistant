@@ -2,11 +2,10 @@
 
 **Last updated:** 2026-09-02
 **Current milestone:** `v0.1-dev — Vault Core`
-**Roadmap position:** Stage 7 completed
-**Active stage:** None
-**Stage 7 status:** `DONE`
+**Roadmap position:** Stage 8 in progress
+**Active stage:** Stage 8 — Model Gateway / Ollama
+**Stage 8 status:** `IN PROGRESS`
 **Started:** 2026-09-02
-**Completed:** 2026-09-02
 
 ## Status model
 
@@ -39,7 +38,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | 5. Retrieval + Entity Resolution | DONE | 2026-08-31 | 2026-08-31 | [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md) |
 | 6. Session Runtime without LLM | DONE | 2026-08-31 | 2026-09-02 | [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md) |
 | 7. Tool Registry / Executor | DONE | 2026-09-02 | 2026-09-02 | [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md) |
-| 8. Model Gateway / Ollama | NOT STARTED | — | — | — |
+| 8. Model Gateway / Ollama | IN PROGRESS | 2026-09-02 | — | [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md) |
 | 9. Fast Agent | NOT STARTED | — | — | — |
 | 10. ChangeSet | NOT STARTED | — | — | — |
 | 11. Post-session Processor | NOT STARTED | — | — | — |
@@ -49,62 +48,36 @@ Detailed task/correction/review records belong in `docs/stages/`.
 
 ## Current roadmap state
 
-Stage 7 is complete.
+Stage 8 is in progress.
 
-Pre-Stage-7 base:
-
-```
-a233a90d9435de0855756abbeedeab274293bed8
-```
-
-Captured Stage-7 implementation review-head:
+Pre-Stage-8 base:
 
 ```
-fe954ca4c9cddeffd519f1c1b14dc4d7415719c9
+9bca669894b2ae12a62381a2f7b6a5447c44e9cd
 ```
 
-Exact historical review range:
-
-```
-a233a90..fe954ca
-```
-
-Detailed history: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)
+Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md)
 
 ## Current stage tasks
 
 | Task | Status |
 |---|---|
-| S7-00 — Foundational tool contracts: typed metadata, ToolRegistry, ToolExecutor, permissions, side effects, session modes, tests, documentation | DONE |
-| S7-C00 — Correction pass for S7-00: exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization | DONE |
-| S7-C01 — Finalize Stage-7 status/document consistency after S7-C00 review | DONE |
-| S7-C02 — Correct Stage-7 malformed status-table separator | DONE |
-| S7-01 — Entity read tools | DONE |
-| S7-C03 — Harden entity read-tool safety | DONE |
-| S7-C04 — Finalize S7-01/C03 documentation and boundary contracts | DONE |
-| S7-02 — Session read tools | DONE |
-| S7-C05 — Strengthen session read public DTO contracts | DONE |
-| S7-03 — Session mutation tools | DONE |
-| S7-04 — World-time read + deterministic calendar read surface | DONE |
-| S7-05 — World-time mutation tools | DONE |
-| S7-C06 — Restore S7-05 maintainability ratchet | DONE |
-| S7-C07 — Correct S7-C06 verification documentation | DONE |
-| S7-C08 — Correct separated maintainability gate count | DONE |
-| S7-06 — Safe entity mutation tools | DONE |
-| S7-07 — Cross-family integration / public registry schema / Golden-Vault hardening | DONE |
-| S7-C09 — Correct S7-07 catalog type safety and verification baseline | DONE |
-| S7-C10 — Enforce strict ToolRegistry identity and isolate boundary imports | DONE |
-| S7-C11 — Localize sys.modules test isolation and correct S7-C10 history | DONE |
-| S7-C12 — Deduplicate import isolation and restore maintainability ratchet | DONE |
-| S7-08 — Full Stage-7 historical review / verification / completion | DONE |
+| S8-00 — Provider-neutral typed ModelGateway contracts + sync decision | DONE |
+| S8-01 — Model profile schemas + machine profile loader | NOT STARTED |
+| S8-02 — Ollama transport + health + plain chat | NOT STARTED |
+| S8-03 — Ollama structured generation | NOT STARTED |
+| S8-04 — Ollama native tool-calling adapter | NOT STARTED |
+| S8-05 — Ollama embeddings | NOT STARTED |
+| S8-06 — Provider integration / error hardening / opt-in smoke coverage | NOT STARTED |
+| S8-07 — Full Stage-8 historical review / completion | NOT STARTED |
 
-Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)
+Details: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md)
 
 ## Next stage
 
 | Stage | Status |
 |---|---|
-| Stage 8 — Model Gateway / Ollama | NOT STARTED |
+| Stage 9 — Fast Agent | NOT STARTED |
 
 ## Maintenance gate before S6-06
 
