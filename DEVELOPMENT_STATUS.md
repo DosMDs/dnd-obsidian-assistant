@@ -118,6 +118,7 @@ Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_RE
 | Task | Status |
 |---|---|
 | MNT-03 — Harden GigaCode task scope/finalization/test-harness reliability | DONE |
+| MNT-C01 — Strengthen test-harness opt-in enforcement | DONE |
 
 ## Current blockers
 

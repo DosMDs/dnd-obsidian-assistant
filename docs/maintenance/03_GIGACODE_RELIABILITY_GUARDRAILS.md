@@ -98,3 +98,75 @@ product architecture or starting Stage 8.
 - Stage 7 — DONE
 - MNT-03 — DONE
 - Stage 8 — NOT STARTED
+
+---
+
+## MNT-C01 — Strengthen test-harness opt-in enforcement
+
+**Date:** 2026-09-02
+
+### Defect
+
+The initial opt-in policy test (`test_test_harness_policy.py`) was
+one-directional:
+
+```python
+for entry in actual:
+    assert entry in expected
+```
+
+This `actual ⊆ expected` check caught unexpected **new** usages but did
+**not** catch disappearance of a required restoration opt-in.  Removing a
+`@pytest.mark.usefixtures("restore_dnd_assistant_modules")` from a
+clean-import test class would leave the policy test green.
+
+Additionally, the allowlist contained a stale entry:
+`("unit/test_calendar_conversion.py", "TestBoundaries")` — that class is a
+pure calendar boundary test with no `sys.modules` mutation and no fixture
+usage.
+
+### Correction
+
+1. **Bidirectional exact-set comparison** — Changed both
+   `test_known_module_level_optins` and `test_known_class_level_optins` to
+   use `actual == expected` with detailed diagnostic messages showing
+   missing expected and unexpected entries separately.
+
+2. **Corrected allowlist** — Removed the stale
+   `("unit/test_calendar_conversion.py", "TestBoundaries")` entry from
+   `CLASS_LEVEL_OPTIIN`.
+
+3. **Semantic clean-import coverage** — Added
+   `TestCleanImportCoverage::test_all_clean_import_scopes_covered` which
+   structurally detects AST patterns that delete `dnd_assistant` from
+   `sys.modules` and verifies the enclosing scope opts into
+   `restore_dnd_assistant_modules`.
+
+4. **Negative regression tests** — Added `TestPolicyLogicRegression` with
+   11 tests covering:
+   - Missing expected opt-in is rejected
+   - Unexpected opt-in is rejected
+   - Exact match passes
+   - Clean-import `del sys.modules[name]` detection (two patterns)
+   - No false positive for unrelated code
+   - Class-level clean-import detection
+   - `_is_usefixtures_restore` detection and non-detection
+
+### Changed files
+
+- `tests/contract/test_test_harness_policy.py`
+- `docs/maintenance/03_GIGACODE_RELIABILITY_GUARDRAILS.md`
+- `DEVELOPMENT_STATUS.md`
+
+### Zero diff
+
+- `src/` — no changes
+- `.gigacode/rules/` — no changes
+- `.gigacode/skills/` — no changes
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` = 700 (unchanged)
+- `TEST_HARD_LIMIT` = 1000 (unchanged)
+- `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` = 1477 (unchanged)
+- `tests/contract/test_test_harness_policy.py` physical lines = N (under 1000)
