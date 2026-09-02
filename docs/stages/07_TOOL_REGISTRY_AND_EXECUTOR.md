@@ -33,7 +33,8 @@ provider-schema-free, and ChangeSet-free.
 | S7-C05 | DONE | Strengthen session read public DTO contracts |
 | S7-03 | DONE | Session mutation tools |
 | S7-04 | DONE | World-time read + deterministic calendar read surface |
-| S7-05 | NOT STARTED | World-time mutation tools |
+| S7-05 | DONE | World-time mutation tools |
+| S7-C06 | DONE | Restore S7-05 maintainability ratchet |
 | S7-06 | NOT STARTED | Safe entity mutation tools |
 | S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
@@ -1319,6 +1320,7 @@ supplied by trusted composition code.
 | `tests/unit/test_world_time_mutation_tool_contracts.py` | **NEW** — DTO/registration/contract tests |
 | `tests/unit/test_world_time_mutation_tools.py` | **NEW** — handler/executor/integration tests |
 | `tests/contract/test_boundaries.py` | **UPDATED** — added 5 world_time_mutations negative import tests |
+| `tests/contract/test_maintainability.py` | **UPDATED** — temporarily added new-file legacy exception for `test_world_time_mutation_tools.py` (subsequently corrected by S7-C06) |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added this record |
 | `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-05 DONE |
 
@@ -1350,4 +1352,103 @@ supplied by trusted composition code.
 - S7-05 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
 - S7-06 remains **NOT STARTED**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-C06 — Restore S7-05 maintainability ratchet
+
+### Independent-review defect
+
+S7-05 introduced a new test module (`test_world_time_mutation_tools.py`) with
+1377 physical lines — exceeding the repository's 1000-line test-module hard
+limit.  The same commit then added this file to `TEST_LEGACY_EXCEPTIONS` in
+`test_maintainability.py`, incorrectly classifying a newly created file as a
+legacy oversized exception.
+
+### Correction
+
+1. **Removed invalid legacy exception**: Deleted `"unit/test_world_time_mutation_tools.py": 1377` from `TEST_LEGACY_EXCEPTIONS`.
+2. **Decomposed oversized test module**: Split `test_world_time_mutation_tools.py` (1377 lines) into three cohesive topical modules, each well under the 1000-line hard limit.
+3. **No production changes**: `src/dnd_assistant/tools/world_time_mutations.py` is unchanged.
+4. **No maintainability-policy weakening**: `TEST_HARD_LIMIT` remains 1000. No new legacy exception added. Pre-existing legacy exceptions otherwise unchanged.
+
+### Final decomposition
+
+| File | Lines | Content |
+|---|---|---|
+| `tests/unit/test_world_time_mutation_tool_contracts.py` | 428 | DTO validation, registration metadata, registration API |
+| `tests/unit/test_world_time_mutation_tools.py` | 998 | Handler behaviour: initialize, update, advance, signed minutes, concurrency, calendar validation |
+| `tests/unit/test_world_time_mutation_tool_safety.py` | 432 | Permission gating, audit gating, invalid-input-before-handler, session modes, no implicit initialization |
+| `tests/unit/test_world_time_mutation_integration.py` | 87 | Real ObsidianWorldTimeRepository + ToolExecutor end-to-end |
+
+All four files are at or below the `TEST_HARD_LIMIT` of 1000 lines.
+
+### Preserved S7-05 coverage
+
+All original S7-05 behavioural regressions are preserved:
+
+- `set_world_time` expected_revision=None → initialize only
+- `set_world_time` expected_revision=N → update only
+- No read-before-branch in set_world_time
+- `advance_world_time`: get current → CalendarService.advance → repository set
+- Caller expected_revision forwarded unchanged (never substituted with current.revision)
+- Negative / zero / positive minutes accepted
+- Same AuditContext object forwarded
+- READ permission rejected before handler
+- Missing audit rejected before handler
+- Invalid input rejected before handler
+- Both session modes accepted
+- Repository NotFoundError / ConflictError / StorageError propagation
+- CalendarService ValueError → project ValidationError
+- RuntimeError propagates unchanged
+- No direct filesystem/audit/JSON mutation
+- No session event
+- No recovery inspection
+- Real repository/tool integration
+
+### Documentation correction
+
+The S7-05 `Files changed` inventory now includes `tests/contract/test_maintainability.py`
+with an accurate description of the temporary invalid legacy exception that was
+subsequently corrected by S7-C06.
+
+### Files changed (S7-C06)
+
+| File | Change |
+|---|---|
+| `tests/unit/test_world_time_mutation_tools.py` | **EDITED** — removed safety tests and integration test (moved to split files); reduced from 1377 to 998 lines |
+| `tests/unit/test_world_time_mutation_tool_safety.py` | **NEW** — safety/permission/audit/invalid-input tests (432 lines) |
+| `tests/unit/test_world_time_mutation_integration.py` | **NEW** — real repository integration test (87 lines) |
+| `tests/contract/test_maintainability.py` | **EDITED** — removed invalid `test_world_time_mutation_tools.py` legacy exception |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-05 file inventory; added this correction record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — S7-C06 DONE |
+
+### Quality-gate evidence
+
+- 48/48 world-time mutation contract tests pass.
+- 30/30 world-time mutation behaviour tests pass.
+- 10/10 world-time mutation safety tests pass.
+- 2/2 world-time mutation integration tests pass.
+- 342/342 maintainability and boundary tests pass.
+- 155/155 S7-04 read + core Tool Layer regression tests pass.
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Final maintainability state
+
+- All newly created S7-05/C06 test modules ≤ `TEST_HARD_LIMIT` (1000).
+- `TEST_HARD_LIMIT` unchanged.
+- No new legacy exception added.
+- Pre-existing legacy exceptions otherwise unchanged.
+- `"unit/test_world_time_mutation_tools.py"` absent from `TEST_LEGACY_EXCEPTIONS`.
+
+### Stage status
+
+- S7-05 remains **DONE**.
+- S7-C06 is **DONE**.
+- S7-06 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.

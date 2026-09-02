@@ -1,4 +1,4 @@
-"""Tests for world-time mutation tool handler behaviour and ToolExecutor integration.
+"""Tests for world-time mutation tool handler behaviour.
 
 Covers:
 - set_world_time initialize path (expected_revision=None)
@@ -6,10 +6,7 @@ Covers:
 - advance_world_time read/calculate/update flow
 - advance_world_time signed-minute behaviour
 - advance_world_time concurrency safety
-- ToolExecutor integration (WRITE permission, audit, session modes)
-- Invalid-input-before-handler regression
 - Calendar validation failure
-- Real repository integration
 """
 
 from __future__ import annotations
@@ -21,7 +18,6 @@ import pytest
 from dnd_assistant.domain.calendar import (
     CalendarDefinition,
     CalendarMonth,
-    DeterministicCalendarService,
     GameDate,
     IntercalaryDay,
     WorldTick,
@@ -31,11 +27,7 @@ from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
-from dnd_assistant.tools.types import (
-    ExecutionContext,
-    Permission,
-    SessionMode,
-)
+from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 from dnd_assistant.tools.world_time_mutations import (
     AdvanceWorldTimeOutput,
     SetWorldTimeOutput,
@@ -43,21 +35,14 @@ from dnd_assistant.tools.world_time_mutations import (
 )
 
 # ── Test calendar definition ──────────────────────────────────────────────
-
 _HARNER_CALENDAR = CalendarDefinition(
     calendar_id="harner",
     epoch=GameDate(year=0, month="Hammer", day=1),
-    months=(
-        CalendarMonth(name="Hammer", days=30),
-        CalendarMonth(name="Alturiak", days=30),
-    ),
+    months=(CalendarMonth(name="Hammer", days=30), CalendarMonth(name="Alturiak", days=30)),
     intercalary_days=(IntercalaryDay(name="Midwinter", after_month="Hammer"),),
     hours_per_day=24,
     minutes_per_hour=60,
 )
-
-
-# ── Call-logging fake WorldTimeRepository ─────────────────────────────────
 
 
 class _CallLog:
@@ -83,9 +68,6 @@ class FakeWorldTimeRepository:
         self.last_world_tick: object = None
         self.last_expected_revision: object = None
         self.last_audit: object = None
-
-    def set_state(self, state: CurrentWorldTime | None) -> None:
-        self._state = state
 
     def get_current_world_time(self) -> CurrentWorldTime:
         if self._call_log:
@@ -222,27 +204,6 @@ def write_context() -> ExecutionContext:
             real_time=datetime(2026, 9, 2, tzinfo=UTC),
             source="test",
         ),
-    )
-
-
-@pytest.fixture
-def active_session_write_context() -> ExecutionContext:
-    return ExecutionContext(
-        granted_permission=Permission.WRITE,
-        session_mode=SessionMode.ACTIVE_SESSION,
-        audit=AuditContext(
-            operation_id="test-op-session",
-            real_time=datetime(2026, 9, 2, tzinfo=UTC),
-            source="test",
-        ),
-    )
-
-
-@pytest.fixture
-def read_context() -> ExecutionContext:
-    return ExecutionContext(
-        granted_permission=Permission.READ,
-        session_mode=SessionMode.NO_ACTIVE_SESSION,
     )
 
 
@@ -927,260 +888,6 @@ class TestAdvanceConcurrencySafety:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# ToolExecutor integration
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestToolExecutorIntegration:
-    """Permission, audit, session-mode enforcement."""
-
-    def test_read_permission_set_rejected(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        read_context: ExecutionContext,
-    ) -> None:
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=initialized_repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        with pytest.raises(ConflictError, match="Permission denied"):
-            executor.execute(
-                "set_world_time",
-                input_data={"world_tick": 500},
-                context=read_context,
-            )
-
-    def test_read_permission_advance_rejected(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        read_context: ExecutionContext,
-    ) -> None:
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=initialized_repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        with pytest.raises(ConflictError, match="Permission denied"):
-            executor.execute(
-                "advance_world_time",
-                input_data={"minutes": 5, "expected_revision": 3},
-                context=read_context,
-            )
-
-    def test_write_without_audit_rejected(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-    ) -> None:
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=initialized_repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        ctx = ExecutionContext(
-            granted_permission=Permission.WRITE,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-        )
-        with pytest.raises(ValidationError, match="requires a non-None AuditContext"):
-            executor.execute(
-                "set_world_time",
-                input_data={"world_tick": 500},
-                context=ctx,
-            )
-
-    def test_no_active_session_allowed(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        write_context: ExecutionContext,
-    ) -> None:
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=initialized_repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        result = executor.execute(
-            "advance_world_time",
-            input_data={"minutes": 5, "expected_revision": 3},
-            context=write_context,
-        )
-        assert isinstance(result, AdvanceWorldTimeOutput)
-
-    def test_active_session_allowed(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        active_session_write_context: ExecutionContext,
-    ) -> None:
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=initialized_repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        result = executor.execute(
-            "advance_world_time",
-            input_data={"minutes": 5, "expected_revision": 3},
-            context=active_session_write_context,
-        )
-        assert isinstance(result, AdvanceWorldTimeOutput)
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Invalid-input-before-handler regression
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestInvalidInputBeforeHandler:
-    """Invalid Pydantic input must cause zero repository and calendar calls."""
-
-    def test_set_world_time_bad_tick(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        write_context: ExecutionContext,
-        call_log: _CallLog,
-    ) -> None:
-        repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
-            call_log=call_log,
-        )
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        with pytest.raises(ValidationError):
-            executor.execute(
-                "set_world_time",
-                input_data={"world_tick": "123"},
-                context=write_context,
-            )
-        assert call_log.calls == []
-
-    def test_advance_world_time_bad_minutes(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        write_context: ExecutionContext,
-        call_log: _CallLog,
-    ) -> None:
-        repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
-            call_log=call_log,
-        )
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        with pytest.raises(ValidationError):
-            executor.execute(
-                "advance_world_time",
-                input_data={"minutes": "5", "expected_revision": 3},
-                context=write_context,
-            )
-        assert call_log.calls == []
-
-    def test_advance_world_time_bad_revision(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        write_context: ExecutionContext,
-        call_log: _CallLog,
-    ) -> None:
-        repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
-            call_log=call_log,
-        )
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        with pytest.raises(ValidationError):
-            executor.execute(
-                "advance_world_time",
-                input_data={"minutes": 5, "expected_revision": 0},
-                context=write_context,
-            )
-        assert call_log.calls == []
-
-    def test_read_permission_prevents_handler(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        read_context: ExecutionContext,
-        call_log: _CallLog,
-    ) -> None:
-        repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
-            call_log=call_log,
-        )
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        with pytest.raises(ConflictError):
-            executor.execute(
-                "set_world_time",
-                input_data={"world_tick": 500},
-                context=read_context,
-            )
-        assert call_log.calls == []
-
-    def test_missing_audit_prevents_handler(
-        self,
-        registry: ToolRegistry,
-        initialized_repo: FakeWorldTimeRepository,
-        fake_calendar: FakeCalendarService,
-        call_log: _CallLog,
-    ) -> None:
-        repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
-            call_log=call_log,
-        )
-        register_world_time_mutation_tools(
-            registry,
-            world_time_repository=repo,
-            calendar_service=fake_calendar,
-        )
-        executor = ToolExecutor(registry)
-        ctx = ExecutionContext(
-            granted_permission=Permission.WRITE,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-        )
-        with pytest.raises(ValidationError):
-            executor.execute(
-                "set_world_time",
-                input_data={"world_tick": 500},
-                context=ctx,
-            )
-        assert call_log.calls == []
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # Calendar validation failure
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -1289,78 +996,3 @@ class TestCalendarValidationFailure:
                 input_data={"minutes": 5, "expected_revision": 3},
                 context=write_context,
             )
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Real repository integration
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-class TestRealRepositoryIntegration:
-    """End-to-end sequence with real ObsidianWorldTimeRepository."""
-
-    def test_initialize_advance_get_sequence(
-        self,
-        tmp_path,
-    ) -> None:
-        from pathlib import Path
-
-        from dnd_assistant.storage.audit import AuditService
-        from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
-
-        vault_root = Path(tmp_path) / "vault"
-        vault_root.mkdir()
-        audit_dir = vault_root / "_system" / "audit"
-        audit_dir.mkdir(parents=True)
-        audit_service = AuditService(audit_dir / "audit.jsonl")
-        repo = ObsidianWorldTimeRepository(vault_root, audit_service)
-        calendar = DeterministicCalendarService(_HARNER_CALENDAR)
-
-        reg = ToolRegistry()
-        register_world_time_mutation_tools(
-            reg,
-            world_time_repository=repo,
-            calendar_service=calendar,
-        )
-        executor = ToolExecutor(reg)
-
-        audit_ctx = AuditContext(
-            operation_id="s7-05-e2e-001",
-            real_time=datetime(2026, 9, 2, tzinfo=UTC),
-            source="test",
-        )
-        ctx = ExecutionContext(
-            granted_permission=Permission.WRITE,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-            audit=audit_ctx,
-        )
-
-        # 1. Initialize
-        set_result = executor.execute(
-            "set_world_time",
-            input_data={"world_tick": 1000},
-            context=ctx,
-        )
-        assert set_result.world_time.current_world_tick == 1000
-        assert set_result.world_time.revision == 1
-
-        # 2. Verify through direct repository read (avoids cross-module import
-        #    interaction in full-suite test ordering)
-        persisted = repo.get_current_world_time()
-        assert persisted.current_world_tick == 1000
-        assert persisted.revision == 1
-
-        # 3. Advance
-        advance_result = executor.execute(
-            "advance_world_time",
-            input_data={"minutes": 120, "expected_revision": 1},
-            context=ctx,
-        )
-        assert advance_result.world_time.current_world_tick == 1120
-        assert advance_result.world_time.revision == 2
-
-        # 4. Verify state survives reconstruction
-        repo2 = ObsidianWorldTimeRepository(vault_root, audit_service)
-        persisted = repo2.get_current_world_time()
-        assert persisted.current_world_tick == 1120
-        assert persisted.revision == 2
