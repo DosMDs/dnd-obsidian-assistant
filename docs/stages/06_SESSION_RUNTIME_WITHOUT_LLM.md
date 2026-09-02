@@ -52,7 +52,7 @@ existing code and ADRs:
 - [x] `S6-05` Restart/recovery + corrupt-state/failure-path integrity
 - [x] `S6-06` Thin CLI orchestration: session start/status/end + note
 - [x] `S6-07` Golden-Vault temp-copy integration + cross-platform/failure hardening
-- [ ] `S6-08` Full Stage-6 historical review / verification / status completion
+- [x] `S6-08` Full Stage-6 historical review / verification / status completion
 
 ## Definition of Done
 
@@ -2064,3 +2064,229 @@ Only non-documentation repository file changed: `tests/unit/test_cli_session.py`
 
 **Correction commit:** (reported in Final Report)
 **Commit message:** `test: finalize Golden Vault integration (S6-C07)`
+
+### S6-08 — Full Stage-6 historical review / verification / status completion
+
+**Date:** 2026-09-02
+
+**Pre-Stage-6 base SHA:** `79d2c1d153e02a578a81fade9e0fa3098f0c2b59`
+**Captured implementation review-head SHA:** `476f15348c4ecdf207d6f678a2f7d1b634322e8b`
+**Exact historical review range:** `79d2c1d..476f153`
+**Commit count:** 32
+
+#### Commit inventory / classification
+
+| # | SHA | Message | Class | Association |
+|---|---|---|---|---|
+| 1 | d68c5dd | feat: define session storage path contracts (S6-00) | A | S6-00 |
+| 2 | 3bab266 | docs: add S6-00 completion SHA to stage document | C | S6-00 docs |
+| 3 | fcb6492 | fix: harden session storage path contracts (S6-C00) | A | S6-C00 |
+| 4 | 92131b7 | feat: add canonical world time persistence (S6-01) | A | S6-01 |
+| 5 | 7bd23d5 | docs: add S6-01 implementation SHA to stage document | C | S6-01 docs |
+| 6 | 7a3091c | fix: harden world time persistence integrity (S6-C01) | A | S6-C01 |
+| 7 | e96e49b | feat: add session start and metadata runtime (S6-02) | A | S6-02 |
+| 8 | b5c7cb8 | fix: harden session metadata persistence (S6-C02) | A | S6-C02 |
+| 9 | 88c60ea | test: isolate session event fsync failures (S6-C02F) | A | S6-C02F |
+| 10 | 3145165 | feat: add append-only session event logging (S6-03) | A | S6-03 |
+| 11 | 623fb9c | docs: add S6-03 implementation SHA to stage document | C | S6-03 docs |
+| 12 | b1fda9d | fix: harden session event persistence (S6-C03) | A | S6-C03 |
+| 13 | 6f8529a | docs: add S6-C03 correction SHA to stage document | C | S6-C03 docs |
+| 14 | 5467d91 | test: finalize session event hardening (S6-C03F) | A | S6-C03F |
+| 15 | 46a9909 | feat: add session close lifecycle (S6-04) | A | S6-04 |
+| 16 | 65a491e | fix: harden session close integrity (S6-C04) | A | S6-C04 |
+| 17 | 16e049c | test: finalize session close hardening (S6-C04F) | A | S6-C04F |
+| 18 | dffe1f6 | feat: add session runtime recovery (S6-05) | A | S6-05 |
+| 19 | 1433c8f | fix: harden session recovery integrity (S6-C05) | A | S6-C05 |
+| 20 | ad9492b | fix: require clean audit before session recovery (S6-C05F) | A | S6-C05F |
+| 21 | c1c7855 | docs: add S6-C05F correction SHA to stage document | C | S6-C05F docs |
+| 22 | df6e266 | chore: establish repository maintainability policy (MNT-01) | B | MNT-01 |
+| 23 | fd91034 | fix: harden maintainability ratchet (MNT-C01) | B | MNT-C01 |
+| 24 | 599fbcd | refactor: decompose session recovery modules (MNT-02) | B | MNT-02 |
+| 25 | 1ed9b2d | fix: complete session recovery decomposition (MNT-C02) | B | MNT-C02 |
+| 26 | 6fb392c | test: complete recovery regression migration (MNT-C02F) | B | MNT-C02F |
+| 27 | 6723b16 | test: lock recovery race contracts (MNT-C02FF) | B | MNT-C02FF |
+| 28 | cfb4fed | feat: add session runtime CLI (S6-06) | A | S6-06 |
+| 29 | f0a04c6 | test: complete session CLI regressions (S6-C06) | A | S6-C06 |
+| 30 | 421ee7d | test: integrate session runtime with Golden Vault (S6-07) | A | S6-07 |
+| 31 | 5f6c790 | test: finalize Golden Vault integration (S6-C07) | A | S6-C07 |
+| 32 | 476f153 | docs: fix Golden integration current line count (S6-C07F) | C | S6-C07F docs |
+
+**Classification counts:**
+- A (Stage-6 implementation/correction): 24
+- B (concurrent maintainability work): 6
+- C (documentation/process follow-up): 2
+
+**Stage-6 implementation/correction commits:** 24
+**Concurrent MNT commits:** 6 (MNT-01, MNT-C01, MNT-02, MNT-C02, MNT-C02F, MNT-C02FF)
+**Documentation/process commits:** 2
+**Auxiliary commits:** 0
+
+#### Production files/components reviewed
+
+- `src/dnd_assistant/domain/world_time.py` — CurrentWorldTime domain schema
+- `src/dnd_assistant/storage/session_paths.py` — SessionStoragePaths resolver
+- `src/dnd_assistant/storage/world_time.py` — ObsidianWorldTimeRepository
+- `src/dnd_assistant/storage/session_metadata.py` — ObsidianSessionMetadataRepository
+- `src/dnd_assistant/storage/session_events.py` — ObsidianSessionEventRepository
+- `src/dnd_assistant/storage/types.py` — Repository protocols
+- `src/dnd_assistant/storage/__init__.py` — Public exports
+- `src/dnd_assistant/storage/session_recovery/` — 8 modules (types, support, audit_tail, partial_start, event_tail, inspection, repository, __init__)
+- `src/dnd_assistant/application/session_runtime.py` — SessionRuntimeService
+- `src/dnd_assistant/application/session_recovery.py` — SessionRecoveryService
+- `src/dnd_assistant/application/__init__.py` — Public exports
+- `src/dnd_assistant/cli/main.py` — Typer app registration
+- `src/dnd_assistant/cli/session.py` — Session CLI commands
+
+#### Test/contract files reviewed
+
+- `tests/unit/test_session_storage_paths.py`, `tests/unit/test_world_time.py`, `tests/unit/test_world_time_repository.py`
+- `tests/unit/test_session_metadata.py`, `tests/unit/test_session_events.py`
+- `tests/unit/test_session_events_c03.py`, `tests/unit/test_session_events_c03f.py`
+- `tests/unit/test_session_runtime.py`, `tests/unit/test_session_close.py`
+- `tests/unit/test_session_close_failures.py`, `tests/unit/test_session_event_lifecycle.py`
+- `tests/unit/session_recovery/` — 6 modules + conftest
+- `tests/unit/test_cli_session.py`, `tests/unit/test_cli_entrypoint.py`
+- `tests/contract/test_boundaries.py`, `tests/contract/test_maintainability.py`
+- `tests/contract/test_session_recovery_facade.py`
+- `tests/integration/test_session_restart.py`, `tests/integration/test_session_golden_vault.py`
+- `tests/integration/test_retrieval_golden_vault.py`
+
+#### ADR/process documents reviewed
+
+- `docs/adr/0004-current-world-time-persistence.md`
+- `docs/adr/0005-module-and-test-decomposition-policy.md`
+- `docs/engineering/MAINTAINABILITY_BASELINE.md`
+- `.gigacode/rules/15-module-decomposition.md`
+- `.gigacode/rules/35-test-decomposition.md`
+
+#### Correction-verification matrix
+
+All 19 accepted Stage-6 corrections (C00 through C07, including C02F, C03F, C04F, C05F, C06, C07F) verified independently against final REVIEW_HEAD source and tests. No unfixed defect remains.
+
+Key verified corrections: SessionStoragePaths immutability (C00), world-time path reauthorization (C01), metadata root validation and fsync (C02), event validation before append and portability (C03), close typing/TOCTOU/revalidation (C04), recovery read-only/byte-splitting/UTF-8 safety (C05), clean audit prerequisite (C05F), CLI regression coverage (C06), Golden fixture trailing LF and Unicode path (C07).
+
+#### Architecture boundary verdict
+
+- **Domain → storage/application/cli/models/tools:** No reverse imports. **PASS**
+- **Storage → application/cli/models/tools:** No reverse imports. **PASS**
+- **Application → cli/models/tools/Ollama:** No imports. **PASS**
+- **CLI → models/tools/Ollama/Fast Agent/ChangeSet:** No imports. **PASS**
+- Boundary contract tests: 50 passed, 0 failed. **PASS**
+
+#### Storage/data-integrity verdict
+
+- Session path safety: traversal, separator, Windows reserved names, trailing dot/space, symlink containment, dangling symlink detection. **PASS**
+- World-time: typed schema, atomic writes, audit, optimistic revision concurrency. **PASS**
+- Session metadata: ID allocation, active-session lifecycle, exclusive-create events.jsonl. **PASS**
+- Event append-only: O_APPEND, O_BINARY portability, fsync, strict validation, duplicate rejection, closed-session rejection. **PASS**
+- Close: status=completed, touched IDs, processing_status=pending, revision+1, world_tick_end, TOCTOU guards. **PASS**
+- Audit: intent/committed phases, operation_id, real_time, before/after hash, source. **PASS**
+
+#### Recovery verdict
+
+- Read-only inspection: no filesystem mutation. **PASS**
+- Audit-tail repair: self-targeting, no intent phase, recovery marker. **PASS**
+- Partial-start cleanup: two-phase audit, ownership verification, exact-known-empty artifacts. **PASS**
+- Event-tail repair: two-phase audit, clean-audit prerequisite, exact-byte restoration, CRLF preservation. **PASS**
+- No auto-repair in normal runtime/CLI. **PASS**
+- Recovery decomposition (MNT-02): all 8 modules under 700 lines, stable facade. **PASS**
+
+#### CLI verdict
+
+- Commands: `dnd session start/status/end`, `dnd note`. **PASS**
+- CLI delegates to SessionRuntimeService for all lifecycle. **PASS**
+- No world-tick calculation, ID allocation, metadata/event writes, entity resolution, model/tool usage. **PASS**
+- Recovery preflight is read-only, called before every mutating operation. **PASS**
+- Error messages in Russian. **PASS**
+
+#### Golden Vault verdict
+
+- 5 completed historical sessions (S001-S005), 20 canonical raw events (evt_001-evt_004 per session). **PASS**
+- All historical events strictly parse. **PASS**
+- Empty audit seed. **PASS**
+- world_time.json: current_world_tick=13800, revision=1, exactly one final LF. **PASS**
+- conversation.jsonl remains undefined/empty. **PASS**
+- Next session ID = S006. **PASS**
+- Pristine recovery inspection clean. **PASS**
+- Writable tests on tmp_path copies only. **PASS**
+- Unicode/spaces path: "Golden Vault Копия". **PASS**
+- Stage-5 Golden retrieval regression: 58 passed, 0 failed. **PASS**
+
+#### Maintainability verdict
+
+- Production legacy exceptions: 6 files (vault_repository 1379, calendar 1295, session_metadata 1138, session_events 1096, world_time 834, types 741). **PASS**
+- Test legacy exceptions: 6 files (test_retrieval_contracts 1477, test_storage_append_fact 1229, test_fts_index 1171, test_session_metadata 1112, test_storage_patch_repository 1103, test_storage_vault_repository 1102). **PASS**
+- Legacy correction-test allowlist: 2 files (test_session_events_c03.py, test_session_events_c03f.py). **PASS**
+- No Stage-6 recovery production module exceeds 700 lines. **PASS**
+- Maintainability contract test: 218 passed, 0 failed. **PASS**
+
+#### Quality-gate results
+
+- Boundary order A: 148 passed, 1 skipped
+- Boundary order B: 148 passed, 1 skipped
+- Paths/world time focused: 145 passed, 15 skipped
+- Metadata/runtime/events/close focused: 295 passed, 22 skipped
+- Recovery focused: 143 passed, 1 skipped
+- CLI focused: 56 passed
+- Golden integration: 35 passed, 1 skipped
+- Golden retrieval regression: 58 passed
+- Maintainability: 218 passed
+- Boundary standalone: 50 passed
+- **Full pytest: 2852 passed, 95 skipped — 0 failed, 0 errors**
+- `uv run ruff check .` — All checks passed
+- `uv run ruff format --check .` — 233 files already formatted
+- `uv run dnd --help`, `dnd index --help`, `dnd index rebuild --help`, `dnd session --help`, `dnd session start --help`, `dnd session status --help`, `dnd note --help`, `dnd session end --help` — All OK
+- `git diff --check` (historical range) — No whitespace errors
+- `git diff --check` (working tree) — No whitespace errors
+
+#### Historical process deviations
+
+1. **Two-commit publication pattern:** S6-00, S6-01, S6-03 each had a separate docs-only commit after the implementation commit. This is recorded in the stage document and does not affect product correctness. Current workflow rules (07-git-workflow.md) now require single-task commits.
+2. **Self-SHA documentation commits:** Commits 2, 5, 11, 13, 21 added implementation SHAs to the stage document after the fact. Current workflow rules prohibit this pattern.
+3. **Correction follow-up commits:** C02F, C03F, C04F, C05F, C06, C07, C07F are legitimate correction passes. All are now resolved.
+4. **MNT work inside Stage-6 range:** MNT-01/MNT-02 occurred as a deliberate maintenance gate before S6-06. This is explicitly documented and does not represent Stage-6 feature scope.
+
+#### Explicit Stage-7 deferral
+
+Stage 7 (Tool Registry / Executor) remains **NOT STARTED**. No Stage-7 production APIs were added or modified. No conversation schema, ChangeSet, post-session processing, ModelGateway, Fast Agent, or Ollama code exists in Stage-6 production.
+
+#### Final Stage-6 architecture verdict
+
+Stage 6 provides: safe session paths, canonical persisted current world time, raw session metadata, session ID allocation, single-active-session lifecycle, append-only raw events, deterministic world-tick capture, session close semantics, restart/recovery, explicit recovery operations, thin CLI, Golden-Vault integration, cross-platform/failure hardening.
+
+Stage 6 remains: **LLM-free, Tool-layer-free, without conversation schema, without ChangeSet, without post-session processing.**
+
+#### Files changed by S6-08
+
+- `DEVELOPMENT_STATUS.md` — Stage 6 completion state
+- `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` — S6-08 review section appended
+
+**Zero `src/` changes. Zero test changes. Zero fixture changes. Zero dependency changes.**
+
+#### S6-00 through S6-08 final states
+
+| Task | Status |
+|---|---|
+| S6-00 — Session storage path contracts | DONE |
+| S6-01 — World time persistence boundary | DONE |
+| S6-02 — Session metadata + ID allocation + start/status | DONE |
+| S6-03 — Append-only event JSONL logging | DONE |
+| S6-04 — Session close + touched IDs + processing pending | DONE |
+| S6-05 — Restart/recovery + failure-path integrity | DONE |
+| S6-06 — Thin CLI orchestration | DONE |
+| S6-07 — Golden-Vault integration | DONE |
+| S6-08 — Historical review / verification / status completion | DONE |
+
+#### MNT-01/MNT-02 final states
+
+| Task | Status |
+|---|---|
+| MNT-01 — Maintainability rules + baseline + ratchet | DONE |
+| MNT-02 — Behavior-preserving Stage-6 hotspot decomposition | DONE |
+
+#### Stage 6 completion
+
+**Stage 6 — Session Runtime without LLM: DONE**
+**Started:** 2026-08-31
+**Completed:** 2026-09-02
+**Stage 7 — Tool Registry / Executor: NOT STARTED**

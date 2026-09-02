@@ -1,11 +1,12 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-01
+**Last updated:** 2026-09-02
 **Current milestone:** `v0.1-dev — Vault Core`
-**Roadmap position:** Stage 6 in progress
-**Active stage:** Stage 6 — Session Runtime without LLM
-**Stage 6 status:** `IN PROGRESS`
+**Roadmap position:** Stage 6 completed
+**Active stage:** None
+**Stage 6 status:** `DONE`
 **Started:** 2026-08-31
+**Completed:** 2026-09-02
 
 ## Status model
 
@@ -36,7 +37,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | 3. Vault Repository | DONE | 2026-08-30 | 2026-08-30 | [`docs/stages/03_VAULT_REPOSITORY.md`](docs/stages/03_VAULT_REPOSITORY.md) |
 | 4. Calendar | DONE | 2026-08-30 | 2026-08-31 | [`docs/stages/04_CALENDAR.md`](docs/stages/04_CALENDAR.md) |
 | 5. Retrieval + Entity Resolution | DONE | 2026-08-31 | 2026-08-31 | [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md) |
-| 6. Session Runtime without LLM | IN PROGRESS | 2026-08-31 | — | [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md) |
+| 6. Session Runtime without LLM | DONE | 2026-08-31 | 2026-09-02 | [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md) |
 | 7. Tool Registry / Executor | NOT STARTED | — | — | — |
 | 8. Model Gateway / Ollama | NOT STARTED | — | — | — |
 | 9. Fast Agent | NOT STARTED | — | — | — |
@@ -48,21 +49,27 @@ Detailed task/correction/review records belong in `docs/stages/`.
 
 ## Current roadmap state
 
-Stage 5 is complete.
+Stage 6 is complete.
 
-Captured Stage-5 implementation review-head:
-
-```
-a1247eb7dfa496ed6cab39ff9f08e9b8ddbe7ae4
-```
-
-Stage-5 completion/status SHA:
+Pre-Stage-6 base:
 
 ```
-c73913845de19255cf588723ac0d57ad0d916cc9
+79d2c1d153e02a578a81fade9e0fa3098f0c2b59
 ```
 
-Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md)
+Captured Stage-6 implementation review-head:
+
+```
+476f15348c4ecdf207d6f678a2f7d1b634322e8b
+```
+
+Exact historical review range:
+
+```
+79d2c1d..476f153
+```
+
+Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md)
 
 ## Current stage tasks
 
@@ -76,9 +83,15 @@ Detailed history: [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/sta
 | S6-05 — Restart/recovery + corrupt-state/failure-path integrity | DONE |
 | S6-06 — Thin CLI orchestration: session start/status/end + note | DONE |
 | S6-07 — Golden-Vault temp-copy integration + cross-platform/failure hardening | DONE |
-| S6-08 — Full Stage-6 historical review / verification / status completion | NOT STARTED |
+| S6-08 — Full Stage-6 historical review / verification / status completion | DONE |
 
 Details: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md)
+
+## Next stage
+
+| Stage | Status |
+|---|---|
+| Stage 7 — Tool Registry / Executor | NOT STARTED |
 
 ## Maintenance gate before S6-06
 
