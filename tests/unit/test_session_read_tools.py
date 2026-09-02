@@ -711,6 +711,37 @@ class TestToolExecutorIntegration:
                 context=read_context,
             )
 
+    def test_faulty_handler_non_session_output_rejected(
+        self,
+        registry: ToolRegistry,
+        read_context: ExecutionContext,
+    ) -> None:
+        """A handler returning a non-Session value must fail output validation."""
+
+        def faulty_handler(input_model: object, context: object) -> object:
+            return GetActiveSessionOutput(session="not-a-session")  # type: ignore[arg-type]
+
+        defn = ToolDefinition(
+            name="faulty_tool",
+            description="A faulty test tool",
+            input_schema=GetActiveSessionInput,
+            output_schema=GetActiveSessionOutput,
+            permission=Permission.READ,
+            side_effects=frozenset(),
+            allowed_session_modes=frozenset(
+                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+            ),
+        )
+        registry.register(defn, faulty_handler)
+        exe = ToolExecutor(registry)
+
+        with pytest.raises(ValidationError):
+            exe.execute(
+                "faulty_tool",
+                input_data={},
+                context=read_context,
+            )
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # No mutation guarantee

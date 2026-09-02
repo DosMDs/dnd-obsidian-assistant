@@ -215,6 +215,12 @@ def test_tools_package_does_not_import_retrieval() -> None:
     assert not mod_names, f"tools package imported retrieval modules: {mod_names}"
 
 
+def test_tools_package_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.tools")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"tools package imported application modules: {mod_names}"
+
+
 # ── dnd_assistant.tools.entity_reads must not import models or CLI ──────
 
 

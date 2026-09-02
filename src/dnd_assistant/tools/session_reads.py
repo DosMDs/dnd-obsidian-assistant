@@ -20,8 +20,10 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, JsonValue, field_validator
 from pydantic import ValidationError as PydanticValidationError
+from pydantic.types import AwareDatetime
 
 from dnd_assistant.domain.calendar import WorldTick
+from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import StorageError, ValidationError
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
@@ -87,7 +89,7 @@ class GetActiveSessionOutput(BaseModel):
     ``session`` is ``None`` when no active session exists.
     """
 
-    session: object | None = None
+    session: Session | None = None
 
     model_config = {"extra": "forbid"}
 
@@ -130,7 +132,7 @@ class GetSessionOutput(BaseModel):
     ``RawSessionMetadata.extra_fields`` is intentionally excluded.
     """
 
-    session: object
+    session: Session
 
     model_config = {"extra": "forbid"}
 
@@ -166,7 +168,7 @@ class ListSessionsOutput(BaseModel):
     ``RawSessionMetadata.extra_fields`` is intentionally excluded.
     """
 
-    sessions: list[object]
+    sessions: list[Session]
 
     model_config = {"extra": "forbid"}
 
@@ -212,7 +214,7 @@ class SessionEventResult(BaseModel):
     """
 
     event_id: str
-    real_time: object
+    real_time: AwareDatetime
     world_tick: WorldTick
     type: str
     extra_fields: dict[str, JsonValue]

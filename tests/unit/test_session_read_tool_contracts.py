@@ -249,6 +249,18 @@ class TestGetActiveSessionOutputValidation:
         with pytest.raises(ValidationError):
             GetActiveSessionOutput(session=None, unknown="x")  # type: ignore[call-arg]
 
+    def test_string_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GetActiveSessionOutput(session="not-a-session")  # type: ignore[arg-type]
+
+    def test_incomplete_dict_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GetActiveSessionOutput(session={"id": "incomplete"})  # type: ignore[arg-type]
+
+    def test_integer_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GetActiveSessionOutput(session=123)  # type: ignore[arg-type]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # GetSessionInput validation
@@ -310,6 +322,18 @@ class TestGetSessionOutputValidation:
         with pytest.raises(ValidationError):
             GetSessionOutput(session=session, unknown="x")  # type: ignore[call-arg]
 
+    def test_string_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GetSessionOutput(session="not-a-session")  # type: ignore[arg-type]
+
+    def test_integer_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GetSessionOutput(session=123)  # type: ignore[arg-type]
+
+    def test_incomplete_dict_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            GetSessionOutput(session={"id": "incomplete"})  # type: ignore[arg-type]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # ListSessionsInput validation
@@ -345,6 +369,14 @@ class TestListSessionsOutputValidation:
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
             ListSessionsOutput(sessions=[], unknown="x")  # type: ignore[call-arg]
+
+    def test_list_with_string_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ListSessionsOutput(sessions=["not-a-session"])  # type: ignore[list-item]
+
+    def test_list_with_incomplete_dict_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ListSessionsOutput(sessions=[{"id": "incomplete"}])  # type: ignore[list-item]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -441,6 +473,53 @@ class TestSessionEventResultValidation:
                 extra_fields={},
                 unknown="x",
             )
+
+    def test_naive_datetime_rejected(self) -> None:
+        naive = datetime(2026, 9, 2, 12, 0, 0)
+        with pytest.raises(ValidationError):
+            SessionEventResult(
+                event_id="evt_001",
+                real_time=naive,  # type: ignore[arg-type]
+                world_tick=WorldTick(1000),
+                type="note",
+                extra_fields={},
+            )
+
+    def test_string_real_time_coerces_to_aware(self) -> None:
+        """AwareDatetime coerces valid ISO strings to timezone-aware datetime."""
+        result = SessionEventResult(
+            event_id="evt_001",
+            real_time="2026-09-02T12:00:00Z",  # type: ignore[arg-type]
+            world_tick=WorldTick(1000),
+            type="note",
+            extra_fields={},
+        )
+        assert isinstance(result.real_time, datetime)
+        assert result.real_time.tzinfo is not None
+
+    def test_integer_real_time_coerces_to_aware(self) -> None:
+        """AwareDatetime coerces Unix timestamps to timezone-aware datetime."""
+        result = SessionEventResult(
+            event_id="evt_001",
+            real_time=1234567890,  # type: ignore[arg-type]
+            world_tick=WorldTick(1000),
+            type="note",
+            extra_fields={},
+        )
+        assert isinstance(result.real_time, datetime)
+        assert result.real_time.tzinfo is not None
+
+    def test_aware_datetime_accepted(self) -> None:
+        aware = datetime(2026, 9, 2, 12, 0, 0, tzinfo=UTC)
+        result = SessionEventResult(
+            event_id="evt_001",
+            real_time=aware,
+            world_tick=WorldTick(1000),
+            type="note",
+            extra_fields={},
+        )
+        assert result.real_time == aware
+        assert result.real_time.tzinfo is not None
 
 
 # ═══════════════════════════════════════════════════════════════════════════

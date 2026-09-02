@@ -30,6 +30,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-C03 | DONE | Harden entity read-tool safety |
 | S7-C04 | DONE | Finalize S7-01/C03 documentation and boundary contracts |
 | S7-02 | DONE | Session read tools |
+| S7-C05 | DONE | Strengthen session read public DTO contracts |
 | S7-03 | NOT STARTED | Session mutation tools |
 | S7-04 | NOT STARTED | World-time read + deterministic calendar read surface |
 | S7-05 | NOT STARTED | World-time mutation tools |
@@ -638,14 +639,14 @@ One cohesive module. No directory hierarchy for four small tools.
 | DTO | Fields | Notes |
 |---|---|---|
 | `GetActiveSessionInput` | (empty) | `extra="forbid"` |
-| `GetActiveSessionOutput` | `session: object \| None` | `None` = no active session |
+| `GetActiveSessionOutput` | `session: Session \| None` | `None` = no active session |
 | `GetSessionInput` | `session_id: str` | strict string validation |
-| `GetSessionOutput` | `session: object` | canonical Session only |
+| `GetSessionOutput` | `session: Session` | canonical Session only |
 | `ListSessionsInput` | (empty) | `extra="forbid"` |
-| `ListSessionsOutput` | `sessions: list[object]` | repository order preserved |
+| `ListSessionsOutput` | `sessions: list[Session]` | repository order preserved |
 | `ListSessionEventsInput` | `session_id: str` | strict string validation |
 | `ListSessionEventsOutput` | `events: list[SessionEventResult]` | physical append order |
-| `SessionEventResult` | `event_id, real_time, world_tick, type, extra_fields` | provider-neutral DTO |
+| `SessionEventResult` | `event_id, real_time: AwareDatetime, world_tick, type, extra_fields` | provider-neutral DTO |
 
 ### Session metadata extra_fields deferral
 
@@ -741,3 +742,89 @@ audit context required.  Tests prove that mutation operations
 - S7-02 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
 - S7-03 remains **NOT STARTED**.
+
+---
+
+## S7-C05 — Correction record
+
+### Defects found
+
+1. **C05-1**: `GetActiveSessionOutput.session` typed as `object | None` instead of `Session | None`.
+2. **C05-2**: `GetSessionOutput.session` typed as `object` instead of `Session`.
+3. **C05-3**: `ListSessionsOutput.sessions` typed as `list[object]` instead of `list[Session]`.
+4. **C05-4**: `SessionEventResult.real_time` typed as `object` instead of `AwareDatetime`.
+5. **C05-5**: No output-validation regression tests proving arbitrary non-Session values are rejected.
+6. **C05-6**: No ToolExecutor regression proving malformed handler output is caught by schema validation.
+7. **C05-7**: Missing root `dnd_assistant.tools` / `application` lightweight-import boundary test.
+
+### Root cause
+
+S7-02 was implemented with weak `object`-typed public DTO fields instead of
+reusing the canonical `Session` domain model and `AwareDatetime`. The original
+implementation deferred typed contracts in favour of opaque field types.
+
+### Corrected contracts
+
+| DTO | Before (S7-02) | After (S7-C05) |
+|---|---|---|
+| `GetActiveSessionOutput.session` | `object \| None` | `Session \| None` |
+| `GetSessionOutput.session` | `object` | `Session` |
+| `ListSessionsOutput.sessions` | `list[object]` | `list[Session]` |
+| `SessionEventResult.real_time` | `object` | `AwareDatetime` |
+
+The canonical `Session` domain model is imported at runtime (not
+`TYPE_CHECKING`) so Pydantic can generate meaningful provider-neutral JSON
+schemas. `AwareDatetime` enforces timezone-aware datetime validation; naive
+datetimes are rejected. Pydantic's standard coercion of ISO strings and Unix
+timestamps to aware datetimes is preserved.
+
+### Regression tests added
+
+- `TestGetActiveSessionOutputValidation.test_string_rejected`
+- `TestGetActiveSessionOutputValidation.test_incomplete_dict_rejected`
+- `TestGetActiveSessionOutputValidation.test_integer_rejected`
+- `TestGetSessionOutputValidation.test_string_rejected`
+- `TestGetSessionOutputValidation.test_integer_rejected`
+- `TestGetSessionOutputValidation.test_incomplete_dict_rejected`
+- `TestListSessionsOutputValidation.test_list_with_string_rejected`
+- `TestListSessionsOutputValidation.test_list_with_incomplete_dict_rejected`
+- `TestSessionEventResultValidation.test_naive_datetime_rejected`
+- `TestSessionEventResultValidation.test_string_real_time_coerces_to_aware`
+- `TestSessionEventResultValidation.test_integer_real_time_coerces_to_aware`
+- `TestSessionEventResultValidation.test_aware_datetime_accepted`
+- `TestToolExecutorIntegration.test_faulty_handler_non_session_output_rejected`
+- `test_tools_package_does_not_import_application` (boundary)
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/session_reads.py` | **EDITED** — replaced `object` field types with `Session` / `AwareDatetime`; added runtime imports |
+| `tests/unit/test_session_read_tool_contracts.py` | **EDITED** — added 12 output-validation regression tests |
+| `tests/unit/test_session_read_tools.py` | **EDITED** — added ToolExecutor faulty-output regression test |
+| `tests/contract/test_boundaries.py` | **EDITED** — added `test_tools_package_does_not_import_application` |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-02 DTO table; added this correction record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — added S7-C05 DONE |
+
+### Quality-gate evidence
+
+- 64/64 session-read contract tests pass (was 52).
+- 33/33 session-read behaviour tests pass (was 32).
+- 69/69 boundary tests pass (was 68).
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — no formatting issues.
+- `git diff --check` — no whitespace errors.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: `fix: strengthen session read schemas (S7-C05)`
+
+### Stage status
+
+- S7-02 remains **DONE**.
+- S7-C05 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-03 remains **NOT STARTED**.
+- Stage 8 remains **NOT STARTED**.
