@@ -31,8 +31,8 @@ provider-schema-free, and ChangeSet-free.
 | S7-C04 | DONE | Finalize S7-01/C03 documentation and boundary contracts |
 | S7-02 | DONE | Session read tools |
 | S7-C05 | DONE | Strengthen session read public DTO contracts |
-| S7-03 | NOT STARTED | Session mutation tools |
-| S7-04 | NOT STARTED | World-time read + deterministic calendar read surface |
+| S7-03 | DONE | Session mutation tools |
+| S7-04 | DONE | World-time read + deterministic calendar read surface |
 | S7-05 | NOT STARTED | World-time mutation tools |
 | S7-06 | NOT STARTED | Safe entity mutation tools |
 | S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
@@ -1019,5 +1019,152 @@ Those belong behind `SessionRuntimeService`.
 
 - S7-03 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
-- S7-04 remains **NOT STARTED**.
+- S7-04 is **DONE**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-04 — World-time read and deterministic calendar read tools
+
+### Scope
+
+Implement four provider-neutral world-time read tools that expose the
+accepted persisted current-world-time read contract and deterministic
+CalendarService read surface through the ToolRegistry/ToolExecutor
+contracts.
+
+### Module shape
+
+```
+src/dnd_assistant/tools/world_time_reads.py    — NEW: all four world-time read tools
+```
+
+### Exact tool surface
+
+Registered exactly:
+
+```
+get_world_time
+world_tick_to_date
+game_date_to_world_tick
+time_between_world_ticks
+```
+
+### WorldTimeRepository vs CalendarService ownership boundary
+
+- Persisted current time belongs only to `WorldTimeRepository`.
+- Calendar/date arithmetic belongs only to `CalendarService`.
+- `GameDate` is always derived from canonical `WorldTick`.
+
+### CurrentWorldTime as sole persisted current-time state
+
+`get_world_time` reads `WorldTimeRepository.get_current_world_time()` and
+derives `GameDate` through `CalendarService.tick_to_date()`.  No fallback
+to tick zero.  `NotFoundError` from uninitialized world time propagates
+unchanged.
+
+### Derived GameDate semantics
+
+`GameDate` is derived at read time and returned in the output.  It is not
+persisted by these tools.  No second date authority exists.
+
+### calendar_id exposure decision
+
+Every conversion output includes `calendar_service.definition.calendar_id`
+so a future model/agent can distinguish which configured calendar produced
+a date conversion without receiving the entire `CalendarDefinition`.
+
+### Input/output DTOs
+
+| DTO | Fields | Notes |
+|---|---|---|
+| `GetWorldTimeInput` | (empty) | `extra="forbid"` |
+| `GetWorldTimeOutput` | `world_time: CurrentWorldTime`, `game_date: GameDate`, `calendar_id: str` | Canonical persisted state + derived date + calendar identity |
+| `WorldTickToDateInput` | `world_tick: WorldTick` | Strict WorldTick validation |
+| `WorldTickToDateOutput` | `game_date: GameDate`, `calendar_id: str` | Pure conversion |
+| `GameDateToWorldTickInput` | `game_date: GameDate` | Canonical GameDate |
+| `GameDateToWorldTickOutput` | `world_tick: WorldTick`, `calendar_id: str` | Pure reverse conversion |
+| `TimeBetweenWorldTicksInput` | `start_tick: WorldTick`, `end_tick: WorldTick` | Two strict WorldTick values |
+| `TimeBetweenWorldTicksOutput` | `minutes: int` (strict) | Signed minute difference |
+
+### Definition-dependent date validation conversion
+
+`game_date_to_world_tick` translates `CalendarService.date_to_tick()`
+`ValueError` (definition-dependent invalid dates) to project
+`ValidationError`.  Unexpected non-`ValueError` exceptions propagate
+unchanged.
+
+### Read-only metadata
+
+All four tools:
+
+```python
+permission = Permission.READ
+side_effects = frozenset()
+allowed_session_modes = frozenset({SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION})
+```
+
+No `AuditContext` required.
+
+### Registration/composition design
+
+```python
+def register_world_time_read_tools(
+    registry: ToolRegistry,
+    *,
+    world_time_repository: WorldTimeRepository,
+    calendar_service: CalendarService,
+) -> None:
+```
+
+Uses `isinstance(registry, ToolRegistry)` validation consistent with
+existing tool registration APIs.  Dependencies are supplied by trusted
+composition code.
+
+### Pure calendar tools performing zero repository access
+
+`world_tick_to_date`, `game_date_to_world_tick`, and
+`time_between_world_ticks` operate only on supplied values through
+`CalendarService`.  Tests prove `WorldTimeRepository` methods are never
+called.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/world_time_reads.py` | **NEW** — get_world_time, world_tick_to_date, game_date_to_world_tick, time_between_world_ticks |
+| `tests/unit/test_world_time_read_tool_contracts.py` | **NEW** — 53 DTO/registration/contract tests |
+| `tests/unit/test_world_time_read_tools.py` | **NEW** — 28 handler/executor/round-trip tests |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added 5 world_time_reads negative import tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added this record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-04 DONE |
+
+### Tests and quality gates
+
+- 53/53 world-time read contract tests pass.
+- 28/28 world-time read behaviour tests pass.
+- 78/78 boundary tests pass (was 73, +5 new world_time_reads tests).
+- Full `uv run pytest`: 3357 passed, 95 skipped, 0 failed, 0 errors.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Explicit non-goals
+
+- World-time mutation tools (S7-05).
+- Entity mutation tools (S7-06).
+- Cross-family integration (S7-07).
+- Timeline-event scheduling tools.
+- Provider schema adaptation.
+- ModelGateway/Ollama integration.
+- Fast Agent.
+- ChangeSet.
+- Post-session processing.
+- Global registry bootstrap.
+
+### Completion state
+
+- S7-04 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-05 remains **NOT STARTED**.
 - Stage 8 remains **NOT STARTED**.
