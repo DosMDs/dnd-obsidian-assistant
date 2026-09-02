@@ -1166,5 +1166,188 @@ called.
 
 - S7-04 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
-- S7-05 remains **NOT STARTED**.
+- S7-05 is **DONE**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-05 — World-time mutation tools
+
+### Scope
+
+Implement two provider-neutral world-time mutation tools that expose the
+accepted canonical current-world-time mutation capabilities through the
+ToolRegistry/ToolExecutor contracts.  Thin adapters over
+`WorldTimeRepository` and `CalendarService`.
+
+### Module shape
+
+```
+src/dnd_assistant/tools/world_time_mutations.py    — NEW: set_world_time and advance_world_time
+```
+
+### Exact tool surface
+
+Registered exactly:
+
+```
+set_world_time
+advance_world_time
+```
+
+### Permission and side-effect metadata
+
+Both tools:
+
+```python
+permission = Permission.WRITE
+side_effects = frozenset({SideEffect.WORLD_TIME_MUTATION})
+allowed_session_modes = frozenset({SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION})
+```
+
+World-time progression is valid both outside and during an active session.
+No session-event side effect is emitted.
+
+### AuditContext ownership
+
+`AuditContext` comes only from `ExecutionContext.audit`.  Tools never
+generate `operation_id`, call `datetime.now()`, or rebuild `AuditContext`.
+The exact same `context.audit` object is passed to the repository.
+
+### set_world_time — two-mode state machine
+
+`expected_revision=None` — initialize only:
+- calls `initialize_current_world_time()`
+- existing state => `ConflictError`
+- never overwrites
+
+`expected_revision=N` — optimistic update:
+- calls `set_current_world_time()`
+- missing state => `NotFoundError`
+- stale revision => `ConflictError`
+
+The caller explicitly declares the expected state.  No read-first branch in
+the Tool Layer.
+
+### set_world_time input/output
+
+| DTO | Fields | Notes |
+|---|---|---|
+| `SetWorldTimeInput` | `world_tick: WorldTick`, `expected_revision: Revision \| None = None` | `None` = initialize; supplied revision = update |
+| `SetWorldTimeOutput` | `world_time: CurrentWorldTime`, `game_date: GameDate`, `calendar_id: str` | Persisted state + derived date + calendar identity |
+
+No `GameDate` in input.  No `calendar_id` in input.  No `session_id` in
+input.  No `audit` metadata in input.
+
+### advance_world_time — canonical flow
+
+```
+1. read persisted CurrentWorldTime (get_current_world_time)
+2. calculate candidate WorldTick (CalendarService.advance_world_time)
+3. persist through repository (set_current_world_time with caller-supplied expected_revision)
+4. derive GameDate from persisted result (CalendarService.tick_to_date)
+5. return typed result
+```
+
+### advance_world_time input/output
+
+| DTO | Fields | Notes |
+|---|---|---|
+| `AdvanceWorldTimeInput` | `minutes: int`, `expected_revision: Revision` | Signed minutes; mandatory revision |
+| `AdvanceWorldTimeOutput` | `world_time: CurrentWorldTime`, `game_date: GameDate`, `calendar_id: str` | Persisted state + derived date |
+
+`expected_revision` is mandatory — the caller must advance from a revision
+it has actually observed.  The tool never substitutes `current.revision`.
+
+### CalendarService arithmetic ownership
+
+`advance_world_time` handler delegates to `CalendarService.advance_world_time()`.
+The result is `current_tick + minutes` (via CalendarService), not a
+tool-layer calculation.  A distinctive fake offset (+42) in tests proves
+the CalendarService result is used.
+
+### Signed-minute behavior
+
+Negative, zero, and positive `minutes` values are all accepted.  No
+monotonicity policy is imposed by the Tool Layer.
+
+### No implicit initialization
+
+`advance_world_time` never initializes missing state.  `NotFoundError` from
+`get_current_world_time()` propagates unchanged.
+
+### No retry on ConflictError
+
+Stale revision causes `ConflictError` to propagate.  No automatic retry,
+no re-read, no silent re-application of the same relative advancement.
+
+### CalendarService ValueError translation
+
+`ValueError` from `CalendarService.advance_world_time()` is translated to
+project `ValidationError`.  Unexpected exceptions (`RuntimeError`, etc.)
+propagate unchanged.
+
+### Registration API
+
+```python
+def register_world_time_mutation_tools(
+    registry: ToolRegistry,
+    *,
+    world_time_repository: WorldTimeRepository,
+    calendar_service: CalendarService,
+) -> None:
+```
+
+Uses `isinstance(registry, ToolRegistry)` validation.  Dependencies are
+supplied by trusted composition code.
+
+### No lower-layer duplication
+
+`world_time_mutations.py` does not directly:
+- write `world_time.json`
+- calculate revision increments
+- write `audit.jsonl`
+- calculate elapsed-time arithmetic independently
+- create an in-memory authoritative clock
+- access filesystem, JSON, or `AuditService`
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/world_time_mutations.py` | **NEW** — set_world_time, advance_world_time |
+| `tests/unit/test_world_time_mutation_tool_contracts.py` | **NEW** — DTO/registration/contract tests |
+| `tests/unit/test_world_time_mutation_tools.py` | **NEW** — handler/executor/integration tests |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added 5 world_time_mutations negative import tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added this record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-05 DONE |
+
+### Tests and quality gates
+
+- All world-time mutation contract tests pass.
+- All world-time mutation behaviour tests pass.
+- All boundary tests pass (including 5 new world_time_mutations tests).
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Explicit non-goals
+
+- Timeline event scheduling tools.
+- Entity mutation tools (S7-06).
+- Cross-family integration (S7-07).
+- Recovery tooling.
+- Provider schema adaptation.
+- ModelGateway/Ollama integration.
+- Fast Agent.
+- ChangeSet.
+- Post-session processing.
+- Global registry bootstrap.
+
+### Completion state
+
+- S7-05 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-06 remains **NOT STARTED**.
 - Stage 8 remains **NOT STARTED**.

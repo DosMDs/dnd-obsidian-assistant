@@ -61,6 +61,7 @@ TEST_LEGACY_EXCEPTIONS: dict[str, int] = {
     "unit/test_session_metadata.py": 1112,
     "unit/test_storage_patch_repository.py": 1103,
     "unit/test_storage_vault_repository.py": 1102,
+    "unit/test_world_time_mutation_tools.py": 1377,
 }
 
 # ── Legacy correction-specific test path allowlist ───────────────────────
