@@ -2140,7 +2140,7 @@ class, causing false-negative ``isinstance()`` results.
 | `src/dnd_assistant/tools/catalog.py` | **EDITED** — removed MRO class-name/module fallback; strict ``isinstance(registry, ToolRegistry)`` only; normal module-level import instead of local import |
 | `tests/unit/test_tool_catalog.py` | **EDITED** — added ``test_spoofed_class_name_module_impostor_rejected`` regression |
 | `tests/conftest.py` | **NEW** — root-level global autouse fixture for module-identity restoration across all tests (subsequently removed/localized by S7-C11) |
-| `tests/contract/test_boundaries.py` | **EDITED** — added ``autouse`` fixture ``_restore_dnd_assistant_modules``; added ``test_boundary_restores_module_identity`` regression |
+| `tests/contract/test_boundaries.py` | **EDITED** — added ``test_boundary_restores_module_identity`` regression |
 | `tests/unit/test_cli_session.py` | **EDITED** — CLI session import-boundary tests switched to full ``dnd_assistant`` clean import; local restoration added by S7-C11 |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-C09 conftest history; added this correction record |
 | `DEVELOPMENT_STATUS.md` | **EDITED** — added S7-C10 DONE |
@@ -2400,6 +2400,313 @@ S7-C12 reverted this increase and restored the accepted 1477 ratchet.
 - S7-C10 remains **DONE**.
 - S7-C11 remains **DONE**.
 - S7-C12 is **DONE**.
-- S7-08 remains **NOT STARTED**.
-- Stage 7 remains **IN PROGRESS**.
+- S7-08 is **DONE**.
+- Stage 7 is **DONE**.
 - Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-08 — Full Stage-7 historical review / verification / status completion
+
+### Review metadata
+
+| Field | Value |
+|---|---|
+| Date | 2026-09-02 |
+| Pre-Stage-7 base SHA | `a233a90d9435de0855756abbeedeab274293bed8` |
+| S7-08 starting SHA | `fe954ca4c9cddeffd519f1c1b14dc4d7415719c9` |
+| Captured Stage-7 implementation review-head SHA | `fe954ca4c9cddeffd519f1c1b14dc4d7415719c9` |
+| Exact historical review range | `a233a90..fe954ca` |
+| Branch | `main` |
+
+### Commit inventory
+
+**Total historical commits: 21**
+
+**Primary implementation (8):**
+
+| # | SHA | Task |
+|---|---|---|
+| 1 | `9658f67b3704ecbcda34ced3451185e1e982731f` | S7-00 |
+| 5 | `72597ef41b21d8081d6a8396e36203f1bc505aa3` | S7-01 |
+| 8 | `7ad3d2dca1c1128a2879e9246e87a940540d3a0c` | S7-02 |
+| 10 | `ac7b479f066718eb87b52373d2518786bd893023` | S7-03 |
+| 11 | `ecc72a21addc58569d959f90b3e50e240787b189` | S7-04 |
+| 12 | `8d33d75c53e81f0ffb486e1fa9478a3a6fed19cf` | S7-05 |
+| 16 | `283ee3b1a7931891e281eb87966edadd4b3377df` | S7-06 |
+| 17 | `607e7e7a67c5148a84c48ca72cdbba787488d4cd` | S7-07 |
+
+**Correction/finalization (13):**
+
+| # | SHA | Task |
+|---|---|---|
+| 2 | `410cf6f49bb8985209b618ed957d5b458be98af6` | S7-C00 |
+| 3 | `fad06ba283ec0ab1fe3ccd996c751933e9a65c6b` | S7-C01 |
+| 4 | `00720b0e2cecf8ca122f4083018f70cffe3edf9e` | S7-C02 |
+| 6 | `fc38b34e65f695677b031208238094fb16d0a48e` | S7-C03 |
+| 7 | `8d3791c8202c0d6e6ed28aa987dd4b1ec62817eb` | S7-C04 |
+| 9 | `667d3bb776d68f44d6b12908d8ed262d3b81d3d2` | S7-C05 |
+| 13 | `d033c0c5f643fd14bd90e38d6d6cccbf14b3c328` | S7-C06 |
+| 14 | `f5c46bfe1bf8e843a668d80fa1c3d17d80e2db64` | S7-C07 |
+| 15 | `0fa559d2b62ac1233f056672367606c161a445e8` | S7-C08 |
+| 18 | `bdc3dfc9f773b448fc6c7e55a8035eb64895a9aa` | S7-C09 |
+| 19 | `19fb8a712223a75ce49760c784f38a56a39d4891` | S7-C10 |
+| 20 | `8a07314b27dd010e1b2b69771f379ac76f78470e` | S7-C11 |
+| 21 | `fe954ca4c9cddeffd519f1c1b14dc4d7415719c9` | S7-C12 |
+
+**Concurrent auxiliary commits: 0**
+
+### Review methodology
+
+- Read all current production Tool Layer source files.
+- Verified contracts, registry, executor pipeline, catalog, MVP composition.
+- Verified entity/session/world-time read and mutation tools.
+- Verified correction-chain defect resolution by inspecting final state.
+- Ran focused tests, Golden Vault tests, boundary tests, maintainability tests, full suite, Ruff, format check, diff check.
+- Verified test-isolation final state (opt-in fixture, no autouse, no duplication).
+- Verified maintainability ratchet values.
+
+### ToolDefinition findings
+
+- name: lowercase ASCII snake_case grammar — verified.
+- description: non-empty printable — verified.
+- input_schema/output_schema: Pydantic BaseModel subclasses — verified.
+- permission: Permission.READ or Permission.WRITE — verified.
+- side_effects: empty frozenset for READ, non-empty for WRITE — verified.
+- allowed_session_modes: non-empty frozenset — verified.
+- No speculative RBAC/middleware/event-bus abstraction — verified.
+
+### ToolRegistry findings
+
+- register, get, get_definition, list_definitions, __len__ — verified.
+- Duplicate registration rejected — verified.
+- Unknown lookup → NotFoundError — verified.
+- list_definitions deterministic by name — verified.
+- Registry does not execute handlers — verified.
+- Registry has no filesystem/storage/provider behavior — verified.
+- No global mutable registry — verified.
+
+### ToolExecutor findings
+
+- Execution order: registry lookup → input validation → permission check → session-mode check → WRITE audit prerequisite → handler invocation → output validation → typed result — verified.
+- Unknown tool → NotFoundError — verified.
+- Invalid input → ValidationError — verified.
+- Permission denied → ConflictError — verified.
+- Session-mode denied → ConflictError — verified.
+- WRITE without audit → ValidationError — verified.
+- Handler DndAssistantError → unchanged — verified.
+- Handler RuntimeError/TypeError/AssertionError → unchanged — verified.
+- Invalid output → ValidationError — verified.
+- No broad handler exception wrapper — verified.
+
+### AuditContext ownership findings
+
+- ExecutionContext.audit = AuditContext | None with TYPE_CHECKING-only storage dependency — verified.
+- ToolExecutor checks audit presence for WRITE, does NOT construct AuditContext, does NOT write audit records — verified.
+- Mutation handlers forward exact context.audit object — verified.
+- Repositories/services remain audit owners — verified.
+
+### Entity-read findings
+
+- search_entities, get_entity: READ, empty side effects, both session modes — verified.
+- get_entity: stable EntityId input, SearchService.get_by_id visibility gate, None → generic NotFoundError — verified.
+- SearchHit.entity_id must equal requested ID — verified.
+- Repository hydration by original requested ID — verified.
+- Hydrated entity ID must equal requested ID — verified.
+- Hydrated visibility must remain PLAYER — verified.
+- Fail closed on consistency violation — verified.
+- Hidden DM/SYSTEM content cannot leak — verified.
+- extra_frontmatter not exposed through DTO — verified.
+- No fuzzy resolution for get_entity — verified.
+
+### Entity-mutation findings
+
+- patch_entity, append_entity_fact: WRITE, ENTITY_MUTATION, both session modes — verified.
+- Stable EntityId only — verified.
+- No name/alias/query/FTS write resolution — verified.
+- SearchService.get_by_id authorization — verified.
+- Hidden/missing → generic NotFoundError — verified.
+- Caller expected_revision mandatory, forwarded unchanged — verified.
+- No current revision substitution — verified.
+- No retry — verified.
+- Reuses canonical EntityPatch — verified.
+- Tool validates fact before handler — verified.
+- Output from returned VaultDocument — verified.
+- Explicit visibility patch allowed by EntityPatch — verified.
+
+### Session-read findings
+
+- get_active_session, get_session, list_sessions, list_session_events: READ, empty side effects, both session modes — verified.
+- Public DTOs expose canonical typed domain data — verified.
+- No raw metadata/path/filesystem/audit objects leak — verified.
+
+### Session-mutation findings
+
+- start_session, record_event, record_note, end_session: WRITE, SESSION_MUTATION — verified.
+- start_session: NO_ACTIVE_SESSION only — verified.
+- record_event, record_note, end_session: ACTIVE_SESSION only — verified.
+- Recovery preflight before mutation — verified.
+- Exact ExecutionContext.audit passed through — verified.
+- SessionRuntimeService owns lifecycle logic — verified.
+- Tool Layer does not directly write session files — verified.
+
+### World-time-read findings
+
+- get_world_time, world_tick_to_date, game_date_to_world_tick, time_between_world_ticks: READ, empty side effects — verified.
+- get_world_time uses persisted canonical CurrentWorldTime — verified.
+- No fallback to world_tick=0 — verified.
+- CalendarService owns tick/date arithmetic — verified.
+- Calendar remains deterministic/stateless — verified.
+
+### World-time-mutation findings
+
+- set_world_time, advance_world_time: WRITE, WORLD_TIME_MUTATION, both session modes — verified.
+- set_world_time: expected_revision=None → initialize-only; expected_revision provided → set/update-only — verified.
+- advance_world_time: reads authoritative current, CalendarService.advance, repository.set with CALLER expected_revision — verified.
+- No current.revision substitution — verified.
+- No retry-on-conflict — verified.
+- Exact audit pass-through — verified.
+
+### Exact final 18 tool names
+
+advance_world_time, append_entity_fact, end_session, game_date_to_world_tick, get_active_session, get_entity, get_session, get_world_time, list_session_events, list_sessions, patch_entity, record_event, record_note, search_entities, set_world_time, start_session, time_between_world_ticks, world_tick_to_date
+
+### Accounting
+
+- TOTAL = 18
+- READ = 10
+- WRITE = 8
+- ENTITY_MUTATION = 2
+- SESSION_MUTATION = 4
+- WORLD_TIME_MUTATION = 2
+
+### MVP composition findings
+
+- build_mvp_tool_registry creates one ToolRegistry, delegates to six family registration functions — verified.
+- Does not manually duplicate 18 definitions — verified.
+- Does not instantiate concrete repositories/services — verified.
+- Does not use singleton/global registry — verified.
+- Six family registrars present — verified.
+
+### Catalog findings
+
+- build_tool_registry_schema requires actual ToolRegistry — verified.
+- Strict isinstance(registry, ToolRegistry) — verified.
+- No hasattr, Protocol, MRO, class-name, duck typing fallback — verified.
+- Legitimate subclass accepted via normal isinstance — verified.
+- Provider-neutral, deterministic, JSON serializable, handler-free, callable-free — verified.
+- Schemas derive from model_json_schema() — verified.
+- No hand-written provider schema — verified.
+- No OpenAI/Ollama function shape — verified.
+
+### Root-package lightweight-import finding
+
+- import dnd_assistant.tools is lightweight — verified.
+- Does NOT eagerly import entity_reads, entity_mutations, session_reads, session_mutations, world_time_reads, world_time_mutations, mvp_registry, application, retrieval, storage, models, ollama — verified.
+- Does NOT export build_mvp_tool_registry from root — verified.
+
+### Stage-8 separation finding
+
+- No accidental dependencies on ModelGateway, Ollama, ollama, chat_with_tools, provider-native function schema, OpenAI function schema, Fast Agent, ChangeSet, post-session processor, model tool-call loop — verified.
+- Catalog uses provider-neutral Pydantic JSON Schema, not provider-native schema — verified.
+
+### Golden Vault source-immutability finding
+
+- All mutable workflows use tmp_path copy — verified.
+- Committed Golden source is never writable target — verified.
+- Copy path retains spaces + Unicode coverage — verified.
+
+### Golden Vault test results
+
+- test_tool_layer_golden_vault.py: 26/26 passed.
+- test_tool_layer_golden_vault_session.py: 17/17 passed.
+- Combined: 43/43 passed.
+
+### Test-isolation final-state findings
+
+- tests/conftest.py: one reusable restore_dnd_assistant_modules fixture — verified.
+- NOT autouse — verified.
+- Ordinary tests have no global restoration side effect — verified.
+- No duplicated fixture implementations — verified.
+- No production workaround for pytest/sys.modules behavior — verified.
+
+### Order-regression results
+
+- boundaries → catalog: 130/130 passed.
+- catalog → boundaries: 130/130 passed.
+- CLI boundaries → catalog: 36/36 passed.
+
+### Maintainability findings
+
+- PRODUCTION_HARD_LIMIT: 700.
+- TEST_HARD_LIMIT: 1000.
+- TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]: 1477.
+- test_retrieval_contracts.py current physical lines: 1476 (below 1477).
+- No Stage-7 new production module > 700 — verified.
+- No Stage-7 new non-exempt test module > 1000 — verified.
+- No legacy ceiling increased — verified.
+- Maintainability test result: 278/278 passed.
+
+### Historical correction-chain verification
+
+- S7-C00: broad exception mapping, AuditContext typing, handler typing, ASCII tool-name grammar — all corrected.
+- S7-C01/C02: status/task-map/table correctness — corrected.
+- S7-C03/C04: entity read identity/visibility fail-closed chain — hardened.
+- S7-C05: session read public DTO shape — corrected.
+- S7-C06/C07/C08: world-time mutation maintainability, documentation counts — restored.
+- S7-C09: catalog duck-typing registry — corrected.
+- S7-C10: strict ToolRegistry identity — enforced.
+- S7-C11: global autouse fixture localized — localized.
+- S7-C12: duplicate fixtures removed, ratchet restored — clean.
+
+### Historical documentation corrections made during S7-08
+
+- S7-C10 Files changed table: corrected inaccurate claim that S7-C10 added an autouse fixture to tests/contract/test_boundaries.py. The actual S7-C10 commit only added test_boundary_restores_module_identity regression to boundaries.py. The autouse fixture was in tests/conftest.py (already correctly documented).
+
+### Quality gate results
+
+- Focused Tool Layer tests: 643/643 passed.
+- Golden Vault main: 26/26 passed.
+- Golden Vault session: 17/17 passed.
+- Golden Vault combined: 43/43 passed.
+- Boundary tests: 97/97 passed.
+- Maintainability tests: 278/278 passed.
+- Full pytest: 3645 passed, 95 skipped, 0 failed, 0 errors.
+- Ruff check: all passed.
+- Ruff format check: 269 files already formatted.
+- git diff --check: clean.
+- CLI smoke (dnd --help): success.
+
+### Definition-of-Done conclusion
+
+All Stage-7 Definition-of-Done items are satisfied:
+
+- Typed provider-neutral ToolDefinition metadata — yes.
+- Deterministic ToolRegistry — yes.
+- Safe ToolExecutor — yes.
+- Permission enforcement — yes.
+- Session-mode enforcement — yes.
+- WRITE audit prerequisite — yes.
+- Entity reads — yes.
+- Session reads — yes.
+- World-time/calendar reads — yes.
+- Session mutations — yes.
+- World-time mutations — yes.
+- Safe entity mutations — yes.
+- Stable-ID write targeting — yes.
+- Hidden/missing entity nondisclosure — yes.
+- Optimistic revision forwarding — yes.
+- Exact AuditContext forwarding — yes.
+- Provider-neutral public catalog — yes.
+- Complete composed 18-tool MVP registry — yes.
+- Golden Vault cross-family integration — yes.
+- No direct LLM/provider coupling — yes.
+- No direct Tool Layer filesystem mutation — yes.
+- No Stage-8 implementation pulled forward — yes.
+- Boundary tests green — yes.
+- Maintainability green — yes.
+- Full suite green — yes.
+
+### Stage-7 conclusion
+
+**Stage 7 is DONE.** All 21 commits (8 primary + 13 correction) have been reviewed and verified. All quality gates pass. No unresolved blockers. Stage 8 remains NOT STARTED.
