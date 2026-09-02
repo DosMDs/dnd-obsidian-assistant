@@ -249,4 +249,53 @@ as a D&D Assistant clean-import scope.
 - `PRODUCTION_HARD_LIMIT` = 700 (unchanged)
 - `TEST_HARD_LIMIT` = 1000 (unchanged)
 - `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` = 1477 (unchanged)
-- `tests/contract/test_test_harness_policy.py` physical lines = (reported in Final Report)
+- `tests/contract/test_test_harness_policy.py` physical lines = 576 (under 1000)
+
+### Quality gates
+
+| Gate | Result |
+|---|---|
+| `uv run pytest tests/contract/test_test_harness_policy.py` | 25 passed |
+| `uv run pytest tests/contract/test_maintainability.py` | 281 passed |
+| `uv run pytest tests/contract/test_boundaries.py tests/unit/test_tool_catalog.py` | 130 passed |
+| `uv run pytest tests/unit/test_tool_catalog.py tests/contract/test_boundaries.py` | 130 passed |
+| `uv run pytest tests/unit/test_cli_session.py::TestCliSessionBoundaries tests/unit/test_tool_catalog.py` | 36 passed |
+| `uv run pytest tests/unit/test_tool_catalog.py tests/unit/test_cli_session.py::TestCliSessionBoundaries` | 36 passed |
+| `uv run pytest` (full suite) | 3673 passed, 95 skipped |
+| **Failed count** | **0** |
+| **Error count** | **0** |
+| `uv run ruff check .` | PASS |
+| `uv run ruff format --check .` | 276 files already formatted |
+| `git diff --check` | PASS |
+
+---
+
+## MNT-C03 — Finalize MNT-C02 committed evidence
+
+**Date:** 2026-09-02
+
+### Defect
+
+Independent review accepted the MNT-C02 implementation but found that
+its committed maintenance record still deferred the policy-test physical
+line count to the Final Report.
+
+This contradicted the evidence-driven finalization rule introduced by
+MNT-03.
+
+MNT-C03 replaced the placeholder/reference with factual committed evidence
+and completed the MNT-C02 quality-gate record.
+
+No production, test behavior, GigaCode rules, or skills changed.
+
+### Changed files
+
+- `docs/maintenance/03_GIGACODE_RELIABILITY_GUARDRAILS.md`
+- `DEVELOPMENT_STATUS.md`
+
+### Zero diff
+
+- `src/` — no changes
+- `tests/` — no changes
+- `.gigacode/rules/` — no changes
+- `.gigacode/skills/` — no changes
