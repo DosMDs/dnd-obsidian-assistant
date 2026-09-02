@@ -3,7 +3,7 @@ name: code-review
 description: Review a diff, branch, pull request or implementation for architecture, correctness, data safety, tests and MVP scope.
 compatibility: D&D Session Assistant repository.
 metadata:
-  version: "1"
+  version: "2"
 ---
 # Code review
 
@@ -27,3 +27,15 @@ For each finding provide:
 - smallest recommended correction.
 
 Do not praise routine code. Focus on actionable risks and regressions.
+
+## Explicit review checks
+
+- Requested scope vs actual diff.
+- Unexpected files in the diff.
+- Production workaround introduced for test infrastructure.
+- Global fixture or global-state side effects.
+- Duplicated test harnesses across modules.
+- Maintainability ratchet movement (ceiling increases).
+- Historical documentation claims vs actual Git state.
+- Final Report changed-file inventory vs actual commit contents.
+- Mandatory gate with failed or error results.

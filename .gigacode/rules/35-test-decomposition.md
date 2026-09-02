@@ -122,3 +122,13 @@ Any exception above the hard limits must be:
 - reviewed.
 
 Never silently raise the global limit.
+
+### Maintainability ratchet
+
+After baseline capture, the recorded ceiling is a **hard ratchet**.
+
+The value itself must not be increased by an ordinary implementation,
+bug-fix, correction, or maintenance task.
+
+See `.gigacode/rules/36-maintainability-ratchets.md` for the full ratchet
+invariants.

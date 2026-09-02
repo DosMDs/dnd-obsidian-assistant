@@ -116,6 +116,20 @@ def _line_count_baseline(
     return legacy_map.get(rel_path, hard_limit)
 
 
+# ── Retrieval legacy-ratchet regression ──────────────────────────────────
+# Accidental 1477 -> 1495 regression must be immediately visible.
+
+
+class TestRetrievalLegacyRatchet:
+    """The retrieval contracts test legacy ceiling is pinned at 1477."""
+
+    def test_retrieval_contracts_ceiling(self) -> None:
+        assert TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"] == 1477, (
+            "unit/test_retrieval_contracts.py legacy ceiling changed from 1477. "
+            "This is a hard ratchet — do not increase without explicit authorization."
+        )
+
+
 # ── Shared size-enforcement helper ────────────────────────────────────────
 # This is the single enforcement function used by both the real repository
 # ratchet and synthetic tests. Synthetic tests exercise the exact same path.

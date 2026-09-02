@@ -28,6 +28,14 @@ mode: AGENT
 
 Если обычный push отклонён, остановись и сообщи причину.
 
+## Pre-finalization audit
+
+Before every task commit, run or follow the `pre-finalization-audit` skill.
+
+The final changed-file inventory must come from Git, not from memory.
+
+A mandatory failed test or Ruff gate means no push.
+
 ## Single-task-commit finalization invariant
 
 Для обычной задачи (implementation / correction / maintenance):

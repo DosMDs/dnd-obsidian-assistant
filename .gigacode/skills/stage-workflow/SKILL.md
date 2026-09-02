@@ -67,6 +67,23 @@ Record unresolved risk/blockers explicitly.
 5. Write detailed final review/completion record into the stage document.
 6. Do not start the next stage automatically.
 
+## Evidence collection
+
+Before completing any task or stage:
+
+- Changed-file inventory — derive from Git (`git diff --name-status`).
+- Commit inventory — derive from Git history (`git log`).
+- Test counts — derive from final command output.
+- Line counts — derive from final repository state.
+- Historical actions — verify from commit/diff, not memory.
+
+Invoke or follow `pre-finalization-audit` before every task commit.
+
+For historical stage review:
+
+- Capture implementation review-head BEFORE documentation/status completion commit.
+- Do not include the completion commit in the historical implementation range.
+
 ## Git finalization (self-SHA rule)
 
 Before task commit:

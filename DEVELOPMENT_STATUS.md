@@ -113,6 +113,12 @@ Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_RE
 | MNT-01 — Maintainability rules + baseline + ratchet | DONE |
 | MNT-02 — Behavior-preserving Stage-6 hotspot decomposition | DONE |
 
+## Maintenance gate before Stage 8
+
+| Task | Status |
+|---|---|
+| MNT-03 — Harden GigaCode task scope/finalization/test-harness reliability | DONE |
+
 ## Current blockers
 
 None known.
