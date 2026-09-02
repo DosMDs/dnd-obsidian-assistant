@@ -73,9 +73,18 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 ## Current stage tasks
 
 | Task | Status |
-|---|---|
+|---|---|---|
 | S7-00 — Foundational tool contracts: typed metadata, ToolRegistry, ToolExecutor, permissions, side effects, session modes, tests, documentation | DONE |
 | S7-C00 — Correction pass for S7-00: exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization | DONE |
+| S7-C01 — Finalize Stage-7 status/document consistency after S7-C00 review | DONE |
+| S7-01 — Entity read tools | NOT STARTED |
+| S7-02 — Session read tools | NOT STARTED |
+| S7-03 — Session mutation tools | NOT STARTED |
+| S7-04 — World-time read + deterministic calendar read surface | NOT STARTED |
+| S7-05 — World-time mutation tools | NOT STARTED |
+| S7-06 — Safe entity mutation tools | NOT STARTED |
+| S7-07 — Cross-family integration / public registry schema / Golden-Vault hardening | NOT STARTED |
+| S7-08 — Full Stage-7 historical review / verification / completion | NOT STARTED |
 
 Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)
 

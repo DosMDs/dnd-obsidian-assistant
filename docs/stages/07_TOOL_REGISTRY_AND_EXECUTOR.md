@@ -24,6 +24,7 @@ provider-schema-free, and ChangeSet-free.
 |---|---|---|
 | S7-00 | DONE | Foundational contracts: typed metadata, ToolRegistry, ToolExecutor, permissions, side effects, session modes, tests, documentation |
 | S7-C00 | DONE | Correction pass for S7-00: fix exception handling, audit typing, handler typing, tool-name validation, documentation, status normalization |
+| S7-C01 | DONE | Finalize Stage-7 status/document consistency after S7-C00 review |
 | S7-01 | NOT STARTED | Entity read tools |
 | S7-02 | NOT STARTED | Session read tools |
 | S7-03 | NOT STARTED | Session mutation tools |
@@ -254,3 +255,28 @@ S7-00 implementation was reviewed and merged without a focused architectural rev
 
 - Stage 7 remains **IN PROGRESS**.
 - S7-01 has **NOT** been started.
+
+---
+
+## S7-C01 — Correction record
+
+### Scope
+
+Documentation-only consistency pass. No production code or test behavior changed.
+
+### Defects found
+
+1. **C01-1**: `DEVELOPMENT_STATUS.md` Stage-7 task map was incomplete — listed only S7-00 and S7-C00. S7-01 through S7-08 were missing.
+2. **C01-2**: No S7-C01 entry existed in either `DEVELOPMENT_STATUS.md` or the Stage-7 task map.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `DEVELOPMENT_STATUS.md` | Restored full Stage-7 task map (S7-00..S7-08) with correct statuses; added S7-C01 as DONE |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | Added S7-C01 to task map; appended this correction record |
+
+### Stage status
+
+- Stage 7 remains **IN PROGRESS**.
+- S7-01 remains **NOT STARTED**.
