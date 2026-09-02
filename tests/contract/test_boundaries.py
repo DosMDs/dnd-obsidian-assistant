@@ -242,24 +242,6 @@ def test_entity_reads_does_not_import_application() -> None:
     assert not mod_names, f"entity_reads imported application modules: {mod_names}"
 
 
-def test_entity_reads_imports_domain() -> None:
-    _clean_import("dnd_assistant.tools.entity_reads")
-    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.domain")}
-    assert mod_names, "entity_reads should import domain modules"
-
-
-def test_entity_reads_imports_retrieval() -> None:
-    _clean_import("dnd_assistant.tools.entity_reads")
-    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.retrieval")}
-    assert mod_names, "entity_reads should import retrieval modules"
-
-
-def test_entity_reads_imports_storage() -> None:
-    _clean_import("dnd_assistant.tools.entity_reads")
-    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
-    assert mod_names, "entity_reads should import storage modules (TYPE_CHECKING only)"
-
-
 # ── no module pulls in ollama ────────────────────────────────────────────
 
 

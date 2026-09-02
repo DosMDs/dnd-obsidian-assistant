@@ -80,6 +80,7 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 | S7-C02 — Correct Stage-7 malformed status-table separator | DONE |
 | S7-01 — Entity read tools | DONE |
 | S7-C03 — Harden entity read-tool safety | DONE |
+| S7-C04 — Finalize S7-01/C03 documentation and boundary contracts | DONE |
 | S7-02 — Session read tools | NOT STARTED |
 | S7-03 — Session mutation tools | NOT STARTED |
 | S7-04 — World-time read + deterministic calendar read surface | NOT STARTED |

@@ -27,6 +27,8 @@ provider-schema-free, and ChangeSet-free.
 | S7-C01 | DONE | Finalize Stage-7 status/document consistency after S7-C00 review |
 | S7-C02 | DONE | Correct Stage-7 malformed status-table separator |
 | S7-01 | DONE | Entity read tools |
+| S7-C03 | DONE | Harden entity read-tool safety |
+| S7-C04 | DONE | Finalize S7-01/C03 documentation and boundary contracts |
 | S7-02 | NOT STARTED | Session read tools |
 | S7-03 | NOT STARTED | Session mutation tools |
 | S7-04 | NOT STARTED | World-time read + deterministic calendar read surface |
@@ -463,14 +465,23 @@ model-facing safety. Registration typing used weak duck-typing inherited
 from earlier prototype conventions. Documentation was not reviewed after
 the S7-01 merge.
 
+### Test decomposition
+
+The C03 test surface is split into three focused modules:
+
+- `test_entity_read_tool_contracts.py` — DTO / registration contracts
+- `test_entity_read_tools.py` — handler / executor / mutation-safety behavior
+- `test_entity_read_tool_safety.py` — identity-chain and non-disclosing safety regressions
+
 ### Files changed
 
 | File | Change |
 |---|---|
 | `src/dnd_assistant/tools/entity_reads.py` | **EDITED** — added requested-ID vs SearchHit-ID check; hydrate via `requested_id`; non-disclosing error messages; `ToolRegistry` type + `isinstance` check |
-| `tests/unit/test_entity_read_tool_contracts.py` | **NEW** — DTO validation, registration metadata, registration API tests (extracted from oversized handler test file) |
+| `tests/unit/test_entity_read_tool_contracts.py` | **NEW** — DTO validation, registration metadata, registration API contracts |
 | `tests/unit/test_entity_read_tools.py` | **EDITED** — removed DTO/registration tests (moved to contracts file); added C03 regression tests for identity chain and non-disclosing errors |
-| `tests/contract/test_boundaries.py` | **UPDATED** — added entity_reads import-boundary tests (no models/CLI/Ollama/application, imports domain/retrieval/storage) |
+| `tests/unit/test_entity_read_tool_safety.py` | **NEW** — identity-chain and non-disclosing safety regressions |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added entity_reads import-boundary tests (no models/CLI/Ollama/application) |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — removed duplicate C02 record; corrected S7-01 status; added real S7-01 record; added this correction record |
 | `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-C03 DONE |
 
@@ -526,3 +537,60 @@ the S7-01 merge.
 
 - Stage 7 remains **IN PROGRESS**.
 - S7-02 remains **NOT STARTED**.
+
+---
+
+## S7-C04 — Correction record
+
+### Scope
+
+Documentation and boundary-contract correction pass. No production behavior changed.
+
+### Defects found
+
+1. **C04-1**: S7-C03 was missing from the canonical Stage-7 task map.
+2. **C04-2**: Positive-import boundary tests (`test_entity_reads_imports_domain`,
+   `test_entity_reads_imports_retrieval`, `test_entity_reads_imports_storage`)
+   encoded incidental runtime import structure rather than dependency-boundary
+   contracts.
+3. **C04-3**: S7-C03 `Files changed` inventory omitted
+   `tests/unit/test_entity_read_tool_safety.py`.
+
+### Changes
+
+| File | Change |
+|---|---|
+| `tests/contract/test_boundaries.py` | **EDITED** — removed positive-import assertions for `entity_reads` (domain, retrieval, storage); preserved negative contracts (models, CLI, application, Ollama) |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — restored S7-C03 to task map; added S7-C04 to task map; added C03 test decomposition section; corrected C03 file inventory; appended this correction record |
+| `DEVELOPMENT_STATUS.md` | **EDITED** — added S7-C04 DONE |
+
+### Corrected contracts
+
+- **Boundary tests assert only prohibited dependencies**: `entity_reads` must not
+  import `models`, `cli`, `application`, or `ollama`. Downward imports to
+  `domain`, `retrieval`, and `storage` are allowed but not required — no positive
+  assertion locks in incidental transitive import structure.
+- **Task map completeness**: S7-C03 and S7-C04 appear exactly once in the
+  canonical Stage-7 task map.
+
+### Quality-gate evidence
+
+- All boundary tests pass.
+- All maintainability tests pass.
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — no formatting issues.
+- `git diff --check` — no whitespace errors.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: `test: finalize entity read boundaries (S7-C04)`
+
+### Stage status
+
+- Stage 7 remains **IN PROGRESS**.
+- S7-01 remains **DONE**.
+- S7-C03 remains **DONE**.
+- S7-02 remains **NOT STARTED**.
+- Stage 8 remains **NOT STARTED**.
