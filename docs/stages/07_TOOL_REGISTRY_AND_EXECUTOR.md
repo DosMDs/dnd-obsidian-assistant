@@ -40,6 +40,8 @@ provider-schema-free, and ChangeSet-free.
 | S7-06 | DONE | Safe entity mutation tools |
 | S7-07 | DONE | Cross-family integration / public registry schema / Golden-Vault hardening |
 | S7-C09 | DONE | Correct S7-07 catalog type safety and verification baseline |
+| S7-C10 | DONE | Enforce strict ToolRegistry identity and isolate boundary imports |
+| S7-C11 | DONE | Localize sys.modules test isolation and correct S7-C10 history |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
 
 ## S7-00 scope and contracts
@@ -2110,11 +2112,14 @@ class, causing false-negative ``isinstance()`` results.
    ``__module__`` check, MRO name scan, duck typing, or structural typing
    fallback.
 
-2. **Isolated boundary-test ``sys.modules`` mutations** by adding an
-   ``autouse=True`` pytest fixture that snapshots ``dnd_assistant`` modules
-   before each boundary test and restores the exact original module objects
-   after.  ``_clean_import()`` still gets a genuinely clean import graph for
-   the assertion, but the pre-test module state is restored afterward.
+2. **Isolated boundary-test ``sys.modules`` mutations** by adding a root-level
+   ``tests/conftest.py`` with an ``autouse=True`` pytest fixture that
+   snapshots ``dnd_assistant`` modules before every test across the entire
+   suite and restores the exact original module objects after.
+   ``_clean_import()`` still gets a genuinely clean import graph for the
+   assertion, but the pre-test module state is restored afterward.
+   (S7-C11 later localized this mechanism to the tests that actually perform
+   ``sys.modules`` clean imports.)
 
 3. **Added spoofed-impostor regression**: a class dynamically created with
    ``name="ToolRegistry"`` and ``__module__="dnd_assistant.tools.registry"``
@@ -2133,7 +2138,9 @@ class, causing false-negative ``isinstance()`` results.
 |---|---|
 | `src/dnd_assistant/tools/catalog.py` | **EDITED** — removed MRO class-name/module fallback; strict ``isinstance(registry, ToolRegistry)`` only; normal module-level import instead of local import |
 | `tests/unit/test_tool_catalog.py` | **EDITED** — added ``test_spoofed_class_name_module_impostor_rejected`` regression |
+| `tests/conftest.py` | **NEW** — root-level global autouse fixture for module-identity restoration across all tests (subsequently removed/localized by S7-C11) |
 | `tests/contract/test_boundaries.py` | **EDITED** — added ``autouse`` fixture ``_restore_dnd_assistant_modules``; added ``test_boundary_restores_module_identity`` regression |
+| `tests/unit/test_cli_session.py` | **EDITED** — CLI session import-boundary tests switched to full ``dnd_assistant`` clean import; local restoration added by S7-C11 |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **EDITED** — corrected S7-C09 conftest history; added this correction record |
 | `DEVELOPMENT_STATUS.md` | **EDITED** — added S7-C10 DONE |
 
@@ -2173,6 +2180,86 @@ class, causing false-negative ``isinstance()`` results.
 - S7-07 remains **DONE**.
 - S7-C09 remains **DONE**.
 - S7-C10 is **DONE**.
+- S7-08 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-C11 — Localize sys.modules test isolation and correct S7-C10 history
+
+### Independent review
+
+- S7-C10 strict ToolRegistry production fix was correct.
+- The module-restoration fixture was implemented globally in ``tests/conftest.py``,
+  although only clean-import tests require it.
+- S7-C10 historical file inventory omitted ``tests/conftest.py`` and
+  ``tests/unit/test_cli_session.py``.
+
+### Correction
+
+- Removed root-level global autouse fixture (``tests/conftest.py`` deleted).
+- Boundary module (``tests/contract/test_boundaries.py``) now owns its own
+  per-test isolation via a module-local autouse fixture.
+- ``TestCliSessionBoundaries`` (``tests/unit/test_cli_session.py``) owns narrow
+  class-local isolation for its clean-import tests.
+- Strict ``isinstance(registry, ToolRegistry)`` in ``catalog.py`` remains
+  unchanged.
+- Order regressions pass without global fixture:
+  - ``test_boundaries.py`` → ``test_tool_catalog.py``
+  - ``test_tool_catalog.py`` → ``test_boundaries.py``
+  - ``TestCliSessionBoundaries`` → ``test_tool_catalog.py``
+  - ``test_tool_catalog.py`` → ``TestCliSessionBoundaries``
+- S7-C10 historical inventory/narrative corrected.
+- No S7-08 or Stage-8 work.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| ``tests/conftest.py`` | **DELETED** — root-level global autouse fixture removed; isolation moved to clean-import modules |
+| ``tests/contract/test_boundaries.py`` | **EDITED** — added module-local ``_restore_dnd_assistant_modules`` autouse fixture |
+| ``tests/unit/test_cli_session.py`` | **EDITED** — added class-local ``_restore_dnd_assistant_modules`` autouse fixture in ``TestCliSessionBoundaries`` |
+| ``docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`` | **EDITED** — corrected S7-C10 file inventory/narrative; added this correction record |
+| ``DEVELOPMENT_STATUS.md`` | **EDITED** — added S7-C11 DONE |
+
+### Quality-gate evidence
+
+- All boundary tests pass.
+- All CLI boundary tests pass.
+- All catalog tests pass.
+- All order-regression pairs pass.
+- All MVP registry tests pass.
+- All Golden Tool Layer integration tests pass.
+- Full ``uv run pytest``: 0 failed, 0 errors.
+- ``uv run ruff check .`` — no errors.
+- ``uv run ruff format --check .`` — all files formatted.
+- ``git diff --check`` — no whitespace errors.
+
+### Maintainability
+
+- ``test_boundaries.py``: under 1000 test hard limit.
+- ``test_cli_session.py``: under 1000 test hard limit.
+- ``test_tool_catalog.py``: under 1000 test hard limit.
+- No new legacy exceptions added.
+- ``PRODUCTION_HARD_LIMIT`` (700) and ``TEST_HARD_LIMIT`` (1000) unchanged.
+
+### Golden fixture immutability
+
+- ``tests/fixtures/golden_test_vault``: zero diff vs HEAD.
+- ``tests/integration/conftest.py``: zero diff vs HEAD.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: ``test: localize module import isolation (S7-C11)``
+
+### Stage status
+
+- S7-07 remains **DONE**.
+- S7-C09 remains **DONE**.
+- S7-C10 remains **DONE**.
+- S7-C11 is **DONE**.
 - S7-08 remains **NOT STARTED**.
 - Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.

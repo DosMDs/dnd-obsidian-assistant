@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
@@ -32,6 +33,24 @@ from dnd_assistant.storage.paths import (
     entity_directory,
     resolve_entity_path,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_dnd_assistant_modules() -> Iterator[None]:
+    """Restore dnd_assistant module identity after clean-import tests."""
+    original = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+    }
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
+                del sys.modules[name]
+        sys.modules.update(original)
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 

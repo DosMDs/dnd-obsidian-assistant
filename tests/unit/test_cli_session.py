@@ -7,6 +7,7 @@ Typer ``CliRunner`` for invocation.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -669,6 +670,35 @@ class TestCliHelpers:
 
 class TestCliSessionBoundaries:
     """Ensure CLI session module does not import restricted packages."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_dnd_assistant_modules(self) -> Iterator[None]:
+        """Snapshot dnd_assistant modules before each test; restore after.
+
+        These boundary tests deliberately delete all ``dnd_assistant``
+        modules from ``sys.modules`` for a clean import assertion.
+        Without restoration, the permanently replaced module objects
+        cause false-negative ``isinstance()`` failures in later tests
+        from other modules that still hold references to the original
+        classes.
+
+        This fixture is scoped to ``TestCliSessionBoundaries`` only —
+        ordinary CLI behavior tests are not affected.
+        """
+        import sys
+
+        original = {
+            name: module
+            for name, module in sys.modules.items()
+            if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+        }
+        try:
+            yield
+        finally:
+            for name in list(sys.modules):
+                if name == "dnd_assistant" or name.startswith("dnd_assistant."):
+                    del sys.modules[name]
+            sys.modules.update(original)
 
     def test_cli_session_does_not_import_models(self) -> None:
         import importlib

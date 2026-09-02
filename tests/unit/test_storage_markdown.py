@@ -12,6 +12,8 @@ Covers:
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import cast
 
@@ -22,6 +24,24 @@ from dnd_assistant.domain.types import EntityId, EntityType, Revision
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.storage import VaultDocument, parse, serialize
 from dnd_assistant.storage.markdown import _find_frontmatter
+
+
+@pytest.fixture(autouse=True)
+def _restore_dnd_assistant_modules() -> Iterator[None]:
+    """Restore dnd_assistant module identity after clean-import tests."""
+    original = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+    }
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
+                del sys.modules[name]
+        sys.modules.update(original)
+
 
 # ── Helpers ─────────────────────────────────────────────────────────────────
 

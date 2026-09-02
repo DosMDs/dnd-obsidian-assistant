@@ -11,8 +11,37 @@ from __future__ import annotations
 
 import importlib
 import sys
+from collections.abc import Iterator
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _restore_dnd_assistant_modules() -> Iterator[None]:
+    """Snapshot dnd_assistant modules before each test; restore after.
+
+    Boundary tests use ``_clean_import`` to temporarily remove all
+    ``dnd_assistant`` modules from ``sys.modules`` for a clean import
+    assertion.  Without restoration, the permanently replaced module
+    objects cause false-negative ``isinstance()`` failures in later
+    tests from other modules that still hold references to the original
+    classes.
+
+    This fixture is local to this module — only tests that perform
+    clean imports are affected.
+    """
+    original = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+    }
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
+                del sys.modules[name]
+        sys.modules.update(original)
 
 
 def _clean_import(module_path: str) -> None:

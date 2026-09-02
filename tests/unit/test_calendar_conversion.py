@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sys
+from collections.abc import Iterator
+
 import pytest
 
 from dnd_assistant.domain import (
@@ -12,6 +15,24 @@ from dnd_assistant.domain import (
     GameDate,
     IntercalaryDay,
 )
+
+
+@pytest.fixture(autouse=True)
+def _restore_dnd_assistant_modules() -> Iterator[None]:
+    """Restore dnd_assistant module identity after clean-import tests."""
+    original = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+    }
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
+                del sys.modules[name]
+        sys.modules.update(original)
+
 
 _3M = (
     CalendarMonth(name="First", days=30),

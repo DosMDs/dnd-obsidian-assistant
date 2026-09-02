@@ -20,7 +20,8 @@ Covers:
 from __future__ import annotations
 
 import ast
-from collections.abc import Sequence
+import sys
+from collections.abc import Iterator, Sequence
 from typing import cast
 
 import pytest
@@ -41,6 +42,23 @@ from dnd_assistant.retrieval import (
     VaultSearchService,
 )
 from dnd_assistant.storage.types import VaultDocument
+
+
+@pytest.fixture(autouse=True)
+def _restore_dnd_assistant_modules() -> Iterator[None]:
+    """Restore dnd_assistant module identity after clean-import tests."""
+    original = {
+        name: module
+        for name, module in sys.modules.items()
+        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
+    }
+    try:
+        yield
+    finally:
+        for name in list(sys.modules):
+            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
+                del sys.modules[name]
+        sys.modules.update(original)
 
 
 class TestImports:
