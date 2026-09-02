@@ -94,6 +94,7 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 | S7-C09 — Correct S7-07 catalog type safety and verification baseline | DONE |
 | S7-C10 — Enforce strict ToolRegistry identity and isolate boundary imports | DONE |
 | S7-C11 — Localize sys.modules test isolation and correct S7-C10 history | DONE |
+| S7-C12 — Deduplicate import isolation and restore maintainability ratchet | DONE |
 | S7-08 — Full Stage-7 historical review / verification / completion | NOT STARTED |
 
 Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)

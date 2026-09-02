@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import ast
 import sys
-from collections.abc import Iterator, Sequence
+from collections.abc import Sequence
 from typing import cast
 
 import pytest
@@ -42,23 +42,6 @@ from dnd_assistant.retrieval import (
     VaultSearchService,
 )
 from dnd_assistant.storage.types import VaultDocument
-
-
-@pytest.fixture(autouse=True)
-def _restore_dnd_assistant_modules() -> Iterator[None]:
-    """Restore dnd_assistant module identity after clean-import tests."""
-    original = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
-    }
-    try:
-        yield
-    finally:
-        for name in list(sys.modules):
-            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
-                del sys.modules[name]
-        sys.modules.update(original)
 
 
 class TestImports:
@@ -759,6 +742,7 @@ def _has_forbidden_prefix(module: str, forbidden_prefixes: set[str]) -> bool:
     return False
 
 
+@pytest.mark.usefixtures("restore_dnd_assistant_modules")
 class TestBoundaries:
     """Verify architectural boundaries are preserved.
 
@@ -775,7 +759,6 @@ class TestBoundaries:
     def _clean_import(self, module_path: str) -> None:
         """Import a module from a clean sys.modules state."""
         import importlib
-        import sys
 
         for key in list(sys.modules):
             if key.startswith("dnd_assistant"):
@@ -785,8 +768,6 @@ class TestBoundaries:
     def _assert_no_modules_loaded(
         self, module_path: str, forbidden_prefix: str, label: str
     ) -> None:
-        import sys
-
         self._clean_import(module_path)
         loaded = {m for m in sys.modules if m.startswith(forbidden_prefix)}
         assert not loaded, f"{module_path} triggered {label} imports: {loaded}"

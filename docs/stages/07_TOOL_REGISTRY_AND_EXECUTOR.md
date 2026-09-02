@@ -42,6 +42,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-C09 | DONE | Correct S7-07 catalog type safety and verification baseline |
 | S7-C10 | DONE | Enforce strict ToolRegistry identity and isolate boundary imports |
 | S7-C11 | DONE | Localize sys.modules test isolation and correct S7-C10 history |
+| S7-C12 | DONE | Deduplicate import isolation and restore maintainability ratchet |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
 
 ## S7-00 scope and contracts
@@ -2260,6 +2261,145 @@ class, causing false-negative ``isinstance()`` results.
 - S7-C09 remains **DONE**.
 - S7-C10 remains **DONE**.
 - S7-C11 is **DONE**.
+- S7-C12 is **DONE**.
+- S7-08 remains **NOT STARTED**.
+- Stage 7 remains **IN PROGRESS**.
+- Stage 8 remains **NOT STARTED**.
+
+## S7-C12 — Deduplicate import isolation and restore maintainability ratchet
+
+### Independent review
+
+- S7-C11 correctly removed the global autouse fixture from ``tests/conftest.py``.
+- However, S7-C11 copied the same module-restoration fixture body into multiple
+  test modules (module-level ``@pytest.fixture(autouse=True)`` in 8 unit modules
+  plus ``test_boundaries.py`` and ``TestCliSessionBoundaries``).
+- The actual S7-C11 diff touched **14 files**, not the 5 listed in its
+  ``Files changed`` section.
+- The existing ``test_retrieval_contracts.py`` legacy ceiling was increased from
+  1477 to 1495 solely because of the duplicated fixture code.
+
+### Correction
+
+- Re-introduced ``tests/conftest.py`` with a single reusable opt-in fixture
+  ``restore_dnd_assistant_modules``.
+- The fixture is **NOT** ``autouse`` — it has zero effect unless explicitly
+  requested via ``@pytest.mark.usefixtures("restore_dnd_assistant_modules")``.
+- Removed the duplicated fixture body from all 10 affected test modules.
+- Each clean-import test class/function now explicitly opts into the shared
+  fixture via ``@pytest.mark.usefixtures``.
+- Ordinary behavior tests in the same modules are not affected.
+- ``test_retrieval_contracts.py`` physical line count restored to 1476 (below
+  the 1477 baseline).
+- ``TEST_LEGACY_EXCEPTIONS`` retrieval baseline restored to 1477.
+- No other legacy ceiling was increased.
+- Production code unchanged.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| ``tests/conftest.py`` | **RE-CREATED** — single reusable ``restore_dnd_assistant_modules`` fixture (opt-in, not autouse) |
+| ``tests/contract/test_boundaries.py`` | **EDITED** — removed local fixture; ``pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")`` |
+| ``tests/contract/test_maintainability.py`` | **EDITED** — ``test_retrieval_contracts.py`` baseline restored 1495 → 1477 |
+| ``tests/unit/test_calendar_contracts.py`` | **EDITED** — removed local fixture; ``TestImportBoundaries`` opts in |
+| ``tests/unit/test_calendar_conversion.py`` | **EDITED** — removed local fixture; ``TestImportBoundaries`` opts in |
+| ``tests/unit/test_cli_session.py`` | **EDITED** — removed class-local fixture; ``TestCliSessionBoundaries`` opts in |
+| ``tests/unit/test_retrieval_contracts.py`` | **EDITED** — removed local fixture; ``TestBoundaries`` opts in; compacted 2 lines |
+| ``tests/unit/test_session_storage_paths.py`` | **EDITED** — removed local fixture; ``TestSessionPathsImportBoundaries`` opts in |
+| ``tests/unit/test_storage_atomic.py`` | **EDITED** — removed local fixture; ``TestAtomicImportBoundaries`` opts in |
+| ``tests/unit/test_storage_markdown.py`` | **EDITED** — removed local fixture; ``TestMarkdownImportBoundaries`` opts in |
+| ``tests/unit/test_storage_paths.py`` | **EDITED** — removed local fixture; ``TestPathsImportBoundaries`` opts in |
+| ``tests/unit/test_storage_types.py`` | **EDITED** — removed local fixture; ``TestStorageTypesImportBoundaries`` opts in |
+| ``docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`` | **EDITED** — added this correction record; corrected S7-C11 file inventory/narrative |
+| ``DEVELOPMENT_STATUS.md`` | **EDITED** — added S7-C12 DONE |
+
+### S7-C11 historical inventory correction
+
+The actual S7-C11 commit changed these 14 files:
+
+- ``DEVELOPMENT_STATUS.md``
+- ``docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md``
+- ``tests/conftest.py`` (DELETED)
+- ``tests/contract/test_boundaries.py``
+- ``tests/contract/test_maintainability.py``
+- ``tests/unit/test_calendar_contracts.py``
+- ``tests/unit/test_calendar_conversion.py``
+- ``tests/unit/test_cli_session.py``
+- ``tests/unit/test_retrieval_contracts.py``
+- ``tests/unit/test_session_storage_paths.py``
+- ``tests/unit/test_storage_atomic.py``
+- ``tests/unit/test_storage_markdown.py``
+- ``tests/unit/test_storage_paths.py``
+- ``tests/unit/test_storage_types.py``
+
+### S7-C11 maintainability-history correction
+
+S7-C11 stated: "No new legacy exceptions added." This was incomplete because
+the existing ``test_retrieval_contracts.py`` ceiling was raised:
+
+```
+1477 → 1495
+```
+
+S7-C12 reverted this increase and restored the accepted 1477 ratchet.
+
+### Quality-gate evidence
+
+- Boundary standalone: 97 passed.
+- Catalog standalone: 33 passed.
+- Boundary → Catalog: 130 passed.
+- Catalog → Boundary: 130 passed.
+- CLI boundary standalone: 3 passed.
+- CLI boundary → Catalog: 36 passed.
+- Catalog → CLI boundary: 36 passed.
+- Calendar contracts: all passed.
+- Calendar conversion: all passed.
+- Retrieval contracts: all passed.
+- Session storage paths: all passed.
+- Storage atomic: all passed.
+- Storage markdown: all passed.
+- Storage paths: all passed.
+- Storage types: all passed.
+- Mixed-order regression (retrieval + catalog + calendar + MVP registry + boundaries): all passed.
+- MVP registry: 21 passed.
+- Golden Tool Layer (main + session): 43 passed.
+- Maintainability: 278 passed.
+- Full ``uv run pytest``: 3645 passed, 95 skipped, 0 failed, 0 errors.
+- ``uv run ruff check .`` — no errors.
+- ``uv run ruff format --check .`` — all files formatted.
+- ``git diff --check`` — no whitespace errors.
+
+### Maintainability
+
+- ``PRODUCTION_HARD_LIMIT``: 700 (unchanged).
+- ``TEST_HARD_LIMIT``: 1000 (unchanged).
+- ``TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]``: **1477** (restored from S7-C11 temporary 1495).
+- No other legacy ceiling increased.
+- No new legacy exceptions added.
+- ``test_retrieval_contracts.py`` physical lines: 1476 (below 1477 baseline).
+
+### Production diff
+
+**Zero.** No ``src/`` files modified.
+
+### Golden fixture immutability
+
+- ``tests/fixtures/golden_test_vault``: zero diff vs HEAD.
+- ``tests/integration/conftest.py``: zero diff vs HEAD.
+
+### Commit
+
+- SHA: (reported in Final Report)
+- Message: ``test: deduplicate import isolation (S7-C12)``
+
+### Stage status
+
+- S7-07 remains **DONE**.
+- S7-C09 remains **DONE**.
+- S7-C10 remains **DONE**.
+- S7-C11 remains **DONE**.
+- S7-C12 is **DONE**.
 - S7-08 remains **NOT STARTED**.
 - Stage 7 remains **IN PROGRESS**.
 - Stage 8 remains **NOT STARTED**.

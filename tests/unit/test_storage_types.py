@@ -11,7 +11,6 @@ Covers:
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import cast
 
@@ -21,24 +20,6 @@ from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.types import EntityId, EntityType, Revision
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
 from dnd_assistant.storage import EntityDirectory, VaultDocument, VaultRepository
-
-
-@pytest.fixture(autouse=True)
-def _restore_dnd_assistant_modules() -> Iterator[None]:
-    """Restore dnd_assistant module identity after clean-import tests."""
-    original = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
-    }
-    try:
-        yield
-    finally:
-        for name in list(sys.modules):
-            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
-                del sys.modules[name]
-        sys.modules.update(original)
-
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
@@ -231,44 +212,39 @@ def test_storage_types_reexported() -> None:
     from dnd_assistant.storage import EntityDirectory, VaultDocument, VaultRepository  # noqa: F401
 
 
-def test_storage_does_not_import_models() -> None:
-    """Verify storage/types does not trigger model imports."""
-    import sys
+@pytest.mark.usefixtures("restore_dnd_assistant_modules")
+class TestStorageTypesImportBoundaries:
+    """Clean-import boundary tests for storage/types."""
 
-    # Clean dnd_assistant modules
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
+    def test_does_not_import_models(self) -> None:
+        """Verify storage/types does not trigger model imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
 
-    import dnd_assistant.storage.types  # noqa: F401
+        import dnd_assistant.storage.types  # noqa: F401
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
-    assert not mod_names, f"storage/types imported model modules: {mod_names}"
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
+        assert not mod_names, f"storage/types imported model modules: {mod_names}"
 
+    def test_does_not_import_retrieval(self) -> None:
+        """Verify storage/types does not trigger retrieval imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
 
-def test_storage_does_not_import_retrieval() -> None:
-    """Verify storage/types does not trigger retrieval imports."""
-    import sys
+        import dnd_assistant.storage.types  # noqa: F401
 
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.retrieval")}
+        assert not mod_names, f"storage/types imported retrieval modules: {mod_names}"
 
-    import dnd_assistant.storage.types  # noqa: F401
+    def test_does_not_import_tools(self) -> None:
+        """Verify storage/types does not trigger tool imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.retrieval")}
-    assert not mod_names, f"storage/types imported retrieval modules: {mod_names}"
+        import dnd_assistant.storage.types  # noqa: F401
 
-
-def test_storage_does_not_import_tools() -> None:
-    """Verify storage/types does not trigger tool imports."""
-    import sys
-
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-
-    import dnd_assistant.storage.types  # noqa: F401
-
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
-    assert not mod_names, f"storage/types imported tool modules: {mod_names}"
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
+        assert not mod_names, f"storage/types imported tool modules: {mod_names}"

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Iterator
 
 import pytest
 
@@ -15,24 +14,6 @@ from dnd_assistant.domain import (
     GameDate,
     IntercalaryDay,
 )
-
-
-@pytest.fixture(autouse=True)
-def _restore_dnd_assistant_modules() -> Iterator[None]:
-    """Restore dnd_assistant module identity after clean-import tests."""
-    original = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
-    }
-    try:
-        yield
-    finally:
-        for name in list(sys.modules):
-            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
-                del sys.modules[name]
-        sys.modules.update(original)
-
 
 _3M = (
     CalendarMonth(name="First", days=30),
@@ -502,6 +483,7 @@ class TestLargeValues:
 
 
 # 28. Import/boundary tests
+@pytest.mark.usefixtures("restore_dnd_assistant_modules")
 class TestImportBoundaries:
     def test_module_importable(self) -> None:
         import dnd_assistant.domain.calendar  # noqa: F401
@@ -513,7 +495,6 @@ class TestImportBoundaries:
 
     def test_no_storage_import(self) -> None:
         import importlib
-        import sys
 
         for key in list(sys.modules):
             if key.startswith("dnd_assistant"):
@@ -524,7 +505,6 @@ class TestImportBoundaries:
 
     def test_no_models_import(self) -> None:
         import importlib
-        import sys
 
         for key in list(sys.modules):
             if key.startswith("dnd_assistant"):

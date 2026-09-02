@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Iterator
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -27,24 +26,6 @@ from dnd_assistant.storage.session_paths import (
     SessionStoragePaths,
     resolve_session_storage_paths,
 )
-
-
-@pytest.fixture(autouse=True)
-def _restore_dnd_assistant_modules() -> Iterator[None]:
-    """Restore dnd_assistant module identity after clean-import tests."""
-    original = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
-    }
-    try:
-        yield
-    finally:
-        for name in list(sys.modules):
-            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
-                del sys.modules[name]
-        sys.modules.update(original)
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -538,56 +519,56 @@ def test_session_paths_module_importable() -> None:
     )
 
 
-def test_session_paths_does_not_import_models() -> None:
-    """Verify storage/session_paths does not trigger model imports."""
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.session_paths  # noqa: F401
+@pytest.mark.usefixtures("restore_dnd_assistant_modules")
+class TestSessionPathsImportBoundaries:
+    """Clean-import boundary tests for storage/session_paths."""
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
-    assert not mod_names, f"session_paths imported model modules: {mod_names}"
+    def test_does_not_import_models(self) -> None:
+        """Verify storage/session_paths does not trigger model imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.session_paths  # noqa: F401
 
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
+        assert not mod_names, f"session_paths imported model modules: {mod_names}"
 
-def test_session_paths_does_not_import_retrieval() -> None:
-    """Verify storage/session_paths does not trigger retrieval imports."""
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.session_paths  # noqa: F401
+    def test_does_not_import_retrieval(self) -> None:
+        """Verify storage/session_paths does not trigger retrieval imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.session_paths  # noqa: F401
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.retrieval")}
-    assert not mod_names, f"session_paths imported retrieval modules: {mod_names}"
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.retrieval")}
+        assert not mod_names, f"session_paths imported retrieval modules: {mod_names}"
 
+    def test_does_not_import_tools(self) -> None:
+        """Verify storage/session_paths does not trigger tool imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.session_paths  # noqa: F401
 
-def test_session_paths_does_not_import_tools() -> None:
-    """Verify storage/session_paths does not trigger tool imports."""
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.session_paths  # noqa: F401
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
+        assert not mod_names, f"session_paths imported tool modules: {mod_names}"
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
-    assert not mod_names, f"session_paths imported tool modules: {mod_names}"
+    def test_does_not_import_application(self) -> None:
+        """Verify storage/session_paths does not trigger application imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.session_paths  # noqa: F401
 
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.application")}
+        assert not mod_names, f"session_paths imported application modules: {mod_names}"
 
-def test_session_paths_does_not_import_application() -> None:
-    """Verify storage/session_paths does not trigger application imports."""
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.session_paths  # noqa: F401
+    def test_does_not_import_cli(self) -> None:
+        """Verify storage/session_paths does not trigger CLI imports."""
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.session_paths  # noqa: F401
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.application")}
-    assert not mod_names, f"session_paths imported application modules: {mod_names}"
-
-
-def test_session_paths_does_not_import_cli() -> None:
-    """Verify storage/session_paths does not trigger CLI imports."""
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.session_paths  # noqa: F401
-
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.cli")}
-    assert not mod_names, f"session_paths imported CLI modules: {mod_names}"
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.cli")}
+        assert not mod_names, f"session_paths imported CLI modules: {mod_names}"

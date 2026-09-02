@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Iterator
 from pathlib import Path
 from unittest import mock
 
@@ -12,23 +11,6 @@ import pytest
 
 from dnd_assistant.errors import StorageError, ValidationError
 from dnd_assistant.storage.atomic import atomic_write_text
-
-
-@pytest.fixture(autouse=True)
-def _restore_dnd_assistant_modules() -> Iterator[None]:
-    """Restore dnd_assistant module identity after clean-import tests."""
-    original = {
-        name: module
-        for name, module in sys.modules.items()
-        if name == "dnd_assistant" or name.startswith("dnd_assistant.")
-    }
-    try:
-        yield
-    finally:
-        for name in list(sys.modules):
-            if name == "dnd_assistant" or name.startswith("dnd_assistant."):
-                del sys.modules[name]
-        sys.modules.update(original)
 
 
 def _make_target(tmp_path: Path, name: str = "target.md") -> Path:
@@ -426,34 +408,36 @@ def test_atomic_does_not_import_markdown() -> None:
     assert "dnd_assistant.storage.markdown" not in src
 
 
-def test_atomic_does_not_import_models() -> None:
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.atomic  # noqa: F401
+@pytest.mark.usefixtures("restore_dnd_assistant_modules")
+class TestAtomicImportBoundaries:
+    """Clean-import boundary tests for storage/atomic."""
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
-    assert not mod_names, f"atomic imported model modules: {mod_names}"
+    def test_does_not_import_models(self) -> None:
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.atomic  # noqa: F401
 
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.models")}
+        assert not mod_names, f"atomic imported model modules: {mod_names}"
 
-def test_atomic_does_not_import_retrieval() -> None:
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.atomic  # noqa: F401
+    def test_does_not_import_retrieval(self) -> None:
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.atomic  # noqa: F401
 
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.retrieval")}
-    assert not mod_names, f"atomic imported retrieval modules: {mod_names}"
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.retrieval")}
+        assert not mod_names, f"atomic imported retrieval modules: {mod_names}"
 
+    def test_does_not_import_tools(self) -> None:
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+        import dnd_assistant.storage.atomic  # noqa: F401
 
-def test_atomic_does_not_import_tools() -> None:
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    import dnd_assistant.storage.atomic  # noqa: F401
-
-    mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
-    assert not mod_names, f"atomic imported tool modules: {mod_names}"
+        mod_names = {m for m in sys.modules if m.startswith("dnd_assistant.tools")}
+        assert not mod_names, f"atomic imported tool modules: {mod_names}"
 
 
 class TestDanglingSymlink:

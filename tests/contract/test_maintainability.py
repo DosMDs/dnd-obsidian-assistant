@@ -55,7 +55,7 @@ PRODUCTION_LEGACY_EXCEPTIONS: dict[str, int] = {
 }
 
 TEST_LEGACY_EXCEPTIONS: dict[str, int] = {
-    "unit/test_retrieval_contracts.py": 1495,
+    "unit/test_retrieval_contracts.py": 1477,
     "unit/test_storage_append_fact.py": 1229,
     "unit/test_fts_index.py": 1171,
     "unit/test_session_metadata.py": 1112,
