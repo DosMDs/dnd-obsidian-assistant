@@ -826,5 +826,198 @@ timestamps to aware datetimes is preserved.
 - S7-02 remains **DONE**.
 - S7-C05 is **DONE**.
 - Stage 7 remains **IN PROGRESS**.
-- S7-03 remains **NOT STARTED**.
+- S7-03 is **DONE**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-03 — Session mutation tools
+
+### Scope
+
+Implement four provider-neutral session mutation tools that expose existing
+deterministic Python session mutation behaviour through the ToolRegistry/
+ToolExecutor contracts.  Every mutation performs a read-only recovery
+preflight before delegating to `SessionRuntimeService`.
+
+### Exact tool surface
+
+Registered exactly:
+
+```
+start_session
+record_event
+record_note
+end_session
+```
+
+### Module shape
+
+```
+src/dnd_assistant/tools/session_mutations.py    — NEW: all four session mutation tools
+```
+
+One cohesive module. No directory hierarchy for four tools.
+
+### Permission and side-effect metadata
+
+All four tools are WRITE tools:
+
+```python
+permission = Permission.WRITE
+side_effects = frozenset({SideEffect.SESSION_MUTATION})
+```
+
+### Session-mode contracts
+
+| Tool | Allowed mode |
+|---|---|
+| `start_session` | `NO_ACTIVE_SESSION` only |
+| `record_event` | `ACTIVE_SESSION` only |
+| `record_note` | `ACTIVE_SESSION` only |
+| `end_session` | `ACTIVE_SESSION` only |
+
+### Recovery preflight
+
+Every mutation handler calls `SessionRecoveryService.inspect_runtime()` after
+ToolExecutor validation and immediately before the runtime mutation.
+
+If `report.has_issues` is True, a generic `ConflictError` is raised:
+
+```
+Session runtime requires explicit recovery before mutation
+```
+
+The error does not expose filesystem paths, raw recovery detail text,
+operation IDs, alternate/corrupt session IDs, or audit hashes.
+
+Recovery repair methods (`repair_audit_tail`, `cleanup_partial_start`,
+`repair_event_tail`) are never called from S7-03 tools.
+
+### Preflight ordering
+
+```
+invalid input            → no recovery inspection → no runtime mutation
+READ permission          → no recovery inspection → no runtime mutation
+wrong SessionMode        → no recovery inspection → no runtime mutation
+missing AuditContext     → no recovery inspection → no runtime mutation
+valid WRITE invocation   → recovery inspection → runtime mutation
+recovery issues present  → recovery inspection → runtime mutation zero times
+```
+
+### AuditContext ownership
+
+`AuditContext` comes from `context.audit` (the trusted `ExecutionContext`).
+Tools never generate `operation_id`, call `datetime.now()`, change `real_time`,
+`source`, `session`, `model_profile`, or `prompt_version`.
+
+The exact same `AuditContext` object is passed to `SessionRuntimeService`.
+
+### Input/output DTOs
+
+| DTO | Fields | Notes |
+|---|---|---|
+| `StartSessionInput` | (empty) | `extra="forbid"` |
+| `StartSessionOutput` | `session: Session` | Canonical Session |
+| `RecordEventInput` | `event_type: str`, `extra_fields: dict[str, JsonValue] \| None` | Strict string validation, `extra="forbid"` |
+| `RecordEventOutput` | `event: SessionEventResult` | Reuses S7-02 DTO |
+| `RecordNoteInput` | `text: str` | Strict string validation, `extra="forbid"` |
+| `RecordNoteOutput` | `event: SessionEventResult` | Reuses S7-02 DTO |
+| `EndSessionInput` | `touched_entity_ids: list[EntityId]` | Default `[]`, `extra="forbid"` |
+| `EndSessionOutput` | `session: Session` | Canonical Session |
+
+### Runtime delegation
+
+All mutation behaviour delegates to `SessionRuntimeService`:
+
+| Tool | Runtime method |
+|---|---|
+| `start_session` | `runtime_service.start_session(audit=context.audit)` |
+| `record_event` | `runtime_service.record_event(event_type, extra_fields=..., audit=...)` |
+| `record_note` | `runtime_service.record_note(text, audit=...)` |
+| `end_session` | `runtime_service.end_session(touched_entity_ids=..., audit=...)` |
+
+No direct repository calls. No direct filesystem access. No direct audit writes.
+No world_tick calculation. No session-ID allocation. No revision calculation.
+
+### Event DTO reuse
+
+`RecordEventOutput` and `RecordNoteOutput` reuse `SessionEventResult` from
+`session_reads.py`.  The raw `RawSessionEvent` returned by the runtime is
+converted to `SessionEventResult` preserving `event_id`, `real_time`,
+`world_tick`, `type`, and `extra_fields` by value.
+
+### No world-time logic in tools
+
+S7-03 tools never accept or calculate `world_tick`, `world_tick_start`,
+or `world_tick_end`.  `SessionRuntimeService` reads the canonical persisted
+world time from `WorldTimeRepository`.
+
+### Registration API
+
+```python
+def register_session_mutation_tools(
+    registry: ToolRegistry,
+    *,
+    runtime_service: SessionRuntimeService,
+    recovery_service: SessionRecoveryService,
+) -> None:
+```
+
+Uses `isinstance(registry, ToolRegistry)` validation consistent with
+existing entity-read and session-read registration.
+
+### No lower-layer duplication
+
+`session_mutations.py` does not directly call:
+- `SessionMetadataRepository.create_session`
+- `SessionMetadataRepository.close_session`
+- `SessionEventRepository.append_event`
+- `WorldTimeRepository.get_current_world_time`
+- `AuditService.append`
+
+Those belong behind `SessionRuntimeService`.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/session_mutations.py` | **NEW** — start_session, record_event, record_note, end_session |
+| `tests/unit/test_session_mutation_tool_contracts.py` | **NEW** — 71 DTO/registration/contract tests |
+| `tests/unit/test_session_mutation_tools.py` | **NEW** — 32 handler/executor/delegation tests |
+| `tests/unit/test_session_mutation_tool_safety.py` | **NEW** — 21 permission/mode/audit/recovery safety tests |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added 4 session_mutations negative import tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added this record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-03 DONE |
+
+### Tests and quality gates
+
+- 71/71 session-mutation contract tests pass.
+- 32/32 session-mutation behaviour tests pass.
+- 21/21 session-mutation safety tests pass.
+- 73/73 boundary tests pass (was 69, +4 new session_mutations tests).
+- Full `uv run pytest`: 3266 passed, 95 skipped, 0 failed, 0 errors.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Explicit non-goals
+
+- World-time read tools (S7-04).
+- World-time mutation tools (S7-05).
+- Entity mutation tools (S7-06).
+- Cross-family integration (S7-07).
+- Recovery mutation/repair tools.
+- Provider schema adaptation.
+- ModelGateway/Ollama integration.
+- Fast Agent.
+- ChangeSet.
+- Post-session processing.
+- Global registry bootstrap.
+
+### Completion state
+
+- S7-03 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-04 remains **NOT STARTED**.
 - Stage 8 remains **NOT STARTED**.

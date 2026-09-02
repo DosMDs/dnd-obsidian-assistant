@@ -83,7 +83,7 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 | S7-C04 — Finalize S7-01/C03 documentation and boundary contracts | DONE |
 | S7-02 — Session read tools | DONE |
 | S7-C05 — Strengthen session read public DTO contracts | DONE |
-| S7-03 — Session mutation tools | NOT STARTED |
+| S7-03 — Session mutation tools | DONE |
 | S7-04 — World-time read + deterministic calendar read surface | NOT STARTED |
 | S7-05 — World-time mutation tools | NOT STARTED |
 | S7-06 — Safe entity mutation tools | NOT STARTED |
