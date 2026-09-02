@@ -1,0 +1,33 @@
+"""Tool Layer — provider-neutral tool registry, executor, and typed metadata.
+
+This package provides the foundational Tool Layer contracts:
+
+- ``ToolRegistry`` — register, lookup, and list tool definitions.
+- ``ToolExecutor`` — validated execution pipeline for registered tools.
+- ``Permission``, ``SideEffect``, ``SessionMode`` — typed metadata vocabulary.
+- ``ToolDefinition`` — provider-neutral tool metadata.
+- ``ExecutionContext`` — trusted Python execution context.
+
+No concrete campaign tools are defined in this package.
+This package must not import Ollama, ModelGateway, or any provider package.
+"""
+
+from dnd_assistant.tools.executor import ToolExecutor
+from dnd_assistant.tools.registry import ToolRegistry
+from dnd_assistant.tools.types import (
+    ExecutionContext,
+    Permission,
+    SessionMode,
+    SideEffect,
+    ToolDefinition,
+)
+
+__all__: list[str] = [
+    "ExecutionContext",
+    "Permission",
+    "SessionMode",
+    "SideEffect",
+    "ToolDefinition",
+    "ToolExecutor",
+    "ToolRegistry",
+]

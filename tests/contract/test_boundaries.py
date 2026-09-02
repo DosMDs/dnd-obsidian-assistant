@@ -140,6 +140,66 @@ def test_registry_does_not_import_domain() -> None:
     assert not mod_names, f"registry imported domain modules: {mod_names}"
 
 
+# ── tools/executor must not depend on storage or models ─────────────────────
+
+
+def test_executor_does_not_import_storage() -> None:
+    _clean_import("dnd_assistant.tools.executor")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
+    assert not mod_names, f"executor imported storage modules: {mod_names}"
+
+
+def test_executor_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.executor")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"executor imported model modules: {mod_names}"
+
+
+def test_executor_does_not_import_domain() -> None:
+    _clean_import("dnd_assistant.tools.executor")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.domain")}
+    assert not mod_names, f"executor imported domain modules: {mod_names}"
+
+
+def test_executor_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.tools.executor")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"executor imported application modules: {mod_names}"
+
+
+def test_executor_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.executor")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"executor triggered ollama import: {mod_names}"
+
+
+# ── tools/types must not depend on storage or models ────────────────────────
+
+
+def test_tools_types_does_not_import_storage() -> None:
+    _clean_import("dnd_assistant.tools.types")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.storage")}
+    assert not mod_names, f"tools.types imported storage modules: {mod_names}"
+
+
+def test_tools_types_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.types")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"tools.types imported model modules: {mod_names}"
+
+
+def test_tools_types_does_not_import_domain() -> None:
+    _clean_import("dnd_assistant.tools.types")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.domain")}
+    assert not mod_names, f"tools.types imported domain modules: {mod_names}"
+
+
+def test_tools_types_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.types")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"tools.types triggered ollama import: {mod_names}"
+
+
 # ── no module pulls in ollama ────────────────────────────────────────────
 
 

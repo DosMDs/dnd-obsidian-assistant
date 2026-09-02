@@ -2,11 +2,10 @@
 
 **Last updated:** 2026-09-02
 **Current milestone:** `v0.1-dev — Vault Core`
-**Roadmap position:** Stage 6 completed
-**Active stage:** None
-**Stage 6 status:** `DONE`
-**Started:** 2026-08-31
-**Completed:** 2026-09-02
+**Roadmap position:** Stage 7 in progress
+**Active stage:** Stage 7 — Tool Registry / Executor
+**Stage 7 status:** `IN PROGRESS`
+**Started:** 2026-09-02
 
 ## Status model
 
@@ -30,7 +29,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 ## Stage overview
 
 | Stage | Status | Started | Completed | Details |
-|---|---|---|---|---|
+|---|---|---|---|---|---|
 | 0. Environment | DONE | 2026-08-27 | 2026-08-27 | — |
 | 1. Project skeleton + contracts | DONE | 2026-08-27 | 2026-08-30 | [`docs/stages/01_PROJECT_SKELETON_AND_CONTRACTS.md`](docs/stages/01_PROJECT_SKELETON_AND_CONTRACTS.md) |
 | 2. Domain schemas | DONE | 2026-08-30 | 2026-08-30 | [`docs/stages/02_DOMAIN_SCHEMAS.md`](docs/stages/02_DOMAIN_SCHEMAS.md) |
@@ -38,7 +37,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | 4. Calendar | DONE | 2026-08-30 | 2026-08-31 | [`docs/stages/04_CALENDAR.md`](docs/stages/04_CALENDAR.md) |
 | 5. Retrieval + Entity Resolution | DONE | 2026-08-31 | 2026-08-31 | [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md) |
 | 6. Session Runtime without LLM | DONE | 2026-08-31 | 2026-09-02 | [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md) |
-| 7. Tool Registry / Executor | NOT STARTED | — | — | — |
+| 7. Tool Registry / Executor | IN PROGRESS | 2026-09-02 | — | [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md) |
 | 8. Model Gateway / Ollama | NOT STARTED | — | — | — |
 | 9. Fast Agent | NOT STARTED | — | — | — |
 | 10. ChangeSet | NOT STARTED | — | — | — |
@@ -49,7 +48,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 
 ## Current roadmap state
 
-Stage 6 is complete.
+Stage 7 is in progress.
 
 Pre-Stage-6 base:
 
@@ -87,11 +86,19 @@ Detailed history: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/
 
 Details: [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md)
 
+## Current stage tasks
+
+| Task | Status |
+|---|---|
+| S7-00 — Foundational tool contracts: typed metadata, ToolRegistry, ToolExecutor, permissions, side effects, session modes, tests, documentation | DONE |
+
+Details: [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md)
+
 ## Next stage
 
 | Stage | Status |
 |---|---|
-| Stage 7 — Tool Registry / Executor | NOT STARTED |
+| Stage 8 — Model Gateway / Ollama | NOT STARTED |
 
 ## Maintenance gate before S6-06
 
@@ -116,3 +123,4 @@ None known.
 | `docs/stages/04_CALENDAR.md` | Stage 4 detailed plan and history |
 | `docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md` | Stage 5 detailed plan and history |
 | `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` | Stage 6 detailed plan and history |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | Stage 7 detailed plan and history |

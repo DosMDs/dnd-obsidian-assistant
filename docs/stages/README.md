@@ -14,13 +14,14 @@ Detailed task/correction/review records belong in `docs/stages/`.
 ## Index
 
 | Stage | Document |
-|---|---|
+|---|---|---|
 | Stage 1 — Project skeleton + contracts | `01_PROJECT_SKELETON_AND_CONTRACTS.md` |
 | Stage 2 — Domain schemas | `02_DOMAIN_SCHEMAS.md` |
 | Stage 3 — Vault Repository | `03_VAULT_REPOSITORY.md` |
 | Stage 4 — Calendar | `04_CALENDAR.md` |
 | Stage 5 — Retrieval + Entity Resolution | `05_RETRIEVAL_AND_ENTITY_RESOLUTION.md` |
 | Stage 6 — Session Runtime without LLM | `06_SESSION_RUNTIME_WITHOUT_LLM.md` |
+| Stage 7 — Tool Registry and Executor | `07_TOOL_REGISTRY_AND_EXECUTOR.md` |
 
 ## Provenance
 
