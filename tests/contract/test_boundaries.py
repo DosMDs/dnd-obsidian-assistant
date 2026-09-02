@@ -362,6 +362,33 @@ def test_world_time_mutations_does_not_import_retrieval() -> None:
     assert not mod_names, f"world_time_mutations imported retrieval modules: {mod_names}"
 
 
+# ── dnd_assistant.tools.entity_mutations must not import models/CLI/application ──
+
+
+def test_entity_mutations_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.entity_mutations")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"entity_mutations imported model modules: {mod_names}"
+
+
+def test_entity_mutations_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.tools.entity_mutations")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"entity_mutations imported CLI modules: {mod_names}"
+
+
+def test_entity_mutations_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.entity_mutations")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"entity_mutations triggered ollama import: {mod_names}"
+
+
+def test_entity_mutations_does_not_import_application() -> None:
+    _clean_import("dnd_assistant.tools.entity_mutations")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.application")}
+    assert not mod_names, f"entity_mutations imported application modules: {mod_names}"
+
+
 # ── no module pulls in ollama ────────────────────────────────────────────
 
 

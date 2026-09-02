@@ -37,7 +37,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-C06 | DONE | Restore S7-05 maintainability ratchet |
 | S7-C07 | DONE | Correct S7-C06 verification documentation |
 | S7-C08 | DONE | Correct separated maintainability gate count |
-| S7-06 | NOT STARTED | Safe entity mutation tools |
+| S7-06 | DONE | Safe entity mutation tools |
 | S7-07 | NOT STARTED | Cross-family integration / public registry schema / Golden-Vault hardening |
 | S7-08 | NOT STARTED | Full Stage-7 historical review / verification / completion |
 
@@ -1547,8 +1547,229 @@ sections.
 - S7-C06 remains **DONE**.
 - S7-C07 remains **DONE**.
 - S7-C08 is **DONE**.
-- S7-06 remains **NOT STARTED**.
+- S7-06 is **DONE**.
 - S7-07 remains **NOT STARTED**.
 - S7-08 remains **NOT STARTED**.
 - Stage 7 remains **IN PROGRESS**.
+- Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-06 — Safe entity mutation tools
+
+### Scope
+
+Implement two concrete entity mutation tools (`patch_entity` and
+`append_entity_fact`) that expose already accepted entity mutation
+capabilities through the ToolRegistry/ToolExecutor contracts.
+
+### Module shape
+
+```
+src/dnd_assistant/tools/
+    entity_mutations.py    — NEW: patch_entity and append_entity_fact tools
+```
+
+### Exact two-tool surface
+
+Registered exactly:
+
+```
+patch_entity
+append_entity_fact
+```
+
+`create_entity` is NOT implemented.
+
+### Stable-ID-only write policy
+
+Both tools accept only a stable `EntityId` as the mutation target.
+No free-text reference, name, alias, or search query is accepted.
+
+No `EntityResolver.resolve()` call exists in these tools.
+
+### SearchService player-visibility authorization
+
+Every mutation handler calls `SearchService.get_by_id(input_model.entity_id)`
+before any repository mutation.
+
+- `None` → generic `NotFoundError` ("Entity not found or not accessible").
+- Mismatched `hit.entity_id != requested_id` → `StorageError` (fail-closed).
+
+Hidden (DM, SYSTEM) and missing entities all produce the same generic
+`NotFoundError`. No visibility value or alternate entity ID is disclosed.
+
+### Generic hidden-vs-missing NotFound behavior
+
+`SearchService.get_by_id()` returns `None` for:
+- missing entities;
+- `Visibility.DM` entities;
+- `Visibility.SYSTEM` entities.
+
+All three cases produce the same generic `NotFoundError`.
+
+### EntityResolver not used
+
+No `EntityResolver` import or call exists in `entity_mutations.py`.
+
+### Module/registration shape
+
+```python
+def register_entity_mutation_tools(
+    registry: ToolRegistry,
+    *,
+    search_service: SearchService,
+    repository: VaultRepository,
+) -> None:
+```
+
+Uses `isinstance(registry, ToolRegistry)` validation consistent with
+existing tool registration APIs.
+
+### WRITE/ENTITY_MUTATION metadata
+
+Both tools:
+
+```python
+permission = Permission.WRITE
+side_effects = frozenset({SideEffect.ENTITY_MUTATION})
+allowed_session_modes = frozenset({SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION})
+```
+
+### Both-session-mode decision
+
+Entity mutation is valid both outside and during an active session.
+No session-event side effect is emitted.
+
+### AuditContext ownership
+
+`AuditContext` comes only from `ExecutionContext.audit`. Tools never
+generate `operation_id`, call `datetime.now()`, or rebuild `AuditContext`.
+The exact same `context.audit` object is passed to the repository.
+
+### PatchEntityInput using canonical EntityPatch
+
+```python
+class PatchEntityInput(BaseModel):
+    entity_id: EntityId
+    expected_revision: Revision
+    patch: EntityPatch
+```
+
+Uses the existing canonical `EntityPatch` which owns:
+- editable-field whitelist;
+- omitted-vs-explicit-None semantics;
+- non-nullable field checks;
+- empty-patch rejection;
+- field validation.
+
+### AppendEntityFactInput validation
+
+```python
+class AppendEntityFactInput(BaseModel):
+    entity_id: EntityId
+    expected_revision: Revision
+    fact: str
+```
+
+The `fact` field is validated at the Tool Layer:
+- must be a string;
+- non-empty;
+- no leading/trailing whitespace;
+- printable Unicode (no newlines/control characters).
+
+### Caller-supplied expected_revision
+
+Both tools require `expected_revision` as a mandatory field. The value
+is forwarded unchanged to the repository. No read-current-revision
+substitution occurs.
+
+### Repository ownership
+
+The repository owns:
+- revision increment (exactly +1);
+- `updated_at` (set to `audit.real_time`);
+- Markdown body preservation for patches;
+- Markdown bullet rendering for append;
+- atomic writes;
+- audit logging (intent/committed).
+
+### Output contracts
+
+```python
+class PatchEntityOutput(BaseModel):
+    entity: Entity
+    body: str
+
+
+class AppendEntityFactOutput(BaseModel):
+    entity: Entity
+    body: str
+```
+
+Both expose canonical `Entity` + Markdown `body`. No `extra_frontmatter`,
+filesystem path, or raw YAML is exposed.
+
+### Returned-ID fail-closed check
+
+After mutation, the handler verifies `document.entity.id == requested_id`.
+A mismatch raises `StorageError` with a generic message.
+
+### No automatic session coupling
+
+Entity writes do NOT automatically:
+- record a session event;
+- record a session note;
+- modify `touched_entity_ids`;
+- invoke `SessionRuntimeService`;
+- invoke `SessionRecoveryService`;
+- advance world time.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/entity_mutations.py` | **NEW** — patch_entity, append_entity_fact |
+| `tests/unit/test_entity_mutation_tool_contracts.py` | **NEW** — DTO/registration/contract tests |
+| `tests/unit/test_entity_mutation_tools.py` | **NEW** — handler/executor/delegation tests |
+| `tests/unit/test_entity_mutation_tool_safety.py` | **NEW** — authorization/safety/gating tests |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added 4 entity_mutations negative import tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added this record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-06 DONE |
+
+### Tests and quality gates
+
+- All entity mutation contract tests pass.
+- All entity mutation behaviour tests pass.
+- All entity mutation safety tests pass.
+- All boundary tests pass (including 4 new entity_mutations tests).
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — all files formatted.
+- `git diff --check` — no whitespace errors.
+
+### Explicit non-goals
+
+- `create_entity` tool.
+- `delete_entity` tool.
+- `rename_entity` tool.
+- `update_quest_status` convenience wrapper.
+- `add_relation` tool.
+- EntityResolver-based fuzzy write.
+- Automatic clarification loop.
+- Session event coupling.
+- Session touched-entity mutation.
+- World-time changes.
+- ModelGateway/Ollama integration.
+- Fast Agent.
+- ChangeSet.
+- Post-session processing.
+- Global registry bootstrap.
+- Cross-family integration (S7-07).
+
+### Completion state
+
+- S7-06 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-07 remains **NOT STARTED**.
 - Stage 8 remains **NOT STARTED**.
