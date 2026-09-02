@@ -169,4 +169,84 @@ usage.
 - `PRODUCTION_HARD_LIMIT` = 700 (unchanged)
 - `TEST_HARD_LIMIT` = 1000 (unchanged)
 - `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` = 1477 (unchanged)
-- `tests/contract/test_test_harness_policy.py` physical lines = N (under 1000)
+- `tests/contract/test_test_harness_policy.py` physical lines = 546 (under 1000)
+
+---
+
+## MNT-C02 — Make harness semantic detection precise
+
+**Date:** 2026-09-02
+
+### Defects
+
+**Defect A — Module-level opt-in detection was too weak.**
+
+`_has_module_level_pytestmark` returned True for **any** module-level
+`pytestmark = ...` assignment, regardless of whether it actually enabled
+the `restore_dnd_assistant_modules` fixture.  This meant a file with::
+
+```python
+pytestmark = pytest.mark.slow
+```
+
+together with a clean-import that deletes `dnd_assistant.*` from
+`sys.modules` would incorrectly pass semantic coverage.
+
+**Defect B — Clean-import detector matched unrelated sys.modules deletion.**
+
+`_has_dnd_assistant_del` and its class/module variants returned True for
+**any** `del sys.modules[...]` without verifying that the deletion was
+guarded by a condition referencing `dnd_assistant`.  This meant a test
+deleting `other_package` from `sys.modules` would be falsely classified
+as a D&D Assistant clean-import scope.
+
+### Correction
+
+1. **Replaced `_has_module_level_pytestmark` with
+   `_has_module_level_restore_optin`** — returns True only when the
+   module-level `pytestmark` assignment actually contains
+   `pytest.mark.usefixtures("restore_dnd_assistant_modules")`.  Supports
+   direct, list, and tuple forms.
+
+2. **Replaced raw `del sys.modules[...]` detection with guarded
+   detection** — `_has_dnd_assistant_del`, `_class_has_dnd_assistant_del`,
+   and `_module_has_dnd_assistant_del_outside_class` now walk `If` nodes
+   and only return True when the `if` condition references the string
+   `"dnd_assistant"`.
+
+3. **Corrected `test_unrelated_del_not_detected`** — changed from
+   asserting detection (documenting the false positive) to asserting
+   non-detection (the correct semantic behavior).
+
+4. **Added semantic regression tests** (11 new tests):
+   - Direct restore fixture mark detected
+   - Unrelated pytestmark NOT detected
+   - Wrong fixture NOT detected
+   - Composite/list pytestmark detected
+   - Clean-import + unrelated module mark = uncovered
+   - Clean-import + correct module restore = covered
+   - Class-level correct restore = covered
+   - Bare unrelated `del sys.modules[...]` NOT detected
+
+5. **Updated `test_known_module_level_optins`** to use
+   `_has_module_level_restore_optin` instead of raw substring +
+   assignment detection.
+
+### Changed files
+
+- `tests/contract/test_test_harness_policy.py`
+- `docs/maintenance/03_GIGACODE_RELIABILITY_GUARDRAILS.md`
+- `DEVELOPMENT_STATUS.md`
+
+### Zero diff
+
+- `src/` — no changes
+- `.gigacode/rules/` — no changes
+- `.gigacode/skills/` — no changes
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` = 700 (unchanged)
+- `TEST_HARD_LIMIT` = 1000 (unchanged)
+- `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` = 1477 (unchanged)
+- `tests/contract/test_test_harness_policy.py` physical lines = (reported in Final Report)

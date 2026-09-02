@@ -143,7 +143,7 @@ class TestRestorationFixtureUniqueness:
 
 
 def _has_dnd_assistant_del(tree: ast.Module) -> bool:
-    """Check if an AST module contains code that deletes dnd_assistant from sys.modules.
+    """Check if an AST module deletes dnd_assistant from sys.modules.
 
     Detects patterns equivalent to::
 
@@ -157,16 +157,52 @@ def _has_dnd_assistant_del(tree: ast.Module) -> bool:
             if key.startswith("dnd_assistant"):
                 del sys.modules[key]
 
-    This is a repository-specific structural check, not a generic AST
-    framework.
+    The key requirement is that the deletion is *guarded* by a condition
+    that specifically references ``dnd_assistant``.  Unrelated deletions
+    such as::
+
+        if name.startswith("other_package"):
+            del sys.modules[name]
+
+    are NOT detected.
     """
     for node in ast.walk(tree):
-        if isinstance(node, ast.Delete):
-            for target in node.targets:
-                if _is_sys_modules_subscr(target):
-                    # Found del sys.modules[something] — verify the
-                    # enclosing context references dnd_assistant
-                    return True
+        if isinstance(node, ast.If) and _condition_refers_to_dnd_assistant(node.test):
+            if _if_body_has_sys_modules_del(node):
+                return True
+    return False
+
+
+def _condition_refers_to_dnd_assistant(test: ast.expr) -> bool:
+    """Check if an if-test condition references the string 'dnd_assistant'.
+
+    Matches patterns such as::
+
+        name == "dnd_assistant"
+        name.startswith("dnd_assistant.")
+        key.startswith("dnd_assistant")
+    """
+    for node in ast.walk(test):
+        if isinstance(node, ast.Constant) and isinstance(node.value, str):
+            if "dnd_assistant" in node.value:
+                return True
+    return False
+
+
+def _if_body_has_sys_modules_del(if_node: ast.If) -> bool:
+    """Check if an if statement's body (or orelse) contains del sys.modules[...]."""
+    for stmt in if_node.body:
+        for sub in ast.walk(stmt):
+            if isinstance(sub, ast.Delete):
+                for target in sub.targets:
+                    if _is_sys_modules_subscr(target):
+                        return True
+    for stmt in if_node.orelse:
+        for sub in ast.walk(stmt):
+            if isinstance(sub, ast.Delete):
+                for target in sub.targets:
+                    if _is_sys_modules_subscr(target):
+                        return True
     return False
 
 
@@ -190,7 +226,7 @@ def _collect_opt_in_scope(
     """
     rel = _relative_path(path)
     tree = _parse_ast(path)
-    has_module = _has_module_level_pytestmark(tree, rel)
+    has_module = _has_module_level_restore_optin(tree)
 
     class_optins: set[tuple[str, str]] = set()
     for node in ast.iter_child_nodes(tree):
@@ -201,13 +237,46 @@ def _collect_opt_in_scope(
     return has_module, class_optins
 
 
-def _has_module_level_pytestmark(tree: ast.Module, rel: str) -> bool:
-    """Check if a module has a module-level pytestmark using restore_dnd_assistant_modules."""
-    for node in ast.walk(tree):
+def _has_module_level_restore_optin(tree: ast.Module) -> bool:
+    """Check if a module-level pytestmark uses usefixtures('restore_dnd_assistant_modules').
+
+    Returns True only when the module-level ``pytestmark`` assignment
+    actually enables the ``restore_dnd_assistant_modules`` fixture.
+
+    Accepted forms::
+
+        pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")
+        pytestmark = [
+            pytest.mark.usefixtures("restore_dnd_assistant_modules"),
+            ...
+        ]
+        pytestmark = (pytest.mark.usefixtures("restore_dnd_assistant_modules"), ...)
+
+    Does NOT return True for::
+
+        pytestmark = pytest.mark.slow
+        pytestmark = pytest.mark.usefixtures("some_other_fixture")
+    """
+    for node in ast.iter_child_nodes(tree):
         if isinstance(node, ast.Assign):
             for target in node.targets:
                 if isinstance(target, ast.Name) and target.id == "pytestmark":
-                    return True
+                    if _assigns_restore_usefixtures(node.value):
+                        return True
+    return False
+
+
+def _assigns_restore_usefixtures(value: ast.expr) -> bool:
+    """Check if an expression is or contains usefixtures('restore_dnd_assistant_modules')."""
+    # Direct: pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")
+    if _is_usefixtures_restore(value):
+        return True
+    # List: pytestmark = [...]
+    if isinstance(value, ast.List):
+        return any(_is_usefixtures_restore(el) for el in value.elts)
+    # Tuple: pytestmark = (...)
+    if isinstance(value, ast.Tuple):
+        return any(_is_usefixtures_restore(el) for el in value.elts)
     return False
 
 
@@ -265,10 +334,9 @@ class TestCleanImportCoverage:
 def _class_has_dnd_assistant_del(class_node: ast.ClassDef) -> bool:
     """Check if a class body contains dnd_assistant sys.modules deletion."""
     for node in ast.walk(class_node):
-        if isinstance(node, ast.Delete):
-            for target in node.targets:
-                if _is_sys_modules_subscr(target):
-                    return True
+        if isinstance(node, ast.If) and _condition_refers_to_dnd_assistant(node.test):
+            if _if_body_has_sys_modules_del(node):
+                return True
     return False
 
 
@@ -278,10 +346,9 @@ def _module_has_dnd_assistant_del_outside_class(tree: ast.Module) -> bool:
         if isinstance(node, ast.ClassDef):
             continue
         for sub in ast.walk(node):
-            if isinstance(sub, ast.Delete):
-                for target in sub.targets:
-                    if _is_sys_modules_subscr(target):
-                        return True
+            if isinstance(sub, ast.If) and _condition_refers_to_dnd_assistant(sub.test):
+                if _if_body_has_sys_modules_del(sub):
+                    return True
     return False
 
 
@@ -339,15 +406,9 @@ class TestRestorationOptInUsage:
         """All module-level opt-in files are accounted for (bidirectional check)."""
         actual: set[str] = set()
         for f in _collect_py_files(TESTS_ROOT):
-            src = _read_source(f)
-            if "restore_dnd_assistant_modules" in src:
-                # Check if it's module-level pytestmark
-                tree = _parse_ast(f)
-                for node in ast.walk(tree):
-                    if isinstance(node, ast.Assign):
-                        for target in node.targets:
-                            if isinstance(target, ast.Name) and target.id == "pytestmark":
-                                actual.add(_relative_path(f))
+            tree = _parse_ast(f)
+            if _has_module_level_restore_optin(tree):
+                actual.add(_relative_path(f))
         self._assert_exact_set(actual, self.MODULE_LEVEL_OPTIIN, "Module-level opt-in")
 
     def test_known_class_level_optins(self) -> None:
@@ -465,7 +526,7 @@ x = sys.path
         assert not _has_dnd_assistant_del(tree)
 
     def test_unrelated_del_not_detected(self) -> None:
-        """_has_dnd_assistant_del must not fire for deletion of unrelated modules."""
+        """_has_dnd_assistant_del must NOT fire for deletion of unrelated modules."""
         code = """
 import sys
 for name in list(sys.modules):
@@ -473,10 +534,7 @@ for name in list(sys.modules):
         del sys.modules[name]
 """
         tree = self._parse_snippet(code)
-        # The AST detects sys.modules[name] deletion regardless of the
-        # conditional — that's by design: any sys.modules del in a test
-        # file is suspicious.  This test documents the current behavior.
-        assert _has_dnd_assistant_del(tree)
+        assert not _has_dnd_assistant_del(tree)
 
     # ── _class_has_dnd_assistant_del regressions ───────────────────────────
 
@@ -496,6 +554,15 @@ class MyTest:
                 assert _class_has_dnd_assistant_del(node)
                 return
         pytest.fail("No class found in snippet")
+
+    def test_bare_unrelated_del_not_detected(self) -> None:
+        """_has_dnd_assistant_del must NOT fire for bare del sys.modules without dnd_assistant guard."""
+        code = """
+import sys
+del sys.modules["some_package"]
+"""
+        tree = self._parse_snippet(code)
+        assert not _has_dnd_assistant_del(tree)
 
     def test_class_no_clean_import_not_detected(self) -> None:
         """_class_has_dnd_assistant_del must not fire for a class without clean-import."""
@@ -544,3 +611,93 @@ class TestFoo:
                     if _is_usefixtures_restore(dec):
                         pytest.fail("Falsely detected unrelated fixture as restore")
         # No detection is success
+
+    # ── _has_module_level_restore_optin regressions ──────────────────────────
+
+    def test_module_restore_direct_detected(self) -> None:
+        """_has_module_level_restore_optin detects direct restore fixture mark."""
+        code = """
+import pytest
+pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")
+"""
+        tree = ast.parse(code)
+        assert _has_module_level_restore_optin(tree)
+
+    def test_module_unrelated_mark_not_detected(self) -> None:
+        """_has_module_level_restore_optin must NOT fire for unrelated pytestmark."""
+        code = """
+import pytest
+pytestmark = pytest.mark.slow
+"""
+        tree = ast.parse(code)
+        assert not _has_module_level_restore_optin(tree)
+
+    def test_module_wrong_fixture_not_detected(self) -> None:
+        """_has_module_level_restore_optin must NOT fire for wrong fixture name."""
+        code = """
+import pytest
+pytestmark = pytest.mark.usefixtures("other_fixture")
+"""
+        tree = ast.parse(code)
+        assert not _has_module_level_restore_optin(tree)
+
+    def test_module_composite_pytestmark_detected(self) -> None:
+        """_has_module_level_restore_optin detects restore fixture in a list pytestmark."""
+        code = """
+import pytest
+pytestmark = [
+    pytest.mark.usefixtures("restore_dnd_assistant_modules"),
+    pytest.mark.slow,
+]
+"""
+        tree = ast.parse(code)
+        assert _has_module_level_restore_optin(tree)
+
+    # ── Coverage interaction regressions ──────────────────────────────────
+
+    def test_clean_import_unrelated_module_mark_uncovered(self) -> None:
+        """Clean-import with unrelated module pytestmark is classified as uncovered."""
+        code = """
+import sys
+pytestmark = pytest.mark.slow
+for name in list(sys.modules):
+    if name.startswith("dnd_assistant"):
+        del sys.modules[name]
+"""
+        tree = ast.parse(code)
+        assert _has_dnd_assistant_del(tree)
+        assert not _has_module_level_restore_optin(tree)
+
+    def test_clean_import_correct_module_restore_covered(self) -> None:
+        """Clean-import with correct module-level restore fixture is covered."""
+        code = """
+import sys
+import pytest
+pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")
+for name in list(sys.modules):
+    if name.startswith("dnd_assistant"):
+        del sys.modules[name]
+"""
+        tree = ast.parse(code)
+        assert _has_dnd_assistant_del(tree)
+        assert _has_module_level_restore_optin(tree)
+
+    def test_class_restore_covered(self) -> None:
+        """Class-level usefixtures restore is detected."""
+        code = """
+import sys
+@pytest.mark.usefixtures("restore_dnd_assistant_modules")
+class TestFoo:
+    def test_bar(self):
+        for key in list(sys.modules):
+            if key.startswith("dnd_assistant"):
+                del sys.modules[key]
+"""
+        tree = ast.parse(code)
+        for node in ast.iter_child_nodes(tree):
+            if isinstance(node, ast.ClassDef):
+                assert _class_has_dnd_assistant_del(node)
+                for dec in node.decorator_list:
+                    if _is_usefixtures_restore(dec):
+                        return
+        pytest.fail("Class-level restore not detected")
