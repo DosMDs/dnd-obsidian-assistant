@@ -29,7 +29,7 @@ provider-schema-free, and ChangeSet-free.
 | S7-01 | DONE | Entity read tools |
 | S7-C03 | DONE | Harden entity read-tool safety |
 | S7-C04 | DONE | Finalize S7-01/C03 documentation and boundary contracts |
-| S7-02 | NOT STARTED | Session read tools |
+| S7-02 | DONE | Session read tools |
 | S7-03 | NOT STARTED | Session mutation tools |
 | S7-04 | NOT STARTED | World-time read + deterministic calendar read surface |
 | S7-05 | NOT STARTED | World-time mutation tools |
@@ -592,5 +592,152 @@ Documentation and boundary-contract correction pass. No production behavior chan
 - Stage 7 remains **IN PROGRESS**.
 - S7-01 remains **DONE**.
 - S7-C03 remains **DONE**.
-- S7-02 remains **NOT STARTED**.
+- S7-02 is **DONE**.
 - Stage 8 remains **NOT STARTED**.
+
+---
+
+## S7-02 — Session read tools
+
+### Scope
+
+Implement four provider-neutral session read tools that expose existing
+deterministic Python session read behaviour through the ToolRegistry/
+ToolExecutor contracts.
+
+### Exact tool surface
+
+Registered exactly:
+
+```
+get_active_session
+get_session
+list_sessions
+list_session_events
+```
+
+### Module shape
+
+```
+src/dnd_assistant/tools/session_reads.py    — NEW: all four session read tools
+```
+
+One cohesive module. No directory hierarchy for four small tools.
+
+### Runtime/repository dependency decisions
+
+| Tool | Dependency | Method |
+|---|---|---|
+| `get_active_session` | `SessionRuntimeService` | `get_active_session()` |
+| `get_session` | `SessionMetadataRepository` | `get_session_metadata()` |
+| `list_sessions` | `SessionMetadataRepository` | `list_session_metadata()` |
+| `list_session_events` | `SessionEventRepository` | `list_events()` |
+
+### Input/output DTOs
+
+| DTO | Fields | Notes |
+|---|---|---|
+| `GetActiveSessionInput` | (empty) | `extra="forbid"` |
+| `GetActiveSessionOutput` | `session: object \| None` | `None` = no active session |
+| `GetSessionInput` | `session_id: str` | strict string validation |
+| `GetSessionOutput` | `session: object` | canonical Session only |
+| `ListSessionsInput` | (empty) | `extra="forbid"` |
+| `ListSessionsOutput` | `sessions: list[object]` | repository order preserved |
+| `ListSessionEventsInput` | `session_id: str` | strict string validation |
+| `ListSessionEventsOutput` | `events: list[SessionEventResult]` | physical append order |
+| `SessionEventResult` | `event_id, real_time, world_tick, type, extra_fields` | provider-neutral DTO |
+
+### Session metadata extra_fields deferral
+
+`RawSessionMetadata.extra_fields` is intentionally excluded from
+`GetSessionOutput` and `ListSessionsOutput`.  Public model-facing
+serialisation for arbitrary session metadata extras is deferred.
+
+### Raw event extra_fields exposure decision
+
+Unlike metadata extras, event `extra_fields` are actual event payload
+content and are necessary to preserve notes and event-specific data.
+`SessionEventResult.extra_fields` is typed as `dict[str, JsonValue]`.
+
+### Ordering semantics
+
+- `get_session`: deterministic (single ID lookup).
+- `list_sessions`: preserves `SessionMetadataRepository` session-ID sorted order.
+- `list_session_events`: preserves exact physical append order from
+  `SessionEventRepository`.
+- `get_active_session`: returns the single active session or `None`.
+
+### Recovery/preflight deferral
+
+Session recovery inspection and repair operations are intentionally NOT
+exposed as tools in S7-02.  Recovery preflight belongs to S7-03.
+
+### Registration/composition design
+
+```python
+def register_session_read_tools(
+    registry: ToolRegistry,
+    *,
+    runtime_service: SessionRuntimeService,
+    session_repository: SessionMetadataRepository,
+    event_repository: SessionEventRepository,
+) -> None:
+```
+
+Uses `isinstance(registry, ToolRegistry)` validation consistent with
+corrected entity-read registration.  Dependencies are supplied by
+trusted composition code.
+
+### Fail-closed consistency
+
+`get_session` verifies `metadata.session.id == requested_id` after
+repository lookup.  A mismatch raises `StorageError` with a generic
+non-disclosing message.
+
+### No-mutation guarantee
+
+All four tools are `Permission.READ` with empty `side_effects`.  No
+audit context required.  Tests prove that mutation operations
+(`start_session`, `end_session`, `allocate_next_session_id`,
+`create_session`, `close_session`, `append_event`) are never called.
+
+### Files changed
+
+| File | Change |
+|---|---|
+| `src/dnd_assistant/tools/session_reads.py` | **NEW** — get_active_session, get_session, list_sessions, list_session_events |
+| `tests/unit/test_session_read_tool_contracts.py` | **NEW** — 52 DTO/registration/contract tests |
+| `tests/unit/test_session_read_tools.py` | **NEW** — 32 handler/executor/no-mutation tests |
+| `tests/contract/test_boundaries.py` | **UPDATED** — added session_reads negative import tests |
+| `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | **UPDATED** — added this record |
+| `DEVELOPMENT_STATUS.md` | **UPDATED** — S7-02 DONE |
+
+### Tests and quality gates
+
+- 52/52 session-read contract tests pass.
+- 32/32 session-read behaviour tests pass.
+- 68/68 boundary tests pass (including 3 new session_reads tests).
+- Full `uv run pytest`: all tests pass.
+- `uv run ruff check .` — no errors.
+- `uv run ruff format --check .` — no formatting issues.
+- `git diff --check` — no whitespace errors.
+
+### Explicit non-goals
+
+- Session mutation tools (S7-03).
+- World-time tools (S7-04, S7-05).
+- Entity mutation tools (S7-06).
+- Cross-family integration (S7-07).
+- Recovery inspection/repair tools.
+- Provider schema adaptation.
+- ModelGateway/Ollama integration.
+- Fast Agent.
+- ChangeSet.
+- Post-session processing.
+- Global registry bootstrap.
+
+### Completion state
+
+- S7-02 is **DONE**.
+- Stage 7 remains **IN PROGRESS**.
+- S7-03 remains **NOT STARTED**.

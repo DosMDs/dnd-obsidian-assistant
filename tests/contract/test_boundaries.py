@@ -242,6 +242,27 @@ def test_entity_reads_does_not_import_application() -> None:
     assert not mod_names, f"entity_reads imported application modules: {mod_names}"
 
 
+# ── dnd_assistant.tools.session_reads must not import models or CLI ──────
+
+
+def test_session_reads_does_not_import_models() -> None:
+    _clean_import("dnd_assistant.tools.session_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.models")}
+    assert not mod_names, f"session_reads imported model modules: {mod_names}"
+
+
+def test_session_reads_does_not_import_cli() -> None:
+    _clean_import("dnd_assistant.tools.session_reads")
+    mod_names = {m for m in _modules_loaded() if m.startswith("dnd_assistant.cli")}
+    assert not mod_names, f"session_reads imported CLI modules: {mod_names}"
+
+
+def test_session_reads_does_not_import_ollama() -> None:
+    _clean_import("dnd_assistant.tools.session_reads")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"session_reads triggered ollama import: {mod_names}"
+
+
 # ── no module pulls in ollama ────────────────────────────────────────────
 
 
