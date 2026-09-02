@@ -124,7 +124,7 @@ All remaining production modules are below the listed soft-review range.
 | Path | Lines | Notes |
 |---|---|---|
 | `tests/unit/session_recovery/test_event_tail.py` | 863 | Event-tail recovery tests |
-| `tests/integration/test_session_golden_vault.py` | 882 | S6-07 Golden integration tests (original commit) |
+| `tests/integration/test_session_golden_vault.py` | 896 | S6-07 Golden integration tests |
 | `tests/unit/test_world_time_repository.py` | 722 | Watch |
 | `tests/integration/test_vault_repository_path_races.py` | 722 | Watch |
 | `tests/unit/test_calendar_event_queries.py` | 715 | Watch |
