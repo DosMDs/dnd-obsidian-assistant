@@ -2112,14 +2112,16 @@ Only non-documentation repository file changed: `tests/unit/test_cli_session.py`
 | 32 | 476f153 | docs: fix Golden integration current line count (S6-C07F) | C | S6-C07F docs |
 
 **Classification counts:**
-- A (Stage-6 implementation/correction): 24
+- A (Stage-6 implementation/correction): 20
 - B (concurrent maintainability work): 6
-- C (documentation/process follow-up): 2
+- C (documentation/process follow-up): 6
 
-**Stage-6 implementation/correction commits:** 24
+**Stage-6 implementation/correction commits:** 20
 **Concurrent MNT commits:** 6 (MNT-01, MNT-C01, MNT-02, MNT-C02, MNT-C02F, MNT-C02FF)
-**Documentation/process commits:** 2
+**Documentation/process commits:** 6
 **Auxiliary commits:** 0
+
+**Verification:** 20 + 6 + 6 + 0 = 32
 
 #### Production files/components reviewed
 
@@ -2161,7 +2163,13 @@ Only non-documentation repository file changed: `tests/unit/test_cli_session.py`
 
 #### Correction-verification matrix
 
-All 19 accepted Stage-6 corrections (C00 through C07, including C02F, C03F, C04F, C05F, C06, C07F) verified independently against final REVIEW_HEAD source and tests. No unfixed defect remains.
+All 13 Stage-6 correction passes and all 4 concurrent MNT correction passes present in the historical review range were independently checked against the final review-head source/tests. No known accepted correction remains unfixed.
+
+**Stage-6 correction passes (13):** C00, C01, C02, C02F, C03, C03F, C04, C04F, C05, C05F, C06, C07, C07F — 12 are class A implementation/test corrections; 1 (C07F) is a docs-only class C correction.
+
+**Concurrent MNT correction passes (4):** MNT-C01, MNT-C02, MNT-C02F, MNT-C02FF.
+
+**Total correction passes in review range:** 17.
 
 Key verified corrections: SessionStoragePaths immutability (C00), world-time path reauthorization (C01), metadata root validation and fsync (C02), event validation before append and portability (C03), close typing/TOCTOU/revalidation (C04), recovery read-only/byte-splitting/UTF-8 safety (C05), clean audit prerequisite (C05F), CLI regression coverage (C06), Golden fixture trailing LF and Unicode path (C07).
 
