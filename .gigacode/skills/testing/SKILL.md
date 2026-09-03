@@ -3,7 +3,7 @@ name: testing
 description: Add, improve or review tests, fixtures, failure-injection coverage, Hypothesis properties, model adapter mocks or regression tests.
 compatibility: Python 3.12+, pytest, Hypothesis, pytest-cov, respx.
 metadata:
-  version: "2"
+  version: "3"
 ---
 # Testing workflow
 
@@ -16,6 +16,60 @@ metadata:
 7. For bug fixes, first reproduce with a regression test when practical.
 8. Keep fixtures small, deterministic and platform-neutral.
 9. Run the narrow test selection first, then the full suite when feasible.
+
+## Boundary equivalence classes
+
+For untrusted structured data, derive equivalence classes before writing
+regression coverage.
+
+Default structural checklist where applicable:
+
+```text
+missing
+None
+expected empty container
+wrong empty container
+""
+0
+False
+True
+valid non-empty
+malformed non-empty
+```
+
+## Numeric test matrix
+
+Where relevant, consider the following numeric values in test/review:
+
+```text
+0
+1
+-1
+ordinary positive int
+ordinary negative int
+ordinary float
+True
+False
+NaN
++Infinity
+-Infinity
+very large positive int
+very large negative int
+wrong scalar type
+```
+
+This is a review/test-design checklist, not a requirement to add every value
+to every numeric test suite.
+
+## Regression adequacy rule
+
+A regression covering only one malformed truthy value is insufficient when
+malformed falsy values have different semantics.
+
+Likewise, a regression proving NaN rejection does not prove oversized
+integer conversion safety.
+
+Test equivalence classes according to distinct runtime/contract behavior.
 
 ## Process-global state isolation
 

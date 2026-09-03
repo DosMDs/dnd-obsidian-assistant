@@ -3,7 +3,7 @@ name: pre-finalization-audit
 description: Perform the mandatory evidence-driven final audit before committing or pushing an implementation, correction, maintenance task, or stage completion.
 compatibility: D&D Session Assistant repository, Git, uv, pytest, Ruff.
 metadata:
-  version: "1"
+  version: "2"
 ---
 
 # Pre-finalization audit
@@ -39,6 +39,42 @@ metadata:
 - legacy ceiling increase without authorization;
 - dirty final working tree;
 - `HEAD != upstream` after expected push.
+
+## Evidence reconciliation
+
+Before committing, perform this mandatory workflow:
+
+1. Run canonical evidence commands.
+2. Update docs/status evidence from actual command output.
+3. Re-read all newly written evidence blocks.
+4. Compare every machine-derived value with the source command output.
+5. Search for stale placeholders and contradictory status.
+6. Inspect final diff.
+7. Only then commit.
+
+### Placeholder/stale-evidence scan
+
+Review newly changed documentation for terms such as:
+
+```text
+TBD
+TODO
+placeholder
+N passed
+N lines
+reported later
+NOT STARTED
+IN PROGRESS
+DONE
+ahead_by
+behind_by
+```
+
+Do not globally forbid all these strings. Instead verify every occurrence is
+intentional and contextually correct.
+
+For current self-commit SHA: do not write the current commit's future SHA
+into the same commit.
 
 ## Invariant
 

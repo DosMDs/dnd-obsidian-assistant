@@ -70,3 +70,34 @@ Prefer a shared opt-in fixture or helper over repeated fixture bodies.
 
 For changes involving `sys.modules` or process-global test state, run
 affected suites in relevant execution orders to verify isolation.
+
+## 7. Protected harness infrastructure
+
+Treat as protected scope:
+
+```text
+tests/conftest.py
+tests/integration/conftest.py
+tests/contract/test_test_harness_policy.py
+module-restoration allowlists
+test-harness allowlists
+global autouse fixtures
+```
+
+A normal feature/provider/domain task must not change them merely to make
+its own tests pass.
+
+## 8. Harness hard-stop rule
+
+If an otherwise local task appears to require modifying protected
+test-harness infrastructure and that scope was not explicitly authorized:
+
+```text
+STOP
+→ report the requirement
+→ separate it into a correction/maintenance task
+```
+
+Exception: a task explicitly about test-harness behavior may modify it.
+
+Do not forbid legitimate harness maintenance.

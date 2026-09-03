@@ -103,3 +103,93 @@ feature:
 - report it to the user for prioritization.
 
 Do not absorb unrelated work into the current task scope.
+
+## 5. Evidence transcription invariant
+
+Machine-derived evidence must not be recomputed mentally when the canonical
+command can produce it.
+
+This applies to at least:
+
+```text
+changed-file inventories
+commit inventories
+commit counts
+parent/base/head SHAs
+merge base
+ahead/behind
+test counts
+failed/error/skipped counts
+physical line counts
+maintainability values
+HEAD/upstream equality
+```
+
+### Canonical-command requirement
+
+Run the canonical command against the final state and copy its value
+directly into documentation/evidence.
+
+Explicitly prohibited: using arithmetic reconstruction for current line
+counts:
+
+```text
+previous_count + additions - deletions
+```
+
+when:
+
+```python
+len(path.read_bytes().splitlines())
+```
+
+can be run against the current file.
+
+Historical calculations may use Git if the historical file itself cannot
+otherwise be directly inspected, but the methodology must be explicit.
+
+### Evidence reconciliation after writing
+
+Correct command output followed by incorrect Markdown transcription is
+still a task failure.
+
+Required workflow:
+
+```text
+run canonical evidence commands
+→ write docs/status evidence
+→ re-read newly written evidence
+→ compare each machine-derived value against command output
+→ only then commit
+```
+
+This applies to implementation tasks, corrections, maintenance tasks and
+stage completion reviews.
+
+## 6. Git direction semantics
+
+For `base..head`:
+
+```text
+base_only = git rev-list --count head..base
+head_only = git rev-list --count base..head
+```
+
+For `git rev-list --left-right --count base...head`:
+
+```text
+left  = base-only
+right = head-only
+```
+
+For GitHub-style `compare(base, head)`:
+
+```text
+ahead_by  = head-only
+behind_by = base-only
+```
+
+Never infer these labels from visual position alone.
+
+Prefer `base-only` and `head-only` as primary evidence terms because they
+are directionally self-explanatory.

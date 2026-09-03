@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-03 (Stage 8 completed)
+**Last updated:** 2026-09-03 (MNT-04 completed)
 **Current milestone:** `v0.1-dev — Vault Core`
-**Roadmap position:** Stage 8 complete; Stage 9 next
+**Roadmap position:** Stage 8 complete; MNT-04 complete; Stage 9 next
 **Active stage:** Stage 9 — Fast Agent
 **Stage 8 status:** `DONE`
 **Started:** 2026-09-02
@@ -104,6 +104,12 @@ Details: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GAT
 | MNT-C01 — Strengthen test-harness opt-in enforcement | DONE |
 | MNT-C02 — Make harness semantic detection precise | DONE |
 | MNT-C03 — Finalize MNT-C02 committed evidence | DONE |
+
+## Maintenance gate before Stage 9
+
+| Task | Status |
+|---|---|
+| MNT-04 — Harden GigaCode boundary-case and evidence reliability | DONE |
 
 ## Current blockers
 

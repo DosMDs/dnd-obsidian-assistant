@@ -307,6 +307,31 @@ Never perform automatically:
 
 If an operation is destructive, irreversible, credential-related or touches a real Vault, stop and require explicit user approval.
 
+## Development reliability principles
+
+Key rules for agent reliability:
+
+```text
+.gigacode/rules/09-untrusted-boundary-validation.md
+    external structured data uses explicit equivalence classes
+    truthiness is not structural validation
+    numeric Python traps must be reviewed (bool is int, NaN, overflow)
+
+.gigacode/rules/08-task-scope-and-evidence.md
+    machine-derived evidence must be reconciled after documentation edits
+    base-only / head-only are the primary Git direction terms
+
+.gigacode/rules/37-test-harness-isolation.md
+    protected harness changes require explicit scope
+    do not modify conftest/harness tests for local task convenience
+
+.gigacode/rules/36-maintainability-ratchets.md
+    consider headroom before approaching hard limits
+    >600 production / >850 test triggers decomposition review
+```
+
+These are overview pointers. The canonical rules files are authoritative.
+
 ## Useful commands
 
 ```text

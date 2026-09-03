@@ -3,7 +3,7 @@ name: stage-workflow
 description: Plan, execute, close, reopen or advance a D&D Session Assistant development stage using DEVELOPMENT_STATUS.md, task IDs, quality gates and ADR discipline. Use when asked to move to the next stage, update project progress, plan the current stage or mark work complete.
 compatibility: D&D Session Assistant repository, Git, uv, pytest, Ruff.
 metadata:
-  version: "2"
+  version: "3"
 ---
 # Development stage workflow
 
@@ -83,6 +83,57 @@ For historical stage review:
 
 - Capture implementation review-head BEFORE documentation/status completion commit.
 - Do not include the completion commit in the historical implementation range.
+
+### Historical Git comparison procedure
+
+For stage completion review, record in this order:
+
+```text
+base SHA
+captured implementation head SHA
+merge-base
+base-only count
+head-only count
+then optional ahead_by / behind_by labels
+```
+
+Definitions:
+
+```text
+base..head:
+    base_only = git rev-list --count head..base
+    head_only = git rev-list --count base..head
+
+git rev-list --left-right --count base...head:
+    left  = base-only
+    right = head-only
+
+GitHub compare(base, head):
+    ahead_by  = head-only
+    behind_by = base-only
+```
+
+Prefer `base-only` and `head-only` as primary evidence terms because they
+are directionally self-explanatory.
+
+## Stage-completion evidence reconciliation
+
+Require stage reviews to re-open/re-read the newly written completion record
+**before the completion commit** and reconcile:
+
+```text
+SHAs
+commit inventory
+commit count
+changed-file inventory
+line counts
+test counts
+stage statuses
+Git direction semantics
+```
+
+Do not consider the review complete merely because the commands themselves
+were correct.
 
 ## Git finalization (self-SHA rule)
 

@@ -54,3 +54,22 @@ Every task that touches maintainability values must verify:
 - global hard limits are unchanged.
 
 If any of these is violated, the task is not complete.
+
+## 6. Proactive headroom guidance
+
+If a production file starts above ~600 lines and a task adds substantial
+behavior, consider decomposition before adding logic.
+
+If a test file starts above ~850 lines and substantial new coverage is
+needed, prefer a new topic-oriented test module where coherent.
+
+These are review thresholds, not new hard limits. They are not encoded in
+maintainability contract tests.
+
+## 7. No hard-limit gaming
+
+Finishing at 699/700 is technically within the hard limit but is not
+automatically good decomposition.
+
+File cohesion remains primary. Do not split tiny cohesive modules solely to
+satisfy a soft threshold.
