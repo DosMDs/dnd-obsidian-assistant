@@ -371,7 +371,6 @@ class TestRestorationOptInUsage:
     # Modules that use restore_dnd_assistant_modules via module-level pytestmark
     MODULE_LEVEL_OPTIIN: set[str] = {
         "contract/test_boundaries.py",
-        "unit/test_ollama_tool_calling.py",
     }
 
     # (module_path, class_name) tuples that use it via @pytest.mark.usefixtures

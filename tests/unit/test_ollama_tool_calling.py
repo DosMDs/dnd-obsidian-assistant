@@ -25,8 +25,6 @@ from dnd_assistant.models.types import (
 from dnd_assistant.tools.catalog import ToolPublicDefinition
 from dnd_assistant.tools.types import Permission, SessionMode
 
-pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")
-
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 
@@ -634,6 +632,58 @@ class TestMalformedToolCalls:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
+# Falsy malformed tool_calls regression (S8-C05)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestFalsyMalformedToolCalls:
+    """Present-but-invalid falsy tool_calls values must raise ModelError.
+
+    The S8-C04 implementation conflated ``tool_calls`` field absence with
+    truthiness, allowing falsy malformed values to bypass ``_parse_tool_calls``
+    and be accepted as text-only responses when usable text was present.
+    """
+
+    @pytest.mark.parametrize(
+        "label,malformed",
+        [
+            ("null", None),
+            ("empty_string", ""),
+            ("empty_object", {}),
+            ("zero", 0),
+            ("false", False),
+        ],
+    )
+    def test_falsy_malformed_rejected(self, label: str, malformed: object) -> None:
+        body: dict[str, object] = {
+            "message": {
+                "role": "assistant",
+                "content": "Usable text",
+                "tool_calls": malformed,
+            }
+        }
+        r = _do_chat(body)
+        assert isinstance(r, ModelError), (
+            f"Expected ModelError for tool_calls={label!r} with usable text, got {type(r).__name__}"
+        )
+        assert "tool_calls" in str(r).lower()
+
+    def test_empty_list_with_text_is_valid(self) -> None:
+        """tool_calls=[] with usable text must remain a valid text-only response."""
+        body: dict[str, object] = {
+            "message": {
+                "role": "assistant",
+                "content": "Usable text",
+                "tool_calls": [],
+            }
+        }
+        r = _do_chat(body)
+        assert isinstance(r, ToolAwareResponse)
+        assert r.message.content == "Usable text"
+        assert r.message.tool_calls == ()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
 # Non-finite argument regression
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -866,20 +916,3 @@ class TestNoExecution:
         assert isinstance(r, ToolAwareResponse)
         assert route.called
         assert route.call_count == 1
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Clean-import diagnostic
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-def test_ollama_import_does_not_load_tool_executor() -> None:
-    import importlib
-    import sys
-
-    for key in list(sys.modules):
-        if key.startswith("dnd_assistant"):
-            del sys.modules[key]
-    importlib.import_module("dnd_assistant.models.ollama")
-    loaded = {m for m in sys.modules if m.startswith("dnd_assistant.tools.executor")}
-    assert not loaded, f"dnd_assistant.models.ollama triggered import of {loaded}"

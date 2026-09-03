@@ -196,11 +196,11 @@ def parse_tool_aware_response(
         )
 
     content = msg_data.get("content")
-    raw_tool_calls = msg_data.get("tool_calls")
 
-    # Parse tool calls first
+    # Parse tool calls first — distinguish field presence from truthiness
     tool_calls: tuple[ToolCall, ...] = ()
-    if raw_tool_calls:
+    if "tool_calls" in msg_data:
+        raw_tool_calls = msg_data["tool_calls"]
         tool_calls = _parse_tool_calls(raw_tool_calls, allowed_tool_names)
 
     # Normalise content

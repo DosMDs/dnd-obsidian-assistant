@@ -81,6 +81,7 @@ Correction passes:
 | S8-C02 | **DONE** | Harden ModelProfile base_url endpoint validation |
 | S8-C03 | **DONE** | Harden Ollama health and JSON response validation |
 | S8-C04 | **DONE** | Correct S8-03 verification evidence and Stage-8 correction index |
+| S8-C05 | **DONE** | Harden tool-call structural validation and restore test-harness scope |
 
 ## S8-00 implementation record
 
@@ -1379,6 +1380,219 @@ git diff --check
 S8-05 (embeddings): NOT STARTED. S8-06 (provider integration): NOT STARTED. S8-07 (Stage-8 review): NOT STARTED. Stage 9 (Fast Agent): NOT STARTED.
 
 ---
+
+## S8-C05 correction record
+
+**Starting SHA:** `d2f6096b87c9a657acb2633f4591b01599ac93a5`
+
+**Branch:** `main`
+
+**Reviewed S8-04 SHA:** `d2f6096b87c9a657acb2633f4591b01599ac93a5`
+
+### Defect A — falsy malformed `tool_calls` values bypass validation
+
+The S8-04 response parsing used truthiness to decide whether the provider supplied `tool_calls`:
+
+```python
+raw_tool_calls = msg_data.get("tool_calls")
+tool_calls = ()
+if raw_tool_calls:
+    tool_calls = _parse_tool_calls(raw_tool_calls, allowed_tool_names)
+```
+
+This incorrectly conflated `tool_calls` field absence with present-but-malformed falsy values (`null`, `""`, `{}`, `0`, `false`). When usable assistant text was also present, these responses were silently accepted as text-only responses.
+
+### Defect B — unnecessary test-harness policy expansion
+
+S8-04 modified `tests/contract/test_test_harness_policy.py` to add `unit/test_ollama_tool_calling.py` to `MODULE_LEVEL_OPTIIN`, and added a module-wide `restore_dnd_assistant_modules` fixture plus a permanent `sys.modules`-deletion test to the tool-calling test module. This was outside the original intended S8-04 scope.
+
+### Production fix
+
+**File:** `src/dnd_assistant/models/ollama_tool_adapter.py`
+
+Changed the `tool_calls` presence check from truthiness to explicit field-membership:
+
+```python
+if "tool_calls" in msg_data:
+    raw_tool_calls = msg_data["tool_calls"]
+    tool_calls = _parse_tool_calls(raw_tool_calls, allowed_tool_names)
+else:
+    tool_calls = ()
+```
+
+`_parse_tool_calls()` already validates that the supplied value is a list, so `null`, `""`, `{}`, `0`, and `false` all produce `ModelError` via the existing `isinstance(raw_tool_calls, list)` check.
+
+### Field-presence semantics after correction
+
+| Condition | Behavior |
+|---|---|
+| `tool_calls` field missing | Accepted as no calls |
+| `tool_calls=[]` | Accepted as no calls |
+| `tool_calls=[...]` | Parsed normally |
+| `tool_calls=None` | `ModelError` |
+| `tool_calls=""` | `ModelError` |
+| `tool_calls={}` | `ModelError` |
+| `tool_calls=0` | `ModelError` |
+| `tool_calls=False` | `ModelError` |
+
+### Regression coverage added
+
+**File:** `tests/unit/test_ollama_tool_calling.py`
+
+New class `TestFalsyMalformedToolCalls` (6 parametrized tests):
+
+| Test | What it covers |
+|---|---|
+| `test_falsy_malformed_rejected[null]` | `tool_calls: null` with usable text → `ModelError` |
+| `test_falsy_malformed_rejected[empty_string]` | `tool_calls: ""` with usable text → `ModelError` |
+| `test_falsy_malformed_rejected[empty_object]` | `tool_calls: {}` with usable text → `ModelError` |
+| `test_falsy_malformed_rejected[zero]` | `tool_calls: 0` with usable text → `ModelError` |
+| `test_falsy_malformed_rejected[false]` | `tool_calls: false` with usable text → `ModelError` |
+| `test_empty_list_with_text_is_valid` | `tool_calls: []` with usable text → valid text-only response |
+
+Each malformed test verifies the error diagnostic references `tool_calls`. The empty-list test verifies `content == "Usable text"` and `tool_calls == ()`.
+
+### Harness restoration
+
+Removed from `tests/unit/test_ollama_tool_calling.py`:
+
+- Module-level `pytestmark = pytest.mark.usefixtures("restore_dnd_assistant_modules")`
+- Permanent `test_ollama_import_does_not_load_tool_executor` test that mutated `sys.modules`
+
+Restored `tests/contract/test_test_harness_policy.py` to pre-S8-04 state:
+
+- Removed `unit/test_ollama_tool_calling.py` from `MODULE_LEVEL_OPTIIN`
+
+After restoration, the module-level opt-in set is:
+
+```python
+MODULE_LEVEL_OPTIIN: set[str] = {
+    "contract/test_boundaries.py",
+}
+```
+
+### Direct clean-import diagnostic
+
+Command:
+
+```text
+uv run python -c "import sys; import dnd_assistant.models.ollama; bad=sorted(m for m in sys.modules if m.startswith('dnd_assistant.tools')); assert not bad, bad; print('clean')"
+```
+
+Result:
+
+```text
+clean
+```
+
+No `dnd_assistant.tools.*` modules are eagerly loaded by importing `dnd_assistant.models.ollama`. No `ToolExecutor` runtime import.
+
+### Preserved behavior
+
+All accepted S8-04 behavior is preserved:
+
+- Text-only, tool-call-only, and text + tool-call responses
+- Parallel calls, duplicate same-name calls
+- Allowlist enforcement
+- `call_id=None` on returned Ollama calls
+- ToolCall validation (entry is object, function exists, name non-empty, arguments object, type check, allowlist)
+- Existing truthy malformed cases (`"not a list"`, non-object entries, missing function, etc.)
+- HTTP/error mapping, invalid-byte protection
+- No execution, no agent loop, one HTTP request per `chat_with_tools` call
+- No argument-schema validation in ModelGateway
+
+### Quality-gate evidence
+
+```
+uv run pytest tests/unit/test_ollama_tool_calling.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_structured.py -v
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 295 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 4023 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 286 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Physical-line counts
+
+```
+src\dnd_assistant\models\ollama.py: 641 (under 700)
+src\dnd_assistant\models\ollama_tool_adapter.py: 319 (under 700)
+tests\unit\test_ollama_tool_calling.py: 918 (under 1000)
+```
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- All legacy exceptions: unchanged
+- No new exceptions added
+- No dependency changes (`pyproject.toml` and `uv.lock` unchanged)
+
+### Scope audit
+
+**Intended scope:** `src/dnd_assistant/models/ollama_tool_adapter.py`, `tests/unit/test_ollama_tool_calling.py`, `tests/contract/test_test_harness_policy.py`, `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`, `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+
+- `src/dnd_assistant/models/ollama_tool_adapter.py`
+- `tests/unit/test_ollama_tool_calling.py`
+- `tests/contract/test_test_harness_policy.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/ollama.py`
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_ollama_provider.py`
+- `tests/unit/test_ollama_structured.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/contract/test_boundaries.py`
+- `tests/contract/test_maintainability.py`
+- `pyproject.toml`
+- `uv.lock`
+
+### S8-05+ deferrals
+
+S8-05 (embeddings): NOT STARTED. S8-06 (provider integration): NOT STARTED. S8-07 (Stage-8 review): NOT STARTED. Stage 9 (Fast Agent): NOT STARTED.
 
 ## S8-03 implementation record
 
