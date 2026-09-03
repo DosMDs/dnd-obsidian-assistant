@@ -1808,3 +1808,347 @@ git diff --check
 - S8-06 (provider integration): NOT STARTED
 - S8-07 (Stage-8 review): NOT STARTED
 - Stage 9 (Fast Agent): NOT STARTED
+
+## S8-05 implementation record
+
+**Starting SHA:** `214e75120cd5a892df78e100c176b611bf072e8e`
+
+**Branch:** `main`
+
+### Exact `embed` signature
+
+```python
+def embed(self, texts: list[str]) -> list[list[float]]:
+```
+
+### Confirmation: all five ModelGateway methods are now implemented
+
+- `chat()` — S8-02
+- `chat_with_tools()` — S8-04
+- `generate_structured()` — S8-03
+- `embed()` — S8-05
+- `health()` — S8-02
+
+ModelGateway Protocol unchanged.
+
+### Production decomposition
+
+`embed()` transport method lives in `src/dnd_assistant/models/ollama.py` (699 lines, under 700).
+
+Provider-specific embedding validation/adaptation lives in a new module:
+`src/dnd_assistant/models/ollama_embedding_adapter.py` (212 lines, under 700).
+
+### Official native endpoint
+
+`POST /api/embed`
+
+Not `/api/embeddings`, `/api/generate`, `/api/chat`, or `/v1/embeddings`.
+
+### Exact embedding payload shape
+
+```json
+{
+  "model": "<profile.model>",
+  "input": ["text one", "text two"],
+  "truncate": false
+}
+```
+
+### Input always sent as array
+
+Even for a single input, `"input"` is always a JSON array:
+
+```json
+"input": ["one"]
+```
+
+not:
+
+```json
+"input": "one"
+```
+
+### Caller-input validation
+
+| Input | Result |
+|---|---|
+| `[]` | `ValidationError` before HTTP |
+| `"hello"` (string) | `ValidationError` before HTTP |
+| `("hello",)` (tuple) | `ValidationError` before HTTP |
+| `123` (int) | `ValidationError` before HTTP |
+| `[123]` (list with int) | `ValidationError` before HTTP |
+| `[None]` (list with None) | `ValidationError` before HTTP |
+| `[["nested"]]` (list with list) | `ValidationError` before HTTP |
+
+Every invalid caller-input case was proven to make zero HTTP calls.
+
+### Text-preservation decisions
+
+- **Order:** preserved exactly.
+- **Duplicates:** preserved — `["same", "same"]` sends two identical entries.
+- **Unicode:** preserved — Cyrillic, CJK, Greek sent unchanged.
+- **Whitespace:** preserved — leading/trailing spaces not stripped.
+- **Empty string:** preserved — `""` sent as-is.
+
+### `truncate` policy
+
+`truncate` is explicitly `False` in every payload.
+
+No silent truncation. No retry with `truncate=True` after a context-length error.
+
+### `keep_alive` mapping
+
+Present in payload when `profile.keep_alive` is not `None`.
+Omitted when `None`.
+
+### Temperature policy
+
+`temperature` is **not** sent in the embedding payload, even when the profile has a non-None temperature value.
+
+### Confirmation: no generation-only settings sent
+
+The following fields are absent from the embedding payload:
+
+- `stream`
+- `format`
+- `tools`
+- `think`
+- `dimensions`
+- `options`
+
+### Profile-role policy
+
+No new hard runtime restriction on `profile.role` inside `embed()`.
+Tests use `EMBEDDING` role for clarity, but no provider-level role enforcement was added.
+
+### Response `embeddings` field validation
+
+| Condition | Result |
+|---|---|
+| Top-level list | `ModelError` |
+| Top-level string | `ModelError` |
+| Missing `embeddings` | `ModelError` |
+| `embeddings` is `None` | `ModelError` |
+| `embeddings` is object | `ModelError` |
+| `embeddings` is string | `ModelError` |
+
+### Cardinality rule
+
+Exactly one vector per input text is required.
+
+| Input count | Returned vectors | Result |
+|---|---|---|
+| 2 | 1 | `ModelError` |
+| 1 | 2 | `ModelError` |
+| 1 | 0 | `ModelError` |
+
+### Vector validation
+
+Each vector must be a non-empty list.
+
+| Condition | Result |
+|---|---|
+| `None` | `ModelError` |
+| string | `ModelError` |
+| object | `ModelError` |
+| number | `ModelError` |
+| `[]` (empty) | `ModelError` |
+
+### Dimension consistency
+
+All returned vectors in a batch must have the same non-zero length.
+Ragged dimensions (`[0.1, 0.2]` vs `[0.3, 0.4, 0.5]`) raise `ModelError`.
+
+### Numeric scalar validation
+
+| Scalar value | Result |
+|---|---|
+| `int` (e.g. `1`) | Accepted, converted to `float(1.0)` |
+| `float` (e.g. `2.5`) | Accepted |
+| `bool` (`True`, `False`) | `ModelError` |
+| `None` | `ModelError` |
+| `"0.5"` (string) | `ModelError` |
+| `[]` (list) | `ModelError` |
+| `{}` (object) | `ModelError` |
+
+### Non-finite value handling
+
+| Value | Result |
+|---|---|
+| `NaN` | `ModelError` |
+| `+Infinity` | `ModelError` |
+| `-Infinity` | `ModelError` |
+
+### No renormalization
+
+Returned vectors are not renormalized, rounded, quantized, clipped, or scaled.
+Only structural/numeric validation and int→float conversion are performed.
+
+### Successful single-input behavior
+
+```python
+result = provider.embed(["hello"])
+# → [[0.1, 0.2, 0.3]]
+# Every scalar is a Python float
+```
+
+### Successful batch behavior
+
+```python
+result = provider.embed(["a", "b", "c"])
+# → [[0.1, 0.1], [0.2, 0.2], [0.3, 0.3]]
+# Cardinality and order preserved
+```
+
+### Duplicate-input result
+
+```python
+result = provider.embed(["same", "same"])
+# → [[0.1, 0.2], [0.3, 0.4]]
+# Two distinct vectors returned, no deduplication
+```
+
+### Provider metadata
+
+Fields such as `model`, `total_duration`, `load_duration`, `prompt_eval_count` are silently ignored.
+
+### HTTP failure mapping
+
+| Condition | Public error | Cause preserved |
+|---|---|---|
+| Connection failure | `ModelError` | `httpx.ConnectError` |
+| Timeout | `ModelError` | `httpx.TimeoutException` |
+| HTTP 400 with JSON error body | `ModelError` | — |
+| HTTP 404 with JSON error body | `ModelError` | — |
+| HTTP 500 with JSON error body | `ModelError` | — |
+| HTTP 500 non-JSON body | `ModelError` | — |
+| HTTP 400 invalid-byte body | `ModelError` | — |
+| Success HTTP non-JSON body | `ModelError` | `ValueError` |
+| Success HTTP invalid-byte body | `ModelError` | `ValueError` |
+
+HTTP status remains visible in the error message for HTTP failures.
+
+### Exactly-one-request proof
+
+- Success: exactly one `POST /api/embed` request.
+- Provider error: exactly one `POST /api/embed` request, no retry.
+
+### No model pull/fallback
+
+No `ollama pull`, no fallback model, no model-name rewriting.
+
+### No persistence/cache/index
+
+No embeddings are written to Vault, SQLite, files, cache, or index.
+
+### No semantic retrieval/vector DB/RAG
+
+S8-05 is strictly the provider-level embedding transport and validation boundary.
+
+### Mock strategy
+
+All tests use `respx.mock` to mock HTTP. No real Ollama, no network, no Vault.
+
+### Quality-gate evidence
+
+```
+uv run pytest tests/unit/test_ollama_embeddings.py -v
+→ 62 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_structured.py -v
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_tool_calling.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 298 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 4088 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 288 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Canonical physical-line counts
+
+```
+src\dnd_assistant\models\ollama.py: 699 (under 700)
+src\dnd_assistant\models\ollama_embedding_adapter.py: 212 (under 700)
+tests\unit\test_ollama_embeddings.py: 850 (under 1000)
+```
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- All legacy exceptions: unchanged
+- No new exceptions added
+- No dependency changes (`pyproject.toml` and `uv.lock` unchanged)
+
+### Scope audit
+
+**Intended scope:**
+- `src/dnd_assistant/models/ollama.py`
+- `src/dnd_assistant/models/ollama_embedding_adapter.py`
+- `tests/unit/test_ollama_embeddings.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/ollama.py`
+- `src/dnd_assistant/models/ollama_embedding_adapter.py`
+- `tests/unit/test_ollama_embeddings.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/models/ollama_tool_adapter.py`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_ollama_provider.py`
+- `tests/unit/test_ollama_structured.py`
+- `tests/unit/test_ollama_tool_calling.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/contract/`
+- `tests/conftest.py`
+- `tests/fixtures/`
+- `pyproject.toml`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+### S8-06+ deferrals
+
+S8-06 (provider integration): NOT STARTED. S8-07 (Stage-8 review): NOT STARTED. Stage 9 (Fast Agent): NOT STARTED.

@@ -1,14 +1,13 @@
 """Ollama-specific ModelGateway provider implementation.
 
 This module implements the ``ModelGateway`` protocol for Ollama's native
-HTTP API.  S8-04 owns:
+HTTP API.  S8-05 completes all five canonical operations:
 
     * ``chat()`` — plain (non-tool) multi-turn conversation.
-    * ``health()`` — Ollama reachability and configured-model availability.
-    * ``generate_structured()`` — structured output matching a Pydantic schema.
     * ``chat_with_tools()`` — multi-turn conversation with tool-calling support.
-
-Later tasks (S8-05) will add ``embed()``.
+    * ``generate_structured()`` — structured output matching a Pydantic schema.
+    * ``embed()`` — vector embeddings for text inputs.
+    * ``health()`` — Ollama reachability and configured-model availability.
 
 Architectural boundary
 ─────────────────────
@@ -16,8 +15,9 @@ This module imports httpx, the provider-neutral DTOs and the ModelProfile
 schema.  It must not import from storage, retrieval, application, CLI,
 domain, or tools (runtime).
 
-Provider-specific DTOs and Ollama JSON shapes live here — not in
-``models/types.py`` or ``models/gateway.py``.
+Provider-specific DTOs and Ollama JSON shapes live here or in sibling
+adapter modules (``ollama_tool_adapter.py``, ``ollama_embedding_adapter.py``)
+— not in ``models/types.py`` or ``models/gateway.py``.
 """
 
 from __future__ import annotations
@@ -29,6 +29,11 @@ import httpx
 from pydantic import BaseModel
 
 from dnd_assistant.errors import ModelError, ValidationError
+from dnd_assistant.models.ollama_embedding_adapter import (
+    build_embed_payload,
+    parse_embed_response,
+    validate_embed_inputs,
+)
 from dnd_assistant.models.ollama_tool_adapter import (
     map_tool_aware_history,
     map_tools_to_ollama,
@@ -66,9 +71,9 @@ class OllamaModelProvider:
     Configured from a ``ModelProfile`` whose ``provider`` must be
     ``"ollama"``.
 
-    S8-04 implements four of the five canonical operations:
+    S8-05 implements all five canonical operations:
     ``chat()``, ``chat_with_tools()``, ``generate_structured()``,
-    and ``health()``.
+    ``embed()``, and ``health()``.
 
     HTTP client ownership
     ─────────────────────
@@ -331,6 +336,59 @@ class OllamaModelProvider:
             )
 
         return self._parse_tool_chat_response(response, tools)
+
+    # ── Embeddings ────────────────────────────────────────────────────
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Produce vector embeddings for text inputs.
+
+        Sends the texts to Ollama's ``POST /api/embed`` with
+        ``truncate=False`` to prevent silent content truncation.
+
+        Args:
+            texts: One or more text strings to embed.
+
+        Returns:
+            A list of embedding vectors, one per input text.
+
+        Raises:
+            ValidationError: If ``texts`` is not a non-empty list of strings
+                (raised before any HTTP request).
+            ModelError: If the provider/network/response fails, or if the
+                response contains malformed or invalid embedding data.
+        """
+        # Validate caller input before any HTTP request
+        validated = validate_embed_inputs(texts)
+
+        payload = build_embed_payload(
+            model=self._profile.model,
+            texts=validated,
+            keep_alive=self._profile.keep_alive,
+        )
+
+        try:
+            response = self._client.post(self._url("/api/embed"), json=payload)
+        except httpx.RequestError as exc:
+            raise ModelError(
+                f"Ollama embed request failed: {exc}",
+                cause=exc,
+            ) from exc
+
+        if not response.is_success:
+            detail = _extract_ollama_error(response)
+            raise ModelError(
+                f"Ollama embed returned HTTP {response.status_code}: {detail}",
+            )
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ModelError(
+                "Ollama embed returned non-JSON response",
+                cause=exc,
+            ) from exc
+
+        return parse_embed_response(data, expected_count=len(validated))
 
     # ── Internal helpers ───────────────────────────────────────────────
 
