@@ -83,6 +83,7 @@ Correction passes:
 | S8-C04 | **DONE** | Correct S8-03 verification evidence and Stage-8 correction index |
 | S8-C05 | **DONE** | Harden tool-call structural validation and restore test-harness scope |
 | S8-C06 | **DONE** | Harden embedding numeric conversion against oversized JSON integers |
+| S8-C07 | **DONE** | Correct S8-C06 physical-line verification evidence |
 
 ## S8-00 implementation record
 
@@ -2267,7 +2268,7 @@ git diff --check
 
 ```
 src\dnd_assistant\models\ollama.py: 699 (under 700, unchanged)
-src\dnd_assistant\models\ollama_embedding_adapter.py: 236 (under 700)
+src\dnd_assistant\models\ollama_embedding_adapter.py: 234 (under 700)
 tests\unit\test_ollama_embeddings.py: 929 (under 1000)
 ```
 
@@ -2312,5 +2313,126 @@ tests\unit\test_ollama_embeddings.py: 929 (under 1000)
 - `.gigacode_vsc/`
 
 ### S8-06 deferral
+
+S8-06 remains NOT STARTED. S8-07 remains NOT STARTED. Stage 9 remains NOT STARTED.
+
+## S8-C07 correction record
+
+**Reviewed S8-C06 SHA:** `b2833c0231a737f3575f12daefbb63695ce9ef3d` (current HEAD, S8-C06 is the most recent commit)
+
+**Reason for correction:** The committed S8-C06 record contained an incorrect physical-line count for `ollama_embedding_adapter.py`. The S8-C06 record stated `236` but the actual physical-line count at S8-C06 SHA is `234`.
+
+**Canonical physical-line counting method:**
+
+```python
+from pathlib import Path
+
+paths = (
+    Path("src/dnd_assistant/models/ollama.py"),
+    Path("src/dnd_assistant/models/ollama_embedding_adapter.py"),
+    Path("tests/unit/test_ollama_embeddings.py"),
+)
+
+for path in paths:
+    print(path, len(path.read_bytes().splitlines()))
+```
+
+**Fresh physical-line counts (at S8-C07 starting SHA `b2833c02`):**
+
+| File | Count |
+|---|---|
+| `src/dnd_assistant/models/ollama.py` | 699 |
+| `src/dnd_assistant/models/ollama_embedding_adapter.py` | 234 |
+| `tests/unit/test_ollama_embeddings.py` | 929 |
+
+**Stale committed S8-C06 count:** `236` (ollama_embedding_adapter.py)
+
+**Corrected count:** `234`
+
+**Historical-count preservation audit:**
+
+- S8-05 historical adapter count `212` — preserved (lines 1840, 2100).
+- S8-C06 ollama.py `699` — preserved (line 2269).
+- S8-C06 test_ollama_embeddings.py `929` — preserved (line 2271).
+- No other historical counts were altered.
+
+**Confirmation production/tests unchanged:**
+
+Zero diff in:
+- `src/dnd_assistant/` (all production code)
+- `tests/` (all test code)
+- `pyproject.toml`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+**Verification commands and results:**
+
+```
+uv run pytest tests/unit/test_ollama_embeddings.py -v
+→ 67 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_structured.py -v
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_tool_calling.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 298 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 4093 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 288 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+**Scope audit:**
+
+**Intended scope:** `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`, `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/` (all production code)
+- `tests/` (all test code)
+- `pyproject.toml`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+**Maintainability:**
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- All legacy exceptions: unchanged
+- No new exceptions added
+- No dependency changes (`pyproject.toml` and `uv.lock` unchanged)
+
+**S8-06 deferral:**
 
 S8-06 remains NOT STARTED. S8-07 remains NOT STARTED. Stage 9 remains NOT STARTED.

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-03 (S8-C06 completed)
+**Last updated:** 2026-09-03 (S8-C07 completed)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Roadmap position:** Stage 8 in progress
 **Active stage:** Stage 8 — Model Gateway / Ollama
@@ -75,6 +75,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | S8-C05 — Harden tool-call structural validation and restore test-harness scope | DONE |
 | S8-05 — Ollama embeddings | DONE |
 | S8-C06 — Harden embedding numeric conversion against oversized JSON integers | DONE |
+| S8-C07 — Correct S8-C06 physical-line verification evidence | DONE |
 | S8-06 — Provider integration / error hardening / opt-in smoke coverage | NOT STARTED |
 | S8-07 — Full Stage-8 historical review / completion | NOT STARTED |
 
