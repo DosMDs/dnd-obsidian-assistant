@@ -164,7 +164,7 @@ Defined in `.gigacode/rules/09-untrusted-boundary-validation.md`:
 - `bool` is a subclass of `int`;
 - NaN / +Infinity / -Infinity are valid floats;
 - Python integers have arbitrary precision;
-- a finite Python int may overflow to Infinity as float;
+- an oversized finite Python int may raise OverflowError during float conversion;
 - numeric conversion may raise `OverflowError`;
 - bool-before-int rule;
 - validate/coerce once.
@@ -252,3 +252,22 @@ remains insufficient.
 - Stage 8 remains `DONE`.
 - MNT-04 `DONE`.
 - Stage 9 remains `NOT STARTED`.
+
+## MNT-C04 — Correct int-to-float overflow semantics
+
+reviewed MNT-04 SHA:
+659d4ca4061627ec3cfb80725a5ce2027527a586
+
+defect:
+MNT-04 conflated oversized Python-int conversion failure with
+non-finite float values.
+
+correct semantics:
+oversized Python int -> float() raises OverflowError;
+NaN/+Inf/-Inf are separate already-float/non-finite input states.
+
+scope:
+guidance/evidence only
+
+production/tests:
+unchanged

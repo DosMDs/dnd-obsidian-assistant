@@ -98,7 +98,7 @@ Python integers have arbitrary precision
     they can be arbitrarily large
 
 a mathematically finite Python int may not be representable as float
-    int -> float conversion can overflow to Infinity
+    built-in int -> float conversion may raise OverflowError
 
 numeric conversion may raise OverflowError
 ```
@@ -136,7 +136,7 @@ When converting an externally supplied integer to `float`, the conversion
 may overflow:
 
 ```python
-# int -> float: may raise OverflowError or produce Infinity
+# oversized Python int -> float may raise OverflowError
 try:
     result = float(large_int_value)
 except OverflowError:

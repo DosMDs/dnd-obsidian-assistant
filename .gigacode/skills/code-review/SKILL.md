@@ -3,7 +3,7 @@ name: code-review
 description: Review a diff, branch, pull request or implementation for architecture, correctness, data safety, tests and MVP scope.
 compatibility: D&D Session Assistant repository.
 metadata:
-  version: "3"
+  version: "4"
 ---
 # Code review
 
@@ -56,7 +56,7 @@ bool-as-int bugs
     is bool rejected before int is accepted?
 
 numeric conversion overflow
-    int -> float may overflow to Infinity or raise OverflowError
+    oversized Python int -> float may raise OverflowError
 
 non-finite numeric values
     NaN, +Infinity, -Infinity explicitly handled or rejected?

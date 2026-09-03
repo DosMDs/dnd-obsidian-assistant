@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-03 (MNT-04 completed)
+**Last updated:** 2026-09-03 (MNT-C04 completed)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Roadmap position:** Stage 8 complete; MNT-04 complete; Stage 9 next
 **Active stage:** Stage 9 — Fast Agent
@@ -110,6 +110,7 @@ Details: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GAT
 | Task | Status |
 |---|---|
 | MNT-04 — Harden GigaCode boundary-case and evidence reliability | DONE |
+| MNT-C04 — Correct Python int-to-float overflow reliability guidance | DONE |
 
 ## Current blockers
 
