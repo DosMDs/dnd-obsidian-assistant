@@ -249,13 +249,71 @@ class TestModelProfileBaseUrl:
             )
 
     def test_scheme_only_rejected(self) -> None:
-        with pytest.raises(PydanticValidationError, match="no host after scheme"):
+        with pytest.raises(PydanticValidationError, match="no network location"):
             ModelProfile(
                 provider="ollama",
                 model="m",
                 base_url="http://",
                 role=ModelProfileRole.AGENT,
             )
+
+    # ── S8-C02 regression: hostname-less endpoints ─────────────────────
+
+    def test_slash_slash_api_rejected(self) -> None:
+        with pytest.raises(PydanticValidationError, match="no network location"):
+            ModelProfile(
+                provider="ollama",
+                model="m",
+                base_url="http:///api",
+                role=ModelProfileRole.AGENT,
+            )
+
+    def test_query_only_host_rejected(self) -> None:
+        with pytest.raises(PydanticValidationError, match="no network location"):
+            ModelProfile(
+                provider="ollama",
+                model="m",
+                base_url="https://?query=value",
+                role=ModelProfileRole.AGENT,
+            )
+
+    def test_whitespace_host_rejected(self) -> None:
+        with pytest.raises(PydanticValidationError, match="no usable hostname"):
+            ModelProfile(
+                provider="ollama",
+                model="m",
+                base_url="http://   ",
+                role=ModelProfileRole.AGENT,
+            )
+
+    def test_fragment_only_host_rejected(self) -> None:
+        with pytest.raises(PydanticValidationError, match="no network location"):
+            ModelProfile(
+                provider="ollama",
+                model="m",
+                base_url="http://#fragment",
+                role=ModelProfileRole.AGENT,
+            )
+
+    def test_malformed_port_rejected(self) -> None:
+        with pytest.raises(PydanticValidationError, match="invalid port"):
+            ModelProfile(
+                provider="ollama",
+                model="m",
+                base_url="http://localhost:not-a-port",
+                role=ModelProfileRole.AGENT,
+            )
+
+    # ── S8-C02 regression: endpoint with path ──────────────────────────
+
+    def test_endpoint_with_path_accepted(self) -> None:
+        p = ModelProfile(
+            provider="ollama",
+            model="m",
+            base_url="https://provider.example/ollama",
+            role=ModelProfileRole.AGENT,
+        )
+        assert p.base_url == "https://provider.example/ollama"
 
 
 class TestModelProfileTemperature:
@@ -757,6 +815,20 @@ temperatur = 0.2
         # On Windows, path.exists() is True for a directory, but read_text
         # raises PermissionError (OSError) -> StorageError.
         with pytest.raises((NotFoundError, StorageError)):
+            load_model_profiles(path)
+
+    # ── S8-C02 regression: invalid base_url via TOML loader ────────────
+
+    def test_invalid_base_url_via_loader(self, tmp_path: Path) -> None:
+        toml = """\
+[profiles.fast]
+provider = "ollama"
+model = "m"
+base_url = "http:///api"
+role = "agent"
+"""
+        path = _write_toml(tmp_path / "bad-host.toml", toml)
+        with pytest.raises(DndValidationError, match="Invalid model profile configuration"):
             load_model_profiles(path)
 
 

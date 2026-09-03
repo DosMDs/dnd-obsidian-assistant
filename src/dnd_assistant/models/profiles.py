@@ -24,6 +24,7 @@ import tomllib
 from enum import StrEnum
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from pydantic import BaseModel, field_validator
 
@@ -48,15 +49,37 @@ class ModelProfileRole(StrEnum):
 
 
 def _validate_http_url(value: str) -> str:
-    """Validate that a string is a plausible HTTP/HTTPS URL.
+    """Validate that a string is a syntactically valid HTTP/HTTPS URL.
 
-    No DNS resolution or network access is performed.
+    Uses the standard-library URL parser (``urlsplit``) to verify:
+    1. scheme is exactly ``http`` or ``https``.
+    2. network location (netloc) is structurally present.
+    3. a non-empty, non-whitespace hostname exists.
+    4. when a port is provided, it is a valid integer.
+
+    No DNS resolution, HTTP request, or socket connection is performed.
     """
     if not value.startswith(("http://", "https://")):
         raise ValueError(f"base_url must start with http:// or https://, got {value!r}")
-    rest = value.split("://", 1)[1]
-    if not rest:
-        raise ValueError(f"base_url has no host after scheme: {value!r}")
+
+    try:
+        parsed = urlsplit(value)
+    except ValueError as exc:
+        raise ValueError(f"base_url is not a valid URL: {value!r}") from exc
+
+    if not parsed.netloc:
+        raise ValueError(f"base_url has no network location (host): {value!r}")
+
+    hostname = parsed.hostname
+    if not hostname or not hostname.strip():
+        raise ValueError(f"base_url has no usable hostname: {value!r}")
+
+    # Accessing .port on a malformed port raises ValueError
+    try:
+        _ = parsed.port  # noqa: F841 — validate port syntax
+    except ValueError as exc:
+        raise ValueError(f"base_url has an invalid port: {value!r}") from exc
+
     return value
 
 

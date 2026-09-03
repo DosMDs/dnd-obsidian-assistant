@@ -77,6 +77,7 @@ Correction passes:
 | Task | Status | Notes |
 |---|---|---|
 | S8-C00 | **DONE** | Harden ModelGateway plain-chat and JSON tool-call contracts |
+| S8-C02 | **DONE** | Harden ModelProfile base_url endpoint validation |
 
 ## S8-00 implementation record
 
@@ -422,3 +423,170 @@ The following are explicitly deferred to S8-02 or later:
 - `dnd doctor` integration
 - Session runtime model loading
 - Home-directory / CLI default machine-path resolution
+
+## S8-C02 correction record
+
+**Reviewed S8-01 SHA:** `0a61ea4c22642481a782060c1a0b7e40aad72a5f`
+
+### Defect found
+
+The S8-01 `_validate_http_url` function used `str.startswith` and `str.split`
+to validate `base_url`. This did not actually verify that a usable hostname
+was present. The following malformed values passed validation:
+
+```text
+http:///api
+https://?query=value
+http://\ \ \   (whitespace-only host)
+http://#fragment
+http://localhost:not-a-port
+```
+
+These are not valid machine-provider endpoints because they have no usable
+host or contain an invalid port.
+
+### Production fix
+
+**File:** `src/dnd_assistant/models/profiles.py`
+
+Replaced the string-based validation with `urllib.parse.urlsplit` from the
+standard library. No new dependency was added.
+
+The validator now deterministically verifies:
+
+1. scheme is exactly `http` or `https` (preserved from S8-01).
+2. network location (netloc) is structurally present.
+3. a non-empty, non-whitespace hostname exists.
+4. when a port is provided, it is a valid integer.
+
+No DNS lookup, HTTP request, or socket connection is performed.
+
+### Provider neutrality preserved
+
+The endpoint contract remains HTTP(S)-only, not Ollama-specific. No
+hardcoded `localhost` or `11434` defaults were introduced. Provider names
+(`ollama`, `test-provider`, `future-provider`) are unaffected.
+
+### All other S8-01 behavior preserved
+
+- `ModelProfileRole` enum: unchanged.
+- `ModelProfile` fields: `provider`, `model`, `base_url`, `temperature`,
+  `keep_alive`, `role` — unchanged.
+- `ModelProfilesConfig` collection: unchanged.
+- `load_model_profiles` loader: unchanged.
+- Error mapping: `ValidationError` for profile validation failures.
+- `extra="forbid"`, `frozen=True`: unchanged.
+- No concrete model-name dependency: unchanged.
+- TOML loader tolerates unrelated top-level sections: unchanged.
+
+### Regression coverage
+
+**File:** `tests/unit/test_model_profiles.py` (73 total tests, +7 from S8-01)
+
+Added to `TestModelProfileBaseUrl`:
+
+| Test | What it covers |
+|---|---|
+| `test_slash_slash_api_rejected` | `http:///api` — no netloc |
+| `test_query_only_host_rejected` | `https://?query=value` — no netloc |
+| `test_whitespace_host_rejected` | `http://   ` — whitespace-only hostname |
+| `test_fragment_only_host_rejected` | `http://#fragment` — no netloc |
+| `test_malformed_port_rejected` | `http://localhost:not-a-port` — invalid port |
+| `test_endpoint_with_path_accepted` | `https://provider.example/ollama` — path accepted |
+
+Added to `TestLoadModelProfilesFailures`:
+
+| Test | What it covers |
+|---|---|
+| `test_invalid_base_url_via_loader` | TOML loader maps invalid URL to `DndValidationError` |
+
+Updated existing `test_scheme_only_rejected` match pattern from `"no host"`
+to `"no network location"` to match the new error message.
+
+### Verification commands and results
+
+```
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 287 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3828 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 281 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Direct diagnostic proof
+
+All required malformed URLs rejected:
+
+```text
+http:///api                → base_url has no network location (host)
+https://?query=value       → base_url has no network location (host)
+http://\ \ \ (whitespace)  → base_url has no usable hostname
+http://#fragment           → base_url has no network location (host)
+http://localhost:not-a-port → base_url has an invalid port
+```
+
+All required valid URLs accepted:
+
+```text
+http://localhost:11434
+http://192.168.1.50:11434
+https://some-provider.example
+https://provider.example/ollama
+```
+
+No DNS lookup, HTTP request, or socket connection performed.
+
+TOML invalid `base_url` maps to `DndValidationError` (not raw Pydantic exception).
+
+### Scope audit
+
+**Intended scope:** `src/dnd_assistant/models/profiles.py`, `tests/unit/test_model_profiles.py`, `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`, `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/profiles.py`
+- `tests/unit/test_model_profiles.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:** `src/dnd_assistant/models/types.py`, `src/dnd_assistant/models/gateway.py`, `src/dnd_assistant/models/__init__.py`, `src/dnd_assistant/domain/`, `src/dnd_assistant/storage/`, `src/dnd_assistant/retrieval/`, `src/dnd_assistant/application/`, `src/dnd_assistant/tools/`, `src/dnd_assistant/cli/`, `tests/unit/test_model_gateway_contracts.py`, `tests/contract/`, `pyproject.toml`, `uv.lock`
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` (1477): unchanged
+- `src/dnd_assistant/models/profiles.py`: 242 lines (under 700)
+- `tests/unit/test_model_profiles.py`: 853 lines (under 1000)
+- No new correction-history filenames created
+- No new maintainability exceptions added
+
+### Remaining invariants
+
+- No S8-02 implementation (Ollama transport, health, plain chat)
+- No S8-03 implementation (structured generation)
+- No S8-04 implementation (native tool calling)
+- No S8-05 implementation (embeddings)
+- No S8-06 implementation (provider integration)
+- No S8-07 implementation (Stage-8 review)
+- Stage 9 remains NOT STARTED
