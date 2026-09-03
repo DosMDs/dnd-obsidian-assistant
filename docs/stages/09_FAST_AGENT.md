@@ -51,6 +51,7 @@
 
 | Task | Status |
 |---|---|
+| S9-C00 — Correct Fast-Agent tool exposure import and permission boundaries | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## Important Context Builder deferral
@@ -145,3 +146,68 @@ Input catalog order is preserved. Returns a new list. Does not mutate inputs.
 - Non-mutation (4 tests)
 - TypeError for invalid arguments (2 tests)
 - No execution side effects (1 test)
+
+---
+
+## S9-C00 — Correct Fast-Agent tool exposure import and permission boundaries
+
+### Defect A — fresh module import eagerly loads ToolExecutor
+
+**Root cause:** `dnd_assistant.application.agent_tool_selection` imported
+`ToolPublicDefinition`, `ToolRegistrySchema`, `ExecutionContext`, and
+`Permission` from `dnd_assistant.tools` at module scope.  Importing from
+`dnd_assistant.tools` initialises the package root, whose `__init__.py`
+eagerly imports `dnd_assistant.tools.executor` (`ToolExecutor`).
+
+The existing unit test only inspected the module namespace (`dir(mod)`)
+within the same process, which could not detect the eager-loading defect
+because the test runner had already loaded the Tool Layer.
+
+**Fix:** Moved all runtime Tool-Layer imports into the `select_agent_tools()`
+function body.  Module-scope imports are now under `TYPE_CHECKING` only,
+preventing Python from resolving them at module-import time.
+
+### Defect B — malformed permission fails open
+
+**Root cause:** `_is_permission_eligible()` used `else: return True` after
+checking `Permission.READ`.  Since `ExecutionContext` is a frozen dataclass
+with no runtime validation of `granted_permission`, a malformed value (e.g.
+a plain string) would fall through to the `else` branch and acquire
+WRITE-equivalent exposure.
+
+**Fix:** Replaced `else: return True` with an explicit `Permission.WRITE`
+check.  Unexpected/malformed permission values now return `False` (fail
+closed), exposing no tools.
+
+### Regression coverage
+
+- **Fresh-process `sys.modules` test:** A subprocess-based diagnostic
+  (`sys.executable -c`) imports only `agent_tool_selection` and asserts
+  that `dnd_assistant.models`, `dnd_assistant.models.ollama`,
+  `dnd_assistant.tools.executor`, `dnd_assistant.storage`,
+  `dnd_assistant.retrieval`, and `dnd_assistant.cli` are NOT loaded.
+  Portable on Windows/macOS (no Bash, no shell-specific commands).
+
+- **Malformed-permission regression:** Four tests using `cast()` to inject
+  deliberately invalid `granted_permission` values (plain string, wrong
+  enum member).  Verifies that malformed permission cannot expose READ or
+  WRITE tools, even with audit present.
+
+### Scope
+
+- No ToolExecutor/tools package refactor.
+- No Stage-9 scope expansion (no FastAgent, ContextBuilder, ChangeSet,
+  model invocation, CLI).
+- Exactly three files changed:
+  - `src/dnd_assistant/application/agent_tool_selection.py`
+  - `tests/unit/test_agent_tool_selection.py`
+  - `docs/stages/09_FAST_AGENT.md`
+
+### Stage status after correction
+
+| Task | Status |
+|---|---|
+| Stage 9 | IN PROGRESS |
+| S9-00 | DONE after correction |
+| S9-01..S9-07 | NOT STARTED |
+| Stage 10 | NOT STARTED |

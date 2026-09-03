@@ -2,19 +2,24 @@
 
 Covers:
 
-- Permission eligibility (READ, WRITE, WRITE + missing audit).
+- Permission eligibility (READ, WRITE, WRITE + missing audit, malformed permission).
 - Session-mode eligibility (ACTIVE_SESSION, NO_ACTIVE_SESSION, both).
 - Combined intersection eligibility.
 - Empty catalog.
 - Order preservation.
 - Non-mutation of inputs.
-- No execution side effects.
+- No execution side effects (module-import and fresh-process levels).
 - TypeError for invalid argument types.
+- Malformed ``granted_permission`` fails closed.
 """
 
 from __future__ import annotations
 
+import subprocess
+import sys
+import textwrap
 from datetime import UTC, datetime
+from typing import cast
 
 import pytest
 
@@ -187,6 +192,94 @@ class TestPermissionEligibility:
         result = select_agent_tools(catalog, context=context)
         assert len(result) == 1
         assert result[0].name == "read_tool"
+
+
+# ── Malformed permission fails closed ────────────────────────────────────────────
+
+
+class TestMalformedPermission:
+    """Regression: unexpected ``granted_permission`` values must fail closed.
+
+    ``ExecutionContext`` is a frozen dataclass and does not runtime-validate
+    its annotations.  A malformed value (e.g. a plain string, wrong enum,
+    or object) must never accidentally acquire WRITE-equivalent exposure.
+    """
+
+    def test_malformed_string_does_not_expose_read_tool(self) -> None:
+        """A plain string ``granted_permission`` must not expose any tool."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "bogus_value"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "malformed permission must not expose READ tools"
+
+    def test_malformed_string_does_not_expose_write_tool(self) -> None:
+        """A plain string ``granted_permission`` must not expose WRITE tools."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "bogus_value"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "write_tool",
+                    permission=Permission.WRITE,
+                    side_effects=[SideEffect.ENTITY_MUTATION],
+                ),
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "malformed permission must not expose WRITE tools"
+
+    def test_malformed_string_with_audit_does_not_expose_write_tool(self) -> None:
+        """Even with audit present, malformed permission must not expose WRITE tools."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "bogus_value"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=AuditContext(
+                    operation_id="test-op",
+                    real_time=datetime(2026, 9, 3, tzinfo=UTC),
+                    source="test",
+                ),
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "write_tool",
+                    permission=Permission.WRITE,
+                    side_effects=[SideEffect.ENTITY_MUTATION],
+                ),
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "malformed permission with audit must not expose WRITE tools"
+
+    def test_wrong_permission_enum_value_does_not_expose_tools(self) -> None:
+        """A valid Permission enum value that is neither READ nor WRITE must fail closed."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "nonexistent"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "unexpected Permission value must not expose tools"
 
 
 # ── Session-mode eligibility ─────────────────────────────────────────────────────
@@ -533,24 +626,63 @@ class TestTypeErrors:
 class TestNoExecutionSideEffects:
     """Selection must perform zero handler/ToolExecutor/Vault/network calls.
 
-    This is structurally verified by not importing or instantiating any
-    of those components in this test module.
+    Verified at two levels:
+    1. Fresh-process import: a subprocess that imports only
+       ``agent_tool_selection`` must NOT eagerly load forbidden modules.
+    2. Structural: this test module does not import or instantiate any
+       executor/handler/Vault/network components.
     """
 
-    def test_no_forbidden_imports_in_module(self) -> None:
-        """Verify agent_tool_selection does not import forbidden modules.
+    def test_fresh_process_does_not_eagerly_load_forbidden_modules(self) -> None:
+        """Fresh-process import must not load models, executor, storage, etc.
 
-        Uses the module's __init__-time import state rather than process-level
-        sys.modules, which may be contaminated by other tests in the same run.
+        This is a subprocess-based regression test for the S9-C00 import-boundary
+        fix.  A child process imports only ``agent_tool_selection`` and inspects
+        ``sys.modules`` for forbidden ``dnd_assistant.*`` subpackages.
+
+        Must pass on Windows and macOS without Bash/shell-specific commands.
         """
-        import dnd_assistant.application.agent_tool_selection as mod
+        code = textwrap.dedent("""\
+            import sys
 
-        import_names = {name for name in dir(mod) if not name.startswith("_")}
-        # The module should only expose select_agent_tools
-        assert "select_agent_tools" in import_names
-        # No forbidden module names should appear in the module's namespace
-        forbidden_prefixes = ["models", "storage", "retrieval", "cli", "ollama"]
-        for name in import_names - {"select_agent_tools"}:
-            assert not any(name.startswith(prefix) for prefix in forbidden_prefixes), (
-                f"agent_tool_selection exposes forbidden import: {name}"
+            # Import only the module under test.
+            import dnd_assistant.application.agent_tool_selection
+
+            # Collect all loaded dnd_assistant.* module prefixes.
+            loaded = {
+                name
+                for name in sys.modules
+                if name.startswith("dnd_assistant.")
+            }
+
+            # Forbidden subpackages that must NOT be eagerly loaded.
+            forbidden = {
+                "dnd_assistant.models",
+                "dnd_assistant.models.ollama",
+                "dnd_assistant.tools.executor",
+                "dnd_assistant.storage",
+                "dnd_assistant.retrieval",
+                "dnd_assistant.cli",
+            }
+
+            # Report for diagnostics.
+            print("Loaded dnd_assistant.* modules:", sorted(loaded))
+            print("Forbidden intersection:", sorted(loaded & forbidden))
+
+            # Assert no forbidden module is loaded.
+            assert not (loaded & forbidden), (
+                f"Fresh import loads forbidden modules: {loaded & forbidden}"
             )
+        """)
+        result = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        print(result.stdout)
+        if result.stderr:
+            print("STDERR:", result.stderr)
+        assert result.returncode == 0, (
+            f"Fresh-process import test failed (exit {result.returncode}): {result.stderr}"
+        )
