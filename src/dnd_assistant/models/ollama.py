@@ -21,7 +21,6 @@ Provider-specific DTOs and Ollama JSON shapes live here — not in
 
 from __future__ import annotations
 
-import json
 from typing import Any
 from urllib.parse import urljoin
 
@@ -59,7 +58,7 @@ class OllamaModelProvider:
     Each ``OllamaModelProvider`` owns a synchronous ``httpx.Client``
     with an explicit ``close()`` method.  The client is created on
     construction and must be closed when the provider is no longer
-    needed (e.g. via a context manager or explicit ``.close()`` call).
+    needed via an explicit ``.close()`` call.
     """
 
     def __init__(self, profile: ModelProfile) -> None:
@@ -105,18 +104,19 @@ class OllamaModelProvider:
 
         try:
             version_data = version_resp.json()
-        except json.JSONDecodeError:
+        except ValueError:
             return ModelHealth(
                 reachable=True,
                 model_available=False,
                 detail="invalid version response: non-JSON body",
             )
 
-        if not isinstance(version_data, dict) or "version" not in version_data:
+        version_value = _extract_version(version_data)
+        if version_value is None:
             return ModelHealth(
                 reachable=True,
                 model_available=False,
-                detail="invalid version response: missing 'version' field",
+                detail="invalid version response: missing or unusable 'version' field",
             )
 
         # Step 2 — configured model availability via /api/tags
@@ -138,7 +138,7 @@ class OllamaModelProvider:
 
         try:
             tags_data = tags_resp.json()
-        except json.JSONDecodeError:
+        except ValueError:
             return ModelHealth(
                 reachable=True,
                 model_available=False,
@@ -273,7 +273,7 @@ class OllamaModelProvider:
         """
         try:
             data = response.json()
-        except json.JSONDecodeError as exc:
+        except ValueError as exc:
             raise ModelError(
                 "Ollama chat returned non-JSON response",
                 cause=exc,
@@ -323,6 +323,22 @@ class OllamaModelProvider:
 # ── Module-level helpers ───────────────────────────────────────────────────
 
 
+def _extract_version(version_data: Any) -> str | None:
+    """Extract a usable version string from a /api/version response.
+
+    Returns the stripped version string if the value is a non-empty string,
+    or ``None`` for any unusable value (missing, null, empty, whitespace-only,
+    non-string).
+    """
+    if not isinstance(version_data, dict):
+        return None
+    raw = version_data.get("version")
+    if not isinstance(raw, str):
+        return None
+    stripped = raw.strip()
+    return stripped if stripped else None
+
+
 def _map_message(msg: ChatMessage) -> dict[str, Any]:
     """Map a provider-neutral ``ChatMessage`` to an Ollama message dict.
 
@@ -360,7 +376,7 @@ def _extract_ollama_error(response: httpx.Response) -> str:
     """
     try:
         data = response.json()
-    except json.JSONDecodeError:
+    except ValueError:
         return f"HTTP {response.status_code}"
 
     if isinstance(data, dict) and isinstance(data.get("error"), str):

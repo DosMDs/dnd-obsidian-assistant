@@ -308,8 +308,42 @@ class TestHealth:
         assert result == ModelHealth(
             reachable=True,
             model_available=False,
-            detail="invalid version response: missing 'version' field",
+            detail="invalid version response: missing or unusable 'version' field",
         )
+
+    @pytest.mark.parametrize(
+        ("version_value", "label"),
+        [
+            (None, "null"),
+            ("", "empty string"),
+            ("   ", "whitespace-only"),
+            (123, "integer"),
+        ],
+    )
+    def test_unusable_version_rejected(self, version_value: Any, label: str) -> None:
+        """version: unusable values must be rejected and /api/tags not called."""
+        profile = _make_profile()
+        tags_called = False
+
+        def fail_on_tags(request: httpx.Request) -> httpx.Response:
+            nonlocal tags_called
+            tags_called = True
+            return httpx.Response(200, json=_tags_response("qwen-2.5-7b"))
+
+        with respx.mock:
+            respx.get("http://localhost:11434/api/version").respond(json={"version": version_value})
+            respx.get("http://localhost:11434/api/tags").mock(side_effect=fail_on_tags)
+
+            provider = OllamaModelProvider(profile)
+            result = provider.health()
+            provider.close()
+
+        assert result == ModelHealth(
+            reachable=True,
+            model_available=False,
+            detail="invalid version response: missing or unusable 'version' field",
+        )
+        assert not tags_called, f"/api/tags must not be called after version={label}"
 
     def test_non_json_version_response(self) -> None:
         profile = _make_profile()
@@ -423,6 +457,37 @@ class TestHealth:
             model_available=False,
             detail="invalid /api/tags response: missing 'models' field",
         )
+
+    def test_invalid_bytes_version_response(self) -> None:
+        """Invalid-byte /api/version body must return ModelHealth, not raise."""
+        profile = _make_profile()
+        with respx.mock:
+            respx.get("http://localhost:11434/api/version").respond(
+                content=b"\xff\xfe\x00\x01invalid bytes"
+            )
+
+            provider = OllamaModelProvider(profile)
+            result = provider.health()
+            provider.close()
+
+        assert result.reachable is True
+        assert result.model_available is False
+
+    def test_invalid_bytes_tags_response(self) -> None:
+        """Invalid-byte /api/tags body after valid version must return ModelHealth, not raise."""
+        profile = _make_profile()
+        with respx.mock:
+            respx.get("http://localhost:11434/api/version").respond(json=_version_response())
+            respx.get("http://localhost:11434/api/tags").respond(
+                content=b"\xff\xfe\x00\x01invalid bytes"
+            )
+
+            provider = OllamaModelProvider(profile)
+            result = provider.health()
+            provider.close()
+
+        assert result.reachable is True
+        assert result.model_available is False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -757,6 +822,24 @@ class TestChatResponse:
                 provider.chat(request)
             provider.close()
 
+    def test_invalid_bytes_chat_response_raises_model_error(self) -> None:
+        """Invalid-byte HTTP 200 /api/chat must raise ModelError, not UnicodeDecodeError."""
+        profile = _make_profile()
+        request = ChatRequest(messages=(ChatMessage(role=MessageRole.USER, content="Hi"),))
+
+        with respx.mock:
+            respx.post("http://localhost:11434/api/chat").respond(
+                content=b"\xff\xfe\x00\x01invalid bytes"
+            )
+
+            provider = OllamaModelProvider(profile)
+            with pytest.raises(ModelError) as exc_info:
+                provider.chat(request)
+            provider.close()
+
+        assert not isinstance(exc_info.value, UnicodeDecodeError)
+        assert exc_info.value.__cause__ is not None
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Plain chat HTTP failure tests
@@ -850,6 +933,20 @@ class TestChatHttpFailures:
         exc = self._do_failing_chat(setup)
         assert isinstance(exc, ModelError)
         assert "502" in str(exc)
+
+    def test_invalid_bytes_error_body(self) -> None:
+        """Invalid-byte HTTP error body must raise ModelError with HTTP status."""
+
+        def setup() -> None:
+            respx.post("http://localhost:11434/api/chat").respond(
+                status_code=502,
+                content=b"\xff\xfe\x00\x01invalid bytes",
+            )
+
+        exc = self._do_failing_chat(setup)
+        assert isinstance(exc, ModelError)
+        assert "502" in str(exc)
+        assert not isinstance(exc, UnicodeDecodeError)
 
 
 # ═══════════════════════════════════════════════════════════════════════════

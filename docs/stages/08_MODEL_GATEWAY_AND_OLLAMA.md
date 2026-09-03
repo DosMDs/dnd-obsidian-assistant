@@ -908,3 +908,187 @@ TOML invalid `base_url` maps to `DndValidationError` (not raw Pydantic exception
 - No S8-06 implementation (provider integration)
 - No S8-07 implementation (Stage-8 review)
 - Stage 9 remains NOT STARTED
+
+## S8-C03 correction record
+
+**Reviewed S8-02 SHA:** `65d6afb6af52b58613456c574f79cd66af02bba3`
+
+### Defect A — `/api/version` accepts unusable version values
+
+The S8-02 version check validated only:
+
+```python
+isinstance(version_data, dict) and "version" in version_data
+```
+
+It did not verify the value itself was usable. Responses such as
+`{"version": null}`, `{"version": ""}`, `{"version": "   "}`, and
+`{"version": 123}` passed validation.
+
+### Defect B — invalidly encoded non-JSON bodies can leak raw exceptions
+
+`httpx.Response.json()` parses raw response bytes, and malformed byte
+encoding may raise `UnicodeDecodeError` instead of `json.JSONDecodeError`.
+This affected `health()`, `chat()`, and `_extract_ollama_error()`.
+
+### Production fixes
+
+**File:** `src/dnd_assistant/models/ollama.py`
+
+1. **Version value validation** — Added `_extract_version()` helper that
+   requires the version value to be a string whose stripped value is
+   non-empty. Returns `None` for null, empty, whitespace-only, or non-string
+   values.
+
+2. **JSON-decoding hardening** — Changed all `except json.JSONDecodeError`
+   to `except ValueError` around `response.json()` calls, because both
+   `json.JSONDecodeError` and `UnicodeDecodeError` are `ValueError`
+   subclasses. Each `except ValueError` is scoped to only the
+   `response.json()` call.
+
+   Affected locations:
+   - `health()` `/api/version` JSON parsing
+   - `health()` `/api/tags` JSON parsing
+   - `_parse_chat_response()` successful response JSON parsing
+   - `_extract_ollama_error()` HTTP error-body JSON parsing
+
+3. **Removed unused `import json`** — No longer needed after changing all
+   `json.JSONDecodeError` references to `ValueError`.
+
+4. **Corrected docstring** — Removed misleading "e.g. via a context manager"
+   wording from the HTTP client ownership section since no `__enter__` /
+   `__exit__` exists.
+
+### Health decoding semantics after correction
+
+For `/api/version`:
+
+- Invalid textual JSON or invalidly encoded bytes → `ModelHealth(reachable=True, model_available=False, detail="invalid version response: non-JSON body")`
+- Unusable version value (null, empty, whitespace, non-string) → `ModelHealth(reachable=True, model_available=False, detail="invalid version response: missing or unusable 'version' field")`
+
+For `/api/tags`:
+
+- Invalid textual JSON or invalidly encoded bytes → `ModelHealth(reachable=True, model_available=False, detail="invalid /api/tags response: non-JSON body")`
+
+No raw `UnicodeDecodeError`, `JSONDecodeError`, or `ValueError` escapes
+`health()` for malformed provider bodies.
+
+### Plain-chat decoding semantics after correction
+
+For successful HTTP `/api/chat` responses with invalid JSON or invalid
+byte encoding → `ModelError("Ollama chat returned non-JSON response")`
+with the underlying decoding exception preserved as `__cause__`.
+
+### HTTP error-body extraction after correction
+
+`_extract_ollama_error()` tolerates invalidly encoded response bodies.
+Falls back to `"HTTP {status}"` without leaking `UnicodeDecodeError`,
+raw binary content, or unbounded body.
+
+### Unchanged transport behavior
+
+Preserved:
+- `POST /api/chat`, `GET /api/version`, `GET /api/tags`
+- `stream = false`, `temperature` → `options.temperature`, `keep_alive` → top-level
+- Exact model matching against `model` and `name` fields
+- Path-prefix URL behavior
+- No automatic model pull/fallback
+- Plain-chat rejection of tool-bearing history
+- Thinking-field behavior
+- Synchronous `httpx.Client` with explicit `close()` lifecycle
+
+### Regression coverage
+
+**File:** `tests/unit/test_ollama_provider.py` (64 total tests, +8 from S8-02)
+
+| Test | What it covers |
+|---|---|
+| `test_unusable_version_rejected` (parametrized × 4) | `version: null`, `version: ""`, `version: "   "`, `version: 123` — each rejected with `reachable=True, model_available=False` and `/api/tags` not called |
+| `test_invalid_bytes_version_response` | Invalid-byte `/api/version` body → `ModelHealth`, no exception |
+| `test_invalid_bytes_tags_response` | Invalid-byte `/api/tags` body after valid version → `ModelHealth`, no exception |
+| `test_invalid_bytes_chat_response_raises_model_error` | Invalid-byte HTTP 200 `/api/chat` → `ModelError`, underlying cause preserved |
+| `test_invalid_bytes_error_body` | Invalid-byte HTTP error body → `ModelError` with HTTP status |
+
+### Verification commands and results
+
+```
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 290 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3895 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 283 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Scope audit
+
+**Intended scope:**
+- `src/dnd_assistant/models/ollama.py`
+- `tests/unit/test_ollama_provider.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/ollama.py`
+- `tests/unit/test_ollama_provider.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/contract/`
+- `pyproject.toml`
+- `uv.lock`
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- `TEST_LEGACY_EXCEPTIONS`: unchanged
+- `src/dnd_assistant/models/ollama.py`: 394 lines (under 700)
+- `tests/unit/test_ollama_provider.py`: 994 lines (under 1000)
+- No new correction-history filenames created
+- No new maintainability exceptions added
+
+### S8-03+ deferrals
+
+- S8-03 (structured generation): NOT STARTED
+- S8-04 (native tool calling): NOT STARTED
+- S8-05 (embeddings): NOT STARTED
+- S8-06 (provider integration): NOT STARTED
+- S8-07 (Stage-8 review): NOT STARTED
+- Stage 9 (Fast Agent): NOT STARTED
