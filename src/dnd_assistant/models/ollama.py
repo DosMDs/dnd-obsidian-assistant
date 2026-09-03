@@ -1,20 +1,20 @@
 """Ollama-specific ModelGateway provider implementation.
 
 This module implements the ``ModelGateway`` protocol for Ollama's native
-HTTP API.  It is intentionally a partial implementation — S8-03 owns:
+HTTP API.  S8-04 owns:
 
     * ``chat()`` — plain (non-tool) multi-turn conversation.
     * ``health()`` — Ollama reachability and configured-model availability.
     * ``generate_structured()`` — structured output matching a Pydantic schema.
+    * ``chat_with_tools()`` — multi-turn conversation with tool-calling support.
 
-Later tasks (S8-04, S8-05) will add ``chat_with_tools()`` and ``embed()``
-respectively.
+Later tasks (S8-05) will add ``embed()``.
 
 Architectural boundary
 ─────────────────────
 This module imports httpx, the provider-neutral DTOs and the ModelProfile
 schema.  It must not import from storage, retrieval, application, CLI,
-domain, or tools.
+domain, or tools (runtime).
 
 Provider-specific DTOs and Ollama JSON shapes live here — not in
 ``models/types.py`` or ``models/gateway.py``.
@@ -22,13 +22,18 @@ Provider-specific DTOs and Ollama JSON shapes live here — not in
 
 from __future__ import annotations
 
-from typing import Any, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import urljoin
 
 import httpx
 from pydantic import BaseModel
 
 from dnd_assistant.errors import ModelError, ValidationError
+from dnd_assistant.models.ollama_tool_adapter import (
+    map_tool_aware_history,
+    map_tools_to_ollama,
+    parse_tool_aware_response,
+)
 from dnd_assistant.models.profiles import ModelProfile
 from dnd_assistant.models.types import (
     ChatMessage,
@@ -36,7 +41,11 @@ from dnd_assistant.models.types import (
     ChatResponse,
     MessageRole,
     ModelHealth,
+    ToolAwareResponse,
 )
+
+if TYPE_CHECKING:
+    from dnd_assistant.tools.catalog import ToolPublicDefinition
 
 # ── Generic type ─────────────────────────────────────────────────────────────
 
@@ -57,8 +66,9 @@ class OllamaModelProvider:
     Configured from a ``ModelProfile`` whose ``provider`` must be
     ``"ollama"``.
 
-    This is intentionally a partial implementation — ``chat()``,
-    ``health()``, and ``generate_structured()`` are implemented in S8-03.
+    S8-04 implements four of the five canonical operations:
+    ``chat()``, ``chat_with_tools()``, ``generate_structured()``,
+    and ``health()``.
 
     HTTP client ownership
     ─────────────────────
@@ -277,6 +287,51 @@ class OllamaModelProvider:
 
         return self._parse_structured_response(response, schema)
 
+    # ── Tool-aware chat ────────────────────────────────────────────────
+
+    def chat_with_tools(
+        self,
+        request: ChatRequest,
+        tools: list[ToolPublicDefinition],
+    ) -> ToolAwareResponse:
+        """Multi-turn conversation with tool-calling support.
+
+        Sends the request to Ollama's ``POST /api/chat`` with native
+        function-calling tool schemas.  Parses the response into a
+        ``ToolAwareResponse`` that may contain text, tool calls, or both.
+
+        Args:
+            request: The conversation history.
+            tools: Provider-neutral public tool definitions from the
+                Tool Layer catalog.  Only ``name``, ``description``,
+                and ``input_schema`` are sent to Ollama.
+
+        Returns:
+            A ``ToolAwareResponse`` whose assistant message may contain
+            text, tool calls, or both.
+
+        Raises:
+            ModelError: If the provider/network/response fails, or if
+                the response contains out-of-allowlist tool calls.
+        """
+        payload = self._build_tool_chat_payload(request, tools)
+
+        try:
+            response = self._client.post(self._url("/api/chat"), json=payload)
+        except httpx.RequestError as exc:
+            raise ModelError(
+                f"Ollama tool chat request failed: {exc}",
+                cause=exc,
+            ) from exc
+
+        if not response.is_success:
+            detail = _extract_ollama_error(response)
+            raise ModelError(
+                f"Ollama tool chat returned HTTP {response.status_code}: {detail}",
+            )
+
+        return self._parse_tool_chat_response(response, tools)
+
     # ── Internal helpers ───────────────────────────────────────────────
 
     def _url(self, path: str) -> str:
@@ -334,6 +389,48 @@ class OllamaModelProvider:
             payload["keep_alive"] = self._profile.keep_alive
 
         return payload
+
+    def _build_tool_chat_payload(
+        self,
+        request: ChatRequest,
+        tools: list[ToolPublicDefinition],
+    ) -> dict[str, Any]:
+        """Build the Ollama ``POST /api/chat`` JSON payload with tools."""
+        payload: dict[str, Any] = {
+            "model": self._profile.model,
+            "messages": map_tool_aware_history(request.messages),
+            "stream": False,
+            "tools": map_tools_to_ollama(tools),
+        }
+
+        if self._profile.temperature is not None:
+            payload.setdefault("options", {})["temperature"] = self._profile.temperature
+
+        if self._profile.keep_alive is not None:
+            payload["keep_alive"] = self._profile.keep_alive
+
+        return payload
+
+    def _parse_tool_chat_response(
+        self,
+        response: httpx.Response,
+        tools: list[ToolPublicDefinition],
+    ) -> ToolAwareResponse:
+        """Parse an Ollama tool-aware response into a ``ToolAwareResponse``.
+
+        Raises ``ModelError`` for malformed responses, invalid bytes,
+        or out-of-allowlist tool calls.
+        """
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ModelError(
+                "Ollama tool chat returned non-JSON response",
+                cause=exc,
+            ) from exc
+
+        allowed_names = {t.name for t in tools}
+        return parse_tool_aware_response(data, allowed_names)
 
     def _assert_no_tool_history(self, request: ChatRequest) -> None:
         """Raise ``ModelError`` if the request contains tool-specific messages.

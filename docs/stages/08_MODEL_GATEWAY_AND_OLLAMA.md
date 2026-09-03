@@ -67,7 +67,7 @@ via a `TYPE_CHECKING`-only import in `gateway.py`.  This ensures:
 | **S8-01** | **DONE** | Model profile schemas + machine profile loader |
 | **S8-02** | **DONE** | Ollama transport + health + plain chat |
 | **S8-03** | **DONE** | Ollama structured generation |
-| S8-04 | NOT STARTED | Ollama native tool-calling adapter |
+| S8-04 | **DONE** | Ollama native tool-calling adapter |
 | S8-05 | NOT STARTED | Ollama embeddings |
 | S8-06 | NOT STARTED | Provider integration / error hardening / opt-in smoke coverage |
 | S8-07 | NOT STARTED | Full Stage-8 historical review / completion |
@@ -1231,6 +1231,154 @@ git diff --check
 **S8-04 deferral:**
 
 S8-04 remains NOT STARTED. This correction does not begin S8-04 implementation.
+
+## S8-04 implementation record
+
+**Starting SHA:** `e445868e9bb5416f0e9ec8ee5fcad631c880ea4a`
+
+**Branch:** `main`
+
+### Official Ollama tool-calling endpoint
+
+Uses `POST /api/chat` with the `tools` field containing native Ollama function-calling schemas.
+
+### `chat_with_tools` signature
+
+```python
+def chat_with_tools(
+    self,
+    request: ChatRequest,
+    tools: list[ToolPublicDefinition],
+) -> ToolAwareResponse:
+```
+
+### ModelGateway Protocol unchanged
+
+The `ModelGateway` Protocol already defined `chat_with_tools()` since S8-00. No changes to `gateway.py`, `types.py`, or any provider-neutral DTOs.
+
+### Runtime ToolPublicDefinition import strategy
+
+Uses `TYPE_CHECKING`-only import in `ollama.py`. The concrete `ToolPublicDefinition` is used only for data adaptation (reading `name`, `description`, `input_schema`). No runtime Tool Layer dependency.
+
+### No ToolRegistry/ToolExecutor/handler dependency
+
+Confirmed via clean-import test and all boundary tests (97 passed).
+
+### Production decomposition decision
+
+Created `src/dnd_assistant/models/ollama_tool_adapter.py` (319 lines) to own pure-ish adaptation. `ollama.py` (641 lines) owns HTTP request lifecycle and payload construction.
+
+### Exact ToolPublicDefinition → Ollama mapping
+
+Only `name`, `description`, and `input_schema` are sent. `output_schema`, `permission`, `side_effects`, and `allowed_session_modes` are intentionally excluded.
+
+### Tool ordering behavior
+
+The input `tools` list order is preserved in the outgoing payload.
+
+### Empty tool-list behavior
+
+`chat_with_tools(request, [])` sends `"tools": []` and returns a normal text-only `ToolAwareResponse`.
+
+### Exact native endpoint
+
+`POST /api/chat` with `stream: false`, `temperature` → `options.temperature`, `keep_alive` → top-level. No `format` or `think` sent. No prompt mutation.
+
+### Message mapping
+
+SYSTEM, USER, plain ASSISTANT, ASSISTANT with tool calls, and TOOL result messages are all mapped to their native Ollama equivalents. Parallel history is supported.
+
+### Provider-neutral call_id policy
+
+Native Ollama does not define provider call IDs. Newly parsed `ToolCall` objects use `call_id=None`. Non-null `call_id` or `tool_call_id` in outgoing history is rejected before HTTP.
+
+### Response mapping
+
+Text-only, tool-call-only, and text + tool-call responses are all supported. Content normalization handles empty/missing/None content appropriately.
+
+### ToolCall structure validation
+
+Required: entry is object, `function` exists and is object, `function.name` is non-empty string, `function.arguments` is object/dict. If `type` is present it must be `"function"`. Out-of-allowlist names raise `ModelError`.
+
+### No argument schema validation in ModelGateway
+
+No JSON-Schema validation of arguments against `input_schema` is performed in S8-04. That belongs to the Tool Layer / ToolExecutor.
+
+### HTTP/error mapping
+
+All failures (connection, timeout, HTTP 4xx/5xx, non-JSON, invalid bytes) surface as `ModelError` with cause preservation. No raw httpx/Pydantic/decoding exceptions escape.
+
+### No execution / no agent loop
+
+A single `chat_with_tools()` call produces exactly one provider response. No retry, no agent loop, no automatic tool-result generation.
+
+### Clean-import dependency diagnostic
+
+Importing `dnd_assistant.models.ollama` does not eagerly load `dnd_assistant.tools.executor`.
+
+### Quality-gate evidence
+
+```
+uv run pytest tests/unit/test_ollama_tool_calling.py -v
+→ 71 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_structured.py -v
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 295 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 4018 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 286 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Physical-line counts
+
+- `ollama.py`: 641 (under 700)
+- `ollama_tool_adapter.py`: 319 (under 700)
+- `test_ollama_tool_calling.py`: 885 (under 1000)
+
+### Maintainability
+
+`PRODUCTION_HARD_LIMIT` (700), `TEST_HARD_LIMIT` (1000), and all legacy exceptions unchanged. No new exceptions added. No dependency changes (`pyproject.toml` and `uv.lock` unchanged).
+
+### Scope audit
+
+**Intended scope:** `src/dnd_assistant/models/ollama.py`, `src/dnd_assistant/models/ollama_tool_adapter.py`, `tests/unit/test_ollama_tool_calling.py`, `tests/contract/test_test_harness_policy.py`, `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`, `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):** same as intended.
+
+**No changes in:** `src/dnd_assistant/models/gateway.py`, `src/dnd_assistant/models/types.py`, `src/dnd_assistant/models/profiles.py`, `src/dnd_assistant/models/__init__.py`, `src/dnd_assistant/domain/`, `src/dnd_assistant/storage/`, `src/dnd_assistant/retrieval/`, `src/dnd_assistant/application/`, `src/dnd_assistant/tools/`, `src/dnd_assistant/cli/`, `tests/unit/test_ollama_provider.py`, `tests/unit/test_ollama_structured.py`, `tests/unit/test_model_gateway_contracts.py`, `tests/unit/test_model_profiles.py`, `tests/contract/test_boundaries.py`, `tests/contract/test_maintainability.py`, `pyproject.toml`, `uv.lock`
+
+### S8-05+ deferrals
+
+S8-05 (embeddings): NOT STARTED. S8-06 (provider integration): NOT STARTED. S8-07 (Stage-8 review): NOT STARTED. Stage 9 (Fast Agent): NOT STARTED.
+
+---
 
 ## S8-03 implementation record
 
