@@ -96,9 +96,9 @@ Correction passes:
 - 97 passed (boundary tests) — zero diff in `test_boundaries.py`
 - 284 passed (maintainability tests) — no ceiling changes
 - 25 passed (test harness policy tests)
-- Full pytest suite: (reported in Final Report)
-- Ruff check: (reported in Final Report)
-- Ruff format: (reported in Final Report)
+- Full pytest suite: 3752 passed, 95 skipped, 0 failed, 0 errors
+- Ruff check: All checks passed
+- Ruff format: 279 files already formatted
 
 ## S8-C00 correction record
 
@@ -178,8 +178,8 @@ git diff --check
 - `PRODUCTION_HARD_LIMIT` (700): unchanged
 - `TEST_HARD_LIMIT` (1000): unchanged
 - `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` (1477): unchanged
-- `src/dnd_assistant/models/types.py`: 218 lines (under 700)
-- `tests/unit/test_model_gateway_contracts.py`: 608 lines (under 1000)
+- `src/dnd_assistant/models/types.py`: 214 lines (under 700)
+- `tests/unit/test_model_gateway_contracts.py`: 610 lines (under 1000)
 - No new correction-history filenames created
 
 ### Remaining invariants
@@ -192,3 +192,99 @@ git diff --check
 - `call_id` remains optional (provider-neutral)
 - S8-01 remains NOT STARTED
 - Stage 9 remains NOT STARTED
+
+## S8-C01 correction record
+
+**Review base SHA:** `f3c8e00e0d8aa584541faa458b800230163e1b9f`
+
+**Reviewed S8-C00 SHA:** `f3c8e00e0d8aa584541faa458b800230163e1b9f` (S8-C00 is the HEAD commit)
+
+**Reason for correction:** Independent review of S8-C00 found two documentation/evidence defects in the Stage-8 document that were not resolved during S8-C00:
+
+1. Stale S8-00 quality-gate placeholders remained unresolved (three `(reported in Final Report)` entries).
+2. Physical-line counts in the Maintainability section (types.py: 218, test_model_gateway_contracts.py: 608) contradicted the S8-C00 Final Report (types.py: 214, test_model_gateway_contracts.py: 610).
+
+**Stale placeholders found:**
+
+Three entries in the S8-00 Quality-gate evidence section:
+
+```
+- Full pytest suite: (reported in Final Report)
+- Ruff check: (reported in Final Report)
+- Ruff format: (reported in Final Report)
+```
+
+**How each placeholder was resolved:**
+
+Replaced with actual verification results from the S8-C01 verification run on the current HEAD (`f3c8e00`):
+
+```
+- Full pytest suite: 3752 passed, 95 skipped, 0 failed, 0 errors
+- Ruff check: All checks passed
+- Ruff format: 279 files already formatted
+```
+
+**Exact physical-line counting method:**
+
+```python
+from pathlib import Path
+for path in (
+    Path("src/dnd_assistant/models/types.py"),
+    Path("tests/unit/test_model_gateway_contracts.py"),
+):
+    print(path, len(path.read_bytes().splitlines()))
+```
+
+This matches the maintainability test semantics: `len(path.read_bytes().splitlines())`.
+
+**Corrected counts:**
+
+- `src/dnd_assistant/models/types.py`: **214** (was 218 in Stage document, was 214 in Final Report)
+- `tests/unit/test_model_gateway_contracts.py`: **610** (was 608 in Stage document, was 610 in Final Report)
+
+**Verification commands and results:**
+
+```
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 284 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3752 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 279 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+**Actual changed-file inventory (from Git):**
+
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**Scope audit:**
+
+Zero diff in:
+- `src/dnd_assistant/` (all production code)
+- `tests/` (all test code)
+- `pyproject.toml`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+No maintainability ceiling changes. No boundary-test changes. No test-harness changes. No S8-01 implementation. No Ollama implementation. No Fast Agent implementation.
+
+**Commit SHA after finalization:** (reported in Final Report)

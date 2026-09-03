@@ -64,6 +64,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 |---|---|
 | S8-00 — Provider-neutral typed ModelGateway contracts + sync decision | DONE |
 | S8-C00 — Harden ModelGateway plain-chat and JSON tool-call contracts | DONE |
+| S8-C01 — Correct Stage-8 verification evidence | DONE |
 | S8-01 — Model profile schemas + machine profile loader | NOT STARTED |
 | S8-02 — Ollama transport + health + plain chat | NOT STARTED |
 | S8-03 — Ollama structured generation | NOT STARTED |
