@@ -1,13 +1,14 @@
 """Ollama-specific ModelGateway provider implementation.
 
 This module implements the ``ModelGateway`` protocol for Ollama's native
-HTTP API.  It is intentionally a partial implementation — S8-02 owns only:
+HTTP API.  It is intentionally a partial implementation — S8-03 owns:
 
     * ``chat()`` — plain (non-tool) multi-turn conversation.
     * ``health()`` — Ollama reachability and configured-model availability.
+    * ``generate_structured()`` — structured output matching a Pydantic schema.
 
-Later tasks (S8-03, S8-04, S8-05) will add ``generate_structured()``,
-``chat_with_tools()``, and ``embed()`` respectively.
+Later tasks (S8-04, S8-05) will add ``chat_with_tools()`` and ``embed()``
+respectively.
 
 Architectural boundary
 ─────────────────────
@@ -21,10 +22,11 @@ Provider-specific DTOs and Ollama JSON shapes live here — not in
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, TypeVar
 from urllib.parse import urljoin
 
 import httpx
+from pydantic import BaseModel
 
 from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.models.profiles import ModelProfile
@@ -35,6 +37,11 @@ from dnd_assistant.models.types import (
     MessageRole,
     ModelHealth,
 )
+
+# ── Generic type ─────────────────────────────────────────────────────────────
+
+T = TypeVar("T", bound=BaseModel)
+"""Type variable bounded to Pydantic BaseModel for structured generation."""
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
@@ -50,8 +57,8 @@ class OllamaModelProvider:
     Configured from a ``ModelProfile`` whose ``provider`` must be
     ``"ollama"``.
 
-    This is intentionally a partial implementation — only ``chat()``
-    and ``health()`` are implemented in S8-02.
+    This is intentionally a partial implementation — ``chat()``,
+    ``health()``, and ``generate_structured()`` are implemented in S8-03.
 
     HTTP client ownership
     ─────────────────────
@@ -214,6 +221,62 @@ class OllamaModelProvider:
 
         return self._parse_chat_response(response)
 
+    # ── Structured generation ──────────────────────────────────────────
+
+    def generate_structured(
+        self,
+        request: ChatRequest,
+        schema: type[T],
+    ) -> T:
+        """Produce structured output matching a Pydantic schema.
+
+        Sends the request to Ollama's ``POST /api/chat`` with the
+        caller's Pydantic JSON Schema as the ``format`` parameter.
+        Validates the assistant response content against the exact
+        caller-provided schema.
+
+        Args:
+            request: The conversation history (no tool-bearing messages).
+            schema: A Pydantic ``BaseModel`` subclass describing the
+                expected output shape.
+
+        Returns:
+            A validated instance of ``schema``.
+
+        Raises:
+            ValidationError: If the supplied ``schema`` is not a Pydantic
+                ``BaseModel`` subclass.
+            ModelError: If the request contains tool-specific history,
+                the provider/network/response fails, or the structured
+                content does not match the schema.
+        """
+        # Reject non-Pydantic schema arguments before any HTTP call
+        if not (isinstance(schema, type) and issubclass(schema, BaseModel)):
+            raise ValidationError(
+                f"generate_structured requires a Pydantic BaseModel subclass, got {schema!r}"
+            )
+
+        # Reject tool-bearing history before making any HTTP call
+        self._assert_no_tool_history(request)
+
+        payload = self._build_structured_payload(request, schema)
+
+        try:
+            response = self._client.post(self._url("/api/chat"), json=payload)
+        except httpx.RequestError as exc:
+            raise ModelError(
+                f"Ollama structured request failed: {exc}",
+                cause=exc,
+            ) from exc
+
+        if not response.is_success:
+            detail = _extract_ollama_error(response)
+            raise ModelError(
+                f"Ollama structured request returned HTTP {response.status_code}: {detail}",
+            )
+
+        return self._parse_structured_response(response, schema)
+
     # ── Internal helpers ───────────────────────────────────────────────
 
     def _url(self, path: str) -> str:
@@ -247,6 +310,31 @@ class OllamaModelProvider:
 
         return payload
 
+    def _build_structured_payload(
+        self,
+        request: ChatRequest,
+        schema: type[BaseModel],
+    ) -> dict[str, Any]:
+        """Build the Ollama ``POST /api/chat`` JSON payload with ``format``.
+
+        The ``format`` field is set to the Pydantic JSON Schema of the
+        caller's schema.  No schema text is injected into the messages.
+        """
+        payload: dict[str, Any] = {
+            "model": self._profile.model,
+            "messages": [_map_message(m) for m in request.messages],
+            "stream": False,
+            "format": schema.model_json_schema(),
+        }
+
+        if self._profile.temperature is not None:
+            payload.setdefault("options", {})["temperature"] = self._profile.temperature
+
+        if self._profile.keep_alive is not None:
+            payload["keep_alive"] = self._profile.keep_alive
+
+        return payload
+
     def _assert_no_tool_history(self, request: ChatRequest) -> None:
         """Raise ``ModelError`` if the request contains tool-specific messages.
 
@@ -256,12 +344,14 @@ class OllamaModelProvider:
         for msg in request.messages:
             if msg.role == MessageRole.TOOL:
                 raise ModelError(
-                    "Plain chat does not support TOOL-role messages. "
+                    "Plain chat and structured generation do not support "
+                    "TOOL-role messages. "
                     "Use chat_with_tools() (S8-04) for tool-bearing history."
                 )
             if msg.role == MessageRole.ASSISTANT and msg.tool_calls:
                 raise ModelError(
-                    "Plain chat does not support assistant messages with tool_calls. "
+                    "Plain chat and structured generation do not support "
+                    "assistant messages with tool_calls. "
                     "Use chat_with_tools() (S8-04) for tool-bearing history."
                 )
 
@@ -316,6 +406,66 @@ class OllamaModelProvider:
         except Exception as exc:
             raise ModelError(
                 f"Invalid chat response from Ollama: {exc}",
+                cause=exc,
+            ) from exc
+
+    def _parse_structured_response(
+        self,
+        response: httpx.Response,
+        schema: type[BaseModel],
+    ) -> BaseModel:
+        """Parse an Ollama ``POST /api/chat`` response into a validated schema instance.
+
+        Validates the outer response structure (message, role, content),
+        then validates the content against the caller-provided Pydantic schema.
+
+        Raises ``ModelError`` for malformed responses, unexpected tool_calls,
+        or schema validation failures.
+        """
+        try:
+            data = response.json()
+        except ValueError as exc:
+            raise ModelError(
+                "Ollama structured request returned non-JSON response",
+                cause=exc,
+            ) from exc
+
+        if not isinstance(data, dict) or "message" not in data:
+            raise ModelError("Ollama structured response missing 'message' field")
+
+        msg_data = data["message"]
+        if not isinstance(msg_data, dict):
+            raise ModelError("Ollama structured response 'message' is not an object")
+
+        role = msg_data.get("role", "")
+        content = msg_data.get("content")
+
+        # Check for unexpected tool_calls
+        tool_calls = msg_data.get("tool_calls")
+        if tool_calls:
+            raise ModelError(
+                "Ollama structured request returned unexpected tool_calls. "
+                "Use chat_with_tools() (S8-04) for tool-calling responses."
+            )
+
+        if role != "assistant":
+            raise ModelError(
+                f"Ollama structured response returned unexpected role: {role!r}. "
+                f"Expected 'assistant'."
+            )
+
+        if not isinstance(content, str):
+            raise ModelError(
+                f"Ollama structured response 'message.content' is not a string, "
+                f"got {type(content).__name__}"
+            )
+
+        # Validate content against the caller-provided schema
+        try:
+            return schema.model_validate_json(content)
+        except Exception as exc:
+            raise ModelError(
+                f"Ollama structured response validation failed: {exc}",
                 cause=exc,
             ) from exc
 

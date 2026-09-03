@@ -66,7 +66,7 @@ via a `TYPE_CHECKING`-only import in `gateway.py`.  This ensures:
 | **S8-00** | **DONE** | Provider-neutral typed ModelGateway contracts + sync decision |
 | **S8-01** | **DONE** | Model profile schemas + machine profile loader |
 | **S8-02** | **DONE** | Ollama transport + health + plain chat |
-| S8-03 | NOT STARTED | Ollama structured generation |
+| **S8-03** | **DONE** | Ollama structured generation |
 | S8-04 | NOT STARTED | Ollama native tool-calling adapter |
 | S8-05 | NOT STARTED | Ollama embeddings |
 | S8-06 | NOT STARTED | Provider integration / error hardening / opt-in smoke coverage |
@@ -1084,9 +1084,215 @@ git diff --check
 - No new correction-history filenames created
 - No new maintainability exceptions added
 
-### S8-03+ deferrals
+## S8-03 implementation record
 
-- S8-03 (structured generation): NOT STARTED
+**Starting SHA:** `8a633b3b467107c96b78fc3a71a125bd3188b563`
+
+**Branch:** `main`
+
+### Official Ollama structured-output mechanism
+
+Uses `POST /api/chat` with the `format` field set to the Pydantic JSON Schema
+of the caller's schema:
+
+```json
+{
+  "model": "...",
+  "messages": [...],
+  "stream": false,
+  "format": { "...caller schema JSON Schema..." }
+}
+```
+
+### `generate_structured` signature
+
+```python
+T = TypeVar("T", bound=BaseModel)
+
+def generate_structured(
+    self,
+    request: ChatRequest,
+    schema: type[T],
+) -> T:
+```
+
+### Generic Pydantic type decision
+
+Uses `TypeVar("T", bound=BaseModel)` with `pydantic.BaseModel` as the runtime
+type bound. The public return type is `T` (the exact validated Pydantic model
+type requested by the caller).
+
+### Runtime schema validation
+
+Before any HTTP request, verifies:
+
+```python
+isinstance(schema, type) and issubclass(schema, BaseModel)
+```
+
+Rejects `int`, `dict`, `str`, ordinary classes, and Pydantic model instances
+with `ValidationError`. Rejected schemas never result in an HTTP call.
+
+### `format = schema.model_json_schema()` mapping
+
+The `format` field in the Ollama payload is set to the exact result of
+`schema.model_json_schema()`. No manual JSON Schema reconstruction.
+
+### No prompt mutation
+
+Messages in the `ChatRequest` are mapped to the Ollama payload unchanged.
+No schema text, system message, or user suffix is injected into the prompt.
+
+### Request mapping reuse
+
+Reuses the same profile-based configuration as `chat()`:
+- `model` from profile
+- `messages` via `_map_message()`
+- `stream: false`
+- `temperature` → `options.temperature` (omitted when `None`)
+- `keep_alive` → top-level (omitted when `None`)
+
+### No tools or think sent
+
+The structured payload never includes `tools` or `think` fields.
+
+### Tool-history rejection
+
+`generate_structured()` calls `_assert_no_tool_history()` before any HTTP
+request, rejecting TOOL-role messages and assistant messages with tool_calls.
+Rejected tool-bearing history makes no HTTP request.
+
+### Response message structural validation
+
+The outer Ollama response is validated for:
+- top-level JSON object
+- `message` field exists and is an object
+- `message.role == "assistant"`
+- `message.content` is a string
+- no unexpected `message.tool_calls`
+
+Malformed responses raise `ModelError`.
+
+### Structured content validation
+
+Uses `schema.model_validate_json(content)` to validate the assistant content
+against the exact caller-provided Pydantic schema. This enforces JSON syntax,
+field types, required fields, nested schemas, caller-defined validators, and
+extra-field policy.
+
+### `ModelError` mapping
+
+All output validation failures cross the provider boundary as `ModelError`:
+- invalid JSON in `message.content`
+- valid JSON but wrong field type
+- missing required field
+- schema-specific validator failure
+- extra field rejection when the caller schema forbids extras
+
+The underlying Pydantic validation exception is preserved via `cause=`.
+
+### No retry/repair/fallback
+
+No retry with a new prompt, no `"format": "json"` fallback, no JSON repair,
+no markdown-fence stripping, no LLM self-correction, no schema simplification,
+no fallback model.
+
+### No automatic model mutation
+
+No `ollama pull`, no model fallback, no model selection changes.
+
+### Test-file split
+
+`tests/unit/test_ollama_provider.py` was at 994 lines (TEST_HARD_LIMIT = 1000).
+S8-03 tests were created in a new topical module:
+`tests/unit/test_ollama_structured.py` (47 tests, 809 lines).
+
+### Mock strategy
+
+All tests use `respx.mock` to mock HTTP. No real Ollama, no network, no Vault.
+
+### Quality-gate evidence
+
+```
+uv run pytest tests/unit/test_ollama_structured.py -v
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 292 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3944 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 284 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Scope audit
+
+**Intended scope:**
+- `src/dnd_assistant/models/ollama.py`
+- `tests/unit/test_ollama_structured.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/ollama.py`
+- `tests/unit/test_ollama_structured.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_ollama_provider.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/contract/`
+- `pyproject.toml`
+- `uv.lock`
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- `TEST_LEGACY_EXCEPTIONS`: unchanged
+- `src/dnd_assistant/models/ollama.py`: 545 lines (under 700)
+- `tests/unit/test_ollama_structured.py`: 809 lines (under 1000)
+- `tests/unit/test_ollama_provider.py`: 994 lines (unchanged, under 1000)
+- No new correction-history filenames created
+- No new maintainability exceptions added
+
+### S8-04+ deferrals
+
 - S8-04 (native tool calling): NOT STARTED
 - S8-05 (embeddings): NOT STARTED
 - S8-06 (provider integration): NOT STARTED
