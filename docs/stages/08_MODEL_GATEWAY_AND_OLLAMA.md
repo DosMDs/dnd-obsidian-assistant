@@ -2433,6 +2433,406 @@ git diff --check
 - No new exceptions added
 - No dependency changes (`pyproject.toml` and `uv.lock` unchanged)
 
-**S8-06 deferral:**
+## S8-06 implementation record
 
-S8-06 remains NOT STARTED. S8-07 remains NOT STARTED. Stage 9 remains NOT STARTED.
+**Starting SHA:** `f15bcd63b136e9bb13ad3f4624db288856b10bac`
+
+### Provider-integration interpretation
+
+S8-06 proved that the accepted machine profile loader and concrete
+`OllamaModelProvider` compose correctly across all five ModelGateway
+operations without introducing a Stage-9 application composition layer.
+The mocked integration test (`test_ollama_provider_integration.py`) creates
+a real machine TOML, loads it through `load_model_profiles()`, instantiates
+`OllamaModelProvider` from the loaded profile, and exercises all five
+canonical operations with mocked HTTP.
+
+### Why no provider factory was introduced
+
+No generic provider factory, `ModelRouter`, `ProviderRegistry`, or similar
+abstraction was introduced because there is no Stage-9 application consumer
+yet. The integration test explicitly instantiates `OllamaModelProvider(profile)`
+after loading the profile — this is sufficient for S8-06.
+
+### Plain-chat tool_calls defect
+
+The old `_parse_chat_response` used truthiness (`if tool_calls:`) to detect
+unexpected native `tool_calls`. This incorrectly allowed falsy-but-present
+values (`None`, `""`, `{}`, `0`, `False`) to pass through silently.
+
+### Structured-generation tool_calls defect
+
+The old `_parse_structured_response` used the same truthiness pattern
+(`if tool_calls:`) with the same incorrect semantics.
+
+### Exact field-presence semantics
+
+Both operations now use `_assert_no_native_tool_calls()` which implements
+presence-based detection:
+
+| Condition | Behaviour |
+|---|---|
+| `tool_calls` field missing | Allowed (no tool calls) |
+| `tool_calls=[]` | Allowed (empty list, no calls) |
+| `tool_calls=None` | `ModelError` |
+| `tool_calls=""` | `ModelError` |
+| `tool_calls={}` | `ModelError` |
+| `tool_calls=0` | `ModelError` |
+| `tool_calls=False` | `ModelError` |
+| `tool_calls=True` | `ModelError` |
+| `tool_calls=[one or more entries]` | `ModelError` |
+
+### `ollama_chat_adapter` decomposition
+
+Created `src/dnd_assistant/models/ollama_chat_adapter.py` (193 lines) owning:
+
+- `parse_plain_chat_response()` — plain chat response parsing
+- `parse_structured_chat_response()` — structured generation response parsing
+- `_assert_no_native_tool_calls()` — shared presence-based tool_calls rejection
+
+### ollama.py before/after physical lines
+
+| State | Lines |
+|---|---|
+| Before (S8-C07) | 699 |
+| After (S8-06) | 627 |
+
+Reduction of 72 lines. Target was ≤640.
+
+### Mocked profile-loader/provider integration
+
+The integration module (`test_ollama_provider_integration.py`) creates a
+temporary machine TOML with `agent_test` and `embedding_test` profiles,
+loads it through `load_model_profiles()`, and exercises all five operations
+with `respx`-mocked HTTP.
+
+### Five-operation integration coverage
+
+| Operation | Test |
+|---|---|
+| `health` | `TestHealthIntegration.test_healthy`, `.test_unreachable` |
+| `chat` | `TestChatIntegration.test_simple_chat` |
+| `generate_structured` | `TestStructuredIntegration.test_simple_structured` |
+| `chat_with_tools` | `TestToolAwareIntegration.test_text_only_response`, `.test_tool_call_response` |
+| `embed` | `TestEmbeddingIntegration.test_single_embedding`, `.test_health_before_embed` |
+
+### Real-smoke marker policy
+
+All real Ollama smoke tests are marked `pytest.mark.ollama`. When
+`DND_ASSISTANT_OLLAMA_SMOKE_CONFIG` is absent, all tests skip before any
+network request. When present, missing/invalid configuration causes the
+opted-in run to fail.
+
+### Exact smoke environment variables
+
+- `DND_ASSISTANT_OLLAMA_SMOKE_CONFIG` — path to machine TOML
+- `DND_ASSISTANT_OLLAMA_SMOKE_AGENT_PROFILE` — profile name for agent operations
+- `DND_ASSISTANT_OLLAMA_SMOKE_EMBEDDING_PROFILE` — profile name for embedding
+
+### Skip-vs-fail semantics
+
+- `DND_ASSISTANT_OLLAMA_SMOKE_CONFIG` absent → skip (no network)
+- Config present but other var missing → fail
+- Config present but file missing → fail
+- Config present but profile missing → fail
+- Config present but provider wrong → fail
+- Config present but endpoint unreachable → fail
+
+### Marker registration
+
+Registered in `pyproject.toml`:
+
+```toml
+[tool.pytest.ini_options]
+markers = [
+    "ollama: opt-in tests requiring a real configured Ollama endpoint",
+]
+```
+
+### Default opt-out smoke result
+
+```
+uv run pytest tests/integration/test_ollama_smoke.py -v
+→ 5 skipped, 0 failed, 0 errors
+```
+
+### Actual real-provider smoke result
+
+```
+REAL OLLAMA SMOKE: NOT RUN — no explicit smoke configuration supplied
+```
+
+### No hardcoded smoke endpoint
+
+Smoke tests use only the environment-supplied machine config. No default
+`localhost:11434`, no default model name.
+
+### No hardcoded production model
+
+No model name was added to production code. All model names are test
+fixtures only.
+
+### No model pull/fallback
+
+Smoke tests do not pull models. If the configured model is unavailable,
+the opted-in run fails.
+
+### New hardening unit-test result
+
+```
+uv run pytest tests/unit/test_ollama_cross_operation_hardening.py -v
+→ 18 passed, 0 failed, 0 errors
+```
+
+### Mocked provider-integration test result
+
+```
+uv run pytest tests/integration/test_ollama_provider_integration.py -v
+→ 8 passed, 0 failed, 0 errors
+```
+
+### Default opt-out smoke test result
+
+```
+uv run pytest tests/integration/test_ollama_smoke.py -v
+→ 5 skipped, 0 failed, 0 errors
+```
+
+### pytest --markers verification
+
+```
+ollama: opt-in tests requiring a real configured Ollama endpoint
+```
+
+### Existing Ollama-provider test result
+
+```
+uv run pytest tests/unit/test_ollama_provider.py
+→ 64 passed, 0 failed, 0 errors
+```
+
+### Existing structured test result
+
+```
+uv run pytest tests/unit/test_ollama_structured.py
+→ 47 passed, 0 failed, 0 errors
+```
+
+### Existing tool-calling test result
+
+```
+uv run pytest tests/unit/test_ollama_tool_calling.py
+→ 76 passed, 0 failed, 0 errors
+```
+
+### Existing embeddings test result
+
+```
+uv run pytest tests/unit/test_ollama_embeddings.py
+→ 67 passed, 0 failed, 0 errors
+```
+
+### Model-profile test result
+
+```
+uv run pytest tests/unit/test_model_profiles.py
+→ 73 passed, 0 failed, 0 errors
+```
+
+### ModelGateway contract test result
+
+```
+uv run pytest tests/unit/test_model_gateway_contracts.py
+→ 76 passed, 0 failed, 0 errors
+```
+
+### Boundary test result
+
+```
+uv run pytest tests/contract/test_boundaries.py
+→ 97 passed, 0 failed, 0 errors
+```
+
+### Maintainability test result
+
+```
+uv run pytest tests/contract/test_maintainability.py
+→ 305 passed, 0 failed, 0 errors
+```
+
+### Test-harness policy result
+
+```
+uv run pytest tests/contract/test_test_harness_policy.py
+→ 25 passed, 0 failed, 0 errors
+```
+
+### Full pytest result
+
+```
+uv run pytest
+→ 4126 passed, 100 skipped, 0 failed, 0 errors
+```
+
+### Exact passed count
+
+4126
+
+### Exact skipped count
+
+100 (95 existing + 5 new opt-in smoke tests)
+
+### Exact failed count
+
+0
+
+### Exact error count
+
+0
+
+### Ruff check result
+
+```
+uv run ruff check .
+→ All checks passed!
+```
+
+### Ruff format-check result
+
+```
+uv run ruff format --check .
+→ 292 files already formatted
+```
+
+### git diff --check result
+
+```
+git diff --check
+→ no whitespace errors
+```
+
+### New unit-test physical-line count
+
+`tests/unit/test_ollama_cross_operation_hardening.py`: 234 lines (< 1000)
+
+### Mocked integration-test physical-line count
+
+`tests/integration/test_ollama_provider_integration.py`: 327 lines (< 1000)
+
+### Smoke-test physical-line count
+
+`tests/integration/test_ollama_smoke.py`: 269 lines (< 1000)
+
+### Maintainability ceilings/exceptions unchanged
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- All legacy exceptions: unchanged
+
+### Dependency list unchanged
+
+`pyproject.toml` changed only to register the pytest marker. No new
+dependencies. `uv.lock` unchanged.
+
+### uv.lock unchanged
+
+Zero diff.
+
+### Fresh-process import-boundary diagnostic
+
+```
+uv run python -c "import dnd_assistant.models.ollama"
+→ dnd_assistant.tools.executor: NOT imported
+→ dnd_assistant.application: NOT imported
+→ dnd_assistant.storage: NOT imported
+→ dnd_assistant.retrieval: NOT imported
+```
+
+### No storage/retrieval/application eager import
+
+Confirmed by the import-boundary diagnostic above.
+
+### Documentation update
+
+This S8-06 implementation record.
+
+### DEVELOPMENT_STATUS result
+
+S8-06 marked DONE, S8-07 remains NOT STARTED, Stage 9 remains NOT STARTED.
+
+### Confirmation S8-06 DONE
+
+Confirmed.
+
+### Confirmation S8-07 remains NOT STARTED
+
+Confirmed.
+
+### Confirmation Stage 9 remains NOT STARTED
+
+Confirmed.
+
+### Unexpected-file/scope audit
+
+**Intended scope (8 files):**
+- `src/dnd_assistant/models/ollama.py`
+- `src/dnd_assistant/models/ollama_chat_adapter.py`
+- `tests/unit/test_ollama_cross_operation_hardening.py`
+- `tests/integration/test_ollama_provider_integration.py`
+- `tests/integration/test_ollama_smoke.py`
+- `pyproject.toml`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**Zero diff in:**
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/models/ollama_tool_adapter.py`
+- `src/dnd_assistant/models/ollama_embedding_adapter.py`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_ollama_provider.py`
+- `tests/unit/test_ollama_structured.py`
+- `tests/unit/test_ollama_tool_calling.py`
+- `tests/unit/test_ollama_embeddings.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/contract/`
+- `tests/conftest.py`
+- `tests/integration/conftest.py`
+- `tests/fixtures/`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+### Pre-finalization audit result
+
+All quality gates passed. Working tree clean. No unintended changes.
+
+### Commit SHA
+
+(reported in Final Report)
+
+### Commit message
+
+```
+feat: harden Ollama provider integration (S8-06)
+```
+
+### Push result
+
+Normal push to `origin/main`.
+
+### HEAD/upstream equality
+
+HEAD == origin/main after push.
+
+### Clean working-tree confirmation
+
+Confirmed.

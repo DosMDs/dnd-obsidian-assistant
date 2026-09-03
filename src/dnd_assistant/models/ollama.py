@@ -29,6 +29,10 @@ import httpx
 from pydantic import BaseModel
 
 from dnd_assistant.errors import ModelError, ValidationError
+from dnd_assistant.models.ollama_chat_adapter import (
+    parse_plain_chat_response,
+    parse_structured_chat_response,
+)
 from dnd_assistant.models.ollama_embedding_adapter import (
     build_embed_payload,
     parse_embed_response,
@@ -513,6 +517,7 @@ class OllamaModelProvider:
     def _parse_chat_response(self, response: httpx.Response) -> ChatResponse:
         """Parse an Ollama ``POST /api/chat`` response into a ``ChatResponse``.
 
+        Delegates to ``parse_plain_chat_response`` after JSON decoding.
         Raises ``ModelError`` for malformed responses, unexpected
         tool_calls, or invalid message structure.
         """
@@ -524,45 +529,7 @@ class OllamaModelProvider:
                 cause=exc,
             ) from exc
 
-        if not isinstance(data, dict) or "message" not in data:
-            raise ModelError("Ollama chat response missing 'message' field")
-
-        msg_data = data["message"]
-        if not isinstance(msg_data, dict):
-            raise ModelError("Ollama chat response 'message' is not an object")
-
-        role = msg_data.get("role", "")
-        content = msg_data.get("content")
-
-        # Check for unexpected tool_calls
-        tool_calls = msg_data.get("tool_calls")
-        if tool_calls:
-            raise ModelError(
-                "Ollama plain chat returned unexpected tool_calls. "
-                "Use chat_with_tools() (S8-04) for tool-calling responses."
-            )
-
-        if role != "assistant":
-            raise ModelError(
-                f"Ollama chat returned unexpected role: {role!r}. Expected 'assistant'."
-            )
-
-        # Build a ChatMessage; let Pydantic validation catch remaining issues
-        try:
-            chat_message = ChatMessage(role=MessageRole.ASSISTANT, content=content)
-        except Exception as exc:
-            raise ModelError(
-                f"Invalid assistant message from Ollama: {exc}",
-                cause=exc,
-            ) from exc
-
-        try:
-            return ChatResponse(message=chat_message)
-        except Exception as exc:
-            raise ModelError(
-                f"Invalid chat response from Ollama: {exc}",
-                cause=exc,
-            ) from exc
+        return parse_plain_chat_response(data)
 
     def _parse_structured_response(
         self,
@@ -571,9 +538,7 @@ class OllamaModelProvider:
     ) -> BaseModel:
         """Parse an Ollama ``POST /api/chat`` response into a validated schema instance.
 
-        Validates the outer response structure (message, role, content),
-        then validates the content against the caller-provided Pydantic schema.
-
+        Delegates to ``parse_structured_chat_response`` after JSON decoding.
         Raises ``ModelError`` for malformed responses, unexpected tool_calls,
         or schema validation failures.
         """
@@ -585,44 +550,7 @@ class OllamaModelProvider:
                 cause=exc,
             ) from exc
 
-        if not isinstance(data, dict) or "message" not in data:
-            raise ModelError("Ollama structured response missing 'message' field")
-
-        msg_data = data["message"]
-        if not isinstance(msg_data, dict):
-            raise ModelError("Ollama structured response 'message' is not an object")
-
-        role = msg_data.get("role", "")
-        content = msg_data.get("content")
-
-        # Check for unexpected tool_calls
-        tool_calls = msg_data.get("tool_calls")
-        if tool_calls:
-            raise ModelError(
-                "Ollama structured request returned unexpected tool_calls. "
-                "Use chat_with_tools() (S8-04) for tool-calling responses."
-            )
-
-        if role != "assistant":
-            raise ModelError(
-                f"Ollama structured response returned unexpected role: {role!r}. "
-                f"Expected 'assistant'."
-            )
-
-        if not isinstance(content, str):
-            raise ModelError(
-                f"Ollama structured response 'message.content' is not a string, "
-                f"got {type(content).__name__}"
-            )
-
-        # Validate content against the caller-provided schema
-        try:
-            return schema.model_validate_json(content)
-        except Exception as exc:
-            raise ModelError(
-                f"Ollama structured response validation failed: {exc}",
-                cause=exc,
-            ) from exc
+        return parse_structured_chat_response(data, schema)
 
 
 # ── Module-level helpers ───────────────────────────────────────────────────
