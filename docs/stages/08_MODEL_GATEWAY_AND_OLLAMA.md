@@ -64,7 +64,7 @@ via a `TYPE_CHECKING`-only import in `gateway.py`.  This ensures:
 | Task | Status | Notes |
 |---|---|---|
 | **S8-00** | **DONE** | Provider-neutral typed ModelGateway contracts + sync decision |
-| S8-01 | NOT STARTED | Model profile schemas + machine profile loader |
+| **S8-01** | **DONE** | Model profile schemas + machine profile loader |
 | S8-02 | NOT STARTED | Ollama transport + health + plain chat |
 | S8-03 | NOT STARTED | Ollama structured generation |
 | S8-04 | NOT STARTED | Ollama native tool-calling adapter |
@@ -228,6 +228,7 @@ Replaced with actual verification results from the S8-C01 verification run on th
 
 ```python
 from pathlib import Path
+
 for path in (
     Path("src/dnd_assistant/models/types.py"),
     Path("tests/unit/test_model_gateway_contracts.py"),
@@ -287,4 +288,137 @@ Zero diff in:
 
 No maintainability ceiling changes. No boundary-test changes. No test-harness changes. No S8-01 implementation. No Ollama implementation. No Fast Agent implementation.
 
-**Commit SHA after finalization:** (reported in Final Report)
+**Commit SHA after finalization:** Reported in the S8-C01 Final Report (not embedded in the commit itself).
+
+## S8-01 implementation record
+
+**Starting SHA:** `c708a4820ff22eecf2ebefd52fa03119d43479b6`
+
+**Branch:** `main`
+
+### Scope
+
+Implement typed configuration for runtime model profiles and a deterministic
+TOML loader for the machine-local configuration file.
+
+### Profile schema decisions
+
+**ModelProfileRole** — a `StrEnum` with three MVP roles:
+- `AGENT = "agent"`
+- `SUMMARIZER = "summarizer"`
+- `EMBEDDING = "embedding"`
+
+**ModelProfile** — a strict Pydantic model (`extra="forbid"`, `frozen=True`)
+with these fields:
+
+| Field | Type | Required | Validation |
+|---|---|---|---|
+| `provider` | `str` | Yes | Non-empty, not whitespace-only |
+| `model` | `str` | Yes | Non-empty, not whitespace-only |
+| `base_url` | `str` | Yes | Must start with `http://` or `https://`, must have a host |
+| `temperature` | `float \| None` | No | Finite, non-NaN, non-negative |
+| `keep_alive` | `str \| None` | No | If provided, non-empty and not whitespace-only |
+| `role` | `ModelProfileRole` | Yes | Must be a valid role value |
+
+### Provider-neutrality decision
+
+The `provider` field is a plain `str` with only non-empty validation.
+A hypothetical valid provider such as `test-provider` is representable.
+No `Literal["ollama"]` restriction — S8-02 may reject non-Ollama profiles
+when constructing an Ollama provider.
+
+### Model-name decision
+
+The `model` field is a plain `str` with only non-empty validation.
+No hardcoded default model. No concrete model-name dependency in tests.
+
+### Machine/campaign config boundary
+
+Machine configuration lives outside the Vault. The loader is explicitly
+path-driven (`load_model_profiles(path: Path)`) and does not access
+`~/.config`, `campaign.yaml`, the Vault, or any environment-specific paths.
+
+### TOML loader contract
+
+```python
+def load_model_profiles(path: Path) -> ModelProfilesConfig:
+```
+
+Uses Python 3.12+ `tomllib` — no new dependency required.
+
+### Top-level machine-config extensibility
+
+The loader parses the full TOML document but only validates the `[profiles.*]`
+subsection. Unrelated top-level sections (e.g. `[timeouts]`, `[cache]`) are
+intentionally ignored. Unknown keys **inside a profile** are still rejected
+via Pydantic's `extra="forbid"`.
+
+### Error mapping
+
+| Condition | Exception | Cause chain |
+|---|---|---|
+| File does not exist | `NotFoundError` | `FileNotFoundError` |
+| Filesystem read failure | `StorageError` | `OSError` (e.g. `PermissionError` on directory) |
+| Malformed TOML | `ValidationError` | `tomllib.TOMLDecodeError` |
+| Missing `profiles` section | `ValidationError` | — |
+| `profiles` not a table/object | `ValidationError` | — |
+| Empty profiles mapping | `ValidationError` | — |
+| Profile schema violation | `ValidationError` | Pydantic `ValidationError` |
+| Invalid role | `ValidationError` | Pydantic `ValidationError` |
+
+No `ModelError` is used for configuration parsing — `ModelError` remains the
+model/provider interaction boundary.
+
+### Cross-platform behavior
+
+All implementation uses portable Python APIs (`pathlib.Path`, `tomllib`,
+UTF-8). Tests use `tmp_path`, not actual user directories. On Windows,
+a directory path raises `StorageError` (via `PermissionError`/`OSError`).
+
+### Tests and quality-gate evidence
+
+```
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 66 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 284 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ full suite: 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed
+
+uv run ruff format --check .
+→ All files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Explicit S8-02+ deferrals
+
+The following are explicitly deferred to S8-02 or later:
+- OllamaModelProvider implementation
+- Ollama HTTP transport (`/api/chat`, `/api/embed`)
+- Health requests and model availability probing
+- Tool-schema conversion and structured generation transport
+- Native Ollama tool calling
+- Embeddings transport
+- Fast Agent
+- ToolExecutor integration
+- Prompt templates
+- Model benchmarking
+- `dnd doctor` integration
+- Session runtime model loading
+- Home-directory / CLI default machine-path resolution
