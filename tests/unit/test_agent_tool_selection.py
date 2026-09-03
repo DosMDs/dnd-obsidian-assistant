@@ -19,6 +19,7 @@ import subprocess
 import sys
 import textwrap
 from datetime import UTC, datetime
+from enum import StrEnum
 from typing import cast
 
 import pytest
@@ -280,6 +281,238 @@ class TestMalformedPermission:
         catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
         result = select_agent_tools(catalog, context=context)
         assert result == [], "unexpected Permission value must not expose tools"
+
+
+# ── StrEnum boundary: Permission same-value strings ──────────────────────────────
+
+
+class TestStrEnumPermissionBoundary:
+    """Regression: plain strings matching StrEnum values must NOT acquire authority.
+
+    ``Permission`` is a ``StrEnum``, so ``"read" == Permission.READ`` is
+    ``True`` in Python.  The selector must use ``isinstance`` + ``is``
+    (identity) to reject structurally malformed values.
+    """
+
+    def test_plain_string_read_does_not_expose_read_tool(self) -> None:
+        """Plain string ``"read"`` must not expose READ tools."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "read"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], 'plain string "read" must not expose READ tools'
+
+    def test_plain_string_write_does_not_expose_read_tool(self) -> None:
+        """Plain string ``"write"`` must not expose READ tools."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "write"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], 'plain string "write" must not expose READ tools'
+
+    def test_plain_string_write_does_not_expose_write_tool_with_audit(self) -> None:
+        """Plain string ``"write"`` must not expose WRITE tools even with audit."""
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, "write"),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=AuditContext(
+                    operation_id="test-op",
+                    real_time=datetime(2026, 9, 3, tzinfo=UTC),
+                    source="test",
+                ),
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "write_tool",
+                    permission=Permission.WRITE,
+                    side_effects=[SideEffect.ENTITY_MUTATION],
+                ),
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], 'plain string "write" with audit must not expose WRITE tools'
+
+
+# ── Foreign StrEnum permission ───────────────────────────────────────────────────
+
+
+class _ForeignPermission(StrEnum):
+    """Test-only foreign StrEnum whose values match Permission members."""
+
+    READ = "read"
+    WRITE = "write"
+
+
+class TestForeignStrEnumPermission:
+    """Regression: a foreign StrEnum with matching values must not acquire authority."""
+
+    def test_foreign_read_does_not_expose_read_tool(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, _ForeignPermission.READ),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "foreign StrEnum READ must not expose READ tools"
+
+    def test_foreign_write_does_not_expose_read_tool(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, _ForeignPermission.WRITE),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(tools=[_make_tool("read_tool", permission=Permission.READ)])
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "foreign StrEnum WRITE must not expose READ tools"
+
+    def test_foreign_write_does_not_expose_write_tool_with_audit(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=cast(Permission, _ForeignPermission.WRITE),  # type: ignore[unused-ignore]
+                session_mode=SessionMode.NO_ACTIVE_SESSION,
+                audit=AuditContext(
+                    operation_id="test-op",
+                    real_time=datetime(2026, 9, 3, tzinfo=UTC),
+                    source="test",
+                ),
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "write_tool",
+                    permission=Permission.WRITE,
+                    side_effects=[SideEffect.ENTITY_MUTATION],
+                ),
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "foreign StrEnum WRITE with audit must not expose WRITE tools"
+
+
+# ── StrEnum boundary: SessionMode same-value strings ─────────────────────────────
+
+
+class TestStrEnumSessionModeBoundary:
+    """Regression: plain strings matching SessionMode StrEnum values must be rejected."""
+
+    def test_plain_string_active_session_does_not_expose_active_tool(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=Permission.READ,
+                session_mode=cast(SessionMode, "active_session"),  # type: ignore[unused-ignore]
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "active_tool",
+                    allowed_session_modes=[SessionMode.ACTIVE_SESSION],
+                )
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], 'plain string "active_session" must not expose tools'
+
+    def test_plain_string_no_active_session_does_not_expose_no_session_tool(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=Permission.READ,
+                session_mode=cast(SessionMode, "no_active_session"),  # type: ignore[unused-ignore]
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "no_session_tool",
+                    allowed_session_modes=[SessionMode.NO_ACTIVE_SESSION],
+                )
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], 'plain string "no_active_session" must not expose tools'
+
+
+# ── Foreign StrEnum session mode ─────────────────────────────────────────────────
+
+
+class _ForeignSessionMode(StrEnum):
+    """Test-only foreign StrEnum whose values match SessionMode members."""
+
+    ACTIVE_SESSION = "active_session"
+    NO_ACTIVE_SESSION = "no_active_session"
+
+
+class TestForeignStrEnumSessionMode:
+    """Regression: a foreign StrEnum with matching session-mode values must be rejected."""
+
+    def test_foreign_active_session_does_not_expose_active_tool(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=Permission.READ,
+                session_mode=cast(SessionMode, _ForeignSessionMode.ACTIVE_SESSION),  # type: ignore[unused-ignore]
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "active_tool",
+                    allowed_session_modes=[SessionMode.ACTIVE_SESSION],
+                )
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "foreign StrEnum ACTIVE_SESSION must not expose tools"
+
+    def test_foreign_no_active_session_does_not_expose_no_session_tool(self) -> None:
+        context = cast(
+            ExecutionContext,
+            ExecutionContext(
+                granted_permission=Permission.READ,
+                session_mode=cast(SessionMode, _ForeignSessionMode.NO_ACTIVE_SESSION),  # type: ignore[unused-ignore]
+                audit=None,
+            ),
+        )
+        catalog = ToolRegistrySchema(
+            tools=[
+                _make_tool(
+                    "no_session_tool",
+                    allowed_session_modes=[SessionMode.NO_ACTIVE_SESSION],
+                )
+            ]
+        )
+        result = select_agent_tools(catalog, context=context)
+        assert result == [], "foreign StrEnum NO_ACTIVE_SESSION must not expose tools"
 
 
 # ── Session-mode eligibility ─────────────────────────────────────────────────────

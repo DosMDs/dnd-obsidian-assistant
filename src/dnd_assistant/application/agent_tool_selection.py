@@ -31,7 +31,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
-    from dnd_assistant.tools.types import ExecutionContext, Permission
+    from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 
 
 def select_agent_tools(
@@ -70,7 +70,7 @@ def select_agent_tools(
     # the function body so that a fresh module import does not pull in the
     # entire Tool Layer at module scope.
     from dnd_assistant.tools.catalog import ToolRegistrySchema
-    from dnd_assistant.tools.types import ExecutionContext, Permission
+    from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 
     if not isinstance(catalog, ToolRegistrySchema):
         raise TypeError("catalog must be a ToolRegistrySchema instance")
@@ -81,7 +81,7 @@ def select_agent_tools(
     for tool in catalog.tools:
         if not _is_permission_eligible(tool, context, Permission):
             continue
-        if context.session_mode not in tool.allowed_session_modes:
+        if not _is_session_mode_eligible(context, tool.allowed_session_modes, SessionMode):
             continue
         if tool.permission == Permission.WRITE and context.audit is None:
             continue
@@ -100,11 +100,38 @@ def _is_permission_eligible(
     ``READ`` authority → only ``READ`` tools are eligible.
     ``WRITE`` authority → both ``READ`` and ``WRITE`` tools are eligible.
     Any other value → fail closed (no tool exposed).
+
+    ``Permission`` is a ``StrEnum``, so Python string-compatible equality
+    means a plain string ``"read"`` or ``"write"`` compares equal to the
+    corresponding enum member.  This function uses ``isinstance`` + ``is``
+    (identity) to reject structurally malformed values such as plain strings
+    or foreign ``StrEnum`` members whose textual value happens to match.
     """
-    if context.granted_permission == permission_enum.READ:
-        return tool.permission == permission_enum.READ
-    if context.granted_permission == permission_enum.WRITE:
+    granted = context.granted_permission
+    if not isinstance(granted, permission_enum):
+        return False
+    if granted is permission_enum.READ:
+        return tool.permission is permission_enum.READ
+    if granted is permission_enum.WRITE:
         # WRITE authority includes READ authority
         return True
     # Unexpected/malformed permission value: fail closed.
     return False
+
+
+def _is_session_mode_eligible(
+    context: ExecutionContext,
+    allowed_modes: frozenset[SessionMode],
+    mode_enum: type[SessionMode],
+) -> bool:
+    """Check whether ``context.session_mode`` is structurally valid and allowed.
+
+    ``SessionMode`` is a ``StrEnum``, so a plain string ``"active_session"``
+    compares equal to ``SessionMode.ACTIVE_SESSION``.  This function uses
+    ``isinstance`` + ``is`` (identity) to reject structurally malformed
+    values such as plain strings or foreign ``StrEnum`` members.
+    """
+    mode = context.session_mode
+    if not isinstance(mode, mode_enum):
+        return False
+    return any(mode is allowed for allowed in allowed_modes)

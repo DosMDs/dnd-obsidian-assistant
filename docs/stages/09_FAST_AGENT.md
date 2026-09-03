@@ -52,6 +52,7 @@
 | Task | Status |
 |---|---|
 | S9-C00 — Correct Fast-Agent tool exposure import and permission boundaries | DONE |
+| S9-C01 — Fail closed on StrEnum-compatible malformed execution-context fields | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## Important Context Builder deferral
@@ -203,11 +204,106 @@ closed), exposing no tools.
   - `tests/unit/test_agent_tool_selection.py`
   - `docs/stages/09_FAST_AGENT.md`
 
+---
+
+## S9-C01 — Fail closed on StrEnum-compatible malformed execution-context fields
+
+### Defect
+
+S9-C00 correctly fixed the eager-import defect and added malformed-permission
+protection, but its protection relied on StrEnum equality (`==`).  Since
+`Permission` inherits from `StrEnum`, Python string-compatible equality means
+structurally malformed values such as plain strings `"read"` or `"write"`
+compare equal to `Permission.READ` and `Permission.WRITE` respectively.
+
+Because `ExecutionContext` is a frozen dataclass with no runtime validation
+of its annotated fields, this was constructible at runtime:
+
+```python
+context = ExecutionContext(
+    granted_permission="write",  # plain string, not Permission.WRITE
+    session_mode=SessionMode.NO_ACTIVE_SESSION,
+    audit=some_audit,
+)
+```
+
+This would acquire WRITE-equivalent tool exposure despite having no actual
+`Permission` member.
+
+The same class of issue existed for `SessionMode`: a plain string
+`"active_session"` would compare equal to `SessionMode.ACTIVE_SESSION` via
+StrEnum equality.
+
+### Fix
+
+**Permission (`_is_permission_eligible`):**
+
+- Added `isinstance(granted, permission_enum)` check before any semantic
+  comparison.  A plain string or foreign StrEnum fails this check and
+  returns `False` (fail closed).
+- Changed member comparison from `==` to `is` (identity) for the READ/WRITE
+  checks.
+- Also changed `tool.permission == permission_enum.READ` to
+  `tool.permission is permission_enum.READ` for consistency.
+
+**Session mode (`_is_session_mode_eligible` — new function):**
+
+- Extracted session-mode eligibility into a dedicated function with the
+  same structural validation pattern.
+- Added `isinstance(mode, mode_enum)` check before membership testing.
+- Changed membership from `in` (which uses `==`) to `any(mode is allowed ...)`
+  using identity comparison.
+
+**Deferred import:**
+
+- Added `SessionMode` to the deferred runtime imports inside
+  `select_agent_tools()` so that `_is_session_mode_eligible` can receive
+  the canonical type reference.
+
+### Regression coverage (10 new tests)
+
+**Permission same-value plain strings (3 tests):**
+
+- `"read"` + READ tool → hidden
+- `"write"` + READ tool → hidden
+- `"write"` + WRITE tool + valid audit → hidden
+
+**Foreign StrEnum permission (3 tests):**
+
+- `_ForeignPermission.READ` + READ tool → hidden
+- `_ForeignPermission.WRITE` + READ tool → hidden
+- `_ForeignPermission.WRITE` + WRITE tool + valid audit → hidden
+
+**Session-mode same-value plain strings (2 tests):**
+
+- `"active_session"` + ACTIVE_SESSION tool → hidden
+- `"no_active_session"` + NO_ACTIVE_SESSION tool → hidden
+
+**Foreign StrEnum session mode (2 tests):**
+
+- `_ForeignSessionMode.ACTIVE_SESSION` + ACTIVE_SESSION tool → hidden
+- `_ForeignSessionMode.NO_ACTIVE_SESSION` + NO_ACTIVE_SESSION tool → hidden
+
+All existing 34 tests preserved and passing.
+
+### Scope
+
+- No Tool Layer refactor.
+- No FastAgent, ContextBuilder, ChangeSet, model invocation, or CLI.
+- No modification to `DEVELOPMENT_STATUS.md`.
+- No modification to protected test harness.
+- No dependency/lockfile changes.
+- Exactly three files changed:
+  - `src/dnd_assistant/application/agent_tool_selection.py`
+  - `tests/unit/test_agent_tool_selection.py`
+  - `docs/stages/09_FAST_AGENT.md`
+
 ### Stage status after correction
 
 | Task | Status |
 |---|---|
 | Stage 9 | IN PROGRESS |
 | S9-00 | DONE after correction |
+| S9-C01 | DONE |
 | S9-01..S9-07 | NOT STARTED |
 | Stage 10 | NOT STARTED |
