@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-03 (MNT-C04 completed)
+**Last updated:** 2026-09-03 (S9-00 completed)
 **Current milestone:** `v0.1-dev — Vault Core`
-**Roadmap position:** Stage 8 complete; MNT-04 complete; Stage 9 next
+**Roadmap position:** Stage 9 in progress
 **Active stage:** Stage 9 — Fast Agent
 **Stage 8 status:** `DONE`
 **Started:** 2026-09-02
@@ -40,7 +40,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | 6. Session Runtime without LLM | DONE | 2026-08-31 | 2026-09-02 | [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md) |
 | 7. Tool Registry / Executor | DONE | 2026-09-02 | 2026-09-02 | [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md) |
 | 8. Model Gateway / Ollama | DONE | 2026-09-02 | 2026-09-03 | [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md) |
-| 9. Fast Agent | NOT STARTED | — | — | — |
+| 9. Fast Agent | IN PROGRESS | 2026-09-03 | — | [`docs/stages/09_FAST_AGENT.md`](docs/stages/09_FAST_AGENT.md) |
 | 10. ChangeSet | NOT STARTED | — | — | — |
 | 11. Post-session Processor | NOT STARTED | — | — | — |
 | 12. Campaign State | NOT STARTED | — | — | — |
@@ -51,10 +51,10 @@ Detailed task/correction/review records belong in `docs/stages/`.
 
 Stage 8 is complete.
 
-Pre-Stage-8 base:
+Pre-Stage-9 base:
 
 ```
-9bca669894b2ae12a62381a2f7b6a5447c44e9cd
+6af880e3f0fed39273c14c4acbfd4d98cd700a16
 ```
 
 Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md)
@@ -63,31 +63,16 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 
 | Task | Status |
 |---|---|
-| S8-00 — Provider-neutral typed ModelGateway contracts + sync decision | DONE |
-| S8-C00 — Harden ModelGateway plain-chat and JSON tool-call contracts | DONE |
-| S8-C01 — Correct Stage-8 verification evidence | DONE |
-| S8-01 — Model profile schemas + machine profile loader | DONE |
-| S8-C02 — Harden ModelProfile base_url endpoint validation | DONE |
-| S8-02 — Ollama transport + health + plain chat | DONE |
-| S8-C03 — Harden Ollama health and JSON response validation | DONE |
-| S8-03 — Ollama structured generation | DONE |
-| S8-C04 — Correct S8-03 verification evidence and Stage-8 correction index | DONE |
-| S8-04 — Ollama native tool-calling adapter | DONE |
-| S8-C05 — Harden tool-call structural validation and restore test-harness scope | DONE |
-| S8-05 — Ollama embeddings | DONE |
-| S8-C06 — Harden embedding numeric conversion against oversized JSON integers | DONE |
-| S8-C07 — Correct S8-C06 physical-line verification evidence | DONE |
-| S8-06 — Provider integration / error hardening / opt-in smoke coverage | DONE |
-| S8-07 — Full Stage-8 historical review / completion | DONE |
-| S8-C08 — Correct Stage-8 completion Git comparison evidence | DONE |
+| S9-00 — Deterministic Fast-Agent tool exposure policy + Stage-9 kickoff | DONE |
+| S9-01 — Compact Context Builder over currently accepted data sources | NOT STARTED |
+| S9-02 — One-step FastAgent model decision boundary | NOT STARTED |
+| S9-03 — Validated ToolExecutor execution + tool-result message adaptation | NOT STARTED |
+| S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | NOT STARTED |
+| S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED |
+| S9-06 — CLI `dnd ask` + mocked end-to-end integration | NOT STARTED |
+| S9-07 — Full Stage-9 historical review / completion | NOT STARTED |
 
-Details: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md)
-
-## Next stage
-
-| Stage | Status |
-|---|---|
-| Stage 9 — Fast Agent | NOT STARTED |
+Details: [`docs/stages/09_FAST_AGENT.md`](docs/stages/09_FAST_AGENT.md)
 
 ## Maintenance gate before S6-06
 
@@ -130,3 +115,4 @@ None known.
 | `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` | Stage 6 detailed plan and history |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | Stage 7 detailed plan and history |
 | `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` | Stage 8 detailed plan and history |
+| `docs/stages/09_FAST_AGENT.md` | Stage 9 detailed plan and history |

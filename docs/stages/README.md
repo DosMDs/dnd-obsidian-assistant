@@ -23,6 +23,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | Stage 6 — Session Runtime without LLM | `06_SESSION_RUNTIME_WITHOUT_LLM.md` |
 | Stage 7 — Tool Registry and Executor | `07_TOOL_REGISTRY_AND_EXECUTOR.md` |
 | Stage 8 — Model Gateway / Ollama | `08_MODEL_GATEWAY_AND_OLLAMA.md` |
+| Stage 9 — Fast Agent | `09_FAST_AGENT.md` |
 
 ## Provenance
 
