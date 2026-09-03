@@ -11,9 +11,12 @@ silent field injection and accidental mutation.
 
 from __future__ import annotations
 
+import math
 from enum import StrEnum
+from typing import Annotated
 
 from pydantic import BaseModel, JsonValue, model_validator
+from pydantic.functional_validators import AfterValidator
 
 
 class MessageRole(StrEnum):
@@ -25,17 +28,43 @@ class MessageRole(StrEnum):
     TOOL = "tool"
 
 
+def _reject_non_finite(v: object) -> object:
+    """Reject non-finite float values recursively in JSON-compatible data.
+
+    Pydantic's ``JsonValue`` accepts ``float("nan")``, ``float("inf")``,
+    and ``float("-inf")`` by default, but these are not valid JSON values.
+    This validator ensures strict JSON compatibility at any nesting depth.
+    """
+    if isinstance(v, float) and (math.isnan(v) or math.isinf(v)):
+        raise ValueError(
+            "Non-finite float values (NaN, Infinity, -Infinity) are not "
+            "valid JSON values and are not permitted in ToolCall.arguments"
+        )
+    if isinstance(v, dict):
+        for val in v.values():
+            _reject_non_finite(val)
+    elif isinstance(v, list):
+        for item in v:
+            _reject_non_finite(item)
+    return v
+
+
+FiniteJsonValue = Annotated[JsonValue, AfterValidator(_reject_non_finite)]
+"""``JsonValue`` that rejects non-finite floats (NaN, ±Infinity) recursively."""
+
+
 class ToolCall(BaseModel):
     """A model-requested tool call.
 
     ``name`` must be non-empty after validation.
-    ``arguments`` is a JSON object.
+    ``arguments`` is a JSON object with strict JSON-compatible values
+    (non-finite floats such as NaN and ±Infinity are rejected).
     ``call_id`` is optional because providers differ in whether they
     emit one.
     """
 
     name: str
-    arguments: dict[str, JsonValue]
+    arguments: dict[str, FiniteJsonValue]
     call_id: str | None = None
 
     model_config = {"extra": "forbid", "frozen": True}
@@ -120,7 +149,11 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Response from a plain chat (no tool-calling)."""
+    """Response from a plain chat (no tool-calling).
+
+    The assistant message must have no tool calls — tool-calling
+    responses belong in ``ToolAwareResponse``.
+    """
 
     message: ChatMessage
 
@@ -130,6 +163,15 @@ class ChatResponse(BaseModel):
     def _role_is_assistant(self) -> ChatResponse:
         if self.message.role != MessageRole.ASSISTANT:
             raise ValueError("ChatResponse.message.role must be ASSISTANT")
+        return self
+
+    @model_validator(mode="after")
+    def _no_tool_calls(self) -> ChatResponse:
+        if self.message.tool_calls:
+            raise ValueError(
+                "ChatResponse must not contain tool calls — "
+                "use ToolAwareResponse for tool-calling responses"
+            )
         return self
 
 

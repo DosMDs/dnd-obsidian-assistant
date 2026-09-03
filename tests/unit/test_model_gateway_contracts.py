@@ -91,6 +91,53 @@ class TestToolCall:
         assert tc.arguments["limit"] == 5
         assert tc.arguments["tags"] == ["undead"]
 
+    # ── S8-C00 regression: strict JSON (no NaN / ±Infinity) ───────────────
+
+    def test_nan_at_top_level_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Non-finite"):
+            ToolCall(name="x", arguments={"val": float("nan")})
+
+    def test_infinity_at_top_level_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Non-finite"):
+            ToolCall(name="x", arguments={"val": float("inf")})
+
+    def test_neg_infinity_at_top_level_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Non-finite"):
+            ToolCall(name="x", arguments={"val": float("-inf")})
+
+    def test_non_finite_nested_in_dict_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Non-finite"):
+            ToolCall(name="x", arguments={"outer": {"inner": float("nan")}})
+
+    def test_non_finite_nested_in_list_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Non-finite"):
+            ToolCall(name="x", arguments={"items": [1, 2, float("inf")]})
+
+    def test_deeply_nested_non_finite_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="Non-finite"):
+            ToolCall(name="x", arguments={"a": {"b": [{"c": float("-inf")}]}})
+
+    def test_valid_nested_json_accepted(self) -> None:
+        tc = ToolCall(
+            name="x",
+            arguments={
+                "null_val": None,
+                "bool_val": True,
+                "int_val": 42,
+                "float_val": 3.14,
+                "str_val": "hello",
+                "list_val": [1, 2, 3],
+                "dict_val": {"a": 1},
+            },
+        )
+        assert tc.arguments["null_val"] is None
+        assert tc.arguments["bool_val"] is True
+        assert tc.arguments["int_val"] == 42
+        assert tc.arguments["float_val"] == 3.14
+        assert tc.arguments["str_val"] == "hello"
+        assert tc.arguments["list_val"] == [1, 2, 3]
+        assert tc.arguments["dict_val"] == {"a": 1}
+
 
 # ── ChatMessage ────────────────────────────────────────────────────────────
 
@@ -323,6 +370,30 @@ class TestChatResponse:
                 unknown="x",
             )
 
+    # ── S8-C00 regression: plain chat must not contain tool calls ──────────
+
+    def test_tool_calls_only_rejected(self) -> None:
+        """ASSISTANT + tool_calls only must be rejected by ChatResponse."""
+        with pytest.raises(ValidationError, match="must not contain tool calls"):
+            ChatResponse(
+                message=ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content=None,
+                    tool_calls=(ToolCall(name="x", arguments={}),),
+                ),
+            )
+
+    def test_text_and_tool_calls_rejected(self) -> None:
+        """ASSISTANT + content + tool_calls must be rejected by ChatResponse."""
+        with pytest.raises(ValidationError, match="must not contain tool calls"):
+            ChatResponse(
+                message=ChatMessage(
+                    role=MessageRole.ASSISTANT,
+                    content="Let me check.",
+                    tool_calls=(ToolCall(name="x", arguments={}),),
+                ),
+            )
+
 
 # ── ToolAwareResponse ──────────────────────────────────────────────────────
 
@@ -366,6 +437,63 @@ class TestToolAwareResponse:
                 message=ChatMessage(role=MessageRole.ASSISTANT, content="Hi"),
                 unknown="x",
             )
+
+
+# ── S8-C00: multi-tool turn representation (Stage-9-capable) ────────────
+
+
+class TestMultiToolTurnRepresentation:
+    """Verify the DTO layer can represent a future tool-calling trajectory.
+
+    This does NOT execute anything — it only validates that the message
+    DTOs can model assistant tool-calling turns and corresponding TOOL
+    result messages, which is required for Stage-9 conversation history.
+    """
+
+    def test_multi_tool_assistant_turn(self) -> None:
+        assistant_msg = ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content=None,
+            tool_calls=(
+                ToolCall(name="get_weather", arguments={"city": "Waterdeep"}, call_id="call_01"),
+                ToolCall(name="search", arguments={"q": "lich"}, call_id="call_02"),
+            ),
+        )
+        assert assistant_msg.role is MessageRole.ASSISTANT
+        assert assistant_msg.content is None
+        assert len(assistant_msg.tool_calls) == 2
+        assert assistant_msg.tool_calls[0].call_id == "call_01"
+        assert assistant_msg.tool_calls[1].call_id == "call_02"
+
+    def test_corresponding_tool_messages(self) -> None:
+        tool_1 = ChatMessage(
+            role=MessageRole.TOOL,
+            content='{"temperature": 22}',
+            tool_name="get_weather",
+            tool_call_id="call_01",
+        )
+        tool_2 = ChatMessage(
+            role=MessageRole.TOOL,
+            content="No results found.",
+            tool_name="search",
+            tool_call_id="call_02",
+        )
+        assert tool_1.tool_call_id == "call_01"
+        assert tool_2.tool_call_id == "call_02"
+        assert tool_1.tool_name == "get_weather"
+        assert tool_2.tool_name == "search"
+
+    def test_assistant_with_text_and_multiple_tool_calls(self) -> None:
+        assistant_msg = ChatMessage(
+            role=MessageRole.ASSISTANT,
+            content="Let me check both sources.",
+            tool_calls=(
+                ToolCall(name="get_weather", arguments={"city": "Neverwinter"}, call_id="c1"),
+                ToolCall(name="search", arguments={"q": "artifact"}, call_id="c2"),
+            ),
+        )
+        assert assistant_msg.content == "Let me check both sources."
+        assert len(assistant_msg.tool_calls) == 2
 
 
 # ── ModelHealth ────────────────────────────────────────────────────────────

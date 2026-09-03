@@ -76,17 +76,7 @@ Correction passes:
 
 | Task | Status | Notes |
 |---|---|---|
-| S8-C00+ | — | Only if required after review |
-
-## Deferred work
-
-The following are explicitly deferred to later S8 tasks:
-
-- Ollama HTTP calls (`/api/chat`, `/api/embed`, etc.)
-- Model profile schemas and machine profile loader
-- Tool-schema Ollama adapter
-- Provider error mapping
-- Real Ollama smoke tests
+| S8-C00 | **DONE** | Harden ModelGateway plain-chat and JSON tool-call contracts |
 
 ## S8-00 implementation record
 
@@ -109,3 +99,96 @@ The following are explicitly deferred to later S8 tasks:
 - Full pytest suite: (reported in Final Report)
 - Ruff check: (reported in Final Report)
 - Ruff format: (reported in Final Report)
+
+## S8-C00 correction record
+
+**Reviewed SHA:** `1040880543c9a3589cee569e92a810a7ed0ce4c5` (S8-00 implementation commit)
+
+### Defects found
+
+1. **ChatResponse plain-chat semantics** — `ChatResponse` accepted assistant messages containing `tool_calls`, even though `chat()` is the plain-chat operation. Tool-calling responses belong in `ToolAwareResponse` (returned by `chat_with_tools()`).
+
+2. **Non-finite float values in ToolCall.arguments** — `ToolCall.arguments: dict[str, JsonValue]` accepted `float("nan")`, `float("inf")`, and `float("-inf")` without rejection. These are not valid JSON values and must be rejected recursively at any nesting depth.
+
+### Production fixes
+
+**File:** `src/dnd_assistant/models/types.py`
+
+- **ChatResponse fix:** Added `@model_validator(mode="after")` method `_no_tool_calls` that raises `ValueError` if `self.message.tool_calls` is non-empty. This rejects both `tool_calls-only` and `content + tool_calls` assistant messages while preserving the existing `_role_is_assistant` validator.
+
+- **ToolCall strict JSON fix:** Added `_reject_non_finite()` recursive validator function that traverses dicts and lists to reject `NaN`, `+Infinity`, and `-Infinity` at any nesting depth. Created `FiniteJsonValue = Annotated[JsonValue, AfterValidator(_reject_non_finite)]` type alias and changed `ToolCall.arguments` type from `dict[str, JsonValue]` to `dict[str, FiniteJsonValue]`.
+
+### Regression coverage added
+
+**File:** `tests/unit/test_model_gateway_contracts.py` (76 total tests, +12 from S8-00)
+
+- `TestChatResponse.test_tool_calls_only_rejected` — ASSISTANT + tool_calls only rejected
+- `TestChatResponse.test_text_and_tool_calls_rejected` — ASSISTANT + content + tool_calls rejected
+- `TestToolCall.test_nan_at_top_level_rejected` — NaN at top level
+- `TestToolCall.test_infinity_at_top_level_rejected` — +Infinity at top level
+- `TestToolCall.test_neg_infinity_at_top_level_rejected` — -Infinity at top level
+- `TestToolCall.test_non_finite_nested_in_dict_rejected` — NaN nested in dict
+- `TestToolCall.test_non_finite_nested_in_list_rejected` — Infinity nested in list
+- `TestToolCall.test_deeply_nested_non_finite_rejected` — -Infinity deeply nested
+- `TestToolCall.test_valid_nested_json_accepted` — all valid JSON types accepted (None, bool, int, finite float, str, list, dict)
+- `TestMultiToolTurnRepresentation` (3 tests) — multi-tool assistant turn with distinct `call_id` values and corresponding TOOL messages
+
+### Verification commands and results
+
+```
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 284 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3752 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 279 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Scope audit
+
+**Intended scope:** `src/dnd_assistant/models/types.py`, `tests/unit/test_model_gateway_contracts.py`, `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`, `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/types.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:** `src/dnd_assistant/models/gateway.py`, `src/dnd_assistant/domain/`, `src/dnd_assistant/storage/`, `src/dnd_assistant/retrieval/`, `src/dnd_assistant/application/`, `src/dnd_assistant/tools/`, `src/dnd_assistant/cli/`, `src/dnd_assistant/errors.py`, `tests/contract/test_boundaries.py`, `tests/contract/test_maintainability.py`, `tests/contract/test_test_harness_policy.py`, `pyproject.toml`, `uv.lock`
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` (1477): unchanged
+- `src/dnd_assistant/models/types.py`: 218 lines (under 700)
+- `tests/unit/test_model_gateway_contracts.py`: 608 lines (under 1000)
+- No new correction-history filenames created
+
+### Remaining invariants
+
+- Exactly 5 synchronous ModelGateway operations preserved
+- `generate_structured` remains generic (`schema: type[T] -> T`)
+- Gateway runtime imports remain lightweight (verified by boundary tests)
+- `ToolAwareResponse` still accepts text-only, tool-calls-only, and text+tool-calls
+- `ChatMessage` assistant role still permits tool calls (needed for `chat_with_tools()` and future Stage-9 conversation history)
+- `call_id` remains optional (provider-neutral)
+- S8-01 remains NOT STARTED
+- Stage 9 remains NOT STARTED

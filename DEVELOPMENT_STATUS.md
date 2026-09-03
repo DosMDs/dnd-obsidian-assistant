@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-02
+**Last updated:** 2026-09-03
 **Current milestone:** `v0.1-dev — Vault Core`
 **Roadmap position:** Stage 8 in progress
 **Active stage:** Stage 8 — Model Gateway / Ollama
@@ -63,6 +63,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | Task | Status |
 |---|---|
 | S8-00 — Provider-neutral typed ModelGateway contracts + sync decision | DONE |
+| S8-C00 — Harden ModelGateway plain-chat and JSON tool-call contracts | DONE |
 | S8-01 — Model profile schemas + machine profile loader | NOT STARTED |
 | S8-02 — Ollama transport + health + plain chat | NOT STARTED |
 | S8-03 — Ollama structured generation | NOT STARTED |
@@ -112,3 +113,4 @@ None known.
 | `docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md` | Stage 5 detailed plan and history |
 | `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` | Stage 6 detailed plan and history |
 | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` | Stage 7 detailed plan and history |
+| `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` | Stage 8 detailed plan and history |
