@@ -68,7 +68,7 @@ via a `TYPE_CHECKING`-only import in `gateway.py`.  This ensures:
 | **S8-02** | **DONE** | Ollama transport + health + plain chat |
 | **S8-03** | **DONE** | Ollama structured generation |
 | S8-04 | **DONE** | Ollama native tool-calling adapter |
-| S8-05 | NOT STARTED | Ollama embeddings |
+| S8-05 | **DONE** | Ollama embeddings |
 | S8-06 | NOT STARTED | Provider integration / error hardening / opt-in smoke coverage |
 | S8-07 | NOT STARTED | Full Stage-8 historical review / completion |
 
@@ -82,6 +82,7 @@ Correction passes:
 | S8-C03 | **DONE** | Harden Ollama health and JSON response validation |
 | S8-C04 | **DONE** | Correct S8-03 verification evidence and Stage-8 correction index |
 | S8-C05 | **DONE** | Harden tool-call structural validation and restore test-harness scope |
+| S8-C06 | **DONE** | Harden embedding numeric conversion against oversized JSON integers |
 
 ## S8-00 implementation record
 
@@ -2152,3 +2153,164 @@ tests\unit\test_ollama_embeddings.py: 850 (under 1000)
 ### S8-06+ deferrals
 
 S8-06 (provider integration): NOT STARTED. S8-07 (Stage-8 review): NOT STARTED. Stage 9 (Fast Agent): NOT STARTED.
+
+## S8-C06 correction record
+
+**Reviewed S8-05 SHA:** `4e7207ca152a464a61985c66b0e5ec8f0a3fd4a8`
+
+**Branch:** `main`
+
+### Oversized-integer defect
+
+`_validate_scalar()` called `math.isfinite(value)` where `value` could be a
+Python `int` larger than the finite representable range of `float`.  For a
+JSON integer such as `10**309`, `math.isfinite(10**309)` raises:
+
+```
+OverflowError: int too large to convert to float
+```
+
+before a project `ModelError` could be produced.  The subsequent
+`float(scalar)` call had the same conversion boundary.
+
+Therefore malformed/unrepresentable provider embedding data could leak a raw
+Python `OverflowError` across the ModelGateway boundary.
+
+### Correct float-coercion boundary
+
+`_validate_scalar()` was replaced by `_coerce_embedding_scalar()` which:
+
+1. Rejects `bool` before numeric coercion.
+2. Rejects non-`int`/`float` types.
+3. Performs exactly one authoritative conversion to `float`.
+4. Narrowly catches `OverflowError` from `float(value)`.
+5. Converts overflow into project `ModelError` with `OverflowError` preserved
+   as `__cause__`.
+6. Runs `math.isfinite()` on the converted `float`, not on an arbitrary-size
+   integer.
+7. Returns the already-validated `float`.
+
+`parse_embed_response()` now appends the returned value rather than calling
+`float()` a second time.
+
+No broad `except Exception` was introduced.
+
+### Positive oversized integer regression
+
+`OllamaModelProvider.embed(["hello"])` with a response containing `10**309`
+raises `ModelError` with `OverflowError` as `__cause__`.  No raw
+`OverflowError` escapes.
+
+### Negative oversized integer regression
+
+`OllamaModelProvider.embed(["hello"])` with a response containing `-(10**309)`
+raises `ModelError` with `OverflowError` as `__cause__`.  No raw
+`OverflowError` escapes.
+
+### Ordinary-int behavior preserved
+
+`[1, 2.5, -3]` → `[1.0, 2.5, -3.0]` — ordinary representable JSON integers
+remain accepted.
+
+### NaN/Inf behavior preserved
+
+`NaN`, `+Infinity`, `-Infinity` still produce `ModelError`.
+
+### Cause-chain policy
+
+`OverflowError` is preserved as `ModelError.__cause__` via `from exc`.
+
+### Quality gates
+
+```
+uv run pytest tests/unit/test_ollama_embeddings.py
+→ 67 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_structured.py
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_tool_calling.py
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py
+→ 298 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 4093 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 288 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Fresh physical-line counts
+
+```
+src\dnd_assistant\models\ollama.py: 699 (under 700, unchanged)
+src\dnd_assistant\models\ollama_embedding_adapter.py: 236 (under 700)
+tests\unit\test_ollama_embeddings.py: 929 (under 1000)
+```
+
+### Scope audit
+
+**Intended scope:**
+- `src/dnd_assistant/models/ollama_embedding_adapter.py`
+- `tests/unit/test_ollama_embeddings.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/ollama_embedding_adapter.py`
+- `tests/unit/test_ollama_embeddings.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/ollama.py` (699, unchanged)
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/models/ollama_tool_adapter.py`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_ollama_provider.py`
+- `tests/unit/test_ollama_structured.py`
+- `tests/unit/test_ollama_tool_calling.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/contract/`
+- `tests/conftest.py`
+- `tests/fixtures/`
+- `pyproject.toml`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+### S8-06 deferral
+
+S8-06 remains NOT STARTED. S8-07 remains NOT STARTED. Stage 9 remains NOT STARTED.

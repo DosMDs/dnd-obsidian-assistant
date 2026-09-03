@@ -848,3 +848,82 @@ class TestNoSilentTruncation:
 
         assert len(embed_route.calls) == 1
         provider.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Oversized integer regression (S8-C06)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestOversizedIntegers:
+    """JSON integers too large for float must produce ModelError, not OverflowError."""
+
+    def test_oversized_positive_int_public_boundary(self, respx_mock: respx.MockRouter) -> None:
+        """A positive int too large for float must raise ModelError with OverflowError cause."""
+        huge = 10**309
+        profile = _make_profile()
+        provider = OllamaModelProvider(profile)
+
+        respx_mock.post("http://localhost:11434/api/embed").respond(json={"embeddings": [[huge]]})
+
+        with pytest.raises(ModelError) as exc_info:
+            provider.embed(["hello"])
+
+        assert isinstance(exc_info.value.__cause__, OverflowError)
+        provider.close()
+
+    def test_oversized_negative_int_public_boundary(self, respx_mock: respx.MockRouter) -> None:
+        """A negative int too large for float must raise ModelError with OverflowError cause."""
+        huge = -(10**309)
+        profile = _make_profile()
+        provider = OllamaModelProvider(profile)
+
+        respx_mock.post("http://localhost:11434/api/embed").respond(json={"embeddings": [[huge]]})
+
+        with pytest.raises(ModelError) as exc_info:
+            provider.embed(["hello"])
+
+        assert isinstance(exc_info.value.__cause__, OverflowError)
+        provider.close()
+
+    def test_ordinary_positive_int_still_accepted(self, respx_mock: respx.MockRouter) -> None:
+        """Ordinary positive ints must still be accepted and converted to float."""
+        profile = _make_profile()
+        provider = OllamaModelProvider(profile)
+
+        respx_mock.post("http://localhost:11434/api/embed").respond(json=_embed_response([42]))
+
+        result = provider.embed(["hello"])
+
+        assert result == [[42.0]]
+        assert isinstance(result[0][0], float)
+        provider.close()
+
+    def test_ordinary_negative_int_still_accepted(self, respx_mock: respx.MockRouter) -> None:
+        """Ordinary negative ints must still be accepted and converted to float."""
+        profile = _make_profile()
+        provider = OllamaModelProvider(profile)
+
+        respx_mock.post("http://localhost:11434/api/embed").respond(json=_embed_response([-7]))
+
+        result = provider.embed(["hello"])
+
+        assert result == [[-7.0]]
+        assert isinstance(result[0][0], float)
+        provider.close()
+
+    def test_oversized_int_in_batch(self, respx_mock: respx.MockRouter) -> None:
+        """An oversized int in a batch must raise ModelError, not OverflowError."""
+        huge = 10**309
+        profile = _make_profile()
+        provider = OllamaModelProvider(profile)
+
+        respx_mock.post("http://localhost:11434/api/embed").respond(
+            json={"embeddings": [[0.1, 0.2], [huge, 0.5]]}
+        )
+
+        with pytest.raises(ModelError) as exc_info:
+            provider.embed(["a", "b"])
+
+        assert isinstance(exc_info.value.__cause__, OverflowError)
+        provider.close()

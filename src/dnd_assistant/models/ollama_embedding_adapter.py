@@ -149,11 +149,10 @@ def parse_embed_response(
     for i, vec in enumerate(embeddings):
         _validate_vector(vec, index=i)
 
-        # Convert to float and check finite
+        # Coerce each scalar to float with validation
         float_vec: list[float] = []
         for j, scalar in enumerate(vec):  # type: ignore[union-attr]
-            _validate_scalar(scalar, vector_index=i, element_index=j)
-            float_vec.append(float(scalar))  # type: ignore[arg-type]
+            float_vec.append(_coerce_embedding_scalar(scalar, vector_index=i, element_index=j))
 
         # Dimension consistency
         dim = len(float_vec)
@@ -184,13 +183,26 @@ def _validate_vector(vec: object, *, index: int) -> None:
         raise ModelError(f"Ollama embed vector at index {index} is empty")
 
 
-def _validate_scalar(value: object, *, vector_index: int, element_index: int) -> None:
-    """Validate a single embedding scalar value.
+def _coerce_embedding_scalar(
+    value: object,
+    *,
+    vector_index: int,
+    element_index: int,
+) -> float:
+    """Validate and coerce a single embedding scalar to ``float``.
 
     Accepts ``int`` and ``float`` (excluding ``bool``, which is a subclass
     of ``int`` in Python).  Rejects non-finite floats.
 
-    Raises ``ModelError`` for invalid values.
+    For ``int`` values that are too large to be represented as a finite Python
+    ``float`` (e.g. ``10**309``), ``OverflowError`` is caught and converted to
+    ``ModelError`` with the original exception preserved as ``__cause__``.
+
+    Returns:
+        The validated finite ``float``.
+
+    Raises:
+        ModelError: If the value is not a valid finite numeric scalar.
     """
     # bool is a subclass of int — reject it explicitly
     if isinstance(value, bool):
@@ -199,14 +211,24 @@ def _validate_scalar(value: object, *, vector_index: int, element_index: int) ->
             f"expected a numeric value"
         )
 
-    if isinstance(value, int | float):
-        if not math.isfinite(value):
-            raise ModelError(
-                f"Ollama embed vector [{vector_index}][{element_index}] is not finite: {value!r}"
-            )
-        return
+    if not isinstance(value, int | float):
+        raise ModelError(
+            f"Ollama embed vector [{vector_index}][{element_index}] "
+            f"must be a numeric value, got {type(value).__name__}"
+        )
 
-    raise ModelError(
-        f"Ollama embed vector [{vector_index}][{element_index}] "
-        f"must be a numeric value, got {type(value).__name__}"
-    )
+    try:
+        converted = float(value)
+    except OverflowError as exc:
+        raise ModelError(
+            f"Ollama embed vector [{vector_index}][{element_index}] "
+            f"cannot be represented as a finite float: {value!r}",
+            cause=exc,
+        ) from exc
+
+    if not math.isfinite(converted):
+        raise ModelError(
+            f"Ollama embed vector [{vector_index}][{element_index}] is not finite: {value!r}"
+        )
+
+    return converted
