@@ -70,6 +70,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | S8-02 — Ollama transport + health + plain chat | DONE |
 | S8-C03 — Harden Ollama health and JSON response validation | DONE |
 | S8-03 — Ollama structured generation | DONE |
+| S8-C04 — Correct S8-03 verification evidence and Stage-8 correction index | DONE |
 | S8-04 — Ollama native tool-calling adapter | NOT STARTED |
 | S8-05 — Ollama embeddings | NOT STARTED |
 | S8-06 — Provider integration / error hardening / opt-in smoke coverage | NOT STARTED |

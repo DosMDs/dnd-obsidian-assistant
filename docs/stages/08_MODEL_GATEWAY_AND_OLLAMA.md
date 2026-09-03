@@ -77,7 +77,10 @@ Correction passes:
 | Task | Status | Notes |
 |---|---|---|
 | S8-C00 | **DONE** | Harden ModelGateway plain-chat and JSON tool-call contracts |
+| S8-C01 | **DONE** | Correct Stage-8 verification evidence |
 | S8-C02 | **DONE** | Harden ModelProfile base_url endpoint validation |
+| S8-C03 | **DONE** | Harden Ollama health and JSON response validation |
+| S8-C04 | **DONE** | Correct S8-03 verification evidence and Stage-8 correction index |
 
 ## S8-00 implementation record
 
@@ -1080,9 +1083,154 @@ git diff --check
 - `TEST_HARD_LIMIT` (1000): unchanged
 - `TEST_LEGACY_EXCEPTIONS`: unchanged
 - `src/dnd_assistant/models/ollama.py`: 394 lines (under 700)
-- `tests/unit/test_ollama_provider.py`: 994 lines (under 1000)
+- `tests/unit/test_ollama_provider.py`: 992 lines (under 1000)
 - No new correction-history filenames created
 - No new maintainability exceptions added
+
+## S8-C04 correction record
+
+**Reviewed S8-03 SHA:** `e0f6399810aef19417db0f1469707bb2e43bdc56`
+
+**Reason for correction:** Independent review of S8-03 found three documentation/evidence defects:
+
+1. **Defect A — wrong S8-03 test-file physical-line count.** The committed S8-03 record stated `tests/unit/test_ollama_structured.py = 809 lines`, but the actual physical-line count is 775.
+
+2. **Defect B — Final Report line-count contradictions.** The S8-03 Final Report correctly reported `ollama.py = 544`, `test_ollama_provider.py = 992`, and `test_ollama_structured.py = 775`, but the committed Stage-8 document contained stale values (545, 994, 809 respectively).
+
+3. **Defect C — incomplete Stage-8 correction-pass index.** The correction-pass table listed only S8-C00 and S8-C02, omitting S8-C01 and S8-C03.
+
+**Canonical physical-line counting method:**
+
+```python
+from pathlib import Path
+
+paths = (
+    Path("src/dnd_assistant/models/ollama.py"),
+    Path("tests/unit/test_ollama_provider.py"),
+    Path("tests/unit/test_ollama_structured.py"),
+)
+
+for path in paths:
+    print(path, len(path.read_bytes().splitlines()))
+```
+
+**Freshly measured counts (at S8-03 HEAD `e0f63998`):**
+
+| File | Count |
+|---|---|
+| `src/dnd_assistant/models/ollama.py` | 544 |
+| `tests/unit/test_ollama_provider.py` | 992 |
+| `tests/unit/test_ollama_structured.py` | 775 |
+
+**Stale S8-03 counts found and corrected:**
+
+| Location | Stale value | Corrected value |
+|---|---|---|
+| S8-03 Test-file split: `test_ollama_provider.py` was at N lines | 994 | 992 |
+| S8-03 Test-file split: `test_ollama_structured.py` (47 tests, N lines) | 809 | 775 |
+| S8-03 Maintainability: `ollama.py` | 545 | 544 |
+| S8-03 Maintainability: `test_ollama_structured.py` | 809 | 775 |
+| S8-03 Maintainability: `test_ollama_provider.py` | 994 | 992 |
+
+**Historical-count preservation audit:**
+
+The S8-C03 record's maintainability section also contained a stale count (`test_ollama_provider.py: 994` at S8-C03 SHA). The actual count at S8-C03 SHA (`8a633b3`) was 992. This was independently verified and corrected as part of this pass.
+
+All other historical counts in earlier records (S8-00, S8-C00, S8-C01, S8-01, S8-C02, S8-02, S8-C03) were verified to match their respective commit SHAs or were left unchanged when the task scope did not authorize their correction.
+
+**Correction-pass table repair:**
+
+Added missing entries:
+- S8-C01 — Correct Stage-8 verification evidence
+- S8-C03 — Harden Ollama health and JSON response validation
+- S8-C04 — Correct S8-03 verification evidence and Stage-8 correction index
+
+**Confirmation production/tests unchanged:**
+
+Zero diff in:
+- `src/dnd_assistant/` (all production code)
+- `tests/` (all test code)
+- `pyproject.toml`
+- `uv.lock`
+- `.gigacode/`
+- `.gigacode_vsc/`
+
+**Verification commands and results:**
+
+```
+uv run pytest tests/unit/test_ollama_structured.py -v
+→ 47 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 64 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 292 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3944 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 284 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+**Scope audit:**
+
+**Intended scope:** `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`, `DEVELOPMENT_STATUS.md`
+
+**Actual changed files (from Git):**
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/ollama.py`
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_ollama_structured.py`
+- `tests/unit/test_ollama_provider.py`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/contract/`
+- `pyproject.toml`
+- `uv.lock`
+
+**Maintainability:**
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"]` (1477): unchanged
+- No new correction-history filenames created
+- No new maintainability exceptions added
+
+**S8-04 deferral:**
+
+S8-04 remains NOT STARTED. This correction does not begin S8-04 implementation.
 
 ## S8-03 implementation record
 
@@ -1203,9 +1351,9 @@ No `ollama pull`, no model fallback, no model selection changes.
 
 ### Test-file split
 
-`tests/unit/test_ollama_provider.py` was at 994 lines (TEST_HARD_LIMIT = 1000).
+`tests/unit/test_ollama_provider.py` was at 992 lines (TEST_HARD_LIMIT = 1000).
 S8-03 tests were created in a new topical module:
-`tests/unit/test_ollama_structured.py` (47 tests, 809 lines).
+`tests/unit/test_ollama_structured.py` (47 tests, 775 lines).
 
 ### Mock strategy
 
@@ -1285,9 +1433,9 @@ git diff --check
 - `PRODUCTION_HARD_LIMIT` (700): unchanged
 - `TEST_HARD_LIMIT` (1000): unchanged
 - `TEST_LEGACY_EXCEPTIONS`: unchanged
-- `src/dnd_assistant/models/ollama.py`: 545 lines (under 700)
-- `tests/unit/test_ollama_structured.py`: 809 lines (under 1000)
-- `tests/unit/test_ollama_provider.py`: 994 lines (unchanged, under 1000)
+- `src/dnd_assistant/models/ollama.py`: 544 lines (under 700)
+- `tests/unit/test_ollama_structured.py`: 775 lines (under 1000)
+- `tests/unit/test_ollama_provider.py`: 992 lines (unchanged, under 1000)
 - No new correction-history filenames created
 - No new maintainability exceptions added
 
