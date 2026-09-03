@@ -1,11 +1,12 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-03 (S8-06 completed)
+**Last updated:** 2026-09-03 (Stage 8 completed)
 **Current milestone:** `v0.1-dev — Vault Core`
-**Roadmap position:** Stage 8 in progress
-**Active stage:** Stage 8 — Model Gateway / Ollama
-**Stage 8 status:** `IN PROGRESS`
+**Roadmap position:** Stage 8 complete; Stage 9 next
+**Active stage:** Stage 9 — Fast Agent
+**Stage 8 status:** `DONE`
 **Started:** 2026-09-02
+**Completed:** 2026-09-03
 
 ## Status model
 
@@ -38,7 +39,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 | 5. Retrieval + Entity Resolution | DONE | 2026-08-31 | 2026-08-31 | [`docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md`](docs/stages/05_RETRIEVAL_AND_ENTITY_RESOLUTION.md) |
 | 6. Session Runtime without LLM | DONE | 2026-08-31 | 2026-09-02 | [`docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md`](docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md) |
 | 7. Tool Registry / Executor | DONE | 2026-09-02 | 2026-09-02 | [`docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md`](docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md) |
-| 8. Model Gateway / Ollama | IN PROGRESS | 2026-09-02 | — | [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md) |
+| 8. Model Gateway / Ollama | DONE | 2026-09-02 | 2026-09-03 | [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md) |
 | 9. Fast Agent | NOT STARTED | — | — | — |
 | 10. ChangeSet | NOT STARTED | — | — | — |
 | 11. Post-session Processor | NOT STARTED | — | — | — |
@@ -48,7 +49,7 @@ Detailed task/correction/review records belong in `docs/stages/`.
 
 ## Current roadmap state
 
-Stage 8 is in progress.
+Stage 8 is complete.
 
 Pre-Stage-8 base:
 
@@ -77,7 +78,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | S8-C06 — Harden embedding numeric conversion against oversized JSON integers | DONE |
 | S8-C07 — Correct S8-C06 physical-line verification evidence | DONE |
 | S8-06 — Provider integration / error hardening / opt-in smoke coverage | DONE |
-| S8-07 — Full Stage-8 historical review / completion | NOT STARTED |
+| S8-07 — Full Stage-8 historical review / completion | DONE |
 
 Details: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md)
 

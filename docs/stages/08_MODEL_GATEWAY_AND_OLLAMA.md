@@ -2836,3 +2836,528 @@ HEAD == origin/main after push.
 ### Clean working-tree confirmation
 
 Confirmed.
+
+---
+
+## S8-07 Stage-8 completion review
+
+### Pre-Stage-8 base SHA
+
+```
+9bca669894b2ae12a62381a2f7b6a5447c44e9cd
+```
+
+### Captured implementation review-head SHA
+
+```
+adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+```
+
+### Exact historical review range
+
+```
+9bca669894b2ae12a62381a2f7b6a5447c44e9cd..adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+```
+
+### Branch
+
+`main`
+
+### Git ahead/behind/commit-count verification
+
+```
+merge-base = 9bca669894b2ae12a62381a2f7b6a5447c44e9cd
+ahead_by   = 0
+behind_by  = 15
+total      = 15
+```
+
+### Exact 15-commit chronological inventory
+
+```
+1040880543c9a3589cee569e92a810a7ed0ce4c5  feat: establish model gateway contracts (S8-00)
+f3c8e00e0d8aa584541faa458b800230163e1b9f  fix: harden model gateway contracts (S8-C00)
+c708a4820ff22eecf2ebefd52fa03119d43479b6  docs: correct Stage 8 verification evidence (S8-C01)
+0a61ea4c22642481a782060c1a0b7e40aad72a5f  feat: add model profile configuration (S8-01)
+fa92750bc2669602e96bf9e1111153e727eff656  fix: validate model profile endpoints (S8-C02)
+65d6afb6af52b58613456c574f79cd66af02bba3  feat: add Ollama health and plain chat (S8-02)
+8a633b3b467107c96b78fc3a71a125bd3188b563  fix: harden Ollama response validation (S8-C03)
+e0f6399810aef19417db0f1469707bb2e43bdc56  feat: add Ollama structured generation (S8-03)
+e445868e9bb5416f0e9ec8ee5fcad631c880ea4a  docs: correct S8-03 verification evidence (S8-C04)
+d2f6096b87c9a657acb2633f4591b01599ac93a5  feat: add Ollama native tool calling (S8-04)
+214e75120cd5a892df78e100c176b611bf072e8e  fix: harden Ollama tool response validation (S8-C05)
+4e7207ca152a464a61985c66b0e5ec8f0a3fd4a8  feat: add Ollama embeddings (S8-05)
+b2833c0231a737f3575f12daefbb63695ce9ef3d  fix: harden Ollama embedding numeric conversion (S8-C06)
+f15bcd63b136e9bb13ad3f4624db288856b10bac  docs: correct S8-C06 verification evidence (S8-C07)
+adce2a55922a7ec8b1613a7c9dc5c67da02aee53  feat: harden Ollama provider integration (S8-06)
+```
+
+### Commit classification
+
+| Commit | Type |
+|--------|------|
+| S8-00 | implementation |
+| S8-C00 | production correction |
+| S8-C01 | documentation/evidence correction |
+| S8-01 | implementation |
+| S8-C02 | production correction |
+| S8-02 | implementation |
+| S8-C03 | production correction |
+| S8-03 | implementation |
+| S8-C04 | documentation/evidence correction |
+| S8-04 | implementation |
+| S8-C05 | production correction |
+| S8-05 | implementation |
+| S8-C06 | production correction |
+| S8-C07 | documentation/evidence correction |
+| S8-06 | implementation |
+
+### Concurrent/unrelated commit assessment
+
+No unrelated concurrent commits inside the Stage-8 range. All 15 commits are Stage-8 tasks or corrections.
+
+### Cumulative changed-file inventory
+
+```
+M       DEVELOPMENT_STATUS.md
+A       docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md
+M       docs/stages/README.md
+M       pyproject.toml
+M       src/dnd_assistant/models/__init__.py
+M       src/dnd_assistant/models/gateway.py
+A       src/dnd_assistant/models/ollama.py
+A       src/dnd_assistant/models/ollama_chat_adapter.py
+A       src/dnd_assistant/models/ollama_embedding_adapter.py
+A       src/dnd_assistant/models/ollama_tool_adapter.py
+A       src/dnd_assistant/models/profiles.py
+A       src/dnd_assistant/models/types.py
+A       tests/integration/test_ollama_provider_integration.py
+A       tests/integration/test_ollama_smoke.py
+A       tests/unit/test_model_gateway_contracts.py
+A       tests/unit/test_model_profiles.py
+A       tests/unit/test_ollama_cross_operation_hardening.py
+A       tests/unit/test_ollama_embeddings.py
+A       tests/unit/test_ollama_provider.py
+A       tests/unit/test_ollama_structured.py
+A       tests/unit/test_ollama_tool_calling.py
+```
+
+### Cumulative changed-file count
+
+21 files.
+
+### Production files reviewed
+
+- `src/dnd_assistant/models/__init__.py` (31 lines)
+- `src/dnd_assistant/models/gateway.py` (125 lines)
+- `src/dnd_assistant/models/types.py` (214 lines)
+- `src/dnd_assistant/models/profiles.py` (242 lines)
+- `src/dnd_assistant/models/ollama.py` (627 lines)
+- `src/dnd_assistant/models/ollama_chat_adapter.py` (193 lines)
+- `src/dnd_assistant/models/ollama_tool_adapter.py` (319 lines)
+- `src/dnd_assistant/models/ollama_embedding_adapter.py` (234 lines)
+
+### Test files reviewed
+
+- `tests/unit/test_model_gateway_contracts.py` (610 lines)
+- `tests/unit/test_model_profiles.py` (853 lines)
+- `tests/unit/test_ollama_provider.py` (992 lines)
+- `tests/unit/test_ollama_structured.py` (775 lines)
+- `tests/unit/test_ollama_tool_calling.py` (918 lines)
+- `tests/unit/test_ollama_embeddings.py` (929 lines)
+- `tests/unit/test_ollama_cross_operation_hardening.py` (234 lines)
+- `tests/integration/test_ollama_provider_integration.py` (327 lines)
+- `tests/integration/test_ollama_smoke.py` (269 lines)
+
+### Exact ModelGateway method inventory
+
+Five synchronous canonical methods confirmed in `gateway.py`:
+1. `chat(request: ChatRequest) -> ChatResponse`
+2. `chat_with_tools(request: ChatRequest, tools: list[ToolPublicDefinition]) -> ToolAwareResponse`
+3. `generate_structured(request: ChatRequest, schema: type[T]) -> T`
+4. `embed(texts: list[str]) -> list[list[float]]`
+5. `health() -> ModelHealth`
+
+### Sync-contract confirmation
+
+All five operations are synchronous (`def`, not `async def`). No `generate()`, `complete()`, `invoke()`, or `chat(tools=...)` variants exist. No provider-specific arguments.
+
+### Provider-neutral import-boundary result
+
+- `dnd_assistant.models` → only `errors`, `gateway`, `types` (no Ollama, no tools runtime, no storage, no retrieval, no application, no CLI)
+- `dnd_assistant.models.gateway` → only `errors` (no Ollama, no tools runtime, no storage, no retrieval, no application, no CLI)
+- `dnd_assistant.models.ollama` → only model-layer modules + `errors` + `profiles` (no ToolExecutor, no storage, no retrieval, no application, no CLI)
+
+### DTO invariant review result
+
+**MessageRole**: Exactly SYSTEM, USER, ASSISTANT, TOOL — confirmed.
+
+**ToolCall**: `name` non-empty, `arguments` is `dict[str, FiniteJsonValue]`, `call_id` optional, frozen, extra forbid — confirmed.
+
+**ChatMessage**: Role invariants verified — SYSTEM/USER require non-empty content and reject tool metadata; ASSISTANT requires at least text or tool_calls; TOOL requires non-empty content and tool_name — confirmed.
+
+**ChatResponse**: Assistant role only, no tool calls — confirmed.
+
+**ToolAwareResponse**: Assistant role only, may contain text, tool calls, or both — confirmed.
+
+**ModelHealth**: `model_available=True` requires `reachable=True`; `healthy` property is deterministic — confirmed.
+
+### ToolCall finite-JSON review result
+
+`FiniteJsonValue` uses `AfterValidator(_reject_non_finite)` which recursively rejects NaN, +Inf, -Inf at any nesting depth in ToolCall.arguments — confirmed.
+
+### ChatResponse plain-chat review result
+
+`ChatResponse` rejects tool calls via `_no_tool_calls` model validator — confirmed.
+
+### ToolAwareResponse review result
+
+Supports text-only, tool-call-only, and text + tool calls. No restrictions on tool call count — confirmed.
+
+### ModelHealth review result
+
+`model_available=True` requires `reachable=True` enforced by model validator. `healthy` property returns `reachable and model_available` — confirmed.
+
+### Model profile schema review result
+
+`ModelProfileRole`: AGENT, SUMMARIZER, EMBEDDING — confirmed.
+`ModelProfile`: provider, model, base_url, temperature (optional), keep_alive (optional), role — confirmed.
+`ModelProfilesConfig`: dict of named profiles, at least one required — confirmed.
+`load_model_profiles(path)`: loads from explicit TOML path — confirmed.
+
+### Machine-config boundary result
+
+Explicit path only. No Vault lookup, no home-directory discovery, no environment-variable discovery, no network, no DNS — confirmed.
+
+### URL validation result
+
+`_validate_http_url()` requires `http://` or `https://` scheme, usable hostname, valid optional port. Path prefixes allowed — confirmed.
+
+### Ollama provider lifecycle result
+
+`OllamaModelProvider` owns one synchronous `httpx.Client` created in `__init__`, has explicit `close()`, does not create new client per operation, does not perform background work, does not retry automatically, does not pull models, does not silently fall back — confirmed.
+
+### Path-prefix result
+
+`_url()` uses `urljoin` with path-prefix preservation. All endpoints use the same `_url()` behavior — confirmed.
+
+### Health operation review
+
+- `/api/version` structurally validated (must be dict with non-empty string `version`)
+- `/api/tags` must contain `models` list
+- Configured model lookup via exact matching on `model` and `name` fields
+- Unreachable → `ModelHealth(reachable=False, ...)`; model missing → `reachable=True, model_available=False`; healthy → both True
+- Malformed bytes/JSON do not leak raw decode exceptions — confirmed
+- No model pull — confirmed
+
+### Plain chat review
+
+- Rejects tool-bearing input history before HTTP via `_assert_no_tool_history()`
+- Uses `model`/`messages`/`stream=false`; maps `temperature` to `options.temperature`; maps `keep_alive` top-level
+- Does not send `tools` or `format` — confirmed
+- Response parsed via `parse_plain_chat_response()` — assistant role, usable content
+- Native `tool_calls` semantics: field missing → allowed, `[]` → allowed, present non-list → ModelError, non-empty list → ModelError — confirmed
+
+### Structured generation review
+
+- Schema must be Pydantic `BaseModel` subclass before HTTP
+- Tool-bearing input history rejected before HTTP
+- `format` == exact `schema.model_json_schema()`; no schema text injected into messages — confirmed
+- Response requires assistant role, string content, rejects unexpected tool_calls
+- Calls exact `schema.model_validate_json(content)` — returns instance of exact caller schema type — confirmed
+
+### Tool-aware review
+
+`chat_with_tools()` is provider adaptation only. No ToolRegistry lookup, no ToolExecutor, no handler lookup, no permission enforcement, no session-mode enforcement, no tool execution, no Vault mutation, no automatic follow-up request, no agent loop — confirmed. Exactly one Ollama request per call.
+
+### Tool definition mapping review
+
+`ToolPublicDefinition.name` → `function.name`, `description` → `function.description`, `input_schema` → `function.parameters`. No `output_schema`, `permission`, `side_effects`, `allowed_session_modes`, `handler` sent. Input schema unmodified. Tool-list order preserved — confirmed.
+
+### Call-ID/index policy review
+
+Assistant tool-call replay uses `type=function`, `function.index` = tuple/list position, `function.name`, `function.arguments`. Index is provider transport metadata only — not converted to `call_id`. Returned Ollama `ToolCall.call_id = None`. Non-None outgoing `call_id`/`tool_call_id` rejected before HTTP — confirmed.
+
+### Tool-response allowlist review
+
+Unknown model-returned tool names produce `ModelError`. Allowlist is the current supplied tool list — confirmed.
+
+### Tool execution absence proof
+
+No tool execution after model call. No automatic model-tool-model cycle. No agent loop. No ToolExecutor invocation from ModelGateway — confirmed.
+
+### Embedding request review
+
+- `embed()` accepts `list[str]`, validates non-empty, every element must be string — no stripping/deduplication/normalization
+- Payload uses `{"model": ..., "input": [...], "truncate": false}` plus optional `keep_alive`
+- Does not send `temperature`, `options`, `stream`, `format`, `tools`, `think`, `dimensions` — confirmed
+
+### Embedding response/cardinality review
+
+- Top-level object with `embeddings` field required
+- Exact one-vector-per-input cardinality enforced
+- Every vector is non-empty list, consistent dimensions in batch
+- Numeric scalars only; bool rejected; all public scalars converted to float
+- Non-finite rejected — confirmed
+
+### Oversized-int error-boundary review
+
+Oversized integer conversion (e.g. `10**309`) caught as `OverflowError`, converted to `ModelError` with original exception preserved as `__cause__` — confirmed.
+
+### Cross-operation error-boundary review
+
+All provider operations contain narrow exception boundaries. Normal provider/network/response failures do not leak `httpx.RequestError`, `JSONDecodeError`, `UnicodeDecodeError`, Pydantic `ValidationError`, `OverflowError`, `KeyError`, `AttributeError`, or `TypeError` outside documented boundaries. Expected project errors: `ModelError`, `ValidationError`, `ModelHealth` state — confirmed.
+
+### Error-body safety review
+
+`_extract_ollama_error()` handles JSON error bodies, non-JSON bodies, invalid bytes. HTTP status visible. Provider error strings bounded to 200 chars. No raw arbitrary response body dump — confirmed. S8-C03 hardening preserved.
+
+### Mocked profile/provider integration review
+
+Integration path: temporary TOML → `load_model_profiles()` → real `ModelProfile` → `OllamaModelProvider` → mocked HTTP → provider-neutral result — confirmed. All five operations represented. No real network. No Vault. No application composition layer — confirmed.
+
+### Five-operation integration coverage
+
+All five operations covered in integration tests: health, chat, generate_structured, chat_with_tools, embed — confirmed.
+
+### Real-smoke marker review
+
+Marker `ollama` registered in `pyproject.toml` — confirmed.
+
+### Smoke environment contract
+
+Three environment variables required: `DND_ASSISTANT_OLLAMA_SMOKE_CONFIG`, `DND_ASSISTANT_OLLAMA_SMOKE_AGENT_PROFILE`, `DND_ASSISTANT_OLLAMA_SMOKE_EMBEDDING_PROFILE` — confirmed.
+
+### Default no-config smoke result
+
+All 5 smoke tests skipped (no config supplied) — confirmed.
+
+### REAL OLLAMA SMOKE status
+
+NOT RUN — no explicit smoke configuration supplied.
+
+### No hardcoded endpoint/model confirmation
+
+No default endpoint/model in production code — confirmed.
+
+### No model pull/fallback confirmation
+
+No model pull, no silent fallback — confirmed.
+
+### Stage-9 boundary audit
+
+No Stage-8 implementation of: FastAgent, agent loop, tool execution after model call, automatic model-tool-model cycle, conversation orchestration, context builder, prompt routing, agent retry loop, application-level tool selection policy, ToolExecutor invocation from ModelGateway — confirmed. `ToolAwareResponse` returned but not executed.
+
+### Vault/storage/retrieval boundary audit
+
+Model Layer does not directly access: Obsidian Vault, VaultRepository, filesystem campaign state, SQLite retrieval index, EntityResolver, session runtime, CalendarService — confirmed. Embeddings are returned values only. No embedding persistence/index/RAG integration in Stage 8.
+
+### Dependency audit
+
+`pyproject.toml` diff adds only `[tool.pytest.ini_options] markers = ["ollama: ..."]`. No new runtime dependency. No Ollama SDK. No jsonschema. No vector DB. No numpy — confirmed.
+
+### uv.lock audit
+
+`uv.lock` has zero Stage-8 diff — confirmed.
+
+### Maintainability ceiling audit
+
+`PRODUCTION_HARD_LIMIT = 700` unchanged. `TEST_HARD_LIMIT = 1000` unchanged. `TEST_LEGACY_EXCEPTIONS["unit/test_retrieval_contracts.py"] = 1477` unchanged. No new exceptions — confirmed.
+
+### Canonical physical-line counts for all Stage-8 production files
+
+```
+src/dnd_assistant/models/gateway.py                   125
+src/dnd_assistant/models/types.py                     214
+src/dnd_assistant/models/profiles.py                  242
+src/dnd_assistant/models/ollama.py                    627
+src/dnd_assistant/models/ollama_chat_adapter.py       193
+src/dnd_assistant/models/ollama_tool_adapter.py       319
+src/dnd_assistant/models/ollama_embedding_adapter.py  234
+```
+
+All below 700-line hard limit — confirmed.
+
+### Canonical physical-line counts for all Stage-8 test files
+
+```
+tests/unit/test_model_gateway_contracts.py             610
+tests/unit/test_model_profiles.py                      853
+tests/unit/test_ollama_provider.py                     992
+tests/unit/test_ollama_structured.py                   775
+tests/unit/test_ollama_tool_calling.py                 918
+tests/unit/test_ollama_embeddings.py                   929
+tests/unit/test_ollama_cross_operation_hardening.py    234
+tests/integration/test_ollama_provider_integration.py  327
+tests/integration/test_ollama_smoke.py                 269
+```
+
+All below 1000-line test hard limit — confirmed.
+
+### Test-harness isolation audit
+
+No Stage-8 test deletes `dnd_assistant` modules from `sys.modules`, adds module-level restoration opt-in, adds global autouse restoration fixtures, or modifies test harness policy exceptions. S8-C05 fully restored `MODULE_LEVEL_OPTIIN == {"contract/test_boundaries.py"}`. No Stage-8 module remains in that allowlist — confirmed.
+
+### Fresh import-boundary diagnostics
+
+Confirmed via fresh Python processes:
+- `dnd_assistant.models` → only `dnd_assistant`, `errors`, `gateway`, `types` (no Ollama, no tools runtime, no storage, no retrieval, no application, no CLI)
+- `dnd_assistant.models.gateway` → only `dnd_assistant`, `errors` (no Ollama, no tools runtime, no storage, no retrieval, no application, no CLI)
+- `dnd_assistant.models.ollama` → only model-layer modules + `errors` + `profiles` (no ToolExecutor, no storage, no retrieval, no application, no CLI)
+
+### S8-C00 persistence check
+
+`ChatResponse` rejects tool calls. `ToolCall` arguments reject non-finite floats recursively — confirmed.
+
+### S8-C01 evidence check
+
+Stage-8 evidence no longer contains corrected stale S8-00 placeholders/counts — confirmed.
+
+### S8-C02 persistence check
+
+Robust `base_url` validation remains — confirmed.
+
+### S8-C03 persistence check
+
+Version validation and safe JSON/invalid-byte boundaries remain — confirmed.
+
+### S8-C04 evidence check
+
+S8-03 physical-line evidence remains historically correct — confirmed.
+
+### S8-C05 persistence check
+
+Tool-aware `tool_calls` presence semantics and harness restoration remain — confirmed.
+
+### S8-C06 persistence check
+
+Oversized embedding integer conversion safely mapped to `ModelError` — confirmed.
+
+### S8-C07 evidence check
+
+S8-C06 adapter count documented as `234`, not stale `236` — confirmed.
+
+### Stage-document consistency audit
+
+Task map is chronological and accurate. All S8-00 through S8-06 are DONE. All S8-C00 through S8-C07 are recorded. No stale NOT STARTED claim remains for a completed task. Historical SHAs refer to correct reviewed states. Historical line counts remain tied to the correct commit/state. No unresolved placeholders remain. No false real-Ollama-smoke success claim exists. The S8-06 record clearly states `REAL OLLAMA SMOKE: NOT RUN — no explicit smoke configuration supplied` — confirmed.
+
+### DEVELOPMENT_STATUS pre-completion audit
+
+Starting status: Stage 8 IN PROGRESS, S8-06 DONE, S8-07 NOT STARTED, Stage 9 NOT STARTED — confirmed.
+
+### Gateway contract test result
+
+76 passed, 0 failed, 0 errors — confirmed.
+
+### Model-profile test result
+
+73 passed, 0 failed, 0 errors — confirmed.
+
+### Ollama-provider test result
+
+64 passed, 0 failed, 0 errors — confirmed.
+
+### Structured-generation test result
+
+47 passed, 0 failed, 0 errors — confirmed.
+
+### Tool-calling test result
+
+76 passed, 0 failed, 0 errors — confirmed.
+
+### Embeddings test result
+
+67 passed, 0 failed, 0 errors — confirmed.
+
+### Cross-operation hardening test result
+
+18 passed, 0 failed, 0 errors — confirmed.
+
+### Mocked integration test result
+
+8 passed, 0 failed, 0 errors — confirmed.
+
+### Default smoke test result
+
+5 skipped, 0 failed, 0 errors — confirmed.
+
+### Boundary test result
+
+97 passed, 0 failed, 0 errors — confirmed.
+
+### Maintainability test result
+
+305 passed, 0 failed, 0 errors — confirmed.
+
+### Test-harness test result
+
+25 passed, 0 failed, 0 errors — confirmed.
+
+### Full pytest result
+
+4126 passed, 100 skipped, 0 failed, 0 errors — confirmed.
+
+### Ruff check result
+
+All checks passed — confirmed.
+
+### Ruff format-check result
+
+292 files already formatted — confirmed.
+
+### git diff --check result
+
+Clean — confirmed.
+
+### Historical review conclusion
+
+Review clean. No blocking defect found.
+
+### Confirmation Stage 8 complete
+
+Confirmed.
+
+### Confirmation S8-07 DONE
+
+Confirmed.
+
+### Confirmation Stage 9 NOT STARTED
+
+Confirmed.
+
+### Completion changed-file inventory
+
+```
+M       DEVELOPMENT_STATUS.md
+M       docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md
+```
+
+### Confirmation zero production/test diff in completion commit
+
+Confirmed — only two docs/status files changed.
+
+### Pre-finalization audit result
+
+All quality gates passed. Working tree clean. No unintended changes. Captured review-head unchanged. Exact historical range unchanged. Stage 8 marked DONE. S8-07 marked DONE. Stage 9 remains NOT STARTED. No implementation slipped into review task. No test workaround added. No maintainability ceiling changed.
+
+### Completion commit SHA
+
+(reported in Final Report)
+
+### Completion commit message
+
+```
+docs: complete Stage 8 model gateway review (S8-07)
+```
+
+### Push result
+
+Normal push to `origin/main`.
+
+### HEAD/upstream equality
+
+HEAD == origin/main after push.
+
+### Clean working-tree confirmation
+
+Confirmed.
