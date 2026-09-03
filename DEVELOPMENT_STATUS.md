@@ -79,6 +79,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | S8-C07 — Correct S8-C06 physical-line verification evidence | DONE |
 | S8-06 — Provider integration / error hardening / opt-in smoke coverage | DONE |
 | S8-07 — Full Stage-8 historical review / completion | DONE |
+| S8-C08 — Correct Stage-8 completion Git comparison evidence | DONE |
 
 Details: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md)
 

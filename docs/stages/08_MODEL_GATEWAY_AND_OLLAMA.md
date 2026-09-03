@@ -2867,8 +2867,8 @@ adce2a55922a7ec8b1613a7c9dc5c67da02aee53
 
 ```
 merge-base = 9bca669894b2ae12a62381a2f7b6a5447c44e9cd
-ahead_by   = 0
-behind_by  = 15
+ahead_by   = 15
+behind_by  = 0
 total      = 15
 ```
 
@@ -3361,3 +3361,74 @@ HEAD == origin/main after push.
 ### Clean working-tree confirmation
 
 Confirmed.
+
+---
+
+## S8-C08 — Correct Stage-8 completion Git comparison evidence
+
+**Reviewed S8-07 completion SHA:**
+
+```
+9f988bd665d9881b3c57d785eacce2dd95e2f518
+```
+
+### Defect
+
+The S8-07 completion review committed reversed `ahead_by` / `behind_by` values.
+
+### Cause
+
+Left/right symmetric-difference counts were interpreted with the wrong semantic labels.
+
+### Git comparison re-verification
+
+```
+git merge-base \
+  9bca669894b2ae12a62381a2f7b6a5447c44e9cd \
+  adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+→ 9bca669894b2ae12a62381a2f7b6a5447c44e9cd
+
+git rev-list --count \
+  9bca669894b2ae12a62381a2f7b6a5447c44e9cd..adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+→ 15  (head-only / ahead_by)
+
+git rev-list --count \
+  adce2a55922a7ec8b1613a7c9dc5c67da02aee53..9bca669894b2ae12a62381a2f7b6a5447c44e9cd
+→ 0   (base-only / behind_by)
+
+git rev-list --left-right --count \
+  9bca669894b2ae12a62381a2f7b6a5447c44e9cd...adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+→ 0    15
+  (base-only = 0, head-only = 15)
+```
+
+### Verified values
+
+| Metric | Committed (incorrect) | Correct |
+|---|---|---|
+| `ahead_by` | 0 | 15 |
+| `behind_by` | 15 | 0 |
+| `total` | 15 | 15 |
+
+### Historical range unchanged
+
+```
+Pre-Stage-8 base:
+9bca669894b2ae12a62381a2f7b6a5447c44e9cd
+
+Captured implementation review-head:
+adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+
+Historical implementation review range:
+9bca669894b2ae12a62381a2f7b6a5447c44e9cd..adce2a55922a7ec8b1613a7c9dc5c67da02aee53
+```
+
+### Confirmation
+
+- S8-07 technical review conclusion remains unchanged.
+- No production defect was found.
+- No test defect was found.
+- This is evidence-only correction.
+- 15-commit inventory unchanged.
+- Captured implementation review-head unchanged.
+- Merge-base unchanged.
