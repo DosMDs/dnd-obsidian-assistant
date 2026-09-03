@@ -65,7 +65,7 @@ via a `TYPE_CHECKING`-only import in `gateway.py`.  This ensures:
 |---|---|---|
 | **S8-00** | **DONE** | Provider-neutral typed ModelGateway contracts + sync decision |
 | **S8-01** | **DONE** | Model profile schemas + machine profile loader |
-| S8-02 | NOT STARTED | Ollama transport + health + plain chat |
+| **S8-02** | **DONE** | Ollama transport + health + plain chat |
 | S8-03 | NOT STARTED | Ollama structured generation |
 | S8-04 | NOT STARTED | Ollama native tool-calling adapter |
 | S8-05 | NOT STARTED | Ollama embeddings |
@@ -423,6 +423,324 @@ The following are explicitly deferred to S8-02 or later:
 - `dnd doctor` integration
 - Session runtime model loading
 - Home-directory / CLI default machine-path resolution
+
+## S8-02 implementation record
+
+**Starting SHA:** `fa92750bc2669602e96bf9e1111153e727eff656`
+
+**Branch:** `main`
+
+### Official Ollama endpoints used
+
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/api/version` | GET | Ollama reachability / health |
+| `/api/tags` | GET | Configured model availability |
+| `/api/chat` | POST | Plain (non-tool) multi-turn chat |
+
+### Partial-provider decision
+
+S8-02 implements only `chat()` and `health()` of the eventual five-operation
+Ollama ModelGateway implementation.
+
+No placeholder/future methods were added:
+
+- `chat_with_tools` — not implemented, not stubbed
+- `generate_structured` — not implemented, not stubbed
+- `embed` — not implemented, not stubbed
+
+### HTTP/client ownership decision
+
+`OllamaModelProvider` owns a synchronous `httpx.Client` created on
+construction.  An explicit `close()` method releases resources.  No async,
+no asyncio, no persistent connection pooling beyond the client's default.
+
+### Profile/provider validation
+
+Constructor rejects non-Ollama profiles:
+
+```python
+if profile.provider != "ollama":
+    raise ValidationError(...)
+```
+
+Uses the existing `dnd_assistant.errors.ValidationError`.  No hardcoded
+model name — the profile is the configuration source.
+
+### Endpoint path-preservation strategy
+
+Uses `urllib.parse.urljoin` with a trailing-slash base URL to preserve
+existing path prefixes:
+
+```python
+urljoin(base_url.rstrip("/") + "/", path.lstrip("/"))
+```
+
+For `base_url = "https://provider.example/ollama"`:
+
+- `_url("/api/version")` → `https://provider.example/ollama/api/version`
+- `_url("/api/chat")` → `https://provider.example/ollama/api/chat`
+
+### Health semantics
+
+Two-step deterministic flow:
+
+1. **GET /api/version** — determines Ollama reachability.
+2. **GET /api/tags** — determines configured-model availability.
+
+### Exact model availability matching
+
+Uses exact string match against each entry's `model` and `name` fields.
+No fuzzy matching.  No `ollama pull` or automatic model installation.
+
+### Healthy result
+
+```python
+ModelHealth(reachable=True, model_available=True)
+```
+
+### Missing-model result
+
+```python
+ModelHealth(reachable=True, model_available=False, detail="configured model not installed")
+```
+
+### Unreachable result
+
+```python
+ModelHealth(reachable=False, model_available=False)
+```
+
+### HTTP-health failure behavior
+
+Non-success HTTP response from `/api/version` or `/api/tags`:
+
+```python
+ModelHealth(reachable=True, model_available=False, detail="HTTP {status} from /api/...")
+```
+
+### Malformed-health response behavior
+
+Non-JSON, missing fields, or wrong structure from either endpoint:
+
+```python
+ModelHealth(reachable=True, model_available=False, detail="invalid ...")
+```
+
+### Plain-chat request payload shape
+
+```json
+{
+  "model": "<profile.model>",
+  "messages": [{"role": "...", "content": "..."}],
+  "stream": false
+}
+```
+
+### `stream=false` confirmation
+
+`"stream": false` is always sent — the MVP gateway is synchronous.
+
+### Temperature mapping
+
+When `profile.temperature is not None`, included inside `"options"`:
+
+```json
+"options": {"temperature": 0.7}
+```
+
+When `None`, the `"options"` key is omitted entirely.
+
+### `keep_alive` mapping
+
+When `profile.keep_alive is not None`, included at top level:
+
+```json
+"keep_alive": "30m"
+```
+
+When `None`, the field is omitted.
+
+### Message-role mapping
+
+| Provider-neutral | Ollama JSON |
+|---|---|
+| `SYSTEM` | `{"role": "system", "content": "..."}` |
+| `USER` | `{"role": "user", "content": "..."}` |
+| `ASSISTANT` | `{"role": "assistant", "content": "..."}` |
+
+`TOOL` role and assistant `tool_calls` are rejected before any HTTP request.
+
+### Plain-chat tool-history rejection behavior
+
+`chat()` raises `ModelError` before making an HTTP request if:
+
+- Any message has `role == TOOL`
+- Any assistant message has non-empty `tool_calls`
+
+### Confirmation rejected tool history makes no HTTP request
+
+The test `test_assistant_with_tool_calls_rejected` verifies via `respx`
+that the `/api/chat` route was never called.
+
+### Valid ChatResponse mapping
+
+```python
+ChatResponse(
+    message=ChatMessage(
+        role=MessageRole.ASSISTANT,
+        content="Hello.",
+    )
+)
+```
+
+### Thinking-field behavior
+
+Provider-specific `message.thinking` is ignored — not copied into
+`content` and not exposed through provider-neutral DTOs.
+
+### Unexpected tool_calls response behavior
+
+If Ollama returns non-empty `message.tool_calls` in a plain chat response,
+`ModelError` is raised with a clear diagnostic.
+
+### Connection failure error mapping
+
+`httpx.ConnectError` → `ModelError` with `cause=` chain.
+
+### Timeout error mapping
+
+`httpx.TimeoutException` → `ModelError` with `cause=` chain.
+
+### HTTP 4xx mapping
+
+HTTP 400/404 → `ModelError` with status code in diagnostic.
+
+### HTTP 5xx mapping
+
+HTTP 500/502 → `ModelError` with status code in diagnostic.
+
+### Non-JSON response mapping
+
+Non-JSON HTTP body → `ModelError("Ollama chat returned non-JSON response")`.
+
+### Malformed message mapping
+
+Missing `message` field, wrong type, or empty content → `ModelError`.
+
+### Representative cause-chain proof
+
+```python
+httpx.ConnectError → ModelError.__cause__ (verified in test)
+httpx.TimeoutException → ModelError.__cause__ (verified in test)
+```
+
+### Confirmation no raw httpx/Pydantic errors escape chat()
+
+All provider/network/response failures surface as `ModelError`.  No raw
+`httpx.RequestError`, `httpx.TimeoutException`, `httpx.HTTPStatusError`,
+`json.JSONDecodeError`, or Pydantic `ValidationError` escapes the public
+`chat()` boundary.
+
+### Confirmation no automatic model pull/fallback
+
+`health()` reports `model_available=False` for missing models.
+`chat()` raises `ModelError` for a missing model (via HTTP 404 from Ollama).
+No `ollama pull`, no `POST /api/pull`, no fallback to another model.
+
+### Confirmation no running Ollama required by normal tests
+
+All tests use `respx` to mock HTTP.  No real network, no Ollama, no Vault.
+
+### Test/mock strategy
+
+- `respx.mock` for HTTP mocking.
+- Synchronous `httpx.Client` owned by the provider.
+- Each test creates a fresh provider instance and closes it.
+
+### Quality-gate evidence
+
+```
+uv run pytest tests/unit/test_ollama_provider.py -v
+→ 56 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_profiles.py -v
+→ 73 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_model_gateway_contracts.py -v
+→ 76 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_boundaries.py -v
+→ 97 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_maintainability.py -v
+→ 290 passed, 0 failed, 0 errors
+
+uv run pytest tests/contract/test_test_harness_policy.py -v
+→ 25 passed, 0 failed, 0 errors
+
+uv run pytest
+→ 3887 passed, 95 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+→ All checks passed!
+
+uv run ruff format --check .
+→ 283 files already formatted
+
+git diff --check
+→ no whitespace errors
+```
+
+### Scope audit
+
+**Intended scope:**
+- `src/dnd_assistant/models/ollama.py` — new
+- `tests/unit/test_ollama_provider.py` — new
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` — updated
+- `DEVELOPMENT_STATUS.md` — updated
+
+**Actual changed files (from Git):**
+- `src/dnd_assistant/models/ollama.py`
+- `tests/unit/test_ollama_provider.py`
+- `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`
+- `DEVELOPMENT_STATUS.md`
+
+**No changes in:**
+- `src/dnd_assistant/models/types.py`
+- `src/dnd_assistant/models/gateway.py`
+- `src/dnd_assistant/models/profiles.py`
+- `src/dnd_assistant/models/__init__.py`
+- `src/dnd_assistant/domain/`
+- `src/dnd_assistant/storage/`
+- `src/dnd_assistant/retrieval/`
+- `src/dnd_assistant/application/`
+- `src/dnd_assistant/tools/`
+- `src/dnd_assistant/cli/`
+- `tests/unit/test_model_gateway_contracts.py`
+- `tests/unit/test_model_profiles.py`
+- `tests/contract/`
+- `pyproject.toml`
+- `uv.lock`
+
+### Maintainability
+
+- `PRODUCTION_HARD_LIMIT` (700): unchanged
+- `TEST_HARD_LIMIT` (1000): unchanged
+- `TEST_LEGACY_EXCEPTIONS`: unchanged
+- `src/dnd_assistant/models/ollama.py`: 378 lines (under 700)
+- `tests/unit/test_ollama_provider.py`: 895 lines (under 1000)
+- No new correction-history filenames created
+- No new maintainability exceptions added
+
+### S8-03+ deferrals
+
+- S8-03 (structured generation): NOT STARTED
+- S8-04 (native tool calling): NOT STARTED
+- S8-05 (embeddings): NOT STARTED
+- S8-06 (provider integration): NOT STARTED
+- S8-07 (Stage-8 review): NOT STARTED
+- Stage 9 (Fast Agent): NOT STARTED
 
 ## S8-C02 correction record
 

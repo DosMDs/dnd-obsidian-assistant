@@ -67,7 +67,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | S8-C01 — Correct Stage-8 verification evidence | DONE |
 | S8-01 — Model profile schemas + machine profile loader | DONE |
 | S8-C02 — Harden ModelProfile base_url endpoint validation | DONE |
-| S8-02 — Ollama transport + health + plain chat | NOT STARTED |
+| S8-02 — Ollama transport + health + plain chat | DONE |
 | S8-03 — Ollama structured generation | NOT STARTED |
 | S8-04 — Ollama native tool-calling adapter | NOT STARTED |
 | S8-05 — Ollama embeddings | NOT STARTED |
