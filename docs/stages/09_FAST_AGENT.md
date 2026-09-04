@@ -57,6 +57,7 @@
 | S9-C03 — Reconcile Stage-9 task-map documentation after S9-02 | DONE |
 | S9-C04 — Harden exact ToolCall binding and TOOL-result serialization evidence | DONE |
 | S9-C05 — Correct terminal JSON validation and remove private FastAgent coupling | DONE |
+| S9-C06 — Correct S9-C05 verification evidence and Stage-9 line-count record | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -931,13 +932,52 @@ or second provider resolution.
 - No dependency/lockfile changes
 - No `DEVELOPMENT_STATUS.md` changes
 - `test_agent_loop.py` (969 lines) unchanged
-- `test_agent_loop_boundaries.py` grew from 527 to 738 physical lines
+- `test_agent_loop_boundaries.py` grew from 527 to 858 physical lines
 
 ### Changed files
 
 - `src/dnd_assistant/application/agent_loop.py`
 - `tests/unit/test_agent_loop_boundaries.py`
 - `docs/stages/09_FAST_AGENT.md`
+
+---
+
+## S9-C06 — Correct S9-C05 verification evidence and Stage-9 line-count record
+
+### Defect
+
+Independent review found the S9-C05 physical-line count for
+`test_agent_loop_boundaries.py` was recorded as 738 instead of the correct
+858 physical lines.
+
+Additionally, the S9-C05 Final Report did not demonstrate canonical full
+`uv run pytest` because integration tests were excluded from the reported
+run.
+
+### Fix
+
+- Corrected the S9-C05 line-count record from `738` to `858` (verified from
+  repository bytes: `len(path.read_bytes().splitlines())`).
+- Ran canonical `uv run pytest` with no path/marker exclusions to obtain
+  the missing full-suite evidence.
+
+### Verification evidence
+
+- `uv run pytest` (no exclusions): **4429 passed, 100 skipped, 0 failed, 0 errors**
+- Integration tests were collected and passed by the canonical run
+- Exact physical line counts from repository bytes:
+  - `agent_loop.py` = 275
+  - `test_agent_loop.py` = 969
+  - `test_agent_loop_boundaries.py` = 858
+
+### Scope
+
+- No S9-C05 production implementation was changed.
+- No production code, tests, dependencies, harness, or configuration were
+  modified.
+- No S9-05 work was started.
+- No real Ollama/model was used.
+- Exactly one file changed: `docs/stages/09_FAST_AGENT.md`.
 
 ---
 
