@@ -59,6 +59,7 @@
 | S9-C05 — Correct terminal JSON validation and remove private FastAgent coupling | DONE |
 | S9-C06 — Correct S9-C05 verification evidence and Stage-9 line-count record | DONE |
 | S9-C07 — Fail closed on inconsistent exposed-tool snapshots in multi-call policy | DONE |
+| S9-C08 — Complete structural validation of exposed-tool snapshots | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -1411,3 +1412,118 @@ All inconsistent-snapshot tests use the S9-C05-style `_FakeFastAgent` test doubl
 - No real Ollama/model used
 - No S9-06 work
 - `DEVELOPMENT_STATUS.md` unchanged (S9-05 DONE, S9-06 NOT STARTED)
+
+---
+
+## S9-C08 — Complete structural validation of exposed-tool snapshots
+
+**Status:** DONE
+
+**Starting base:** `104f4dd5e8ab642c412cd7d6bd6d6717018a3ac7`
+
+### Defect
+
+S9-C07 validated matching-name cardinality and Permission but still
+dereferenced arbitrary exposed snapshot entries before validating
+`ToolPublicDefinition` identity. A manually constructed/corrupted
+`AgentDecision` could contain arbitrary objects in
+`decision.exposed_tools`, causing incidental `AttributeError` or
+accepting duck-typed metadata as trusted policy input instead of
+failing closed with `ModelError`.
+
+### Correction
+
+1. **`_validate_exposed_snapshot`** — a new private helper in
+   `agent_loop.py` that validates every entry in the exposed-tool
+   snapshot before any policy use:
+   - Every entry must be a real canonical `ToolPublicDefinition`
+     instance via `isinstance(entry, ToolPublicDefinition)`.
+   - Each `name` field must be a real `str`, non-empty, and
+     non-whitespace-only.
+   - Duck-type impostors with matching `name`/`permission` attributes
+     fail closed.
+   - `object()`, `None`, and arbitrary non-`ToolPublicDefinition`
+     objects fail closed.
+   - Malformed `name` values (`None`, `False`, `0`, `""`, `"   "`)
+     fail closed.
+   - Malformed entries unrelated to any called tool (e.g. `object()`
+     in a snapshot alongside a valid `read_tool` definition) still
+     fail closed before any execution, regardless of position.
+
+2. **Integration point** — `_validate_exposed_snapshot` is called in
+   `AgentLoop.run()` after duplicate call-ID rejection and before
+   multi-call WRITE safety classification, ensuring all inconsistent
+   snapshot failures happen before any tool execution.
+
+3. **No production schema weakening** — `ToolPublicDefinition` and
+   `Permission` remain unchanged. Malformed values are injected via
+   `ToolPublicDefinition.model_construct(...)` in tests only.
+
+### New test coverage (10 tests)
+
+**`tests/unit/test_agent_loop_snapshot_policy.py`:**
+
+**Malformed snapshot entry (3 tests):**
+- `object()` in exposed_tools → `ModelError`, zero execution, no
+  second model call
+- `None` in exposed_tools → `ModelError`
+- Duck-type impostor with `name="read_tool"`, `permission=Permission.READ`
+  → `ModelError`
+
+**Malformed name field (5 tests):**
+- `name=None` → `ModelError`
+- `name=False` → `ModelError`
+- `name=0` → `ModelError`
+- `name=""` → `ModelError`
+- `name="   "` → `ModelError`
+
+**Malformed unrelated entry (2 tests):**
+- Malformed entry first, valid entry second → `ModelError`
+- Valid entry first, malformed entry second → `ModelError`
+  (proves order independence)
+
+All malformed-snapshot tests produce `ModelError` (not `AttributeError`,
+not `TypeError`), zero `AgentToolExecutionService` calls, and zero
+second `ModelGateway` calls.
+
+### Preserved behavior
+
+- All 9 S9-C07 snapshot policy tests preserved.
+- All 16 S9-05 multi-tool policy tests preserved.
+- All 7 S9-05 failure policy tests preserved.
+- All 36 S9-04 loop tests preserved.
+- All 16 S9-04 boundary tests preserved.
+- 2 READ calls succeed sequentially.
+- 4 READ calls succeed sequentially.
+- Same READ tool with different arguments succeeds.
+- Multiple `None` call_id values permitted.
+- Single READ succeeds.
+- Single WRITE+audit succeeds.
+- Direct clarification executes zero tools.
+- Mixed WRITE batches (READ+WRITE, WRITE+READ, WRITE+WRITE,
+  READ+READ+WRITE) → `ModelError`, zero execution, one initial model
+  decision only.
+- 5+ call cap unchanged.
+- Duplicate non-None `call_id` unchanged.
+- No retry, rollback, second tool round, or transaction semantics added.
+
+### Verification evidence
+
+- 19 snapshot policy tests: **19 passed, 0 failed, 0 errors**
+- 102 AgentLoop tests: **102 passed, 0 failed, 0 errors**
+- 343 regression tests (FastAgent, S9-03, Tool Layer, ModelGateway):
+  **343 passed, 0 failed, 0 errors**
+- 458 contract tests (boundaries, maintainability, harness):
+  **458 passed, 0 failed, 0 errors**
+- Full suite: **4476 passed, 100 skipped, 0 failed, 0 errors**
+- Ruff check: clean
+- Ruff format: clean
+- `git diff --check`: clean
+- No protected-harness changes
+- No dependency changes
+- No real Ollama/model used
+- No S9-06 work
+- `DEVELOPMENT_STATUS.md` unchanged (S9-05 DONE, S9-06 NOT STARTED)
+- All inconsistent-snapshot failures happen before any tool execution
+- No S9-06 work
+- No real Ollama/model work

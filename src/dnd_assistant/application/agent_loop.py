@@ -161,6 +161,57 @@ def _parse_agent_outcome(response: ToolAwareResponse) -> AgentTextOutcome:
 # ── Multi-call safety helpers ──────────────────────────────────────────────────
 
 
+def _validate_exposed_snapshot(
+    exposed_tools: tuple[ToolPublicDefinition, ...],
+) -> tuple[ToolPublicDefinition, ...]:
+    """Validate every entry in the exposed-tool snapshot as a real ``ToolPublicDefinition``.
+
+    Each entry must be a canonical ``ToolPublicDefinition`` instance with a
+    structurally valid ``name`` field (real ``str``, non-empty,
+    non-whitespace-only).
+
+    Args:
+        exposed_tools: The turn-local exposed-tool snapshot from the
+            ``AgentDecision``.
+
+    Returns:
+        The same snapshot tuple if all entries are valid.
+
+    Raises:
+        ModelError: If any entry is not a real ``ToolPublicDefinition``
+            instance, or has a structurally invalid ``name``.
+    """
+    from dnd_assistant.tools.catalog import ToolPublicDefinition as TPD
+
+    for i, entry in enumerate(exposed_tools):
+        if not isinstance(entry, TPD):
+            raise ModelError(
+                f"Exposed-tool snapshot entry {i} is not a valid "
+                f"ToolPublicDefinition (got {type(entry).__name__}). "
+                "Refusing to execute with malformed snapshot."
+            )
+
+        name = entry.name
+        if not isinstance(name, str):
+            raise ModelError(
+                f"Exposed-tool snapshot entry {i} has non-string name "
+                f"({type(name).__name__}). Refusing to execute with "
+                "malformed snapshot."
+            )
+        if not name:
+            raise ModelError(
+                f"Exposed-tool snapshot entry {i} has empty name. "
+                "Refusing to execute with malformed snapshot."
+            )
+        if not name.strip():
+            raise ModelError(
+                f"Exposed-tool snapshot entry {i} has whitespace-only name. "
+                "Refusing to execute with malformed snapshot."
+            )
+
+    return exposed_tools
+
+
 def _reject_duplicate_call_ids(
     tool_calls: tuple[ToolCall, ...],
 ) -> None:
@@ -360,7 +411,12 @@ class AgentLoop:
         # 4. Duplicate non-None call_id rejection before any execution
         _reject_duplicate_call_ids(tool_calls)
 
-        # 5. Multi-call WRITE safety: reject any batch containing a WRITE
+        # 5. Validate the complete exposed-tool snapshot before using its
+        #    metadata for policy decisions.  Every entry must be a real
+        #    ToolPublicDefinition with structurally valid fields.
+        _validate_exposed_snapshot(initial_decision.exposed_tools)
+
+        # 6. Multi-call WRITE safety: reject any batch containing a WRITE
         #    tool before executing any call.
         if len(tool_calls) > 1:
             _reject_multi_call_containing_write(
@@ -368,7 +424,7 @@ class AgentLoop:
                 initial_decision.exposed_tools,
             )
 
-        # 6. Execute tool calls sequentially
+        # 7. Execute tool calls sequentially
         from dnd_assistant.models.types import ChatRequest
 
         tool_executions: list[AgentToolExecutionResult] = []
@@ -380,7 +436,7 @@ class AgentLoop:
             )
             tool_executions.append(execution)
 
-        # 7. Build follow-up request with exact ordered history.
+        # 8. Build follow-up request with exact ordered history.
         #    Order: SYSTEM, USER, ASSISTANT(tool calls), TOOL(result 0),
         #    TOOL(result 1), ...
         followup_messages = [
@@ -392,20 +448,20 @@ class AgentLoop:
 
         followup_request = ChatRequest(messages=tuple(followup_messages))
 
-        # 8. Second model call with exact first-turn exposure snapshot
+        # 9. Second model call with exact first-turn exposure snapshot
         second_response = self._model_gateway.chat_with_tools(
             followup_request,
             list(initial_decision.exposed_tools),
         )
 
-        # 9. Bound enforcement: second response must have zero tool calls
+        # 10. Bound enforcement: second response must have zero tool calls
         if second_response.message.tool_calls:
             raise ModelError(
                 "S9-05 does not support post-tool tool calls. "
                 "The model requested another tool after receiving a tool result."
             )
 
-        # 10. Parse terminal outcome from second response
+        # 11. Parse terminal outcome from second response
         outcome = _parse_agent_outcome(second_response)
 
         return AgentRunResult(
