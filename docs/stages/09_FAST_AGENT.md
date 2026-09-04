@@ -305,5 +305,107 @@ All existing 34 tests preserved and passing.
 | Stage 9 | IN PROGRESS |
 | S9-00 | DONE after correction |
 | S9-C01 | DONE |
-| S9-01..S9-07 | NOT STARTED |
+| S9-01 | DONE |
+| S9-02..S9-07 | NOT STARTED |
 | Stage 10 | NOT STARTED |
+
+---
+
+## S9-01 — Compact Context Builder over currently accepted data sources
+
+**Accepted starting boundary:** `e8319ee358ea59cb9170e2b7d1f9ef7d9f3f708a`
+
+S9-C00 accepted.  S9-C01 accepted.
+
+### New context DTOs
+
+All are `@dataclass(frozen=True, slots=True)`:
+
+- `AgentEntityContext` — entity_id, entity_type, name, status, knowledge_status, tags (tuple), body_excerpt, body_truncated
+- `AgentSessionContext` — session_id, world_tick_start
+- `AgentEventContext` — event_id, event_type, world_tick, text_excerpt, text_truncated
+- `AgentContext` — user_input, current_world_tick, active_session, relevant_entities (tuple), recent_events (tuple)
+
+### Builder dependencies
+
+```python
+AgentContextBuilder(
+    *,
+    search_service: SearchService,
+    vault_repository: VaultRepository,
+    session_repository: SessionMetadataRepository,
+    event_repository: SessionEventRepository,
+    world_time_repository: WorldTimeRepository,
+)
+```
+
+### Fixed compactness limits
+
+- Maximum relevant entities: 5
+- Maximum recent events: 5
+- Maximum entity Markdown body excerpt: 1000 characters
+- Maximum event text excerpt: 400 characters
+
+### Accepted data sources
+
+- `SearchService.search()` for player-visible entity retrieval (limit=5)
+- `VaultRepository.get_entity()` for entity materialisation
+- `SessionMetadataRepository.get_active_session()` for active session
+- `SessionEventRepository.list_events()` for recent session events
+- `WorldTimeRepository.get_current_world_time()` for current world tick
+
+### Player-visibility defence in depth
+
+- Uses `is` identity comparison against `Visibility.PLAYER`
+- `Visibility.DM` and `Visibility.SYSTEM` entities are excluded
+- Plain string `"player"` (structurally malformed) is rejected — fail closed
+
+### Stale-search-hit handling
+
+- `NotFoundError` from `get_entity()` → entity skipped silently
+- `StorageError` is NOT swallowed
+
+### Current world time
+
+- `NotFoundError` → `current_world_tick = None`
+- `StorageError` → propagated
+
+### Active-session recent-event behaviour
+
+- No active session → `active_session=None`, `recent_events=()`, `list_events()` NOT called
+- Active session → last 5 events in physical append order
+- Event `"text"` field: missing/None/wrong-type → `text_excerpt=None`; empty string preserved; long text clipped to 400 chars
+
+### Deterministic clipping and ordering
+
+- Preserves SearchService result order
+- First occurrence wins for duplicate entity IDs
+- Event tail preserves physical append order
+- Tag order preserved from source
+- Exact prefix clipping (no ellipsis appended)
+
+### Model/tool/prompt deferrals
+
+- Zero ModelGateway, ChatMessage, ChatRequest, ToolAwareResponse references
+- Zero ToolExecutor, select_agent_tools references
+- Zero writes
+- Zero prompt construction
+- Fresh-process import does NOT eagerly load `dnd_assistant.models`, `dnd_assistant.tools`, `dnd_assistant.cli`
+
+### Stage-10+ deferrals
+
+- No ChangeSet
+- No Campaign State
+- No Summary/Recap
+- No post-session processing
+- No token counting
+- No configuration
+
+### Test evidence
+
+- 46 tests: input boundary (6), search (6), entity materialisation (6), visibility (4), world time (3), active session (2), recent events (4), event text (6), determinism (4), forbidden behaviour (3), fresh-process import (1), parametrized (2)
+- All passing
+- Fresh-process subprocess regression confirms import isolation
+- Plain-string `"player"` visibility regression: fail closed
+- Event `""` (empty string) structural test: `text_excerpt=""`, `text_truncated=False`
+- Event `0` and `False` wrong-type tests: `text_excerpt=None`
