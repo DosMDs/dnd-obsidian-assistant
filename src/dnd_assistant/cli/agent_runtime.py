@@ -8,11 +8,12 @@ It composes the accepted concrete repositories, services, and tool layers
 needed by the Fast Agent loop, then constructs the ``AgentLoop``.
 
 Provider cleanup is guaranteed through a small context-manager runtime
-object (``AskRuntime``).
+object (``AskRuntime``) and ``contextlib.ExitStack`` during composition.
 """
 
 from __future__ import annotations
 
+from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -191,19 +192,25 @@ def _load_profile(config_path: Path, profile_name: str) -> ModelProfile:
 # ── Session-mode derivation ────────────────────────────────────────────────
 
 
-def _derive_session_mode(
+def _derive_session_context(
     session_repository: ObsidianSessionMetadataRepository,
-) -> SessionMode:
-    """Determine the current session mode from the Vault state.
+) -> tuple[SessionMode, str | None]:
+    """Determine the current session mode and optional session ID from one trusted read.
+
+    Uses a single ``get_active_session()`` call for both the session mode
+    and the active session ID (used for audit context).
 
     Returns:
-        ``SessionMode.ACTIVE_SESSION`` if an active session exists,
-        ``SessionMode.NO_ACTIVE_SESSION`` otherwise.
+        A tuple of ``(SessionMode, active_session_id_or_None)``.
+
+    Raises:
+        StorageError: Propagated from the repository.
+        ValidationError: Propagated from the repository.
     """
     active = session_repository.get_active_session()
     if active is not None:
-        return SessionMode.ACTIVE_SESSION
-    return SessionMode.NO_ACTIVE_SESSION
+        return SessionMode.ACTIVE_SESSION, active.session.id
+    return SessionMode.NO_ACTIVE_SESSION, None
 
 
 # ── AuditContext factory ───────────────────────────────────────────────────
@@ -321,115 +328,116 @@ def compose_ask_runtime(
     # 1. Load and validate profile
     profile = _load_profile(config_path, profile_name)
 
-    # 2. Build model provider
+    # 2. Build model provider with ExitStack for deterministic cleanup
+    #    before AskRuntime is returned.
     factory = model_provider_factory or _build_model_provider
     model_gateway = factory(profile)
 
-    # 3. Compose storage/repository layer
-    audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
-    audit_service = AuditService(str(audit_log_path))
+    with ExitStack() as stack:
+        stack.callback(model_gateway.close)
 
-    vault_repository = ObsidianVaultRepository(
-        vault_root=str(vault_root),
-        audit_service=audit_service,
-    )
+        # 3. Compose storage/repository layer
+        audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        audit_service = AuditService(str(audit_log_path))
 
-    session_repository = ObsidianSessionMetadataRepository(vault_root, audit_service)
-    event_repository = ObsidianSessionEventRepository(vault_root, audit_service)
-    world_time_repository = ObsidianWorldTimeRepository(vault_root, audit_service)
-    recovery_repository = ObsidianSessionRecoveryRepository(vault_root, audit_service)
-
-    # 4. Compose application services
-    runtime_service = SessionRuntimeService(
-        session_repository,
-        world_time_repository,
-        event_repository,
-    )
-    recovery_service = SessionRecoveryService(recovery_repository)
-
-    # 5. Compose retrieval
-    fts_index = SqliteFtsIndex(vault_root=str(vault_root))
-    search_service = VaultSearchService(
-        repository=vault_repository,
-        lexical_index=fts_index,
-    )
-
-    # 6. Compose tool registry (12 tools — no calendar/world-time)
-    tool_registry = _build_ask_tool_registry(
-        search_service=search_service,
-        repository=vault_repository,
-        runtime_service=runtime_service,
-        recovery_service=recovery_service,
-        session_repository=session_repository,
-        event_repository=event_repository,
-    )
-
-    # 7. Build tool catalog and executor
-    tool_catalog = build_tool_registry_schema(tool_registry)
-    tool_executor = ToolExecutor(tool_registry)
-    tool_execution_service = AgentToolExecutionService(tool_executor=tool_executor)
-
-    # 8. Build context builder
-    context_builder = AgentContextBuilder(
-        search_service=search_service,
-        vault_repository=vault_repository,
-        session_repository=session_repository,
-        event_repository=event_repository,
-        world_time_repository=world_time_repository,
-    )
-
-    # 9. Build AgentLoop
-    agent_loop = AgentLoop(
-        context_builder=context_builder,
-        model_gateway=model_gateway,
-        tool_catalog=tool_catalog,
-        tool_execution_service=tool_execution_service,
-    )
-
-    # 10. Determine session mode and build ExecutionContext
-    session_mode = _derive_session_mode(session_repository)
-
-    if allow_write:
-        # Determine active session ID for audit context
-        active_session_id: str | None = None
-        try:
-            active = session_repository.get_active_session()
-            if active is not None:
-                active_session_id = active.session.id
-        except Exception:
-            pass
-
-        from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
-
-        audit_ctx = _build_ask_audit_context(
-            model_profile=profile_name,
-            prompt_version=PROMPT_VERSION,
-            session_id=active_session_id,
-        )
-        execution_context = ExecutionContext(
-            granted_permission=Permission.WRITE,
-            session_mode=session_mode,
-            audit=audit_ctx,
-        )
-    else:
-        audit_ctx = None
-        execution_context = ExecutionContext(
-            granted_permission=Permission.READ,
-            session_mode=session_mode,
-            audit=None,
+        vault_repository = ObsidianVaultRepository(
+            vault_root=str(vault_root),
+            audit_service=audit_service,
         )
 
-    # 11. Store execution context on runtime for later use
-    components = _RuntimeComponents(
-        model_gateway=model_gateway,
-        agent_loop=agent_loop,
-        recovery_service=recovery_service,
-        vault_root=vault_root,
-        audit_service=audit_service if allow_write else None,
-    )
+        session_repository = ObsidianSessionMetadataRepository(vault_root, audit_service)
+        event_repository = ObsidianSessionEventRepository(vault_root, audit_service)
+        world_time_repository = ObsidianWorldTimeRepository(vault_root, audit_service)
+        recovery_repository = ObsidianSessionRecoveryRepository(vault_root, audit_service)
 
-    runtime = AskRuntime(components)
-    runtime._execution_context = execution_context
-    runtime._profile_name = profile_name  # type: ignore[attr-defined]
+        # 4. Compose application services
+        runtime_service = SessionRuntimeService(
+            session_repository,
+            world_time_repository,
+            event_repository,
+        )
+        recovery_service = SessionRecoveryService(recovery_repository)
+
+        # 5. Compose retrieval
+        fts_index = SqliteFtsIndex(vault_root=str(vault_root))
+        search_service = VaultSearchService(
+            repository=vault_repository,
+            lexical_index=fts_index,
+        )
+
+        # 6. Compose tool registry (12 tools — no calendar/world-time)
+        tool_registry = _build_ask_tool_registry(
+            search_service=search_service,
+            repository=vault_repository,
+            runtime_service=runtime_service,
+            recovery_service=recovery_service,
+            session_repository=session_repository,
+            event_repository=event_repository,
+        )
+
+        # 7. Build tool catalog and executor
+        tool_catalog = build_tool_registry_schema(tool_registry)
+        tool_executor = ToolExecutor(tool_registry)
+        tool_execution_service = AgentToolExecutionService(tool_executor=tool_executor)
+
+        # 8. Build context builder
+        context_builder = AgentContextBuilder(
+            search_service=search_service,
+            vault_repository=vault_repository,
+            session_repository=session_repository,
+            event_repository=event_repository,
+            world_time_repository=world_time_repository,
+        )
+
+        # 9. Build AgentLoop
+        agent_loop = AgentLoop(
+            context_builder=context_builder,
+            model_gateway=model_gateway,
+            tool_catalog=tool_catalog,
+            tool_execution_service=tool_execution_service,
+        )
+
+        # 10. Determine session context from one trusted read.
+        #     Both session mode and optional session ID come from a single
+        #     ``get_active_session()`` call.
+        session_mode, active_session_id = _derive_session_context(session_repository)
+
+        if allow_write:
+            from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+
+            audit_ctx = _build_ask_audit_context(
+                model_profile=profile_name,
+                prompt_version=PROMPT_VERSION,
+                session_id=active_session_id,
+            )
+            execution_context = ExecutionContext(
+                granted_permission=Permission.WRITE,
+                session_mode=session_mode,
+                audit=audit_ctx,
+            )
+        else:
+            audit_ctx = None
+            execution_context = ExecutionContext(
+                granted_permission=Permission.READ,
+                session_mode=session_mode,
+                audit=None,
+            )
+
+        # 11. Store execution context on runtime for later use
+        components = _RuntimeComponents(
+            model_gateway=model_gateway,
+            agent_loop=agent_loop,
+            recovery_service=recovery_service,
+            vault_root=vault_root,
+            audit_service=audit_service if allow_write else None,
+        )
+
+        runtime = AskRuntime(components)
+        runtime._execution_context = execution_context
+        runtime._profile_name = profile_name  # type: ignore[attr-defined]
+
+        # Transfer provider ownership to AskRuntime — ExitStack will NOT
+        # close the provider on normal exit.
+        stack.pop_all()
 
     return runtime

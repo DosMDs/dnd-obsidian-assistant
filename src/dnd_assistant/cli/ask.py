@@ -80,12 +80,14 @@ def _ask_command(
         )
         raise typer.Exit(code=1)
 
-    # Perform recovery preflight before any composition or model call
-    _recovery_preflight(vault_root)
-
     runtime: AskRuntime | None = None
 
     try:
+        # Perform recovery preflight inside the error boundary so that
+        # project errors from recovery inspection are caught by the CLI
+        # DndAssistantError handler.
+        _recovery_preflight(vault_root)
+
         # Compose runtime
         runtime = compose_ask_runtime(
             vault_root=vault_root,

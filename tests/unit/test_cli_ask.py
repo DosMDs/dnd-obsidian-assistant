@@ -2,7 +2,7 @@
 
 These tests verify:
 
-- Typer command registration
+- Typer command registration (via CliRunner for --help and option-only tests)
 - respond rendering
 - clarify rendering
 - exit codes
@@ -10,14 +10,17 @@ These tests verify:
 - option propagation
 - ``--allow-write`` propagation
 - unexpected exception not broad-caught
+- recovery error rendering
+
+Typer 0.27.1 regression
+───────────────────────
+Typer 0.27.1 has a confirmed regression where ``CliRunner`` does not handle
+positional arguments in named subcommands — the positional value is treated
+as an unexpected extra argument.  Tests that require positional argument
+parsing invoke ``_ask_command`` directly.  Option-only tests (``--help``,
+option validation) use ``CliRunner`` with the real ``dnd`` app.
 
 They do NOT test runtime composition (see ``test_cli_agent_runtime.py``).
-
-Note: Due to a Typer 0.27.1 regression with ``CliRunner`` and positional
-arguments in named subcommands, these tests call the command function
-directly rather than through the Typer CLI runner.  The Typer option
-parsing (help text, option validation) is tested separately through
-``--help`` invocations.
 """
 
 from __future__ import annotations
@@ -29,7 +32,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-import typer
 from typer.testing import CliRunner
 
 from dnd_assistant.application.agent_loop import (
@@ -38,7 +40,8 @@ from dnd_assistant.application.agent_loop import (
     AgentTextOutcome,
 )
 from dnd_assistant.cli.ask import _ask_command
-from dnd_assistant.errors import DndAssistantError
+from dnd_assistant.cli.main import app
+from dnd_assistant.errors import DndAssistantError, StorageError
 
 # ── Runner for help-text tests ─────────────────────────────────────────────
 
@@ -143,15 +146,43 @@ def _invoke_ask_direct(
 
 
 class TestAskCommandRegistration:
-    """Verify the ask command is properly registered."""
+    """Verify the ask command is properly registered in the real dnd app."""
 
     def test_ask_command_exists(self, runner: CliRunner) -> None:
-        """The ``ask`` subcommand is registered."""
-        app = typer.Typer()
-        app.command(name="ask")(_ask_command)
+        """The ``ask`` subcommand is registered in the real app."""
         result = runner.invoke(app, ["ask", "--help"])
         assert result.exit_code == 0
-        assert "ask" in result.output.lower() or "ask" in result.stdout
+        assert "ask" in result.stdout
+
+    def test_ask_has_positional_query(self, runner: CliRunner) -> None:
+        """The ``ask`` help shows the QUERY positional argument."""
+        result = runner.invoke(app, ["ask", "--help"])
+        assert result.exit_code == 0
+        assert "QUERY" in result.stdout or "{query}" in result.stdout
+
+    def test_ask_has_vault_option(self, runner: CliRunner) -> None:
+        """The ``ask`` help shows the --vault option."""
+        result = runner.invoke(app, ["ask", "--help"])
+        assert result.exit_code == 0
+        assert "--vault" in result.stdout
+
+    def test_ask_has_config_option(self, runner: CliRunner) -> None:
+        """The ``ask`` help shows the --config option."""
+        result = runner.invoke(app, ["ask", "--help"])
+        assert result.exit_code == 0
+        assert "--config" in result.stdout
+
+    def test_ask_has_profile_option(self, runner: CliRunner) -> None:
+        """The ``ask`` help shows the --profile option."""
+        result = runner.invoke(app, ["ask", "--help"])
+        assert result.exit_code == 0
+        assert "--profile" in result.stdout
+
+    def test_ask_has_allow_write_option(self, runner: CliRunner) -> None:
+        """The ``ask`` help shows the --allow-write option."""
+        result = runner.invoke(app, ["ask", "--help"])
+        assert result.exit_code == 0
+        assert "--allow-write" in result.stdout
 
 
 class TestAskRespond:
@@ -331,6 +362,36 @@ class TestAskErrorRendering:
 
         result = _invoke_ask_direct("Тест", vault_root, config_path)
         assert result.exit_code == 1
+
+
+class TestAskRecoveryErrors:
+    """Recovery error rendering through the CLI error boundary."""
+
+    @patch("dnd_assistant.cli.ask.compose_ask_runtime")
+    @patch("dnd_assistant.cli.ask._recovery_preflight")
+    def test_recovery_storage_error_renders_to_stderr(
+        self,
+        mock_preflight: MagicMock,
+        mock_compose: MagicMock,
+        tmp_path: Path,
+    ) -> None:
+        """A StorageError from recovery preflight renders to stderr with exit 1."""
+        vault_root = tmp_path / "vault"
+        vault_root.mkdir(parents=True)
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            "[profiles.test-agent]\nprovider='ollama'\nmodel='test'\n"
+            "base_url='http://localhost:11434'\nrole='agent'\n",
+            encoding="utf-8",
+        )
+
+        mock_preflight.side_effect = StorageError("Recovery inspection failed")
+
+        result = _invoke_ask_direct("Тест", vault_root, config_path)
+
+        assert result.exit_code == 1
+        assert "Ошибка:" in result.stderr
+        assert "Recovery inspection failed" in result.stderr
 
 
 class TestAskAllowWrite:

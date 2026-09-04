@@ -18,6 +18,7 @@ They do NOT test CLI presentation (see ``test_cli_ask.py``).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -27,7 +28,7 @@ from dnd_assistant.cli.agent_runtime import (
     _build_ask_audit_context,
     _build_ask_tool_registry,
     _build_model_provider,
-    _derive_session_mode,
+    _derive_session_context,
     _load_profile,
     _new_operation_id,
     _now_utc,
@@ -185,24 +186,36 @@ class TestExecutionContextConstruction:
 # ── Session-mode derivation tests ──────────────────────────────────────────
 
 
-class TestDeriveSessionMode:
-    """Session mode derivation from repository state."""
+class TestDeriveSessionContext:
+    """Session context derivation from repository state using one trusted read."""
 
     def test_no_active_session(self) -> None:
-        """No active session returns NO_ACTIVE_SESSION."""
+        """No active session returns NO_ACTIVE_SESSION and None ID."""
         repo = MagicMock()
         repo.get_active_session.return_value = None
 
-        mode = _derive_session_mode(repo)
+        mode, session_id = _derive_session_context(repo)
         assert mode is SessionMode.NO_ACTIVE_SESSION
+        assert session_id is None
 
     def test_active_session(self) -> None:
-        """An active session returns ACTIVE_SESSION."""
+        """An active session returns ACTIVE_SESSION and the session ID."""
         repo = MagicMock()
-        repo.get_active_session.return_value = MagicMock()
+        mock_active = MagicMock()
+        mock_active.session.id = "S001"
+        repo.get_active_session.return_value = mock_active
 
-        mode = _derive_session_mode(repo)
+        mode, session_id = _derive_session_context(repo)
         assert mode is SessionMode.ACTIVE_SESSION
+        assert session_id == "S001"
+
+    def test_get_active_session_called_once(self) -> None:
+        """get_active_session is called exactly once for both mode and ID."""
+        repo = MagicMock()
+        repo.get_active_session.return_value = None
+
+        _derive_session_context(repo)
+        repo.get_active_session.assert_called_once()
 
 
 # ── AuditContext tests ─────────────────────────────────────────────────────
@@ -408,6 +421,163 @@ class TestTimeAndIdHelpers:
         op_id = _new_operation_id()
         assert op_id.startswith("model-")
         assert len(op_id) > len("model-")
+
+
+# ── Composition-failure cleanup tests ──────────────────────────────────────
+
+
+class TestComposeAskRuntimeCleanup:
+    """Provider cleanup when composition fails after provider creation."""
+
+    def _fake_provider(self) -> MagicMock:
+        """Create a fake provider with observable close count."""
+        provider = MagicMock()
+        provider.close = MagicMock()  # type: ignore[method-assign]
+        return provider
+
+    def _minimal_vault(self, tmp_path: Path) -> Path:
+        """Create a minimal Vault with required directories."""
+        vault_root = tmp_path / "vault"
+        vault_root.mkdir()
+        (vault_root / "Characters" / "NPCs").mkdir(parents=True)
+        (vault_root / "Locations").mkdir()
+        (vault_root / "Quests").mkdir()
+        (vault_root / "Items").mkdir()
+        (vault_root / "Sessions").mkdir()
+        (vault_root / "_system" / "audit").mkdir(parents=True)
+        (vault_root / "_system" / "raw" / "sessions").mkdir(parents=True)
+        (vault_root / "_system" / "indexes").mkdir(parents=True)
+        return vault_root
+
+    def _write_config(self, tmp_path: Path) -> Path:
+        """Write a minimal valid config."""
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            "[profiles.test-agent]\nprovider='ollama'\nmodel='test'\n"
+            "base_url='http://localhost:11434'\nrole='agent'\n",
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_provider_closed_on_storage_composition_failure(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """Provider.close called once when AuditService composition fails."""
+        vault_root = self._minimal_vault(tmp_path)
+        config_path = self._write_config(tmp_path)
+        provider = self._fake_provider()
+
+        # Make AuditService raise StorageError on construction
+        from dnd_assistant.errors import StorageError
+
+        def _broken_audit(*args: Any, **kwargs: Any) -> None:
+            raise StorageError("Audit path invalid")
+
+        monkeypatch.setattr(
+            "dnd_assistant.cli.agent_runtime.AuditService.__init__",
+            _broken_audit,
+        )
+
+        with pytest.raises(StorageError, match="Audit path invalid"):
+            from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+            compose_ask_runtime(
+                vault_root=vault_root,
+                config_path=config_path,
+                profile_name="test-agent",
+                model_provider_factory=lambda p: provider,
+            )
+
+        provider.close.assert_called_once()
+
+    def test_provider_closed_on_session_state_failure(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """Provider.close called once when session-state read raises StorageError."""
+        vault_root = self._minimal_vault(tmp_path)
+        config_path = self._write_config(tmp_path)
+        provider = self._fake_provider()
+
+        from dnd_assistant.errors import StorageError
+
+        def _broken_get_active(*args: Any, **kwargs: Any) -> None:
+            raise StorageError("Session state unavailable")
+
+        monkeypatch.setattr(
+            "dnd_assistant.cli.agent_runtime.ObsidianSessionMetadataRepository.get_active_session",
+            _broken_get_active,
+        )
+
+        with pytest.raises(StorageError, match="Session state unavailable"):
+            from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+            compose_ask_runtime(
+                vault_root=vault_root,
+                config_path=config_path,
+                profile_name="test-agent",
+                model_provider_factory=lambda p: provider,
+            )
+
+        provider.close.assert_called_once()
+
+    def test_provider_closed_on_unexpected_runtime_error(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """Provider.close called once when an unexpected RuntimeError occurs during composition."""
+        vault_root = self._minimal_vault(tmp_path)
+        config_path = self._write_config(tmp_path)
+        provider = self._fake_provider()
+
+        def _broken_agent_loop(*args: Any, **kwargs: Any) -> None:
+            raise RuntimeError("Unexpected composition error")
+
+        monkeypatch.setattr(
+            "dnd_assistant.cli.agent_runtime.AgentLoop.__init__",
+            _broken_agent_loop,
+        )
+
+        with pytest.raises(RuntimeError, match="Unexpected composition error"):
+            from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+            compose_ask_runtime(
+                vault_root=vault_root,
+                config_path=config_path,
+                profile_name="test-agent",
+                model_provider_factory=lambda p: provider,
+            )
+
+        provider.close.assert_called_once()
+
+    def test_provider_closed_on_active_session_storage_error_write(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """Provider.close called once when get_active_session raises StorageError with --allow-write."""
+        vault_root = self._minimal_vault(tmp_path)
+        config_path = self._write_config(tmp_path)
+        provider = self._fake_provider()
+
+        from dnd_assistant.errors import StorageError
+
+        def _broken_get_active(*args: Any, **kwargs: Any) -> None:
+            raise StorageError("Cannot read session state")
+
+        monkeypatch.setattr(
+            "dnd_assistant.cli.agent_runtime.ObsidianSessionMetadataRepository.get_active_session",
+            _broken_get_active,
+        )
+
+        with pytest.raises(StorageError, match="Cannot read session state"):
+            from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+            compose_ask_runtime(
+                vault_root=vault_root,
+                config_path=config_path,
+                profile_name="test-agent",
+                allow_write=True,
+                model_provider_factory=lambda p: provider,
+            )
+
+        provider.close.assert_called_once()
 
 
 # ── Import-time side-effect test ───────────────────────────────────────────

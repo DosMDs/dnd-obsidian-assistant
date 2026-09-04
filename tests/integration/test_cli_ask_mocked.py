@@ -5,9 +5,14 @@ services, tool registry, executor, agent loop), and a fake ``ModelGateway``.
 
 No live Ollama, no network, no GPU, no model download.
 
-Note: Due to a Typer 0.27.1 regression with ``CliRunner`` and positional
-arguments in named subcommands, these tests invoke the command function
-directly rather than through the Typer CLI runner.
+Typer 0.27.1 regression
+───────────────────────
+Typer 0.27.1 has a confirmed regression where ``CliRunner`` does not handle
+positional arguments in named subcommands — the positional value is treated
+as an unexpected extra argument.  Integration tests that require positional
+argument parsing invoke ``_ask_command`` directly through the
+``_invoke_ask_direct`` helper.  Option-only tests (``--help``, option
+validation) use ``CliRunner`` with the real ``dnd`` app.
 """
 
 from __future__ import annotations
@@ -20,7 +25,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from typer.testing import CliRunner
+
 from dnd_assistant.cli.ask import _ask_command
+from dnd_assistant.cli.main import app as dnd_app
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.models.profiles import ModelProfile
 from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole, ToolAwareResponse
@@ -430,3 +438,84 @@ class TestAskProfileConfigFailures:
 
         assert result.exit_code == 1
         assert "Ошибка" in result.stderr
+
+
+# ── Actual CLI runner tests (option-only, no positional args) ──────────────
+
+
+class TestAskCliRunnerIntegration:
+    """Integration tests using the real Typer CliRunner for option-only paths.
+
+    These tests verify that the real ``dnd`` app correctly routes option
+    validation through Typer's parser.  Positional argument tests use
+    ``_invoke_ask_direct`` due to the Typer 0.27.1 regression.
+    """
+
+    def test_ask_help_via_cli_runner(self, tmp_path: Path) -> None:
+        """``dnd ask --help`` works through the real CLI runner."""
+        runner = CliRunner()
+        result = runner.invoke(dnd_app, ["ask", "--help"])
+        assert result.exit_code == 0
+        assert "QUERY" in result.stdout or "{query}" in result.stdout
+        assert "--vault" in result.stdout
+        assert "--config" in result.stdout
+        assert "--profile" in result.stdout
+        assert "--allow-write" in result.stdout
+
+    def test_missing_vault_option_via_cli_runner(self, tmp_path: Path) -> None:
+        """Missing --vault is caught by Typer parser, exit 2."""
+        config_path = _write_test_config(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "test query",
+                "--config",
+                str(config_path),
+                "--profile",
+                "test-agent",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "Missing option" in result.stderr
+
+    def test_missing_config_option_via_cli_runner(self, tmp_path: Path) -> None:
+        """Missing --config is caught by Typer parser, exit 2."""
+        vault_root = _build_minimal_vault(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "test query",
+                "--vault",
+                str(vault_root),
+                "--profile",
+                "test-agent",
+            ],
+        )
+        assert result.exit_code == 2
+        assert "Missing option" in result.stderr
+
+    def test_missing_profile_option_via_cli_runner(self, tmp_path: Path) -> None:
+        """Missing --profile is caught by Typer parser, exit 2."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = _write_test_config(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "test query",
+                "--vault",
+                str(vault_root),
+                "--config",
+                str(config_path),
+            ],
+        )
+        assert result.exit_code == 2
+        assert "Missing option" in result.stderr

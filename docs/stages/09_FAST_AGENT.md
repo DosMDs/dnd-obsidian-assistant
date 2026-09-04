@@ -60,6 +60,7 @@
 | S9-C06 — Correct S9-C05 verification evidence and Stage-9 line-count record | DONE |
 | S9-C07 — Fail closed on inconsistent exposed-tool snapshots in multi-call policy | DONE |
 | S9-C08 — Complete structural validation of exposed-tool snapshots | DONE |
+| S9-C09 — Fix ask CLI lifecycle, error boundaries, and real CLI E2E | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -1793,3 +1794,160 @@ Only the model provider is mocked.
 | S9-07 | NOT STARTED |
 | Stage 9 | IN PROGRESS |
 | Stage 10 | NOT STARTED |
+
+---
+
+## S9-C09 — Fix ask CLI lifecycle, error boundaries, and real CLI E2E
+
+**Status:** DONE
+
+**Starting base:** `f72f112dd1539cede84ae79289694eeee12c9a5b`
+
+### Defect A — provider leak during failed composition
+
+`compose_ask_runtime()` created the model provider before composing
+storage/retrieval/AgentLoop.  If any subsequent step failed before the
+`AskRuntime` was returned, the provider was leaked — its `close()` was
+never called.
+
+**Fix:** Wrapped the provider with `contextlib.ExitStack` immediately after
+construction.  `stack.callback(provider.close)` ensures cleanup if any
+composition step raises.  `stack.pop_all()` transfers provider ownership to
+`AskRuntime` on the successful path.
+
+### Defect B — broad active-session `except Exception`
+
+The WRITE composition path contained:
+
+```python
+try:
+    active = session_repository.get_active_session()
+    ...
+except Exception:
+    pass
+```
+
+This silently converted session-state read failures into `None` session ID,
+hiding `StorageError` and other project errors.
+
+**Fix:** Removed the broad catch.  The single trusted `_derive_session_context`
+read now propagates `StorageError`, `ValidationError`, and unexpected
+exceptions unchanged.  Provider cleanup still occurs exactly once because
+the provider is managed by `ExitStack` during composition.
+
+### Defect C — recovery preflight outside CLI error boundary
+
+`_recovery_preflight(vault_root)` was called before the `try/except
+DndAssistantError` block, meaning project errors from recovery inspection
+bypassed the promised CLI error presentation.
+
+**Fix:** Moved `_recovery_preflight()` inside the `try` block.  All project
+errors from recovery, composition, and `AgentLoop.run()` now map uniformly
+to `stderr: Ошибка: <message>`, exit code 1.
+
+### Defect D — real Typer CLI runner not exercised
+
+The published S9-06 tests invoked `_ask_command` directly, bypassing the
+real `dnd_assistant.cli.main:app` Typer application.  CLI option parsing,
+subcommand routing, and exit code integration were not verified through the
+actual parser.
+
+**Fix:** Unit tests now use `CliRunner` with the real `dnd` app for
+`--help`, option registration, and option presence.  Integration tests
+include `CliRunner`-based option validation tests.  Direct invocation
+remains for tests requiring positional argument parsing (due to the
+confirmed Typer 0.27.1 regression).
+
+### Typer 0.27.1 regression investigation
+
+A minimal reproduction confirmed the regression:
+
+```python
+app = typer.Typer()
+
+
+@app.command("ask")
+def ask(query: str = typer.Argument(...)):
+    typer.echo(query)
+
+
+runner = CliRunner()
+result = runner.invoke(app, ["ask", "hello"])
+# exit=2, "Got unexpected extra argument(s) (hello world)"
+```
+
+The regression is genuine.  The `--help` and option-only paths work
+correctly through `CliRunner`.  The workaround documentation was updated
+to accurately describe the scope of the limitation.
+
+### Production changes
+
+**`src/dnd_assistant/cli/agent_runtime.py`:**
+
+- Added `contextlib.ExitStack` import.
+- Replaced `_derive_session_mode()` with `_derive_session_context()` that
+  returns `(SessionMode, session_id_or_None)` from one trusted read.
+- `compose_ask_runtime()` now uses `ExitStack` for deterministic provider
+  cleanup before `AskRuntime` return.
+- Removed broad `except Exception` around `get_active_session()` in WRITE
+  path.
+- Both READ and WRITE paths use the same single `_derive_session_context()`
+  call for session mode and optional session ID.
+
+**`src/dnd_assistant/cli/ask.py`:**
+
+- Moved `_recovery_preflight()` inside the `try/except DndAssistantError`
+  block so that project errors from recovery inspection are caught by the
+  CLI error boundary.
+
+### Test changes
+
+**`tests/unit/test_cli_ask.py`:**
+
+- Registration tests now use `CliRunner` with the real `dnd_assistant.cli.main:app`.
+- Added 5 option-registration tests (`--vault`, `--config`, `--profile`,
+  `--allow-write`, positional QUERY).
+- Added `TestAskRecoveryErrors` with `StorageError` preflight regression.
+- Updated docstring to accurately describe the Typer 0.27.1 regression scope.
+
+**`tests/unit/test_cli_agent_runtime.py`:**
+
+- Replaced `TestDeriveSessionMode` with `TestDeriveSessionContext` (3 tests:
+  no active session, active session with ID, `get_active_session` called once).
+- Added `TestComposeAskRuntimeCleanup` (4 tests):
+  - `StorageError` during AuditService composition → provider closed once.
+  - `StorageError` during session-state read → provider closed once.
+  - Unexpected `RuntimeError` during AgentLoop construction → provider closed once.
+  - `StorageError` from `get_active_session` with `--allow-write` → provider closed once.
+  - All prove original exception propagates unchanged, no `AskRuntime` returned.
+
+**`tests/integration/test_cli_ask_mocked.py`:**
+
+- Added `TestAskCliRunnerIntegration` with 4 actual CLI runner tests:
+  - `--help` renders all expected options.
+  - Missing `--vault` → Typer parser exit 2.
+  - Missing `--config` → Typer parser exit 2.
+  - Missing `--profile` → Typer parser exit 2.
+- Updated docstring with accurate Typer regression description.
+
+### Verification evidence
+
+- 57 targeted tests: **57 passed, 0 failed, 0 errors**
+- Provider cleanup: all 4 composition-failure scenarios prove `close()` called exactly once
+- Broad `except Exception` removed: `StorageError` from session read now propagates
+- Recovery `StorageError` → `stderr: Ошибка:`, exit 1
+- Real `dnd` Typer app exercised through `CliRunner` in unit and integration tests
+- Typer 0.27.1 regression confirmed and documented
+- No real Ollama/model used
+- No AgentLoop changes
+- No Tool Layer changes
+- No ModelGateway changes
+- No dependency changes
+- No protected-harness changes
+- `DEVELOPMENT_STATUS.md` unchanged (S9-06 DONE, S9-07 NOT STARTED)
+
+### Correction task map update
+
+| Task | Status |
+|---|---|
+| S9-C09 — Fix ask CLI lifecycle, error boundaries, and real CLI E2E | DONE |
