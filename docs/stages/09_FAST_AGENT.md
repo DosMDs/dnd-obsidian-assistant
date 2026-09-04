@@ -55,6 +55,7 @@
 | S9-C01 — Fail closed on StrEnum-compatible malformed execution-context fields | DONE |
 | S9-C02 — Complete S9-01 structural coverage and verification evidence | DONE |
 | S9-C03 — Reconcile Stage-9 task-map documentation after S9-02 | DONE |
+| S9-C04 — Harden exact ToolCall binding and TOOL-result serialization evidence | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -767,9 +768,94 @@ Two test modules (stable capability split):
 - No model invocation: service has no ModelGateway dependency (1 test)
 - Fresh-process import isolation (1 test)
 
-**`tests/unit/test_agent_tool_result_serialization.py`** (17 tests):
-- Result serialisation: empty output, Unicode, None, False, 0, empty string, empty list, empty dict, nested list/dict, deterministic key order and compact separators (10 tests)
+**`tests/unit/test_agent_tool_result_serialization.py`** (19 tests):
+- Result serialisation: empty output, Unicode, real None→null, real False→false, real 0→0, empty string, empty list, empty dict, nested list/dict, deterministic full-string equality, deterministic key order and compact separators (11 tests)
 - TOOL message: role, content, tool_name, tool_calls empty, call_id preserved, call_id None (6 tests)
-- Serialisation failure: normal output serialises fine (1 test)
+- Serialisation failure: normal output baseline, real serialisation failure with handler count and cause preservation (2 tests)
 
-All 46 tests passing. Full suite 4345 passed, 100 skipped. Ruff clean.
+All 48 tests passing. Full suite 4362 passed, 100 skipped. Ruff clean.
+
+---
+
+## S9-C04 — Harden exact ToolCall binding and TOOL-result serialization evidence
+
+### Defect A — ToolCall membership uses weak Python equality
+
+`_tool_call_in()` used `call.arguments == existing.arguments`, which
+conflates distinct JSON types (`0 == False`, `1 == True`) recursively
+through dict/list structures. An application caller could change
+model-selected argument type and still pass the membership check.
+
+**Fix:** Replaced plain `==` with `_json_args_equal()`, a recursive strict
+JSON value comparator that uses `type(left) is not type(right)` to
+distinguish `int`, `float`, `bool`, `None`, `str`, `list`, and `dict`.
+Dict key order is ignored; list order is preserved. `0 != False`,
+`1 != True`, `1 != 1.0`.
+
+### Defect B — broad serialization catch
+
+`_build_tool_message()` wrapped `output.model_dump(mode="json")` with
+`except Exception`, violating the narrow public-boundary exception policy.
+
+**Fix:** Replaced with `except PydanticSerializationError` — the concrete
+Pydantic Core exception raised when `model_dump(mode="json")` cannot
+serialize a validated field value. Unrelated unexpected exceptions now
+propagate unchanged.
+
+### Defect C — required None/False serialization tests were false positives
+
+`test_none_value` observed `count == 0` (not None). `test_false_value`
+observed `flag is True` (not False).
+
+**Fix:** Added dedicated `NoneOutput`/`BoolOutput`/`IntOutput` schemas with
+corresponding handlers that return real `None`, `False`, and `0`. Each
+proves the correct JSON representation: `null`, `false`, `0`.
+
+### Defect D — serialization evidence was incomplete
+
+**Deterministic full-string equality:** Added
+`test_deterministic_full_string_equality` asserting the exact expected
+complete JSON string with `sort_keys=True`, `separators=(",", ":")`,
+`ensure_ascii=False`.
+
+**Real serialization failure:** Added
+`test_real_serialization_failure_raises_validation_error` using an
+`object()` value in an `object`-typed field. Handler executes exactly once.
+`PydanticSerializationError` is preserved as `ValidationError.__cause__`.
+No retry. No TOOL message returned.
+
+### Regression coverage
+
+**Strict membership (7 tests):** `0→False`, `False→0`, `1→True`,
+`True→1`, `1→1.0`, nested `{"x": 0}→{"x": False}`, nested
+`[1, False]→[True, 0]`. Every rejection proves `ValidationError` and
+zero ToolExecutor calls.
+
+**Dict order equivalence (3 tests):** Different key insertion order at
+top level, nested, and mixed types — all accepted.
+
+**Valid call execution (3 tests):** Exact call, equivalent call,
+dict-order-different call — all execute exactly once.
+
+**Serialization evidence (4 new):** Real `None→null`, real `False→false`,
+real `0→0`, deterministic full-string equality, real serialization failure
+with handler count and cause preservation.
+
+### Scope
+
+- No ToolExecutor contract changes.
+- No FastAgent/ModelGateway contract changes.
+- No second model turn.
+- No S9-04 work (no model→tool→model loop).
+- No S9-05 work (no multi-call policy).
+- No dependency/lockfile changes.
+- No protected-harness changes.
+- No `DEVELOPMENT_STATUS.md` changes.
+- Existing `test_agent_tool_execution.py` (928 lines) unchanged.
+
+### Changed files
+
+- `src/dnd_assistant/application/agent_tool_execution.py`
+- `tests/unit/test_agent_tool_execution_boundaries.py`
+- `tests/unit/test_agent_tool_result_serialization.py`
+- `docs/stages/09_FAST_AGENT.md`

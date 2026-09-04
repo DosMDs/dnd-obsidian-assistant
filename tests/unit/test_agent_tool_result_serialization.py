@@ -1,4 +1,4 @@
-"""Tests for deterministic TOOL-result JSON serialisation (S9-03).
+"""Tests for deterministic TOOL-result JSON serialisation (S9-03, S9-C04).
 
 Covers:
 
@@ -6,8 +6,9 @@ Covers:
 - Unicode preservation
 - Nested list/dict
 - Deterministic key order and compact separators
+- Exact deterministic full-string equality
 - TOOL ChatMessage construction (role, content, tool_name, call_id)
-- Serialisation failure boundary
+- Real serialisation failure boundary with no retry
 """
 
 from __future__ import annotations
@@ -16,11 +17,13 @@ import json
 
 import pytest
 from pydantic import BaseModel
+from pydantic_core import PydanticSerializationError
 
 from dnd_assistant.application.agent_tool_execution import (
     AgentToolExecutionService,
 )
 from dnd_assistant.application.fast_agent import AgentDecision
+from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
@@ -65,6 +68,18 @@ class NestedOutput(BaseModel):
     flag: bool = False
 
 
+class NoneOutput(BaseModel):
+    value: object | None = None
+
+
+class BoolOutput(BaseModel):
+    flag: bool = False
+
+
+class IntOutput(BaseModel):
+    count: int = 0
+
+
 # ── Handlers ───────────────────────────────────────────────────────────────────
 
 
@@ -91,6 +106,18 @@ def unicode_handler(input_model: StringInput, context: object) -> NestedOutput:
         name=input_model.value,
         tags=["\u043f\u0440\u0438\u0432\u0435\u0442", "\u043c\u0438\u0440"],
     )
+
+
+def none_handler(input_model: StringInput, context: object) -> NoneOutput:
+    return NoneOutput(value=None)
+
+
+def false_handler(input_model: StringInput, context: object) -> BoolOutput:
+    return BoolOutput(flag=False)
+
+
+def zero_handler(input_model: StringInput, context: object) -> IntOutput:
+    return IntOutput(count=0)
 
 
 # ── Fixtures ───────────────────────────────────────────────────────────────────
@@ -157,17 +184,68 @@ def unicode_tool_def() -> ToolDefinition:
 
 
 @pytest.fixture
+def none_tool_def() -> ToolDefinition:
+    return ToolDefinition(
+        name="none_tool",
+        description="Returns None output",
+        input_schema=StringInput,
+        output_schema=NoneOutput,
+        permission=Permission.READ,
+        side_effects=frozenset(),
+        allowed_session_modes=frozenset(
+            {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+        ),
+    )
+
+
+@pytest.fixture
+def false_tool_def() -> ToolDefinition:
+    return ToolDefinition(
+        name="false_tool",
+        description="Returns False output",
+        input_schema=StringInput,
+        output_schema=BoolOutput,
+        permission=Permission.READ,
+        side_effects=frozenset(),
+        allowed_session_modes=frozenset(
+            {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+        ),
+    )
+
+
+@pytest.fixture
+def zero_tool_def() -> ToolDefinition:
+    return ToolDefinition(
+        name="zero_tool",
+        description="Returns 0 output",
+        input_schema=StringInput,
+        output_schema=IntOutput,
+        permission=Permission.READ,
+        side_effects=frozenset(),
+        allowed_session_modes=frozenset(
+            {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+        ),
+    )
+
+
+@pytest.fixture
 def registry(
     read_tool_def: ToolDefinition,
     empty_tool_def: ToolDefinition,
     nested_tool_def: ToolDefinition,
     unicode_tool_def: ToolDefinition,
+    none_tool_def: ToolDefinition,
+    false_tool_def: ToolDefinition,
+    zero_tool_def: ToolDefinition,
 ) -> ToolRegistry:
     reg = ToolRegistry()
     reg.register(read_tool_def, read_handler)
     reg.register(empty_tool_def, empty_handler)
     reg.register(nested_tool_def, nested_handler)
     reg.register(unicode_tool_def, unicode_handler)
+    reg.register(none_tool_def, none_handler)
+    reg.register(false_tool_def, false_handler)
+    reg.register(zero_tool_def, zero_handler)
     return reg
 
 
@@ -279,41 +357,48 @@ class TestResultSerialization:
         assert parsed["name"] == "\u0413\u044d\u043d\u0434\u0430\u043b\u044c\u0444"
         assert "\u043f\u0440\u0438\u0432\u0435\u0442" in parsed["tags"]
 
-    def test_none_value(
+    def test_none_value_serialises_to_json_null(
         self,
         service: AgentToolExecutionService,
         read_context: ExecutionContext,
     ) -> None:
-        tool_call = _make_tool_call("nested_tool", {"number": 0})
-        exposed = [_make_tool_public("nested_tool")]
+        """Prove real None output produces JSON null."""
+        tool_call = _make_tool_call("none_tool", {"value": "x"})
+        exposed = [_make_tool_public("none_tool")]
+        decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
+        result = service.execute(decision, tool_call, execution_context=read_context)
+        parsed = json.loads(result.tool_message.content)
+        assert parsed["value"] is None
+        assert "null" in result.tool_message.content
+
+    def test_false_value_serialises_to_json_false(
+        self,
+        service: AgentToolExecutionService,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Prove real False output produces JSON false."""
+        tool_call = _make_tool_call("false_tool", {"value": "x"})
+        exposed = [_make_tool_public("false_tool")]
+        decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
+        result = service.execute(decision, tool_call, execution_context=read_context)
+        parsed = json.loads(result.tool_message.content)
+        assert parsed["flag"] is False
+        assert '"flag":false' in result.tool_message.content
+
+    def test_zero_value_serialises_to_json_0(
+        self,
+        service: AgentToolExecutionService,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Prove real 0 output produces JSON 0."""
+        tool_call = _make_tool_call("zero_tool", {"value": "x"})
+        exposed = [_make_tool_public("zero_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
         parsed = json.loads(result.tool_message.content)
         assert parsed["count"] == 0
-
-    def test_false_value(
-        self,
-        service: AgentToolExecutionService,
-        read_context: ExecutionContext,
-    ) -> None:
-        tool_call = _make_tool_call("nested_tool", {"number": 0})
-        exposed = [_make_tool_public("nested_tool")]
-        decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
-        result = service.execute(decision, tool_call, execution_context=read_context)
-        parsed = json.loads(result.tool_message.content)
-        assert parsed["flag"] is True
-
-    def test_zero_value(
-        self,
-        service: AgentToolExecutionService,
-        read_context: ExecutionContext,
-    ) -> None:
-        tool_call = _make_tool_call("nested_tool", {"number": 0})
-        exposed = [_make_tool_public("nested_tool")]
-        decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
-        result = service.execute(decision, tool_call, execution_context=read_context)
-        parsed = json.loads(result.tool_message.content)
-        assert parsed["count"] == 0
+        assert parsed["count"] is not False
+        assert '"count":0' in result.tool_message.content
 
     def test_empty_string_in_output(self) -> None:
         class EmptyStringOutput(BaseModel):
@@ -439,12 +524,36 @@ class TestResultSerialization:
         assert parsed["metadata"] == {"key": "val", "nested": {"inner": 42}}
         assert parsed["tags"] == ["a", "b"]
 
+    def test_deterministic_full_string_equality(
+        self,
+        service: AgentToolExecutionService,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Assert exact complete JSON string for multi-field output.
+
+        Proves all of:
+        - sort_keys=True
+        - separators=(",", ":")
+        - ensure_ascii=False
+        - deterministic content
+        """
+        tool_call = _make_tool_call("nested_tool", {"number": 1})
+        exposed = [_make_tool_public("nested_tool")]
+        decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
+        result = service.execute(decision, tool_call, execution_context=read_context)
+        content = result.tool_message.content
+        expected = (
+            '{"count":1,"flag":true,"metadata":{"key":"val","nested":{"inner":42}},'
+            '"name":"test","tags":["a","b"]}'
+        )
+        assert content == expected
+
     def test_deterministic_key_order_and_compact_separators(
         self,
         service: AgentToolExecutionService,
         read_context: ExecutionContext,
     ) -> None:
-        """Assert exact string equality for multi-field output."""
+        """Supplementary ordering and separator assertions."""
         tool_call = _make_tool_call("nested_tool", {"number": 1})
         exposed = [_make_tool_public("nested_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
@@ -580,3 +689,59 @@ class TestSerializationFailure:
         )
         result = svc.execute(decision, tool_call, execution_context=ctx)
         assert json.loads(result.tool_message.content) == {"value": "ok"}
+
+    def test_real_serialization_failure_raises_validation_error(self) -> None:
+        """Prove that a validated output that cannot be JSON-serialised raises
+        ValidationError with the original PydanticSerializationError as cause.
+
+        Handler executes exactly once. No retry. No TOOL message returned.
+        """
+        handler_call_count = 0
+
+        class UnserializableOutput(BaseModel):
+            value: object
+
+        class SimpleIn(BaseModel):
+            x: str
+
+        def handler(input_model: SimpleIn, context: object) -> UnserializableOutput:
+            nonlocal handler_call_count
+            handler_call_count += 1
+            return UnserializableOutput(value=object())
+
+        reg_def = ToolDefinition(
+            name="unserializable_tool",
+            description="Tool with unserializable output",
+            input_schema=SimpleIn,
+            output_schema=UnserializableOutput,
+            permission=Permission.READ,
+            side_effects=frozenset(),
+            allowed_session_modes=frozenset(
+                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+            ),
+        )
+        reg = ToolRegistry()
+        reg.register(reg_def, handler)
+        exe = ToolExecutor(reg)
+        svc = AgentToolExecutionService(tool_executor=exe)
+
+        tool_call = _make_tool_call("unserializable_tool", {"x": "y"})
+        exposed = [_make_tool_public("unserializable_tool")]
+        decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
+
+        ctx = ExecutionContext(
+            granted_permission=Permission.READ,
+            session_mode=SessionMode.NO_ACTIVE_SESSION,
+        )
+        with pytest.raises(ValidationError) as exc_info:
+            svc.execute(decision, tool_call, execution_context=ctx)
+
+        # Handler executed exactly once
+        assert handler_call_count == 1
+
+        # Original PydanticSerializationError is preserved as cause
+        cause = exc_info.value.__cause__
+        assert cause is not None
+        assert isinstance(cause, PydanticSerializationError)
+
+        # No TOOL message or result returned (exception was raised)

@@ -35,6 +35,8 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from pydantic_core import PydanticSerializationError
+
 from dnd_assistant.errors import ValidationError
 
 if TYPE_CHECKING:
@@ -165,25 +167,59 @@ class AgentToolExecutionService:
 
 
 def _tool_call_in(call: ToolCall, calls: tuple[ToolCall, ...]) -> bool:
-    """Check if ``call`` is semantically equal to any member of ``calls``.
+    """Check if ``call`` is a strict member of ``calls``.
 
-    Semantic equality means:
+    Strict membership means:
     - same ``name``
-    - same ``arguments`` (deep dict equality)
     - same ``call_id`` (or both None)
+    - same ``arguments`` using **recursive strict JSON value comparison**
 
-    This prevents a caller from changing model-selected arguments after
-    the model decision while still allowing the same call｜DSML｜lue to be
-    reused.
+    Python ``==`` conflates distinct JSON types (``0 == False``,
+    ``1 == True``).  This comparator preserves exact JSON structural
+    types recursively so that model-selected argument types cannot be
+    silently substituted.
+
+    Dict key order does NOT matter.  List order DOES matter.
     """
     for existing in calls:
         if (
             call.name == existing.name
-            and call.arguments == existing.arguments
             and call.call_id == existing.call_id
+            and _json_args_equal(call.arguments, existing.arguments)
         ):
             return True
     return False
+
+
+def _json_args_equal(left: object, right: object) -> bool:
+    """Recursive strict JSON value comparison.
+
+    Preserves exact JSON structural types:
+    - ``0 != False``, ``1 != True``, ``1 != 1.0``
+    - ``None`` matches only ``None``
+    - ``bool`` matches only ``bool``
+    - ``int`` matches only ``int``
+    - ``float`` matches only ``float``
+    - ``str`` matches only ``str``
+    - ``list`` order matters
+    - ``dict`` key order does NOT matter
+    """
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        if len(left) != len(right):
+            return False
+        for k in left:
+            if k not in right:
+                return False
+            if not _json_args_equal(left[k], right[k]):
+                return False
+        return True
+    if isinstance(left, list):
+        if len(left) != len(right):
+            return False
+        return all(_json_args_equal(a, b) for a, b in zip(left, right, strict=True))
+    return left == right
 
 
 def _build_tool_message(
@@ -210,7 +246,7 @@ def _build_tool_message(
 
     try:
         json_ready = output.model_dump(mode="json", by_alias=True)
-    except Exception as exc:
+    except PydanticSerializationError as exc:
         raise ValidationError(
             "Failed to serialise tool output to JSON",
             cause=exc,
