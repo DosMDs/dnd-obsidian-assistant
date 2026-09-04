@@ -38,9 +38,9 @@
 
 | Task | Status | Notes |
 |---|---|---|
-| S9-00 — Deterministic Fast-Agent tool exposure policy + Stage-9 kickoff | DONE | Current task |
-| S9-01 — Compact Context Builder over currently accepted data sources | NOT STARTED | Must use only data sources that exist at that point. Do not assume Stage-11/12 artifacts (State/Party.md, summaries, recaps, Campaign State) exist. |
-| S9-02 — One-step FastAgent model decision boundary | DONE | Current task |
+| S9-00 — Deterministic Fast-Agent tool exposure policy + Stage-9 kickoff | DONE | Completed after S9-C00/S9-C01 |
+| S9-01 — Compact Context Builder over currently accepted data sources | DONE | Completed after S9-C02; uses only accepted current data sources |
+| S9-02 — One-step FastAgent model decision boundary | DONE | Completed; S9-C03 reconciles documentation only |
 | S9-03 — Validated ToolExecutor execution + tool-result message adaptation | NOT STARTED | |
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | NOT STARTED | |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED | |
@@ -54,6 +54,7 @@
 | S9-C00 — Correct Fast-Agent tool exposure import and permission boundaries | DONE |
 | S9-C01 — Fail closed on StrEnum-compatible malformed execution-context fields | DONE |
 | S9-C02 — Complete S9-01 structural coverage and verification evidence | DONE |
+| S9-C03 — Reconcile Stage-9 task-map documentation after S9-02 | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -603,3 +604,33 @@ AgentContextBuilder(
 - Exact `SearchQuery` preservation: `"  Гэндальф?  "` preserved through both `user_input` and `SearchQuery.text`
 - Invalid-input zero-read regression: all five dependencies verified untouched
 - No S9-01 production code changed
+
+---
+
+## S9-C03 — Reconcile Stage-9 task-map documentation after S9-02
+
+### Defect
+
+Independent review found that the primary/current Task map at the top of this
+document contained stale contradictory state:
+
+- S9-01 was listed as `NOT STARTED` despite being completed after S9-C02.
+- S9-00 and S9-02 still carried `Current task` notes after their completion.
+- This contradicted the already-correct later Stage-9 status section and
+  `DEVELOPMENT_STATUS.md`.
+
+### Fix
+
+- S9-00 Task-map row: changed from `DONE | Current task` to `DONE` with
+  note `Completed after S9-C00/S9-C01`.
+- S9-01 Task-map row: changed from `NOT STARTED` to `DONE` with note
+  `Completed after S9-C02; uses only accepted current data sources`.
+- S9-02 Task-map row: changed from `DONE | Current task` to `DONE` with
+  note `Completed; S9-C03 reconciles documentation only`.
+
+### Scope
+
+- No S9-02 production implementation was changed.
+- No S9-03 work was started.
+- No tests, dependencies, harness, or configuration were changed.
+- Exactly one file changed: `docs/stages/09_FAST_AGENT.md`.
