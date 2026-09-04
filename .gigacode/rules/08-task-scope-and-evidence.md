@@ -33,7 +33,7 @@ to create or modify.
 
 Before commit:
 
-```
+```text
 actual changed-file list MUST be derived from Git
 and compared against the intended task scope.
 ```
@@ -49,7 +49,7 @@ Every unexpected changed file must be inspected.
 
 Required decision for each unexpected file:
 
-```
+```text
 unexpected file
     -> required for root cause?
         yes -> explicitly classify/document scope expansion
@@ -60,9 +60,39 @@ Do NOT silently widen scope.
 
 If scope expansion represents another independent defect or task:
 
-```
+```text
 STOP and report it instead of absorbing it.
 ```
+
+## 2.1. Final-diff quality-gate classification
+
+Quality-gate class is determined from the **actual final Git diff**, not only
+from the task title or originally intended scope.
+
+Canonical rule:
+
+```text
+.gigacode/rules/31-adaptive-quality-gates.md
+```
+
+Required flow before finalization:
+
+```text
+derive final changed-file inventory from Git
+→ classify documentation-only vs machine-consumed/code/test/runtime changes
+→ select relevant gates
+→ run gates
+→ re-read final diff
+→ confirm classification still applies
+```
+
+For ordinary documentation-only Markdown changes, full pytest and Ruff are
+not required by default. Their intentional omission must be reported as a
+policy-based skip, not as missing evidence.
+
+If a non-documentation or machine-consumed file appears in the final diff,
+reclassify the task and either restore the unintended edit or run the
+corresponding code/test quality gates.
 
 ## 3. Final Report evidence
 
@@ -74,24 +104,37 @@ reconstructed from memory:
 - changed files
 - commit SHA
 - parent/starting SHA
-- test counts
-- failed/error counts
-- Ruff result
-- line counts
-- maintainability values
+- test counts when tests were required/executed
+- failed/error counts when tests were required/executed
+- Ruff result when Ruff was required/executed
+- line counts when relevant
+- maintainability values when relevant
+- selected quality-gate class
+- intentionally skipped gates and policy reason
 - HEAD/upstream equality
 - working-tree cleanliness
 
 Explicit invariant:
 
-```
+```text
 A file present in the commit but absent from the Final Report changed-file
 inventory is a finalization failure.
 ```
 
 Historical claims must be checked against actual historical Git state.
 
-Do not write that a restore, edit, or test occurred if it did not occur.
+Do not write that a restore, edit, test, or quality gate occurred if it did
+not occur.
+
+For documentation-only tasks it is valid and preferred to state explicitly:
+
+```text
+Full pytest and Ruff were intentionally not run because the final diff
+contains documentation Markdown only.
+```
+
+Do not fabricate zero-failure counts for commands that were intentionally
+not run.
 
 ## 4. Scope expansion rule
 
@@ -165,6 +208,10 @@ run canonical evidence commands
 
 This applies to implementation tasks, corrections, maintenance tasks and
 stage completion reviews.
+
+For documentation-only tasks, "canonical evidence commands" means the
+commands relevant to that gate class. Do not add irrelevant pytest/Ruff runs
+solely because this reconciliation rule exists.
 
 ## 6. Git direction semantics
 

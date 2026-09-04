@@ -69,7 +69,7 @@ Rules:
 - Work primarily inside the current stage.
 - Do not pull later-stage implementation forward merely because it is convenient.
 - Do not mark a task/stage `DONE` because code was generated.
-- Completion requires implementation, required tests, successful relevant quality gates, and final diff review.
+- Completion requires implementation or the requested documentation/workflow change, successful **relevant** quality gates, and final diff review.
 - Do not advance the roadmap stage automatically.
 - If the user explicitly changes stage or scope, update `DEVELOPMENT_STATUS.md` as part of that change.
 - Significant architecture/development-workflow decisions belong in `docs/adr/`.
@@ -146,7 +146,7 @@ While editing:
 2. Reuse existing abstractions.
 3. Do not add a dependency unless it is necessary and justified.
 4. Keep public contracts typed and explicit.
-5. Add/update tests in the same change.
+5. Add/update tests in the same change when production behavior changes.
 6. Use built-in GigaCode/IDE file-edit tools for repository text files. A JSON parsing error, oversized payload, timeout, or similar edit/write-tool failure is not permission to switch automatically to shell/PowerShell/Python file generation.
 7. After an edit/write-tool failure, inspect the working tree first, preserve already-correct partial work, and retry with smaller atomic create/edit/patch operations. For oversized tests, reduce needless duplication with parametrization/helpers without weakening required coverage.
 
@@ -249,13 +249,61 @@ Do not switch writing mechanisms because a payload is large.
 
 The repository rules remain mandatory even if a particular task prompt accidentally omits this repeated block. This is defense in depth, not an alternative policy.
 
+### Adaptive quality gates
+
+Quality gates MUST be selected from the **final actual Git diff**, not mechanically from the task title or from a fixed checklist.
+
+Canonical rule:
+
+```text
+.gigacode/rules/31-adaptive-quality-gates.md
+```
+
+Classification:
+
+```text
+final diff = documentation/agent-instruction Markdown only
+and no changed file is machine-consumed runtime/test/build data
+→ documentation-only gates
+
+final diff contains Python/tests/runtime config/dependencies/schemas/
+executable fixtures/other machine-consumed files
+→ normal relevant code/test gates
+```
+
+For ordinary documentation-only work, required by default:
+
+1. inspect the complete final diff;
+2. validate documentation/status consistency relevant to the task;
+3. verify exact changed-file inventory from Git;
+4. run `git diff --check`;
+5. run final Git scope/status/finalization checks.
+
+Do **not** run solely for evidence on a normal Markdown-only task:
+
+```text
+uv run pytest
+targeted/contract pytest suites
+uv run ruff check .
+uv run ruff format --check .
+```
+
+Exceptions apply when a Markdown file is machine-consumed by runtime/tests/build tooling, is a fixture/golden/generated input/executable specification, is covered by a relevant project validator, or the task gives another concrete technical reason.
+
+After all edits, reclassify using the final changed-file inventory. If a code/test/runtime/config/machine-consumed file appeared, restore the unintended edit or run the corresponding quality gates.
+
+### Completion verification
+
 Before considering a task complete:
-1. Run targeted tests first.
-2. Run `uv run pytest` when feasible.
-3. Run `uv run ruff check .`.
-4. Run `uv run ruff format --check .`.
-5. Review the diff for boundary violations, accidental generated files, secrets and unrelated edits.
-6. State what was changed, tests executed and any remaining risk.
+1. Derive the final changed-file inventory from Git.
+2. Classify the task under `.gigacode/rules/31-adaptive-quality-gates.md`.
+3. Run the quality gates relevant to that final diff and explicit task risk/scope.
+4. Run `git diff --check`.
+5. Review the complete diff for boundary violations, accidental generated files, secrets and unrelated edits.
+6. Re-check that the gate classification still matches the final diff.
+7. State what was changed, which gates were executed, which were intentionally skipped under policy, and any remaining risk.
+
+For a documentation-only task, skipping full pytest/Ruff under the adaptive policy is an expected successful outcome, not a failure.
 
 ## Repository maintainability
 
@@ -321,6 +369,11 @@ Key rules for agent reliability:
     machine-derived evidence must be reconciled after documentation edits
     base-only / head-only are the primary Git direction terms
 
+.gigacode/rules/31-adaptive-quality-gates.md
+    quality gates are selected from the actual final diff
+    docs-only Markdown does not require pytest/Ruff by default
+    reclassify if machine-consumed/code/test files appear
+
 .gigacode/rules/37-test-harness-isolation.md
     protected harness changes require explicit scope
     do not modify conftest/harness tests for local task convenience
@@ -334,6 +387,8 @@ These are overview pointers. The canonical rules files are authoritative.
 
 ## Useful commands
 
+Code-bearing tasks commonly use:
+
 ```text
 uv sync
 uv run pytest
@@ -342,11 +397,13 @@ uv run ruff format --check .
 uv run dnd --help
 ```
 
+Documentation-only tasks normally use only their relevant documentation/diff checks plus Git finalization; do not run the Python suite mechanically.
+
 ## Git commit and push policy
 
 После успешного завершения каждой задачи агент обязан самостоятельно:
 
-1. Запустить требуемые quality gates.
+1. Запустить **релевантные** quality gates согласно final-diff classification.
 2. Проверить `git status` и `git diff`.
 3. Убедиться, что в commit не попали:
    - секреты;
@@ -368,7 +425,7 @@ uv run dnd --help
 - `git reset --hard`;
 - rebase опубликованной истории;
 - удалять remote branches;
-- пушить при проваленных тестах или quality gates.
+- пушить при проваленных **требуемых** quality gates.
 
 Если push не удался из-за authentication, conflicts, branch protection или remote changes — остановиться и сообщить пользователю, не обходить защиту автоматически.
 

@@ -14,6 +14,8 @@ A coding assistant is used during implementation. The project needs a clear dist
 
 Without this distinction, development tooling could accidentally be treated as part of runtime architecture or as a permitted path for campaign-data mutation.
 
+The workflow also needs verification proportional to the actual change. Running the complete Python test/lint stack for a Markdown-only documentation edit adds cost and noise without validating the modified surface. Conversely, a task that unexpectedly changes code or machine-consumed files must not keep a documentation-only exemption.
+
 ## Decision
 
 ### IDE and supported development platforms
@@ -75,6 +77,39 @@ Default project policy:
 - no unrestricted filesystem/shell MCP;
 - destructive Git, secrets, real Vault mutations, publishing and irreversible migrations require explicit user approval.
 
+### Adaptive quality gates
+
+Verification is selected from the **actual final Git diff**.
+
+For ordinary documentation-only tasks where every changed file is Markdown documentation or agent/development instruction Markdown and no file is machine-consumed runtime/test/build data:
+
+Required by default:
+
+- full final-diff review;
+- documentation/status consistency checks relevant to the task;
+- exact changed-file inventory verification;
+- `git diff --check`;
+- normal Git scope/finalization checks.
+
+Not required by default:
+
+- full `uv run pytest`;
+- targeted/contract pytest suites;
+- `uv run ruff check .`;
+- `uv run ruff format --check .`.
+
+A Markdown file does not receive this exemption when it is a runtime/test fixture, golden/generated input, executable specification, schema-like machine-consumed artifact, or when a relevant project validator explicitly applies.
+
+If a code/test/runtime/config/machine-consumed file appears during a task that started as documentation-only, the task must be reclassified from the final diff. The unintended file must either be restored or the corresponding quality gates must be run.
+
+The canonical detailed rule is:
+
+```text
+.gigacode/rules/31-adaptive-quality-gates.md
+```
+
+Final Reports record the selected gate class, commands actually run, and gates intentionally skipped under this policy.
+
 ### Development status
 
 The canonical current development state is:
@@ -99,13 +134,16 @@ GigaCode must read `DEVELOPMENT_STATUS.md` before planning implementation and mu
 - fewer architecture boundary violations;
 - development state survives chat history;
 - Windows/macOS portability becomes an explicit quality requirement;
-- GigaCode remains replaceable and does not leak into runtime code.
+- GigaCode remains replaceable and does not leak into runtime code;
+- documentation-only work avoids unnecessary full Python-suite execution;
+- code-bearing scope expansion automatically restores the appropriate stronger verification.
 
 ### Trade-offs
 
 - project rules/skills require maintenance;
 - agent changes require explicit review discipline;
-- stage progress requires updating `DEVELOPMENT_STATUS.md`.
+- stage progress requires updating `DEVELOPMENT_STATUS.md`;
+- the agent must correctly classify the final diff before finalization instead of relying on a fixed command checklist.
 
 ## Supersedes
 
