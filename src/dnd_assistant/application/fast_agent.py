@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dnd_assistant.errors import ModelError
-from dnd_assistant.prompts.agent_v1 import PROMPT_VERSION, SYSTEM_PROMPT
+from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION, SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder

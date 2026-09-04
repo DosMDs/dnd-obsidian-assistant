@@ -34,7 +34,7 @@ from dnd_assistant.models.types import (
     ToolAwareResponse,
     ToolCall,
 )
-from dnd_assistant.prompts.agent_v1 import PROMPT_VERSION, SYSTEM_PROMPT
+from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION, SYSTEM_PROMPT
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode, SideEffect
@@ -347,10 +347,10 @@ class TestRequestConstruction:
         decision = fast_agent.decide("test", execution_context=_make_context())
         assert decision.request.messages[0].content == SYSTEM_PROMPT
 
-    def test_prompt_version_equals_agent_v1(self, fast_agent: FastAgent) -> None:
+    def test_prompt_version_equals_agent_v2(self, fast_agent: FastAgent) -> None:
         decision = fast_agent.decide("test", execution_context=_make_context())
         assert decision.prompt_version == PROMPT_VERSION
-        assert decision.prompt_version == "agent-v1"
+        assert decision.prompt_version == "agent-v2"
 
     def test_user_content_is_valid_json(self, fast_agent: FastAgent) -> None:
         decision = fast_agent.decide("test", execution_context=_make_context())

@@ -42,7 +42,7 @@
 | S9-01 — Compact Context Builder over currently accepted data sources | DONE | Completed after S9-C02; uses only accepted current data sources |
 | S9-02 — One-step FastAgent model decision boundary | DONE | Completed; S9-C03 reconciles documentation only |
 | S9-03 — Validated ToolExecutor execution + tool-result message adaptation | DONE | |
-| S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | NOT STARTED | |
+| S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | DONE | |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED | |
 | S9-06 — CLI `dnd ask` + mocked end-to-end integration | NOT STARTED | |
 | S9-07 — Full Stage-9 historical review / completion | NOT STARTED | |
@@ -859,3 +859,189 @@ with handler count and cause preservation.
 - `tests/unit/test_agent_tool_execution_boundaries.py`
 - `tests/unit/test_agent_tool_result_serialization.py`
 - `docs/stages/09_FAST_AGENT.md`
+
+---
+
+## S9-04 — Bounded model→tool→model loop + clarification/final-response semantics
+
+**Accepted starting boundary:** `9806e1840f2d47996e0389709d7179200dc16c99`
+
+### New production modules
+
+- `src/dnd_assistant/prompts/agent_v2.py` — versioned prompt resource with deterministic terminal-text protocol
+- `src/dnd_assistant/application/agent_loop.py` — bounded model-tool-model orchestration
+
+### Modified production modules
+
+- `src/dnd_assistant/application/fast_agent.py` — active prompt switched from `agent-v1` to `agent-v2`
+
+### agent-v2 prompt resource
+
+`PROMPT_VERSION = "agent-v2"`. Preserves all player-safety rules from agent-v1 and adds:
+
+- Deterministic terminal-text protocol: `{"kind":"respond","message":"..."}` or `{"kind":"clarify","message":"..."}`
+- No Markdown fences, no prose before/after JSON
+- `respond` = terminal answer for this run
+- `clarify` = model needs additional user information
+- Ambiguous/missing write targets → clarify preferred
+- Native tool-calling mechanism for tool requests
+- Terminal outcome after TOOL result (no second tool request)
+
+### AgentOutcomeKind (StrEnum)
+
+```python
+class AgentOutcomeKind(StrEnum):
+    RESPOND = "respond"
+    CLARIFY = "clarify"
+```
+
+### AgentTextOutcome (Pydantic BaseModel)
+
+```python
+class AgentTextOutcome(BaseModel):
+    kind: AgentOutcomeKind
+    message: str  # non-empty, non-whitespace-only
+    model_config = {"extra": "forbid", "frozen": True}
+```
+
+- `message` validated non-empty and non-whitespace-only via `@field_validator`
+- Extra fields forbidden
+
+### AgentRunResult (frozen dataclass)
+
+```python
+@dataclass(frozen=True, slots=True)
+class AgentRunResult:
+    initial_decision: AgentDecision
+    tool_execution: AgentToolExecutionResult | None
+    final_response: ToolAwareResponse
+    outcome: AgentTextOutcome
+```
+
+### AgentLoop
+
+```python
+class AgentLoop:
+    def __init__(
+        self,
+        *,
+        context_builder: AgentContextBuilder,
+        model_gateway: ModelGateway,
+        tool_catalog: ToolRegistrySchema,
+        tool_execution_service: AgentToolExecutionService,
+    ) -> None: ...
+
+    def run(
+        self,
+        user_input: str,
+        *,
+        execution_context: ExecutionContext,
+    ) -> AgentRunResult: ...
+```
+
+### Terminal content parsing (`_parse_agent_outcome`)
+
+- Accepts `ToolAwareResponse` with zero tool calls
+- Parses JSON content using `AgentTextOutcome` schema
+- Malformed model output → `ModelError` with original cause retained
+- Rejects: plain prose, empty content, JSON list, `{}`, missing fields, extra fields, unknown kind, whitespace-only message
+- No broad `except Exception`
+- No repair of malformed JSON
+- No inference from punctuation/question marks
+
+### Direct respond/clarify path
+
+- Zero tool calls in initial response → parse `AgentTextOutcome`
+- `model calls = 1`, `tool executions = 0`, `tool_execution = None`
+- Both `respond` and `clarify` are terminal
+- `clarify` does NOT loop or ask again inside `run()`
+
+### Single-tool path
+
+- Exactly one `ToolCall` in initial response → execute through `AgentToolExecutionService`
+- Build follow-up request as exact ordered history: `SYSTEM, USER, ASSISTANT(tool call), TOOL(result)`
+- Second model call with exact first-turn exposure snapshot
+- `model calls = 2`, `tool executions = 1`
+
+### Hard bound enforcement
+
+- **Initial multi-tool call (2+)**: `ModelError` before any ToolExecutor execution. `model calls = 1`, `tool executions = 0`
+- **Post-tool tool call**: `ModelError` without additional execution. First tool executed exactly once. `model calls = 2`, `tool executions = 1`
+- **Post-tool multiple tool calls**: Same bounded failure
+- No second tool execution, no third model call, no retry
+
+### Tool-execution failure propagation
+
+- `ValidationError`, `NotFoundError`, `ConflictError`, `StorageError`, domain/application errors propagate unchanged
+- No second model call after tool-execution failure
+- No retry, no replacement tool call
+
+### Second-model-call failure
+
+- `ModelError` from second `chat_with_tools` → propagated unchanged
+- Tool may already have succeeded → no rollback, no retry, no third call
+
+### Malformed output after successful tool
+
+- Second response fails `AgentTextOutcome` validation → `ModelError`
+- Tool executed exactly once, model called exactly twice
+- No tool retry, no third model call, no synthetic response
+
+### Clarification safety
+
+- `clarify` outcome with zero tool execution → safe path for ambiguous writes
+- Python never transforms `clarify` into a write call
+- No semantic guessing by Python (no `endswith("?")`, no keyword matching)
+
+### WRITE safety
+
+- WRITE tool with audit: handler executes once, TOOL result replayed, final response parsed
+- WRITE tool without audit: tool hidden by exposure policy → `ModelError` from `FastAgent.decide()` before loop
+- Direct clarification with WRITE authority/tools exposed: zero ToolExecutor calls, zero mutation
+
+### Prompt-v2 switch
+
+- `FastAgent` now imports from `dnd_assistant.prompts.agent_v2`
+- `AgentDecision.prompt_version == "agent-v2"`
+- `agent_v1.py` preserved unchanged
+
+### Import boundary
+
+Fresh `import dnd_assistant.application.agent_loop` does NOT eagerly load:
+- `dnd_assistant.models.ollama`
+- `dnd_assistant.storage`
+- `dnd_assistant.retrieval`
+- `dnd_assistant.cli`
+
+Uses `TYPE_CHECKING` for all heavy imports. Runtime imports of `ChatRequest`, `ChatMessage`, `MessageRole` are deferred into `run()`.
+
+### S9-05 strict deferral
+
+Not implemented: multiple initial tool calls, multiple second-round tool calls, execute-all policy, execute-first policy, parallel calls, atomic batch, partial success, rollback, multi-write ordering, read/write call ordering, multi-round loops, tool-call budget > 1.
+
+### S9-06 strict deferral
+
+Not implemented: `dnd ask` Typer command, Rich rendering, interactive clarification input, CLI composition, live Ollama setup.
+
+### Test evidence
+
+**`tests/unit/test_agent_loop.py`** (36 tests):
+
+- Direct path: respond JSON, clarify JSON (2 tests)
+- Single-tool path: tool→respond, tool→clarify (2 tests)
+- Follow-up request: exact history, exposed-tool snapshot reuse, original unchanged (3 tests)
+- WRITE safety: with audit executes once, without audit fails (2 tests)
+- Clarification safety: zero mutation with WRITE authority (1 test)
+- Prompt-v2: version, DATA reference, no invented IDs, clarification, terminal JSON, native tools, no premature success, terminal after tool, active FastAgent uses agent-v2 (9 tests)
+- Terminal outcome schema: respond, clarify, Unicode, empty, whitespace, unknown kind, missing kind, missing message, extra field, parse respond, parse clarify, parse plain text, parse empty, parse JSON array, parse empty object, parse with tool calls (16 tests)
+- Import boundary (1 test)
+
+**`tests/unit/test_agent_loop_boundaries.py`** (8 tests):
+
+- Initial multi-call: 2 calls, 3 calls (2 tests)
+- Post-tool tool call: single, multiple (2 tests)
+- Malformed outcome: direct, post-tool (2 tests)
+- Second model failure: propagated (1 test)
+- Tool-execution failure: no second call (1 test)
+
+All 44 tests passing. Full suite 4412 passed, 100 skipped. Ruff clean.
