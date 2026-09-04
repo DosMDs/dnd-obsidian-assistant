@@ -40,7 +40,7 @@
 |---|---|---|
 | S9-00 — Deterministic Fast-Agent tool exposure policy + Stage-9 kickoff | DONE | Current task |
 | S9-01 — Compact Context Builder over currently accepted data sources | NOT STARTED | Must use only data sources that exist at that point. Do not assume Stage-11/12 artifacts (State/Party.md, summaries, recaps, Campaign State) exist. |
-| S9-02 — One-step FastAgent model decision boundary | NOT STARTED | |
+| S9-02 — One-step FastAgent model decision boundary | DONE | Current task |
 | S9-03 — Validated ToolExecutor execution + tool-result message adaptation | NOT STARTED | |
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | NOT STARTED | |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED | |
@@ -55,6 +55,145 @@
 | S9-C01 — Fail closed on StrEnum-compatible malformed execution-context fields | DONE |
 | S9-C02 — Complete S9-01 structural coverage and verification evidence | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
+
+## S9-02 — One-step FastAgent model decision boundary
+
+**Accepted starting boundary:** `76666cd5ebdfe92106a0e63e0e1489df4d8a0b7e`
+
+### AgentDecision contract
+
+```python
+@dataclass(frozen=True, slots=True)
+class AgentDecision:
+    prompt_version: str
+    request: ChatRequest
+    exposed_tools: tuple[ToolPublicDefinition, ...]
+    response: ToolAwareResponse
+```
+
+- `prompt_version` = reproducible prompt identity for tracing/evals
+- `request` = exact conversation history used for the first model turn
+- `exposed_tools` = exact allowlist snapshot shown to the model for this turn
+- `response` = validated provider-neutral `ToolAwareResponse`
+
+No action enum, respond/clarify/tool DTOs, provider-native fields, Ollama metadata, or filesystem paths.
+
+### FastAgent constructor/decide contract
+
+```python
+class FastAgent:
+    def __init__(
+        self,
+        *,
+        context_builder: AgentContextBuilder,
+        model_gateway: ModelGateway,
+        tool_catalog: ToolRegistrySchema,
+    ) -> None: ...
+
+    def decide(
+        self,
+        user_input: str,
+        *,
+        execution_context: ExecutionContext,
+    ) -> AgentDecision: ...
+```
+
+Synchronous API. No async.
+
+### agent-v1 prompt resource
+
+`src/dnd_assistant/prompts/agent_v1.py`:
+
+```python
+PROMPT_VERSION = "agent-v1"
+SYSTEM_PROMPT = "..."
+```
+
+The v1 prompt communicates player-facing D&D campaign assistant semantics, context-as-data boundaries, no speculative tool execution, clarification preference, and prohibition of filesystem/shell access.
+
+### Deterministic JSON request format
+
+The USER message content is explicit JSON with `sort_keys=True`, `ensure_ascii=False`, `separators=(",", ":")`, `allow_nan=False`.
+
+Required top-level JSON keys: `user_input`, `current_world_tick`, `active_session`, `relevant_entities`, `recent_events`.
+
+Required active-session object: `session_id`, `world_tick_start`.
+
+Required entity object: `entity_id`, `entity_type`, `name`, `status`, `knowledge_status`, `tags`, `body_excerpt`, `body_truncated`.
+
+Required event object: `event_id`, `event_type`, `world_tick`, `text_excerpt`, `text_truncated`.
+
+### SYSTEM/USER two-message first turn
+
+Exactly two messages: `SYSTEM` (content = `SYSTEM_PROMPT`), `USER` (content = deterministic JSON). No assistant history, no tool-result messages.
+
+### Turn-local exposed-tool snapshot
+
+Calls `select_agent_tools(catalog, context=execution_context)` once per `decide()` invocation. The returned list is converted to a tuple for `AgentDecision.exposed_tools` and passed as a list to `chat_with_tools()`.
+
+### Exact one chat_with_tools call
+
+`ModelGateway.chat_with_tools()` is called exactly once on the successful path. Zero calls to `chat()`, `generate_structured()`, `embed()`, or `health()`. No retry, no fallback, no second turn.
+
+### Application-level tool-name allowlist validation
+
+For every `ToolCall` in `response.message.tool_calls`, the tool name must be present in `exposed_tools` by exact match. Unknown tool names, hidden real tools (permission/audit/session-mode filtered), and mixed allowed/forbidden multi-calls all raise `ModelError`. Zero tool execution.
+
+### Text/tool/text+tool preservation
+
+- Text only: `response.message.content` preserved, `tool_calls == ()`.
+- Tool call only: `response.message.content` is `None`, tool call preserved exactly.
+- Text + tool call: both preserved.
+- Multiple calls: all preserved in original order.
+
+### Multiple-call preservation without execution semantics
+
+Multiple `ToolCall` values are preserved and name-validated. No execution, no ordering/atomicity/execution semantics defined. Those belong to S9-05.
+
+### Prompt_version propagation
+
+`AgentDecision.prompt_version` always equals `PROMPT_VERSION` from the versioned prompt resource (`"agent-v1"`).
+
+### Failure propagation
+
+- `ValidationError` from context builder → propagated, model call count = 0.
+- `StorageError` from context builder → propagated, model call count = 0.
+- Invalid `execution_context` → `TypeError` from selector, model call count = 0.
+- `ModelError` from `chat_with_tools` → same error propagated, exactly one attempted call, no retry.
+- Out-of-allowlist `ToolCall` → `ModelError`, no second model call.
+
+No broad `except Exception` in production FastAgent.
+
+### Import boundary
+
+A fresh `import dnd_assistant.application.fast_agent` does NOT eagerly load:
+- `dnd_assistant.models.ollama`
+- `dnd_assistant.tools.executor`
+- `dnd_assistant.storage`
+- `dnd_assistant.retrieval`
+- `dnd_assistant.cli`
+
+Uses `TYPE_CHECKING` for all heavy imports. Runtime imports of `select_agent_tools`, `ChatMessage`, `ChatRequest`, `MessageRole` are deferred into `decide()`.
+
+### Explicit S9-03 deferral
+
+Not implemented: ToolExecutor invocation, ToolRegistry lookup for execution, input-schema execution validation, output-schema validation, handler execution, tool-result serialization, TOOL ChatMessage creation, assistant/tool history replay.
+
+### Explicit S9-04 deferral
+
+Not implemented: model→tool→model loop, second `chat_with_tools` call, max rounds, final-response classification, clarification classification, clarification loop, retry after tool result.
+
+### Explicit S9-05 deferral
+
+Not implemented: execute all, execute first, atomic multi-call batch, parallel tool execution, partial-success policy, multiple-write ordering policy.
+
+### Test evidence
+
+- 60 tests: request construction (25), context-as-data isolation (3), tool exposure (6), model response (7), tool argument boundary (6), failure propagation (5), determinism/non-mutation (4), no forbidden behaviour (3), fresh-process import (1)
+- All passing
+- Fresh-process subprocess regression confirms import isolation
+- Adversarial context strings (JSON-like, prompt-looking) remain in USER data, not SYSTEM
+- Subprocess-based `sys.modules` diagnostic confirms no eager loading of forbidden modules
 
 ## Important Context Builder deferral
 
@@ -307,7 +446,8 @@ All existing 34 tests preserved and passing.
 | S9-00 | DONE after correction |
 | S9-C01 | DONE |
 | S9-01 | DONE after correction |
-| S9-02..S9-07 | NOT STARTED |
+| S9-02 | DONE |
+| S9-03..S9-07 | NOT STARTED |
 | Stage 10 | NOT STARTED |
 
 ---
