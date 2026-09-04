@@ -184,6 +184,64 @@ def _reject_duplicate_call_ids(
             seen.add(cid)
 
 
+def _resolve_multi_call_read_tool(
+    call: ToolCall,
+    exposed_tools: tuple[ToolPublicDefinition, ...],
+) -> ToolPublicDefinition:
+    """Resolve a ``ToolCall`` against the exposed snapshot for multi-call READ classification.
+
+    Requires exactly one exposed definition matching the call name with a
+    structurally valid ``Permission.READ`` member.
+
+    Args:
+        call: The ``ToolCall`` to classify.
+        exposed_tools: The turn-local exposed-tool snapshot from the
+            ``AgentDecision``.
+
+    Returns:
+        The unique matching ``ToolPublicDefinition``.
+
+    Raises:
+        ModelError: If zero or multiple matching definitions are found,
+            or the matching definition's permission is not a real canonical
+            ``Permission.READ`` member.
+    """
+    from dnd_assistant.tools.types import Permission as P
+
+    matching: list[ToolPublicDefinition] = [t for t in exposed_tools if t.name == call.name]
+
+    if not matching:
+        raise ModelError(
+            f"Tool call '{call.name}' has no matching exposed tool definition. "
+            "Cannot classify for multi-call safety."
+        )
+
+    if len(matching) > 1:
+        raise ModelError(
+            f"Tool call '{call.name}' has {len(matching)} matching exposed "
+            "definitions. Ambiguous snapshot — refusing to execute."
+        )
+
+    definition = matching[0]
+
+    # Permission must be a real canonical Permission member.
+    # Plain strings, foreign StrEnum values, and None fail closed.
+    perm = definition.permission
+    if not isinstance(perm, P):
+        raise ModelError(
+            f"Tool '{call.name}' has malformed permission '{perm}'. "
+            "Cannot classify for multi-call safety."
+        )
+
+    if perm is not P.READ:
+        raise ModelError(
+            "Multi-call batches containing WRITE tools are not allowed. "
+            f"Tool '{call.name}' has permission '{perm.value}'."
+        )
+
+    return definition
+
+
 def _reject_multi_call_containing_write(
     tool_calls: tuple[ToolCall, ...],
     exposed_tools: tuple[ToolPublicDefinition, ...],
@@ -195,28 +253,11 @@ def _reject_multi_call_containing_write(
 
     Raises:
         ModelError: If any call in the batch resolves to a WRITE
-            ``ToolPublicDefinition`` by exact name match.
+            ``ToolPublicDefinition`` by exact name match, or the
+            exposed snapshot is structurally inconsistent.
     """
-    from dnd_assistant.tools.types import Permission as P
-
     for call in tool_calls:
-        matching: ToolPublicDefinition | None = None
-        for t in exposed_tools:
-            if t.name == call.name:
-                matching = t
-                break
-
-        if matching is None:
-            raise ModelError(
-                f"Tool call '{call.name}' has no matching exposed tool definition. "
-                "Cannot classify for multi-call safety."
-            )
-
-        if matching.permission is not P.READ:
-            raise ModelError(
-                "Multi-call batches containing WRITE tools are not allowed. "
-                f"Tool '{call.name}' has permission '{matching.permission.value}'."
-            )
+        _resolve_multi_call_read_tool(call, exposed_tools)
 
 
 # ── AgentLoop ──────────────────────────────────────────────────────────────────

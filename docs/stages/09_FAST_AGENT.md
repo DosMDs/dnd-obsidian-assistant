@@ -58,6 +58,7 @@
 | S9-C04 — Harden exact ToolCall binding and TOOL-result serialization evidence | DONE |
 | S9-C05 — Correct terminal JSON validation and remove private FastAgent coupling | DONE |
 | S9-C06 — Correct S9-C05 verification evidence and Stage-9 line-count record | DONE |
+| S9-C07 — Fail closed on inconsistent exposed-tool snapshots in multi-call policy | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -1342,3 +1343,71 @@ Fresh `import dnd_assistant.application.agent_loop` does NOT eagerly load:
 - No protected-harness changes
 - No dependency changes
 - No real Ollama/model used
+
+## S9-C07 — Fail closed on inconsistent exposed-tool snapshots in multi-call policy
+
+**Status:** DONE
+
+**Starting base:** `fa235835586d23759e0df31e528f301cc4711441`
+
+### Defect
+
+The S9-05 production helper `_reject_multi_call_containing_write` searched `initial_decision.exposed_tools` and stopped at the first matching tool name. A structurally inconsistent snapshot containing duplicate definitions for the same tool name (e.g. READ+WRITE) could make permission classification order-dependent. Additionally, if a malformed `Permission` value (plain string, `None`, foreign StrEnum) reached the policy, the existing code could leak `AttributeError` instead of failing closed with `ModelError`.
+
+### Correction
+
+1. **`_resolve_multi_call_read_tool`** — a new private resolver that:
+   - Collects all exposed definitions matching the call name.
+   - Raises `ModelError` on 0 matches (missing definition).
+   - Raises `ModelError` on 2+ matches (ambiguous duplicate snapshot).
+   - Validates that the single matching definition's `permission` is a real canonical `Permission` member via `isinstance(perm, P)`.
+   - Raises `ModelError` with `"malformed permission"` for plain strings, `None`, and foreign StrEnum values.
+   - Raises `ModelError` if permission is not `Permission.READ`.
+   - Returns the unique matching definition on success.
+
+2. **`_reject_multi_call_containing_write`** — updated to delegate to `_resolve_multi_call_read_tool` for each call instead of implementing inline first-match logic.
+
+### New test coverage
+
+**`tests/unit/test_agent_loop_snapshot_policy.py`** (9 tests):
+
+- Missing exposed definition → `ModelError`, zero execution, no second model call
+- Duplicate READ+READ definitions → `ModelError`
+- Duplicate READ+WRITE definitions → `ModelError`
+- Duplicate WRITE+READ definitions → `ModelError` (proves order independence)
+- `permission="read"` → `ModelError` (not `AttributeError`)
+- `permission="write"` → `ModelError` (not `AttributeError`)
+- `permission=None` → `ModelError`
+- Foreign StrEnum with value `"read"` → `ModelError`
+- Foreign StrEnum with value `"write"` → `ModelError`
+
+All inconsistent-snapshot tests use the S9-C05-style `_FakeFastAgent` test double that bypasses normal `FastAgent.decide()` validation, exercising `AgentLoop` defence in depth.
+
+### Preserved behavior
+
+- Normal 2/4 READ batches still execute sequentially.
+- Same READ tool called multiple times with different arguments works.
+- Multiple `call_id=None` permitted.
+- Mixed WRITE batches (READ+WRITE, WRITE+READ, WRITE+WRITE, READ+READ+WRITE) still reject before any execution.
+- Single WRITE+audit call unchanged.
+- Single READ call unchanged.
+- Direct clarification unchanged.
+- 5+ call cap unchanged.
+- Duplicate non-None `call_id` unchanged.
+- No retry, rollback, second tool round, or transaction semantics added.
+
+### Verification evidence
+
+- 9 new snapshot policy tests: **9 passed, 0 failed, 0 errors**
+- 83 AgentLoop tests: **83 passed, 0 failed, 0 errors**
+- 343 regression tests (FastAgent, S9-03, Tool Layer, ModelGateway): **343 passed, 0 failed, 0 errors**
+- 458 contract tests (boundaries, maintainability, harness): **458 passed, 0 failed, 0 errors**
+- Full suite: **4466 passed, 100 skipped, 0 failed, 0 errors**
+- Ruff check: clean
+- Ruff format: clean
+- `git diff --check`: clean
+- No protected-harness changes
+- No dependency changes
+- No real Ollama/model used
+- No S9-06 work
+- `DEVELOPMENT_STATUS.md` unchanged (S9-05 DONE, S9-06 NOT STARTED)
