@@ -351,7 +351,7 @@ class TestDirectPath:
 
         assert gateway.chat_with_tools_call_count == 1
         assert fake_svc.execute_call_count == 0
-        assert result.tool_execution is None
+        assert result.tool_executions == ()
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "Gandalf is a wizard"
         assert builder.build_call_count == 1
@@ -377,7 +377,7 @@ class TestDirectPath:
 
         assert gateway.chat_with_tools_call_count == 1
         assert fake_svc.execute_call_count == 0
-        assert result.tool_execution is None
+        assert result.tool_executions == ()
         assert result.outcome.kind is AgentOutcomeKind.CLARIFY
         assert result.outcome.message == "Which Varos do you mean?"
         assert builder.build_call_count == 1
@@ -433,7 +433,8 @@ class TestSingleToolPath:
         result = loop.run("lookup hello", execution_context=read_context)
 
         assert gateway.chat_with_tools_call_count == 2
-        assert result.tool_execution is not None
+        assert len(result.tool_executions) == 1
+        assert result.tool_executions[0].output.result == "read: hello"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "Found: read: hello"
         assert builder.build_call_count == 1
@@ -482,7 +483,8 @@ class TestSingleToolPath:
         result = loop.run("lookup hello", execution_context=read_context)
 
         assert gateway.chat_with_tools_call_count == 2
-        assert result.tool_execution is not None
+        assert len(result.tool_executions) == 1
+        assert result.tool_executions[0].output.result == "read: hello"
         assert result.outcome.kind is AgentOutcomeKind.CLARIFY
         assert result.outcome.message == "Which record do you mean?"
         assert builder.build_call_count == 1
@@ -546,7 +548,7 @@ class TestFollowUpRequest:
             messages=(
                 *result.initial_decision.request.messages,
                 result.initial_decision.response.message,
-                result.tool_execution.tool_message,
+                result.tool_executions[0].tool_message,
             )
         )
         assert gateway.last_request == expected
@@ -643,8 +645,8 @@ class TestFollowUpRequest:
         assert result.initial_decision.request.messages[1].role is MessageRole.USER
         assert result.initial_decision.response.message.content == "Looking up..."
         assert len(result.initial_decision.response.message.tool_calls) == 1
-        assert result.tool_execution is not None
-        assert result.tool_execution.tool_call.name == "read_tool"
+        assert len(result.tool_executions) == 1
+        assert result.tool_executions[0].tool_call.name == "read_tool"
 
 
 # ── WRITE safety tests ─────────────────────────────────────────────────────────
@@ -695,8 +697,8 @@ class TestWriteSafety:
         result = loop.run("write world", execution_context=write_context)
 
         assert gateway.chat_with_tools_call_count == 2
-        assert result.tool_execution is not None
-        assert result.tool_execution.output.result == "write: world"
+        assert len(result.tool_executions) == 1
+        assert result.tool_executions[0].output.result == "write: world"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "written"
 
@@ -788,7 +790,7 @@ class TestClarificationSafety:
         assert result.outcome.kind is AgentOutcomeKind.CLARIFY
         assert result.outcome.message == "Which target?"
         assert fake_svc.execute_call_count == 0
-        assert result.tool_execution is None
+        assert result.tool_executions == ()
 
 
 # ── Prompt-v2 tests ────────────────────────────────────────────────────────────

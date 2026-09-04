@@ -1,18 +1,20 @@
-"""Bounded model-tool-model loop for the Fast Agent (S9-04).
+"""Bounded model-tool-model loop for the Fast Agent (S9-05).
 
 This module owns exactly:
 
 - one-step direct respond/clarify path (one model call, zero tools)
-- single-tool path (model → ToolExecutor → model)
+- single-tool path (model -> ToolExecutor -> model)
+- multi-READ batch path (model -> ToolExecutor x N -> model)
 - terminal AgentTextOutcome parsing from ToolAwareResponse
-- hard bound enforcement (max 2 model calls, max 1 tool execution)
+- hard bound enforcement (max 2 model calls, max 4 tool executions)
+- multi-call safety policy (READ-only batches, WRITE-batch rejection)
+- duplicate non-None call_id rejection
 
 It does NOT own:
 
 - ToolExecutor execution (delegates to AgentToolExecutionService)
 - ToolRegistry lookup (delegates to ToolExecutor)
 - input/output schema validation (delegates to ToolExecutor)
-- multi-tool-call semantics (S9-05)
 - CLI (S9-06)
 - Ollama transport
 - Vault access
@@ -46,9 +48,22 @@ if TYPE_CHECKING:
     )
     from dnd_assistant.application.fast_agent import AgentDecision, FastAgent
     from dnd_assistant.models.gateway import ModelGateway
-    from dnd_assistant.models.types import ToolAwareResponse
-    from dnd_assistant.tools.catalog import ToolRegistrySchema
+    from dnd_assistant.models.types import ToolAwareResponse, ToolCall
+    from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
     from dnd_assistant.tools.types import ExecutionContext
+
+
+# ── Hard bounds ─────────────────────────────────────────────────────────────────
+
+
+MAX_TOOL_CALLS_PER_RUN: int = 4
+"""Maximum number of initial tool calls accepted in one bounded run.
+
+0 calls -> direct terminal outcome.
+1 call  -> READ or WRITE through ToolExecutor.
+2..4 calls -> READ-only sequential batch.
+5+ calls -> rejected before any execution.
+"""
 
 
 # ── Terminal outcome schema ────────────────────────────────────────────────────
@@ -97,15 +112,15 @@ class AgentRunResult:
 
     Attributes:
         initial_decision: The ``AgentDecision`` from the first model call.
-        tool_execution: The ``AgentToolExecutionResult`` if a tool was
-            executed, or ``None`` for the direct path.
+        tool_executions: Tuple of ``AgentToolExecutionResult`` values, one
+            per executed tool call.  Empty for the direct path.
         final_response: The final ``ToolAwareResponse`` (either the initial
             decision response or the second model call response).
         outcome: The validated terminal ``AgentTextOutcome``.
     """
 
     initial_decision: AgentDecision
-    tool_execution: AgentToolExecutionResult | None
+    tool_executions: tuple[AgentToolExecutionResult, ...]
     final_response: ToolAwareResponse
     outcome: AgentTextOutcome
 
@@ -143,21 +158,88 @@ def _parse_agent_outcome(response: ToolAwareResponse) -> AgentTextOutcome:
         ) from exc
 
 
+# ── Multi-call safety helpers ──────────────────────────────────────────────────
+
+
+def _reject_duplicate_call_ids(
+    tool_calls: tuple[ToolCall, ...],
+) -> None:
+    """Reject a batch with duplicate non-None ``call_id`` values.
+
+    Multiple calls with ``call_id=None`` are permitted.
+    Duplicate non-None call IDs are ambiguous and fail closed.
+
+    Raises:
+        ModelError: If any non-None ``call_id`` appears more than once.
+    """
+    seen: set[str] = set()
+    for call in tool_calls:
+        cid = call.call_id
+        if cid is not None:
+            if cid in seen:
+                raise ModelError(
+                    f"Duplicate non-None call_id '{cid}' in initial tool calls. "
+                    "Refusing to execute ambiguous batch."
+                )
+            seen.add(cid)
+
+
+def _reject_multi_call_containing_write(
+    tool_calls: tuple[ToolCall, ...],
+    exposed_tools: tuple[ToolPublicDefinition, ...],
+) -> None:
+    """Reject a multi-call batch that contains any WRITE tool.
+
+    Only READ-only batches of 2..4 calls are permitted.
+    The entire batch is rejected before any execution.
+
+    Raises:
+        ModelError: If any call in the batch resolves to a WRITE
+            ``ToolPublicDefinition`` by exact name match.
+    """
+    from dnd_assistant.tools.types import Permission as P
+
+    for call in tool_calls:
+        matching: ToolPublicDefinition | None = None
+        for t in exposed_tools:
+            if t.name == call.name:
+                matching = t
+                break
+
+        if matching is None:
+            raise ModelError(
+                f"Tool call '{call.name}' has no matching exposed tool definition. "
+                "Cannot classify for multi-call safety."
+            )
+
+        if matching.permission is not P.READ:
+            raise ModelError(
+                "Multi-call batches containing WRITE tools are not allowed. "
+                f"Tool '{call.name}' has permission '{matching.permission.value}'."
+            )
+
+
 # ── AgentLoop ──────────────────────────────────────────────────────────────────
 
 
 class AgentLoop:
     """Bounded model-tool-model orchestration for the Fast Agent.
 
-    The ``run()`` method performs at most two model calls and at most one
-    tool execution:
+    The ``run()`` method performs at most two model calls and at most
+    ``MAX_TOOL_CALLS_PER_RUN`` (4) tool executions:
 
     - Direct path: one model call, zero tools → terminal outcome.
     - Single-tool path: one model call → one tool execution → one model
       call → terminal outcome.
-    - Initial multi-tool response: raises ``ModelError`` before any tool
-      execution (S9-04 fail-closed deferral).
-    - Post-tool tool call: raises ``ModelError`` without additional execution.
+    - Multi-READ batch (2..4 calls): one model call → sequential READ
+      executions → one model call → terminal outcome.
+    - Multi-call containing WRITE: raises ``ModelError`` before any
+      execution.
+    - 5+ initial calls: raises ``ModelError`` before any execution.
+    - Duplicate non-None ``call_id``: raises ``ModelError`` before any
+      execution.
+    - Post-tool tool call: raises ``ModelError`` without additional
+      execution.
     """
 
     def __init__(
@@ -194,13 +276,14 @@ class AgentLoop:
                 exposure filtering and execution.
 
         Returns:
-            An ``AgentRunResult`` with the decision, optional tool
-            execution, final response, and terminal outcome.
+            An ``AgentRunResult`` with the decision, tool execution
+            results, final response, and terminal outcome.
 
         Raises:
-            ModelError: If the initial response has multiple tool calls,
-                the second response has tool calls, or model output is
-                malformed.
+            ModelError: If the initial response has 5+ tool calls,
+                contains WRITE calls in a multi-call batch, has duplicate
+                non-None call_ids, the second response has tool calls,
+                or model output is malformed.
             ValidationError: Propagated from context builder or tool
                 execution.
             NotFoundError: Propagated from tool execution.
@@ -221,55 +304,72 @@ class AgentLoop:
             outcome = _parse_agent_outcome(initial_decision.response)
             return AgentRunResult(
                 initial_decision=initial_decision,
-                tool_execution=None,
+                tool_executions=(),
                 final_response=initial_decision.response,
                 outcome=outcome,
             )
 
-        # 3. S9-04 fail-closed: multiple tool calls → ModelError
-        if len(tool_calls) > 1:
+        # 3. Hard bound: 5+ initial tool calls → ModelError before execution
+        if len(tool_calls) > MAX_TOOL_CALLS_PER_RUN:
             raise ModelError(
-                "S9-04 does not support multiple initial tool calls. "
-                "S9-05 will define multi-call semantics."
+                f"Maximum {MAX_TOOL_CALLS_PER_RUN} initial tool calls allowed, "
+                f"got {len(tool_calls)}"
             )
 
-        # 4. Exactly one tool call → execute
-        tool_execution = self._tool_execution_service.execute(
-            initial_decision,
-            tool_calls[0],
-            execution_context=execution_context,
-        )
+        # 4. Duplicate non-None call_id rejection before any execution
+        _reject_duplicate_call_ids(tool_calls)
 
-        # 5. Build follow-up request with exact ordered history
+        # 5. Multi-call WRITE safety: reject any batch containing a WRITE
+        #    tool before executing any call.
+        if len(tool_calls) > 1:
+            _reject_multi_call_containing_write(
+                tool_calls,
+                initial_decision.exposed_tools,
+            )
+
+        # 6. Execute tool calls sequentially
         from dnd_assistant.models.types import ChatRequest
 
-        followup_request = ChatRequest(
-            messages=(
-                *initial_decision.request.messages,
-                initial_decision.response.message,
-                tool_execution.tool_message,
+        tool_executions: list[AgentToolExecutionResult] = []
+        for tool_call in tool_calls:
+            execution = self._tool_execution_service.execute(
+                initial_decision,
+                tool_call,
+                execution_context=execution_context,
             )
-        )
+            tool_executions.append(execution)
 
-        # 6. Second model call with exact first-turn exposure snapshot
+        # 7. Build follow-up request with exact ordered history.
+        #    Order: SYSTEM, USER, ASSISTANT(tool calls), TOOL(result 0),
+        #    TOOL(result 1), ...
+        followup_messages = [
+            *initial_decision.request.messages,
+            initial_decision.response.message,
+        ]
+        for execution in tool_executions:
+            followup_messages.append(execution.tool_message)
+
+        followup_request = ChatRequest(messages=tuple(followup_messages))
+
+        # 8. Second model call with exact first-turn exposure snapshot
         second_response = self._model_gateway.chat_with_tools(
             followup_request,
             list(initial_decision.exposed_tools),
         )
 
-        # 7. Bound enforcement: second response must have zero tool calls
+        # 9. Bound enforcement: second response must have zero tool calls
         if second_response.message.tool_calls:
             raise ModelError(
-                "S9-04 does not support post-tool tool calls. "
+                "S9-05 does not support post-tool tool calls. "
                 "The model requested another tool after receiving a tool result."
             )
 
-        # 8. Parse terminal outcome from second response
+        # 10. Parse terminal outcome from second response
         outcome = _parse_agent_outcome(second_response)
 
         return AgentRunResult(
             initial_decision=initial_decision,
-            tool_execution=tool_execution,
+            tool_executions=tuple(tool_executions),
             final_response=second_response,
             outcome=outcome,
         )

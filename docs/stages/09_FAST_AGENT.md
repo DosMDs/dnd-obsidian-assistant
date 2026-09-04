@@ -43,7 +43,7 @@
 | S9-02 — One-step FastAgent model decision boundary | DONE | Completed; S9-C03 reconciles documentation only |
 | S9-03 — Validated ToolExecutor execution + tool-result message adaptation | DONE | |
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | DONE | |
-| S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED | |
+| S9-05 — Agent safety/failure hardening + multi-tool-call semantics | DONE | |
 | S9-06 — CLI `dnd ask` + mocked end-to-end integration | NOT STARTED | |
 | S9-07 — Full Stage-9 historical review / completion | NOT STARTED | |
 
@@ -1164,3 +1164,181 @@ Not implemented: `dnd ask` Typer command, Rich rendering, interactive clarificat
 - Tool-execution failure: no second call (1 test)
 
 All 44 tests passing. Full suite 4412 passed, 100 skipped. Ruff clean.
+
+---
+
+## S9-05 — Agent safety/failure hardening + multi-tool-call semantics
+
+**Accepted starting boundary:** `6d04d9fd9e244650d71832bc829c6ee35a534eb3`
+
+### Final MVP multi-tool policy
+
+```text
+0 calls → direct terminal outcome
+1 call → READ or WRITE through ToolExecutor
+2..4 calls → READ-only sequential batch
+5+ calls → reject before execution
+multi-call containing WRITE → reject before execution
+duplicate non-None call_id → reject before execution
+READ batch failure → stop on first failure
+model calls remain bounded to 2
+tool rounds remain bounded to 1
+```
+
+### MAX_TOOL_CALLS_PER_RUN
+
+```python
+MAX_TOOL_CALLS_PER_RUN: int = 4
+```
+
+Hard bounds:
+
+- maximum model calls = 2
+- maximum initial tool calls accepted = 4
+- maximum tool executions = 4
+- maximum model→tool→model rounds = 1
+
+### AgentRunResult contract evolution
+
+The singular `tool_execution: AgentToolExecutionResult | None` field was replaced with:
+
+```python
+tool_executions: tuple[AgentToolExecutionResult, ...]
+```
+
+- Direct respond/clarify → `tool_executions == ()`
+- Single tool → `len(tool_executions) == 1`
+- Multi-READ batch → `len(tool_executions) == number of initial tool calls`
+
+No duplicate singular and plural state is kept.
+
+### Permission classification source
+
+Multi-call batch safety uses `initial_decision.exposed_tools` snapshot.
+Each call is matched by exact tool name against `ToolPublicDefinition.permission`.
+Only `Permission.READ` batches of 2..4 calls are permitted.
+
+### Sequential READ-batch semantics
+
+Calls execute in model order. No parallelism, sorting, deduplication, or
+argument rewriting. Each execution goes through `AgentToolExecutionService`.
+
+### Partial failure policy
+
+If call `i` fails in a READ batch:
+
+- calls `0..i-1` may have completed
+- call `i` raises the original exception
+- calls `i+1..end` are NOT executed
+- no second model call, no retry, no rollback
+
+### Follow-up conversation history
+
+For N successful calls, the follow-up `ChatRequest` has:
+
+```text
+SYSTEM
+USER
+ASSISTANT(tool calls)
+TOOL(result for call 0)
+TOOL(result for call 1)
+...
+TOOL(result for call N-1)
+```
+
+### Duplicate call_id policy
+
+- Duplicate non-None `call_id` → `ModelError` before any execution
+- Multiple calls with `call_id=None` are permitted
+- No call_id rewriting
+
+### WRITE safety integration
+
+- Single WRITE with valid AuditContext → executes exactly once
+- Multi-call containing WRITE → rejected before execution, even with valid WRITE authority
+- No model permission authority: only trusted Python metadata determines safety
+
+### Failure hardening
+
+- Unexpected exceptions from READ execution → propagate unchanged, stop immediately
+- Second ModelGateway call fails → no retry, no execution replay
+- Terminal AgentTextOutcome validation fails → no retry, no execution replay
+
+### Input immutability
+
+No successful or rejected multi-call run mutates:
+
+- initial `AgentDecision`
+- `ToolCall` objects
+- `ToolCall.arguments`
+- initial `exposed_tools` tuple
+- `ToolPublicDefinition` objects
+- `ExecutionContext`
+
+### Import boundary
+
+Fresh `import dnd_assistant.application.agent_loop` does NOT eagerly load:
+
+- `dnd_assistant.models.ollama`
+- `dnd_assistant.storage`
+- `dnd_assistant.retrieval`
+- `dnd_assistant.cli`
+
+### Unchanged contracts
+
+- `agent_v2.py` — unchanged
+- `FastAgent` — unchanged
+- `ModelGateway` — unchanged
+- `ToolExecutor` — unchanged
+- `ToolRegistry` — unchanged
+- `ToolCatalog` — unchanged
+- `ToolPublicDefinition` — unchanged
+- `AgentToolExecutionService` — unchanged
+- `AgentDecision` — unchanged
+- `AgentTextOutcome` — unchanged
+- `AgentOutcomeKind` — unchanged
+- `_parse_agent_outcome` — unchanged
+
+### Test evidence
+
+**`tests/unit/test_agent_loop_multi_tool.py`** (16 tests):
+
+- 2-READ batch success (1 test)
+- 4-READ batch success (1 test)
+- Execution order == model order (1 test)
+- Same READ tool, different arguments (1 test)
+- 5-call rejection (1 test)
+- 20-call batch rejection (1 test)
+- READ+WRITE rejection (1 test)
+- WRITE+READ rejection (1 test)
+- WRITE+WRITE rejection (1 test)
+- READ+READ+WRITE rejection (1 test)
+- Duplicate non-None call_id rejection (1 test)
+- Multiple None call_id permitted (1 test)
+- Inconsistent exposed-snapshot failure (1 test)
+- Single READ call unchanged (1 test)
+- Single WRITE+audit call unchanged (1 test)
+- Direct clarification unchanged (1 test)
+
+**`tests/unit/test_agent_loop_failure_policy.py`** (7 tests):
+
+- Stop-on-first-failure propagation (1 test)
+- Unexpected exception propagation (1 test)
+- Second-model failure, no retry (1 test)
+- Terminal validation failure, no retry (1 test)
+- Post-batch tool call rejected (1 test)
+- Initial decision unchanged after batch (1 test)
+- ToolCall objects unchanged after batch (1 test)
+
+### Verification evidence
+
+- 83 AgentLoop tests passing (36 + 8 + 16 + 7 + 16 boundary/terminal)
+- 343 regression tests passing (FastAgent, ToolExecutor, S9-03, Ollama, ModelGateway)
+- 456 contract tests passing (boundaries, maintainability, harness)
+- Full suite: **4455 passed, 100 skipped, 0 failed, 0 errors**
+- Ruff check: clean
+- Ruff format: clean
+- `git diff --check`: clean
+- No protected-harness changes
+- No dependency changes
+- No real Ollama/model used

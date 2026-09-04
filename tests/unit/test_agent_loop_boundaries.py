@@ -213,46 +213,13 @@ def _make_two_call_gateway(
 
 
 class TestInitialMultiCall:
-    """Initial 2+ tool calls -> ModelError, zero ToolExecutor, no second call."""
+    """Initial multi-call policy (S9-05): 5+ rejected, 2..4 READ-only allowed."""
 
-    def test_two_initial_tool_calls_raises_model_error(self) -> None:
+    def test_five_initial_tool_calls_raises_model_error(self) -> None:
+        """5+ initial tool calls -> ModelError, zero execution, one model call."""
         ctx = _make_context_with()
         builder = _FakeAgentContextBuilder(ctx)
-        tool_call_a = _make_tool_call("read_tool", {"x": "a"})
-        tool_call_b = _make_tool_call("read_tool", {"x": "b"})
-        gateway = _FakeModelGateway(
-            response=_make_tool_response(
-                content="Calling tools...",
-                tool_calls=[tool_call_a, tool_call_b],
-            )
-        )
-        read_public = ToolPublicDefinition(
-            name="read_tool",
-            description="Tool read_tool",
-            input_schema={"type": "object"},
-            output_schema={"type": "object"},
-            permission=Permission.READ,
-            side_effects=[],
-            allowed_session_modes=[SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION],
-        )
-        catalog = ToolRegistrySchema(tools=[read_public])
-        fake_svc = _FakeToolExecutionService()
-        loop = AgentLoop(
-            context_builder=builder,
-            model_gateway=gateway,
-            tool_catalog=catalog,
-            tool_execution_service=fake_svc,
-        )
-        with pytest.raises(ModelError, match="does not support multiple initial tool calls"):
-            loop.run("test", execution_context=_make_context())
-
-        assert fake_svc.execute_call_count == 0
-        assert gateway.chat_with_tools_call_count == 1
-
-    def test_three_initial_tool_calls_raises_model_error(self) -> None:
-        ctx = _make_context_with()
-        builder = _FakeAgentContextBuilder(ctx)
-        calls = [_make_tool_call("read_tool", {"x": str(i)}) for i in range(3)]
+        calls = [_make_tool_call("read_tool", {"x": str(i)}) for i in range(5)]
         gateway = _FakeModelGateway(
             response=_make_tool_response(
                 content="Calling tools...",
@@ -276,7 +243,7 @@ class TestInitialMultiCall:
             tool_catalog=catalog,
             tool_execution_service=fake_svc,
         )
-        with pytest.raises(ModelError, match="does not support multiple initial tool calls"):
+        with pytest.raises(ModelError, match="Maximum 4 initial tool calls"):
             loop.run("test", execution_context=_make_context())
 
         assert fake_svc.execute_call_count == 0
