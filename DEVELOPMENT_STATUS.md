@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-04 (S9-02 completed)
+**Last updated:** 2026-09-04 (S9-03 completed)
 **Current milestone:** `v0.1-dev — Vault Core`
 **Roadmap position:** Stage 9 in progress
 **Active stage:** Stage 9 — Fast Agent
@@ -66,7 +66,7 @@ Detailed history: [`docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md`](docs/stages/08_
 | S9-00 — Deterministic Fast-Agent tool exposure policy + Stage-9 kickoff | DONE |
 | S9-01 — Compact Context Builder over currently accepted data sources | DONE |
 | S9-02 — One-step FastAgent model decision boundary | DONE |
-| S9-03 — Validated ToolExecutor execution + tool-result message adaptation | NOT STARTED |
+| S9-03 — Validated ToolExecutor execution + tool-result message adaptation | DONE |
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | NOT STARTED |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED |
 | S9-06 — CLI `dnd ask` + mocked end-to-end integration | NOT STARTED |

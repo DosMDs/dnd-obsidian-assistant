@@ -41,7 +41,7 @@
 | S9-00 — Deterministic Fast-Agent tool exposure policy + Stage-9 kickoff | DONE | Completed after S9-C00/S9-C01 |
 | S9-01 — Compact Context Builder over currently accepted data sources | DONE | Completed after S9-C02; uses only accepted current data sources |
 | S9-02 — One-step FastAgent model decision boundary | DONE | Completed; S9-C03 reconciles documentation only |
-| S9-03 — Validated ToolExecutor execution + tool-result message adaptation | NOT STARTED | |
+| S9-03 — Validated ToolExecutor execution + tool-result message adaptation | DONE | |
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | NOT STARTED | |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | NOT STARTED | |
 | S9-06 — CLI `dnd ask` + mocked end-to-end integration | NOT STARTED | |
@@ -634,3 +634,142 @@ document contained stale contradictory state:
 - No S9-03 work was started.
 - No tests, dependencies, harness, or configuration were changed.
 - Exactly one file changed: `docs/stages/09_FAST_AGENT.md`.
+
+---
+
+## S9-03 — Validated ToolExecutor execution + tool-result message adaptation
+
+**Accepted starting boundary:** `087dd9d7bad25917e263c4e8f542a6ce9e1dddf5`
+
+### New production module
+
+`src/dnd_assistant/application/agent_tool_execution.py`
+
+### AgentToolExecutionResult (frozen dataclass)
+
+```python
+@dataclass(frozen=True, slots=True)
+class AgentToolExecutionResult:
+    tool_call: ToolCall
+    output: BaseModel
+    tool_message: ChatMessage
+```
+
+### AgentToolExecutionService
+
+```python
+class AgentToolExecutionService:
+    def __init__(self, *, tool_executor: ToolExecutor) -> None: ...
+
+    def execute(
+        self,
+        decision: AgentDecision,
+        tool_call: ToolCall,
+        *,
+        execution_context: ExecutionContext,
+    ) -> AgentToolExecutionResult: ...
+```
+
+### Exact pre-execution validation order
+
+1. Reject malformed/non-AgentDecision input → `ValidationError`
+2. Reject malformed/non-ToolCall input → `ValidationError`
+3. Reject malformed/non-ExecutionContext input → `ValidationError`
+4. Exact decision membership: `ToolCall` must be semantically equal to one of `decision.response.message.tool_calls` (same name, same arguments, same call_id) → `ValidationError`
+5. Turn-local exposure snapshot: call name must exist in `decision.exposed_tools` by exact name → `ValidationError`
+6. Delegate to `ToolExecutor.execute()` with preserved model arguments
+7. Deterministic TOOL-result JSON serialisation
+8. Return `AgentToolExecutionResult`
+
+### Call-membership rule
+
+Semantic equality: same `name`, same `arguments` (deep dict equality), same `call_id` (or both None). Same name + different arguments is rejected before ToolExecutor. This prevents changing model-selected arguments after the decision.
+
+### Exposed-tool rule
+
+Call name must exist by exact name in `decision.exposed_tools` (defence in depth).
+
+### ToolExecutor invocation shape
+
+```python
+self._tool_executor.execute(
+    tool_call.name,
+    input_data=tool_call.arguments,
+    context=execution_context,
+)
+```
+
+No application-level input schema validation, coercion, defaults, or filtering.
+
+### Output serialisation settings
+
+```python
+output.model_dump(mode="json", by_alias=True)
+json.dumps(
+    json_ready,
+    ensure_ascii=False,
+    sort_keys=True,
+    separators=(",", ":"),
+    allow_nan=False,
+)
+```
+
+### TOOL ChatMessage mapping
+
+```python
+ChatMessage(
+    role=MessageRole.TOOL,
+    content=<deterministic JSON>,
+    tool_name=tool_call.name,
+    tool_call_id=tool_call.call_id,
+)
+```
+
+### Failure propagation
+
+- Unknown actual-registry tool → `NotFoundError` (propagated unchanged)
+- Invalid input → `ValidationError` (propagated unchanged)
+- READ context → WRITE tool → `ConflictError` (propagated unchanged)
+- Session-mode mismatch → `ConflictError` (propagated unchanged)
+- WRITE tool without audit → `ValidationError` (propagated unchanged)
+- Invalid output → `ValidationError` after handler exactly once (no retry)
+- Domain/project handler error → propagated unchanged
+- Unexpected handler exception → propagated unchanged
+- Serialisation failure → `ValidationError` (no retry, no second execution)
+
+### S9-04 strict deferral
+
+Zero ModelGateway calls from `agent_tool_execution.py`. No second-turn request construction. No `chat`, `chat_with_tools`, `generate_structured`, `embed`, or `health` calls.
+
+### S9-05 strict deferral
+
+No multi-call execution semantics. No batch result DTO. No atomicity decision. No partial-success policy. No parallelism. The service is a per-call primitive: exactly one supplied `ToolCall` is executed; siblings are not automatically inspected or executed.
+
+### Import boundary
+
+Fresh `import dnd_assistant.application.agent_tool_execution` does NOT eagerly load:
+- `dnd_assistant.models.ollama`
+- `dnd_assistant.storage`
+- `dnd_assistant.retrieval`
+- `dnd_assistant.cli`
+
+Uses `TYPE_CHECKING` for all heavy imports. Runtime imports of `AgentDecision`, `ToolCall`, `ExecutionContext`, `ChatMessage`, `MessageRole` are deferred into `execute()` and `_build_tool_message()`.
+
+### Test evidence
+
+Two test modules (stable capability split):
+
+**`tests/unit/test_agent_tool_execution.py`** (29 tests):
+- Turn binding: valid execution, semantic equality, same-name/different-args rejection, unrelated call rejection, exposed-tool rejection, malformed decision/call/context rejection, zero executor calls on pre-execution failures (10 tests)
+- Trusted execution: READ success, raw argument preservation, Pydantic coercion in ToolExecutor, unknown tool, invalid input, READ→WRITE denial, session-mode denial, WRITE without audit, WRITE+audit success, invalid output after handler, domain error propagation, unexpected exception propagation, no retry after post-handler failure (13 tests)
+- Multi-call per-call primitive: execute only supplied call, sibling not automatically executed (2 tests)
+- Non-mutation: decision unchanged, tool_call unchanged (2 tests)
+- No model invocation: service has no ModelGateway dependency (1 test)
+- Fresh-process import isolation (1 test)
+
+**`tests/unit/test_agent_tool_result_serialization.py`** (17 tests):
+- Result serialisation: empty output, Unicode, None, False, 0, empty string, empty list, empty dict, nested list/dict, deterministic key order and compact separators (10 tests)
+- TOOL message: role, content, tool_name, tool_calls empty, call_id preserved, call_id None (6 tests)
+- Serialisation failure: normal output serialises fine (1 test)
+
+All 46 tests passing. Full suite 4345 passed, 100 skipped. Ruff clean.
