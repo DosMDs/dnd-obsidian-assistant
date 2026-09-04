@@ -5,14 +5,21 @@ services, tool registry, executor, agent loop), and a fake ``ModelGateway``.
 
 No live Ollama, no network, no GPU, no model download.
 
-Typer 0.27.1 regression
-───────────────────────
-Typer 0.27.1 has a confirmed regression where ``CliRunner`` does not handle
-positional arguments in named subcommands — the positional value is treated
-as an unexpected extra argument.  Integration tests that require positional
-argument parsing invoke ``_ask_command`` directly through the
-``_invoke_ask_direct`` helper.  Option-only tests (``--help``, option
-validation) use ``CliRunner`` with the real ``dnd`` app.
+Parser-backed E2E
+─────────────────
+The real ``dnd_assistant.cli.main:app`` has an ``@app.callback()`` registered,
+which causes ``typer.main.get_command()`` to produce a ``TyperGroup``.  In
+this configuration, ``typer.testing.CliRunner`` correctly handles positional
+arguments in named subcommands.  All E2E integration scenarios use
+``CliRunner.invoke(app, ...)`` with ``unittest.mock.patch`` on
+``_build_model_provider`` to inject a fake ``ModelGateway``.
+
+Direct-call tests
+─────────────────
+A minimal Typer app *without* a callback reproduces the Typer 0.27.1
+regression where ``CliRunner`` rejects positional args as unexpected extra
+arguments.  The ``_invoke_ask_direct`` helper remains for narrow presentation-
+layer tests that do not need parser verification.
 """
 
 from __future__ import annotations
@@ -444,11 +451,12 @@ class TestAskProfileConfigFailures:
 
 
 class TestAskCliRunnerIntegration:
-    """Integration tests using the real Typer CliRunner for option-only paths.
+    """Integration tests using the real Typer CliRunner for option paths.
 
     These tests verify that the real ``dnd`` app correctly routes option
-    validation through Typer's parser.  Positional argument tests use
-    ``_invoke_ask_direct`` due to the Typer 0.27.1 regression.
+    validation through Typer's parser.  The real app has an
+    ``@app.callback()`` registered, so ``CliRunner`` handles positional
+    arguments correctly (unlike a minimal Typer app without a callback).
     """
 
     def test_ask_help_via_cli_runner(self, tmp_path: Path) -> None:
@@ -519,3 +527,351 @@ class TestAskCliRunnerIntegration:
         )
         assert result.exit_code == 2
         assert "Missing option" in result.stderr
+
+
+# ── Parser-backed mocked E2E tests ─────────────────────────────────────────
+
+
+class TestAskCliRunnerParserBacked:
+    """Parser-backed mocked E2E integration tests.
+
+    These tests use ``CliRunner.invoke(dnd_app, ...)`` with
+    ``unittest.mock.patch`` on ``_build_model_provider`` to inject a fake
+    ``ModelGateway``.  Every scenario exercises the real Typer/Click parser:
+    positional QUERY, ``--vault``, ``--config``, ``--profile``, and
+    ``--allow-write`` are all parsed by the generated command, then routed
+    through the real ``_ask_command``, ``compose_ask_runtime``, repositories,
+    services, ``ToolRegistry``, ``ToolExecutor``, and ``AgentLoop``.
+    """
+
+    def test_respond_through_real_parser(self, tmp_path: Path) -> None:
+        """RESPOND outcome: exit 0, correct stdout, 1 fake model call."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = _write_test_config(tmp_path)
+        fake_gateway = FakeModelGateway()
+        fake_gateway.add_response(_respond("Ответ через реальный парсер."))
+
+        runner = CliRunner()
+        with patch(
+            "dnd_assistant.cli.agent_runtime._build_model_provider",
+            side_effect=_fake_provider_factory(fake_gateway),
+        ):
+            result = runner.invoke(
+                dnd_app,
+                [
+                    "ask",
+                    "Кто такой Варос?",
+                    "--vault",
+                    str(vault_root),
+                    "--config",
+                    str(config_path),
+                    "--profile",
+                    "test-agent",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "Ответ через реальный парсер." in result.stdout
+        assert fake_gateway.call_count == 1
+
+    def test_clarify_through_real_parser(self, tmp_path: Path) -> None:
+        """CLARIFY outcome: exit 0, correct stdout, 1 fake model call."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = _write_test_config(tmp_path)
+        fake_gateway = FakeModelGateway()
+        fake_gateway.add_response(_clarify("Какого именно Вароса?"))
+
+        runner = CliRunner()
+        with patch(
+            "dnd_assistant.cli.agent_runtime._build_model_provider",
+            side_effect=_fake_provider_factory(fake_gateway),
+        ):
+            result = runner.invoke(
+                dnd_app,
+                [
+                    "ask",
+                    "Обнови Вароса",
+                    "--vault",
+                    str(vault_root),
+                    "--config",
+                    str(config_path),
+                    "--profile",
+                    "test-agent",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "Какого именно Вароса?" in result.stdout
+        assert fake_gateway.call_count == 1
+
+    def test_read_tool_through_real_parser(self, tmp_path: Path) -> None:
+        """READ tool executes, final respond printed, 2 fake model calls."""
+        vault_root = _build_minimal_vault(tmp_path)
+        _start_test_session(vault_root)
+        config_path = _write_test_config(tmp_path)
+        fake_gateway = FakeModelGateway()
+
+        fake_gateway.add_response(_tool_call_response("get_active_session", {}))
+        fake_gateway.add_response(_respond("Сессия активна."))
+
+        runner = CliRunner()
+        with patch(
+            "dnd_assistant.cli.agent_runtime._build_model_provider",
+            side_effect=_fake_provider_factory(fake_gateway),
+        ):
+            result = runner.invoke(
+                dnd_app,
+                [
+                    "ask",
+                    "Какая сессия активна?",
+                    "--vault",
+                    str(vault_root),
+                    "--config",
+                    str(config_path),
+                    "--profile",
+                    "test-agent",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "Сессия активна." in result.stdout
+        assert fake_gateway.call_count == 2
+
+    def test_read_only_blocks_write_through_real_parser(self, tmp_path: Path) -> None:
+        """Without --allow-write, WRITE tool raises error -> exit 1."""
+        vault_root = _build_minimal_vault(tmp_path)
+        _start_test_session(vault_root)
+        config_path = _write_test_config(tmp_path)
+        fake_gateway = FakeModelGateway()
+
+        fake_gateway.add_response(_tool_call_response("record_note", {"text": "Test note"}))
+
+        runner = CliRunner()
+        with patch(
+            "dnd_assistant.cli.agent_runtime._build_model_provider",
+            side_effect=_fake_provider_factory(fake_gateway),
+        ):
+            result = runner.invoke(
+                dnd_app,
+                [
+                    "ask",
+                    "Запиши заметку",
+                    "--vault",
+                    str(vault_root),
+                    "--config",
+                    str(config_path),
+                    "--profile",
+                    "test-agent",
+                ],
+            )
+
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr
+        # Zero mutations
+        audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        audit_text = audit_log_path.read_text(encoding="utf-8")
+        assert "model_tool" not in audit_text
+
+    def test_write_tool_through_real_parser(self, tmp_path: Path) -> None:
+        """With --allow-write, WRITE tool executes, audit persisted."""
+        vault_root = _build_minimal_vault(tmp_path)
+        session_id = _start_test_session(vault_root)
+        config_path = _write_test_config(tmp_path)
+        fake_gateway = FakeModelGateway()
+
+        fake_gateway.add_response(
+            _tool_call_response("record_note", {"text": "Варос упомянул древний артефакт."})
+        )
+        fake_gateway.add_response(_respond("Заметка сохранена."))
+
+        runner = CliRunner()
+        with patch(
+            "dnd_assistant.cli.agent_runtime._build_model_provider",
+            side_effect=_fake_provider_factory(fake_gateway),
+        ):
+            result = runner.invoke(
+                dnd_app,
+                [
+                    "ask",
+                    "Запиши: Варос упомянул древний артефакт.",
+                    "--vault",
+                    str(vault_root),
+                    "--config",
+                    str(config_path),
+                    "--profile",
+                    "test-agent",
+                    "--allow-write",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "Заметка сохранена." in result.stdout
+        assert fake_gateway.call_count == 2
+
+        # Semantic audit evidence
+        audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        assert audit_log_path.exists()
+
+        audit_service = AuditService(str(audit_log_path))
+        records = audit_service.read_all()
+        tool_records = [r for r in records if r.source == "model_tool"]
+        assert len(tool_records) >= 1
+
+        last_tool = tool_records[-1]
+        assert last_tool.source == "model_tool"
+        assert last_tool.model_profile == "test-agent"
+        assert last_tool.prompt_version == PROMPT_VERSION
+        assert last_tool.session == session_id
+
+        # Verify the note was persisted exactly once
+        event_repo = ObsidianSessionEventRepository(vault_root, audit_service)
+        events = event_repo.list_events(session_id)
+        note_events = [e for e in events if e.type == "note"]
+        assert len(note_events) >= 1
+        assert note_events[-1].extra_fields.get("text") == "Варос упомянул древний артефакт."
+
+
+class TestAskCliRunnerProfileFailures:
+    """Profile/config failure scenarios through the real parser."""
+
+    def test_missing_config_file_through_parser(self, tmp_path: Path) -> None:
+        """A nonexistent --config path is rejected by Typer parser, exit 2."""
+        vault_root = _build_minimal_vault(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "Тест",
+                "--vault",
+                str(vault_root),
+                "--config",
+                str(tmp_path / "nonexistent.toml"),
+                "--profile",
+                "test-agent",
+            ],
+        )
+
+        assert result.exit_code == 2
+
+    def test_wrong_role_profile_through_parser(self, tmp_path: Path) -> None:
+        """A non-AGENT profile exits with code 1 and Ошибка on stderr."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            "[profiles.test-agent]\n"
+            "provider='ollama'\n"
+            "model='test'\n"
+            "base_url='http://localhost:11434'\n"
+            "role='summarizer'\n",
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "Тест",
+                "--vault",
+                str(vault_root),
+                "--config",
+                str(config_path),
+                "--profile",
+                "test-agent",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr
+
+    def test_missing_profile_name_through_parser(self, tmp_path: Path) -> None:
+        """A nonexistent profile name exits with code 1 and Ошибка on stderr."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = _write_test_config(tmp_path)
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "Тест",
+                "--vault",
+                str(vault_root),
+                "--config",
+                str(config_path),
+                "--profile",
+                "nonexistent",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr
+
+    def test_unsupported_provider_through_parser(self, tmp_path: Path) -> None:
+        """An unsupported provider exits with code 1."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            "[profiles.test-agent]\n"
+            "provider='openai'\n"
+            "model='gpt-4'\n"
+            "base_url='https://api.openai.com/v1'\n"
+            "role='agent'\n",
+            encoding="utf-8",
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            dnd_app,
+            [
+                "ask",
+                "Тест",
+                "--vault",
+                str(vault_root),
+                "--config",
+                str(config_path),
+                "--profile",
+                "test-agent",
+            ],
+        )
+
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr
+
+
+class TestAskCliRunnerProviderCleanup:
+    """Provider cleanup regressions through the real parser."""
+
+    def test_composition_storage_error_close_once(self, tmp_path: Path) -> None:
+        """StorageError during composition -> provider close called once."""
+        vault_root = _build_minimal_vault(tmp_path)
+        config_path = _write_test_config(tmp_path)
+
+        from dnd_assistant.errors import StorageError
+
+        def _broken_audit_init(self_arg, *args, **kwargs):
+            raise StorageError("Audit path invalid")
+
+        runner = CliRunner()
+        with patch(
+            "dnd_assistant.cli.agent_runtime.AuditService.__init__",
+            _broken_audit_init,
+        ):
+            result = runner.invoke(
+                dnd_app,
+                [
+                    "ask",
+                    "Тест",
+                    "--vault",
+                    str(vault_root),
+                    "--config",
+                    str(config_path),
+                    "--profile",
+                    "test-agent",
+                ],
+            )
+
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr

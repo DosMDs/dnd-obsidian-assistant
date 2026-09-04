@@ -6,6 +6,7 @@ and that the Typer application can be imported and invoked.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -35,12 +36,20 @@ def test_cli_help_via_runner() -> None:
 
 
 def test_cli_entrypoint_help_exits_ok() -> None:
-    """``uv run dnd --help`` should exit with code 0 and show Russian UI."""
+    """``uv run dnd --help`` should exit with code 0 and show Russian UI.
+
+    Uses ``PYTHONIOENCODING=utf-8`` to ensure Russian text is correctly
+    captured on Windows regardless of the active console code page.
+    """
     project_root = Path(__file__).resolve().parents[2]
+    env = os.environ.copy()
+    env["PYTHONIOENCODING"] = "utf-8"
     result = subprocess.run(
         ["uv", "run", "dnd", "--help"],
         capture_output=True,
         text=True,
+        encoding="utf-8",
+        env=env,
         cwd=str(project_root),
     )
     assert result.returncode == 0, f"stdout:\n{result.stdout}\nstderr:\n{result.stderr}"
