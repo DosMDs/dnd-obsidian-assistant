@@ -56,6 +56,7 @@
 | S9-C02 — Complete S9-01 structural coverage and verification evidence | DONE |
 | S9-C03 — Reconcile Stage-9 task-map documentation after S9-02 | DONE |
 | S9-C04 — Harden exact ToolCall binding and TOOL-result serialization evidence | DONE |
+| S9-C05 — Correct terminal JSON validation and remove private FastAgent coupling | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -858,6 +859,84 @@ with handler count and cause preservation.
 - `src/dnd_assistant/application/agent_tool_execution.py`
 - `tests/unit/test_agent_tool_execution_boundaries.py`
 - `tests/unit/test_agent_tool_result_serialization.py`
+- `docs/stages/09_FAST_AGENT.md`
+
+---
+
+## S9-C05 — Correct terminal JSON validation and remove private FastAgent coupling
+
+### Defect A — terminal output does not use Pydantic JSON validation and broad-catches Exception
+
+`_parse_agent_outcome()` performed `json.loads(content)` followed by
+`AgentTextOutcome.model_validate(parsed)`, wrapping Pydantic validation in
+`except Exception`. This violated the S9-04 requirement for narrow
+Pydantic-only exception handling.
+
+**Fix:** Replaced the two-step parse+validate pipeline with a single
+`AgentTextOutcome.model_validate_json(content)` call. Only
+`PydanticValidationError` is caught and converted to `ModelError`.
+Unexpected programming exceptions (e.g. `RuntimeError`) propagate
+unchanged. No `json.loads`, no `isinstance(parsed, dict)` manual check,
+no `except Exception`.
+
+### Defect B — AgentLoop reaches into private FastAgent state
+
+The second model call used `self._fast_agent._model_gateway.chat_with_tools(...)`,
+accessing a private implementation detail of `FastAgent`.
+
+**Fix:** `AgentLoop.__init__()` now stores the supplied `model_gateway` as
+`self._model_gateway`. The second model call uses
+`self._model_gateway.chat_with_tools(...)` instead. Both turns still
+receive the exact same `ModelGateway` instance — no cloning, wrapping,
+or second provider resolution.
+
+### Regression coverage (17 new tests)
+
+**Terminal validation (15 tests):**
+
+- Valid respond JSON → `AgentTextOutcome.RESPOND`
+- Valid clarify JSON → `AgentTextOutcome.CLARIFY`
+- Unicode preserved
+- Malformed JSON → `ModelError`, `__cause__` is `PydanticValidationError`
+- Schema-invalid JSON (unknown kind) → same cause evidence
+- Empty JSON object → same cause evidence
+- Missing kind → same cause evidence
+- Missing message → same cause evidence
+- Extra field → same cause evidence
+- Empty message → same cause evidence
+- Whitespace-only message → same cause evidence
+- JSON array → same cause evidence
+- JSON null → same cause evidence
+- Wrong field types → same cause evidence
+- Unexpected `RuntimeError` from validation entry point → propagates
+  unchanged, NOT converted to `ModelError`
+
+**Private-coupling regression (1 test):**
+
+- `AgentLoop` works when `_fast_agent` is replaced with a test double
+  that has `decide()` but intentionally no `_model_gateway` attribute
+
+**Same-gateway identity (1 test):**
+
+- Both model turns use the exact same `ModelGateway` instance
+
+### Scope
+
+- No S9-05 work (no multi-tool semantics, no retry, no tool budget > 1)
+- No real Ollama/model work
+- No ToolExecutor changes
+- No ModelGateway contract changes
+- No prompt changes
+- No protected-harness changes
+- No dependency/lockfile changes
+- No `DEVELOPMENT_STATUS.md` changes
+- `test_agent_loop.py` (969 lines) unchanged
+- `test_agent_loop_boundaries.py` grew from 527 to 738 physical lines
+
+### Changed files
+
+- `src/dnd_assistant/application/agent_loop.py`
+- `tests/unit/test_agent_loop_boundaries.py`
 - `docs/stages/09_FAST_AGENT.md`
 
 ---

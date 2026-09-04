@@ -525,3 +525,334 @@ class TestToolExecutionFailure:
 
         assert failing_svc.execute_call_count == 1
         assert gateway.chat_with_tools_call_count == 1
+
+
+class TestTerminalValidation:
+    """Terminal JSON parsing uses AgentTextOutcome.model_validate_json() (S9-C05).
+
+    Only PydanticValidationError is converted to ModelError.
+    Unexpected programming exceptions propagate unchanged.
+    """
+
+    def test_valid_respond_json(self) -> None:
+        """Valid respond JSON -> AgentTextOutcome.RESPOND."""
+        from dnd_assistant.application.agent_loop import (
+            AgentOutcomeKind,
+            _parse_agent_outcome,
+        )
+
+        response = _make_tool_response(content='{"kind":"respond","message":"Done"}')
+        outcome = _parse_agent_outcome(response)
+        assert outcome.kind is AgentOutcomeKind.RESPOND
+        assert outcome.message == "Done"
+
+    def test_valid_clarify_json(self) -> None:
+        """Valid clarify JSON -> AgentTextOutcome.CLARIFY."""
+        from dnd_assistant.application.agent_loop import (
+            AgentOutcomeKind,
+            _parse_agent_outcome,
+        )
+
+        response = _make_tool_response(
+            content='{"kind":"clarify","message":"Which Varos do you mean?"}'
+        )
+        outcome = _parse_agent_outcome(response)
+        assert outcome.kind is AgentOutcomeKind.CLARIFY
+        assert outcome.message == "Which Varos do you mean?"
+
+    def test_unicode_message(self) -> None:
+        """Unicode message is preserved."""
+        from dnd_assistant.application.agent_loop import (
+            AgentOutcomeKind,
+            _parse_agent_outcome,
+        )
+
+        response = _make_tool_response(
+            content='{"kind":"respond","message":"\\u0413\\u044d\\u043d\\u0434\\u0430\\u043b\\u044c\\u0444"}'
+        )
+        outcome = _parse_agent_outcome(response)
+        assert outcome.kind is AgentOutcomeKind.RESPOND
+        assert outcome.message == "\u0413\u044d\u043d\u0434\u0430\u043b\u044c\u0444"
+
+    def test_malformed_json_raises_model_error(self) -> None:
+        """Malformed JSON -> ModelError with PydanticValidationError as cause."""
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content="not valid json at all")
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_schema_invalid_json_raises_model_error(self) -> None:
+        """Schema-invalid JSON -> ModelError with PydanticValidationError as cause."""
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"kind":"unknown","message":"x"}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_empty_json_object_raises_model_error(self) -> None:
+        """Empty JSON object -> ModelError with PydanticValidationError as cause."""
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content="{}")
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_missing_kind_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"message":"x"}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_missing_message_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"kind":"respond"}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_extra_field_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"kind":"respond","message":"x","extra":1}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_empty_message_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"kind":"respond","message":""}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_whitespace_only_message_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"kind":"respond","message":"   "}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_json_array_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content="[1, 2, 3]")
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_json_null_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content="null")
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_wrong_field_types_raises_model_error(self) -> None:
+        from pydantic import ValidationError as PydanticValidationError
+
+        from dnd_assistant.application.agent_loop import _parse_agent_outcome
+        from dnd_assistant.errors import ModelError
+
+        response = _make_tool_response(content='{"kind":"respond","message":42}')
+        with pytest.raises(ModelError) as exc_info:
+            _parse_agent_outcome(response)
+        assert isinstance(exc_info.value.__cause__, PydanticValidationError)
+
+    def test_unexpected_runtime_error_propagates(self) -> None:
+        """Unexpected RuntimeError from validation entry point propagates unchanged."""
+        from dnd_assistant.application.agent_loop import (
+            AgentTextOutcome,
+            _parse_agent_outcome,
+        )
+
+        response = _make_tool_response(content='{"kind":"respond","message":"ok"}')
+
+        original_validate_json = AgentTextOutcome.model_validate_json
+
+        def _broken_validate_json(content: str) -> object:
+            raise RuntimeError("programming defect")
+
+        AgentTextOutcome.model_validate_json = _broken_validate_json  # type: ignore[method-assign]
+        try:
+            with pytest.raises(RuntimeError, match="programming defect"):
+                _parse_agent_outcome(response)
+        finally:
+            AgentTextOutcome.model_validate_json = original_validate_json
+
+
+class TestPrivateCoupling:
+    """AgentLoop does not require FastAgent._model_gateway (S9-C05)."""
+
+    def test_fast_agent_without_private_gateway_succeeds(self) -> None:
+        """FastAgent-like double with decide() but no _model_gateway works."""
+        from dataclasses import dataclass
+
+        from dnd_assistant.application.agent_loop import AgentLoop
+
+        ctx = _make_context_with()
+        builder = _FakeAgentContextBuilder(ctx)
+
+        # A minimal fake FastAgent with decide() but NO _model_gateway
+        @dataclass
+        class _FakeFastAgent:
+            _call_count: int = 0
+
+            def decide(
+                self,
+                user_input: str,
+                *,
+                execution_context: object,
+            ) -> object:
+                self._call_count += 1
+                tool_call = _make_tool_call("read_tool", {"value": "hello"})
+                return _FakeDecision(
+                    response=_make_tool_response(
+                        content="Looking up...",
+                        tool_calls=[tool_call],
+                    ),
+                    exposed_tools=(),
+                    request=_make_fake_request(),
+                )
+
+        # Gateway that returns a valid second response
+        gateway = _FakeModelGateway(
+            response=_make_tool_response(content='{"kind":"respond","message":"result"}')
+        )
+
+        catalog = ToolRegistrySchema(tools=[])
+        fake_svc = _FakeToolExecutionService(result=ResultOutput(result="ok"))
+
+        loop = AgentLoop(
+            context_builder=builder,
+            model_gateway=gateway,
+            tool_catalog=catalog,
+            tool_execution_service=fake_svc,
+        )
+        # Replace _fast_agent with the minimal fake
+        fake_agent = _FakeFastAgent()
+        loop._fast_agent = fake_agent  # type: ignore[assignment]
+
+        result = loop.run("test", execution_context=_make_context())
+
+        assert fake_agent._call_count == 1
+        assert fake_svc.execute_call_count == 1
+        assert gateway.chat_with_tools_call_count == 1
+        assert result.outcome.message == "result"
+        # Confirm _FakeFastAgent has no _model_gateway
+        assert not hasattr(fake_agent, "_model_gateway")
+
+
+@dataclass(frozen=True)
+class _FakeDecision:
+    """Minimal AgentDecision-like object for private-coupling test."""
+
+    response: Any
+    exposed_tools: Any
+    request: Any
+
+
+def _make_fake_request() -> Any:
+    """Build a minimal ChatRequest-like object for the fake decision."""
+    from dnd_assistant.models.types import ChatMessage as CM
+    from dnd_assistant.models.types import ChatRequest as CR
+    from dnd_assistant.models.types import MessageRole as MR
+
+    return CR(
+        messages=(
+            CM(role=MR.SYSTEM, content="system"),
+            CM(role=MR.USER, content="user"),
+        )
+    )
+
+
+class TestSameGatewayIdentity:
+    """Both model turns use the exact same ModelGateway instance (S9-C05)."""
+
+    def test_same_gateway_instance_for_both_turns(self) -> None:
+        """Both model calls receive the same gateway instance."""
+        from dnd_assistant.application.agent_loop import AgentLoop
+
+        ctx = _make_context_with()
+        builder = _FakeAgentContextBuilder(ctx)
+
+        tool_call = _make_tool_call("read_tool", {"value": "hello"})
+        first_response = _make_tool_response(
+            content="Looking up...",
+            tool_calls=[tool_call],
+        )
+        second_response = _make_tool_response(content='{"kind":"respond","message":"found"}')
+
+        gateway = _FakeModelGateway(first_response)
+        gateway.chat_with_tools = _make_two_call_gateway(gateway, first_response, second_response)
+
+        read_public = ToolPublicDefinition(
+            name="read_tool",
+            description="Tool read_tool",
+            input_schema={"type": "object"},
+            output_schema={"type": "object"},
+            permission=Permission.READ,
+            side_effects=[],
+            allowed_session_modes=[
+                SessionMode.NO_ACTIVE_SESSION,
+                SessionMode.ACTIVE_SESSION,
+            ],
+        )
+        catalog = ToolRegistrySchema(tools=[read_public])
+        fake_svc = _FakeToolExecutionService(result=ResultOutput(result="ok"))
+
+        loop = AgentLoop(
+            context_builder=builder,
+            model_gateway=gateway,
+            tool_catalog=catalog,
+            tool_execution_service=fake_svc,
+        )
+
+        # Verify the stored gateway is the exact same object
+        assert loop._model_gateway is gateway
+
+        result = loop.run("test", execution_context=_make_context())
+
+        assert gateway.chat_with_tools_call_count == 2
+        assert result.outcome.message == "found"
+        # Confirm FastAgent received the same gateway
+        assert loop._fast_agent._model_gateway is gateway

@@ -29,12 +29,12 @@ Importing this module must NOT eagerly load::
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, field_validator
+from pydantic import ValidationError as PydanticValidationError
 
 from dnd_assistant.errors import ModelError
 
@@ -135,19 +135,8 @@ def _parse_agent_outcome(response: ToolAwareResponse) -> AgentTextOutcome:
         raise ModelError("Cannot parse AgentTextOutcome from empty content")
 
     try:
-        parsed = json.loads(content)
-    except (json.JSONDecodeError, ValueError, TypeError) as exc:
-        raise ModelError(
-            "Failed to parse model output as AgentTextOutcome JSON",
-            cause=exc,
-        ) from exc
-
-    if not isinstance(parsed, dict):
-        raise ModelError(f"Expected JSON object for AgentTextOutcome, got {type(parsed).__name__}")
-
-    try:
-        return AgentTextOutcome.model_validate(parsed)
-    except Exception as exc:
+        return AgentTextOutcome.model_validate_json(content)
+    except PydanticValidationError as exc:
         raise ModelError(
             "Model output failed AgentTextOutcome validation",
             cause=exc,
@@ -183,6 +172,7 @@ class AgentLoop:
         # of module-import scope.
         from dnd_assistant.application.fast_agent import FastAgent as FA
 
+        self._model_gateway: ModelGateway = model_gateway
         self._fast_agent: FastAgent = FA(
             context_builder=context_builder,
             model_gateway=model_gateway,
@@ -262,7 +252,7 @@ class AgentLoop:
         )
 
         # 6. Second model call with exact first-turn exposure snapshot
-        second_response = self._fast_agent._model_gateway.chat_with_tools(
+        second_response = self._model_gateway.chat_with_tools(
             followup_request,
             list(initial_decision.exposed_tools),
         )
