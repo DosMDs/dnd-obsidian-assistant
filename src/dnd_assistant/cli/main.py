@@ -10,6 +10,7 @@ from pathlib import Path
 
 import typer
 
+from dnd_assistant.cli.ask import _ask_command
 from dnd_assistant.cli.session import _note_command, session_app
 from dnd_assistant.errors import StorageError
 from dnd_assistant.retrieval.index import SqliteFtsIndex
@@ -28,6 +29,10 @@ app.add_typer(session_app)
 # ── Note root command ───────────────────────────────────────────────────────
 
 app.command(name="note")(_note_command)
+
+# ── Ask root command ───────────────────────────────────────────────────────
+
+app.command(name="ask")(_ask_command)
 
 # ── Index command group ─────────────────────────────────────────────────────
 

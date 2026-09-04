@@ -44,7 +44,7 @@
 | S9-03 — Validated ToolExecutor execution + tool-result message adaptation | DONE | |
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | DONE | |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | DONE | |
-| S9-06 — CLI `dnd ask` + mocked end-to-end integration | NOT STARTED | |
+| S9-06 — CLI `dnd ask` + mocked end-to-end integration | DONE | |
 | S9-07 — Full Stage-9 historical review / completion | NOT STARTED | |
 
 ### Correction passes
@@ -1527,3 +1527,269 @@ second `ModelGateway` calls.
 - All inconsistent-snapshot failures happen before any tool execution
 - No S9-06 work
 - No real Ollama/model work
+
+---
+
+## S9-06 — CLI `dnd ask` + mocked end-to-end integration
+
+**Status:** DONE
+
+**Starting base:** `95c74f250f093a8e5a36d9d66a134742e457bf61`
+
+### New production modules
+
+- `src/dnd_assistant/cli/ask.py` — Typer command declaration, CLI options, rendering, error mapping
+- `src/dnd_assistant/cli/agent_runtime.py` — dependency composition, provider lifetime, AskRuntime
+
+### Modified production modules
+
+- `src/dnd_assistant/cli/main.py` — registered `ask` root command
+
+### New test modules
+
+- `tests/unit/test_cli_ask.py` — CLI presentation unit tests (12 tests)
+- `tests/unit/test_cli_agent_runtime.py` — runtime composition unit tests (23 tests)
+- `tests/integration/test_cli_ask_mocked.py` — mocked end-to-end integration tests (7 tests)
+
+### CLI contract
+
+```text
+dnd ask QUERY --vault PATH --config PATH --profile NAME [--allow-write]
+```
+
+- `QUERY` — required positional argument (user query text)
+- `--vault` — required path to Obsidian Vault root
+- `--config` — required path to machine-local TOML config
+- `--profile` — required model profile name (must have AGENT role)
+- `--allow-write` — optional flag to grant WRITE permission (default: READ-only)
+
+### Read-only default
+
+Without `--allow-write`:
+
+```python
+ExecutionContext(
+    granted_permission=Permission.READ,
+    session_mode=<actual mode>,
+    audit=None,
+)
+```
+
+- READ tools eligible
+- WRITE tools hidden by exposure policy
+- Model-generated WRITE call → `ModelError` → exit 1
+- Zero Vault mutation
+
+### Explicit WRITE authority
+
+With `--allow-write`:
+
+```python
+ExecutionContext(
+    granted_permission=Permission.WRITE,
+    session_mode=<actual mode>,
+    audit=<AuditContext>,
+)
+```
+
+Audit metadata:
+
+- `source = "model_tool"`
+- `model_profile = <exact CLI --profile name>`
+- `prompt_version = PROMPT_VERSION` from `agent_v2`
+- `session = <active session ID if any>`
+- Fresh unique `operation_id` per invocation
+- Current aware UTC time
+
+### Model profile loading
+
+Uses `load_model_profiles()` from `dnd_assistant.models.profiles`.
+
+- Exact profile name required
+- Role must be `ModelProfileRole.AGENT`
+- `SUMMARIZER` or `EMBEDDING` profiles rejected
+- Unsupported provider (not `ollama`) rejected before model request
+
+### Provider selection
+
+- `OllamaModelProvider` for `provider == "ollama"`
+- Unsupported providers fail with `ValidationError`
+- No automatic fallback
+- No health preflight
+
+### Provider cleanup
+
+`AskRuntime.close()` guarantees provider `close()` after:
+
+- successful respond
+- successful clarify
+- tool execution path
+- `ModelError`
+- application/storage/tool error after provider creation
+
+Safe to call multiple times (idempotent).
+
+### Recovery preflight
+
+Uses the shared `_recovery_preflight` from `cli/session.py`.
+
+- Read-only `SessionRecoveryService.inspect_runtime()` before any model/tool call
+- Unresolved issues → exit 1, no model call, no tool execution, no repair
+
+### Session-mode derivation
+
+Deterministic from repository state:
+
+- Active session exists → `SessionMode.ACTIVE_SESSION`
+- No active session → `SessionMode.NO_ACTIVE_SESSION`
+
+### 12-tool production CLI registry
+
+The S9-06 production agent registry contains exactly these 12 tools:
+
+```
+append_entity_fact
+end_session
+get_active_session
+get_entity
+get_session
+list_session_events
+list_sessions
+patch_entity
+record_event
+record_note
+search_entities
+start_session
+```
+
+The following 6 calendar/world-time tools are deferred until a canonical
+campaign calendar-definition startup source exists (Stage-7 registry
+remains unchanged):
+
+```
+advance_world_time
+game_date_to_world_tick
+get_world_time
+set_world_time
+time_between_world_ticks
+world_tick_to_date
+```
+
+### CLI output
+
+- `RESPOND` → stdout, exit 0
+- `CLARIFY` → stdout, exit 0
+- `DndAssistantError` → stderr with `Ошибка: <message>`, exit 1
+- No debug mode, no internal JSON, no tool schemas in output
+
+### No interactive clarification loop
+
+- `CLARIFY` ends one invocation
+- User invokes `dnd ask` again with more information
+- No `typer.prompt()`, no stdin read, no recursive AgentLoop
+
+### No conversation persistence
+
+- Each `dnd ask` is one independent bounded AgentLoop run
+- No chat history files, conversation IDs, CLI transcript persistence
+- Vault campaign state remains the durable source
+
+### No model-controlled filesystem access
+
+- Model receives only context data, provider-neutral tool schemas, and tool results
+- No filesystem path tool, no shell tool, no arbitrary read/write tool
+- Vault path and config path not exposed in prompt
+
+### Typer 0.27.1 workaround
+
+Typer 0.27.1 has a regression where `CliRunner` does not handle positional
+arguments in named subcommands.  All S9-06 tests invoke `_ask_command`
+directly with keyword arguments rather than through `CliRunner`.
+
+The `--help` test still uses `CliRunner` and works correctly because it
+has no positional arguments.
+
+### Mocked end-to-end path
+
+Integration tests use:
+
+- Real temporary Vault with canonical directories and initialized world time
+- Real `SqliteFtsIndex` (initialized with empty document list)
+- Real `ObsidianVaultRepository`, `ObsidianSessionMetadataRepository`,
+  `ObsidianSessionEventRepository`, `ObsidianWorldTimeRepository`
+- Real `VaultSearchService`, `ToolRegistry`, `ToolExecutor`,
+  `AgentToolExecutionService`, `AgentLoop`
+- Fake `ModelGateway` (deterministic, no network)
+
+Only the model provider is mocked.
+
+### Test coverage
+
+**`tests/unit/test_cli_ask.py`** (12 tests):
+
+- Command registration (1 test)
+- Respond rendering (2 tests)
+- Clarify rendering (2 tests)
+- Error rendering (2 tests)
+- `--allow-write` propagation (2 tests)
+- Provider cleanup (2 tests)
+- Unexpected exception not broad-caught (1 test)
+
+**`tests/unit/test_cli_agent_runtime.py`** (23 tests):
+
+- Profile loading (4 tests)
+- Provider selection (2 tests)
+- ExecutionContext construction (2 tests)
+- Session-mode derivation (2 tests)
+- AuditContext metadata (3 tests)
+- Provider cleanup (4 tests)
+- 12-tool registry (3 tests)
+- Time/ID helpers (2 tests)
+- Import-time side effects (1 test)
+
+**`tests/integration/test_cli_ask_mocked.py`** (7 tests):
+
+- Direct respond (1 test)
+- Direct clarify (1 test)
+- READ tool execution (1 test)
+- READ-only blocks WRITE (1 test)
+- Explicit WRITE with audit persistence (1 test)
+- Missing config file (1 test)
+- Wrong role profile (1 test)
+
+### Verification evidence
+
+- 12 unit tests (CLI presentation): **12 passed, 0 failed**
+- 23 unit tests (runtime composition): **23 passed, 0 failed**
+- 7 integration tests (mocked e2e): **7 passed, 0 failed**
+- 52 session CLI regression tests: **52 passed, 0 failed**
+- 102 AgentLoop regression tests: **102 passed, 0 failed**
+- 60 FastAgent regression tests: **60 passed, 0 failed**
+- 61 tool execution regression tests: **61 passed, 0 failed**
+- 91 Tool Layer regression tests: **91 passed, 0 failed**
+- 152 ModelGateway/Ollama regression tests: **152 passed, 0 failed**
+- 466 contract tests: **466 passed, 0 failed**
+- Full suite: **4526 passed, 100 skipped, 0 failed, 0 errors**
+- Ruff check: clean
+- Ruff format: clean
+- `git diff --check`: clean
+- No protected-harness changes
+- No dependency changes
+- No real Ollama/model used
+- No S9-07 work
+- No Stage-10 work
+
+### Stage status after S9-06
+
+| Task | Status |
+|---|---|
+| S9-00 | DONE |
+| S9-01 | DONE |
+| S9-02 | DONE |
+| S9-03 | DONE |
+| S9-04 | DONE |
+| S9-05 | DONE |
+| S9-06 | DONE |
+| S9-07 | NOT STARTED |
+| Stage 9 | IN PROGRESS |
+| Stage 10 | NOT STARTED |
