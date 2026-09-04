@@ -53,6 +53,7 @@
 |---|---|
 | S9-C00 — Correct Fast-Agent tool exposure import and permission boundaries | DONE |
 | S9-C01 — Fail closed on StrEnum-compatible malformed execution-context fields | DONE |
+| S9-C02 — Complete S9-01 structural coverage and verification evidence | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## Important Context Builder deferral
@@ -305,9 +306,59 @@ All existing 34 tests preserved and passing.
 | Stage 9 | IN PROGRESS |
 | S9-00 | DONE after correction |
 | S9-C01 | DONE |
-| S9-01 | DONE |
+| S9-01 | DONE after correction |
 | S9-02..S9-07 | NOT STARTED |
 | Stage 10 | NOT STARTED |
+
+---
+
+## S9-C02 — Complete S9-01 structural coverage and verification evidence
+
+### Defect A — `"text": None` was not actually tested
+
+The `_make_event(text=None)` helper used `if text is not None: extras["text"] = text`, so passing `text=None` produced a **missing** `"text"` key, not a present-None value. The existing `test_text_missing_or_none` therefore tested the missing state twice.
+
+**Fix:** Introduced `_TEXT_MISSING = object()` sentinel as the default for `_make_event(text=...)`. When `text is _TEXT_MISSING`, the `"text"` key is omitted. Passing explicit `None` now correctly produces `extra_fields == {"text": None}`.
+
+### Defect B — exact `SearchQuery` preservation was not demonstrated
+
+`FakeSearchService` stored `str(query)` instead of the actual `SearchQuery` object, making it impossible to assert exact text preservation through the query DTO.
+
+**Fix:** `FakeSearchService.last_query` now stores the accepted `SearchQuery` object directly. A new `test_exact_search_query_preserved` test proves that `"  Гэндальф?  "` is preserved exactly through both `context.user_input` and `search_service.last_query.text`, and that `last_limit == 5`.
+
+### Defect C — invalid-input zero-read coverage was incomplete
+
+Only `search.last_query` was checked. The contract requires zero dependency reads across all five Context Builder dependencies.
+
+**Fix:** Added `_call_count` counters to all five fakes (`FakeSearchService.search_call_count`, `FakeVaultRepository.get_entity_call_count`, `FakeSessionMetadataRepository.get_active_session_call_count`, `FakeSessionEventRepository.list_events_call_count`, `FakeWorldTimeRepository.get_current_world_time_call_count`). A parametrized `test_zero_dependency_reads_on_invalid_input` proves all five counters are zero for four representative invalid inputs (empty, whitespace-only, non-string, control-char).
+
+### MNT-04 structural coverage
+
+The `TestEventText` class was rewritten with explicit separate regressions:
+
+| State | `text_excerpt` | `text_truncated` |
+|---|---|---|
+| Missing | `None` | `False` |
+| Present `None` | `None` | `False` |
+| `""` | `""` | `False` |
+| `0` | `None` | `False` |
+| `False` | `None` | `False` |
+| `[]` | `None` | `False` |
+| `{}` | `None` | `False` |
+| Valid short string | preserved exactly | `False` |
+| String > 400 | first 400 chars | `True` |
+
+The present-None test proves that `"text" in source.extra_fields` and `source.extra_fields["text"] is None` before calling the builder, preventing false-positive helper bugs.
+
+### Scope
+
+- No S9-01 production code changed (`agent_context.py` unchanged, 331 lines).
+- No Stage-9 scope expansion.
+- No protected harness changes.
+- No dependency/lockfile changes.
+- Exactly two files changed:
+  - `tests/unit/test_agent_context.py`
+  - `docs/stages/09_FAST_AGENT.md`
 
 ---
 
@@ -403,9 +454,12 @@ AgentContextBuilder(
 
 ### Test evidence
 
-- 46 tests: input boundary (6), search (6), entity materialisation (6), visibility (4), world time (3), active session (2), recent events (4), event text (6), determinism (4), forbidden behaviour (3), fresh-process import (1), parametrized (2)
+- 52 tests: input boundary (9), search (7), entity materialisation (6), visibility (4), world time (3), active session (2), recent events (4), event text (10), determinism (4), forbidden behaviour (3), fresh-process import (1)
 - All passing
 - Fresh-process subprocess regression confirms import isolation
 - Plain-string `"player"` visibility regression: fail closed
-- Event `""` (empty string) structural test: `text_excerpt=""`, `text_truncated=False`
-- Event `0` and `False` wrong-type tests: `text_excerpt=None`
+- Event text structural states (MNT-04): missing, present-None, `""`, `0`, `False`, `[]`, `{}`, valid short string, long string > 400 — each tested independently
+- Present-None test proves `"text" in event.extra_fields` and `event.extra_fields["text"] is None` before builder call
+- Exact `SearchQuery` preservation: `"  Гэндальф?  "` preserved through both `user_input` and `SearchQuery.text`
+- Invalid-input zero-read regression: all five dependencies verified untouched
+- No S9-01 production code changed

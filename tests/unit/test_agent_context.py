@@ -46,6 +46,9 @@ if TYPE_CHECKING:
 _MAX_ENTITY_BODY = 1000
 _MAX_EVENT_TEXT = 400
 
+# Sentinel for "text field missing from event extras"
+_TEXT_MISSING: object = object()
+
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -105,13 +108,21 @@ def _make_event(
     event_id: str = "evt_001",
     world_tick: int = 100,
     event_type: str = "note",
-    text: object = None,
+    text: object = _TEXT_MISSING,
 ) -> RawSessionEvent:
-    """Create a minimal RawSessionEvent for testing."""
+    """Create a minimal RawSessionEvent for testing.
+
+    When ``text`` is ``_TEXT_MISSING`` (the default), the ``"text"`` key
+    is omitted from ``extra_fields`` — representing a structurally missing
+    field.
+
+    Pass an explicit value (including ``None``) to include ``"text"`` in
+    ``extra_fields`` with that value.
+    """
     from dnd_assistant.storage.session_events import RawSessionEvent
 
     extras: dict[str, object] = {}
-    if text is not None:
+    if text is not _TEXT_MISSING:
         extras["text"] = text
     return RawSessionEvent(
         event_id=event_id,
@@ -149,12 +160,14 @@ class FakeSearchService:
 
     def __init__(self, hits: Sequence[SearchHit] | None = None) -> None:
         self._hits = list(hits) if hits else []
-        self.last_query: str | None = None
+        self.last_query: object | None = None
         self.last_limit: int | None = None
+        self.search_call_count: int = 0
 
     def search(self, query: object, *, limit: int = 20) -> Sequence[SearchHit]:
-        self.last_query = str(query)
+        self.last_query = query
         self.last_limit = limit
+        self.search_call_count += 1
         return list(self._hits)
 
     def get_by_id(self, entity_id: EntityId) -> SearchHit | None:
@@ -169,8 +182,10 @@ class FakeVaultRepository:
 
     def __init__(self, documents: dict[str, VaultDocument] | None = None) -> None:
         self._documents = dict(documents) if documents else {}
+        self.get_entity_call_count: int = 0
 
     def get_entity(self, entity_id: EntityId) -> VaultDocument:
+        self.get_entity_call_count += 1
         if entity_id not in self._documents:
             raise NotFoundError(f"Entity {entity_id} not found")
         return self._documents[entity_id]
@@ -184,8 +199,10 @@ class FakeSessionMetadataRepository:
 
     def __init__(self, active: RawSessionMetadata | None = None) -> None:
         self._active = active
+        self.get_active_session_call_count: int = 0
 
     def get_active_session(self) -> RawSessionMetadata | None:
+        self.get_active_session_call_count += 1
         return self._active
 
     # Unused stubs required by Protocol
@@ -211,9 +228,11 @@ class FakeSessionEventRepository:
     def __init__(self, events: list[RawSessionEvent] | None = None) -> None:
         self._events = list(events) if events else []
         self.last_session_id: str | None = None
+        self.list_events_call_count: int = 0
 
     def list_events(self, session_id: str) -> list[RawSessionEvent]:
         self.last_session_id = session_id
+        self.list_events_call_count += 1
         return list(self._events)
 
     def append_event(
@@ -242,8 +261,10 @@ class FakeWorldTimeRepository:
 
     def __init__(self, world_tick: int | None = None) -> None:
         self._world_tick = world_tick
+        self.get_current_world_time_call_count: int = 0
 
     def get_current_world_time(self) -> _FakeCurrentWorldTime:
+        self.get_current_world_time_call_count += 1
         if self._world_tick is None:
             raise NotFoundError("World time not initialised")
         return _FakeCurrentWorldTime(current_world_tick=self._world_tick, revision=1)
@@ -312,13 +333,37 @@ class TestInputValidation:
         with pytest.raises(ValidationError):
             builder.build("hello\nworld")
 
-    def test_no_reads_on_invalid_input(self) -> None:
-        """Invalid input must fail before any dependency reads."""
+    @pytest.mark.parametrize(
+        "bad_input",
+        [
+            pytest.param("", id="empty"),
+            pytest.param("   ", id="whitespace-only"),
+            pytest.param(42, id="non-string"),
+            pytest.param("hello\nworld", id="control-char"),
+        ],
+    )
+    def test_zero_dependency_reads_on_invalid_input(self, bad_input: object) -> None:
+        """Invalid user input must perform zero dependency reads across
+        all five Context Builder dependencies."""
         search = FakeSearchService()
-        b = _make_builder(search=search)
+        vault = FakeVaultRepository()
+        session = FakeSessionMetadataRepository()
+        events = FakeSessionEventRepository()
+        world_time = FakeWorldTimeRepository()
+        b = _make_builder(
+            search=search,
+            vault=vault,
+            session=session,
+            events=events,
+            world_time=world_time,
+        )
         with pytest.raises(ValidationError):
-            b.build("")
-        assert search.last_query is None
+            b.build(bad_input)  # type: ignore[arg-type]
+        assert search.search_call_count == 0
+        assert vault.get_entity_call_count == 0
+        assert session.get_active_session_call_count == 0
+        assert events.list_events_call_count == 0
+        assert world_time.get_current_world_time_call_count == 0
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -330,9 +375,13 @@ class TestSearch:
     """SearchQuery construction and SearchService integration."""
 
     def test_search_called(self) -> None:
+        from dnd_assistant.retrieval.types import SearchQuery
+
         search = FakeSearchService()
         _make_builder(search=search).build("Гэндальф")
         assert search.last_query is not None
+        assert isinstance(search.last_query, SearchQuery)
+        assert search.last_query.text == "Гэндальф"
 
     def test_search_called_with_limit(self) -> None:
         search = FakeSearchService()
@@ -365,6 +414,19 @@ class TestSearch:
         )
         ctx = _make_builder(search=FakeSearchService(hits=hits), vault=vault).build("test")
         assert len(ctx.relevant_entities) == _MAX_RELEVANT_ENTITIES
+
+    def test_exact_search_query_preserved(self) -> None:
+        """SearchQuery receives the exact original input with preserved
+        whitespace; limit is _MAX_RELEVANT_ENTITIES."""
+        from dnd_assistant.retrieval.types import SearchQuery
+
+        original = "  Гэндальф?  "
+        search = FakeSearchService()
+        ctx = _make_builder(search=search).build(original)
+        assert ctx.user_input == original
+        assert isinstance(search.last_query, SearchQuery)
+        assert search.last_query.text == original
+        assert search.last_limit == _MAX_RELEVANT_ENTITIES
 
     def test_duplicate_ids_first_only(self) -> None:
         """Duplicate entity IDs: only the first occurrence is included."""
@@ -636,47 +698,86 @@ class TestRecentEvents:
 
 
 class TestEventText:
-    """Event ``text`` field structural equivalence classes."""
+    """Event ``text`` field structural equivalence classes (MNT-04)."""
 
-    def test_text_missing_or_none(self) -> None:
-        raw = _make_raw_metadata()
-        for ev in [_make_event(text=None), _make_event(text=None)]:
-            ctx = _make_builder(
-                session=FakeSessionMetadataRepository(active=raw),
-                events=FakeSessionEventRepository(events=[ev]),
-            ).build("test")
-            assert ctx.recent_events[0].text_excerpt is None
-            assert ctx.recent_events[0].text_truncated is False
+    # ── Helpers ────────────────────────────────────────────────────────────
 
-    @pytest.mark.parametrize("wrong_type", [0, False, [], {}])
-    def test_wrong_type(self, wrong_type: object) -> None:
+    @staticmethod
+    def _build_with_event(text_value: object = _TEXT_MISSING) -> AgentContext:
         raw = _make_raw_metadata()
-        ctx = _make_builder(
+        return _make_builder(
             session=FakeSessionMetadataRepository(active=raw),
-            events=FakeSessionEventRepository(events=[_make_event(text=wrong_type)]),
+            events=FakeSessionEventRepository(events=[_make_event(text=text_value)]),
         ).build("test")
-        assert ctx.recent_events[0].text_excerpt is None
-        assert ctx.recent_events[0].text_truncated is False
 
-    def test_empty_string(self) -> None:
-        """Empty string is a valid string of length 0 <= 400."""
-        raw = _make_raw_metadata()
-        ctx = _make_builder(
-            session=FakeSessionMetadataRepository(active=raw),
-            events=FakeSessionEventRepository(events=[_make_event(text="")]),
-        ).build("test")
-        assert ctx.recent_events[0].text_excerpt == ""
-        assert ctx.recent_events[0].text_truncated is False
+    # ── Missing key ────────────────────────────────────────────────────────
 
-    def test_long_text_clipped(self) -> None:
+    def test_text_missing(self) -> None:
+        """Field missing from extra_fields -> text_excerpt is None."""
+        ctx = self._build_with_event(_TEXT_MISSING)
+        ev = ctx.recent_events[0]
+        assert ev.text_excerpt is None
+        assert ev.text_truncated is False
+
+    # ── Present None ───────────────────────────────────────────────────────
+
+    def test_text_present_none(self) -> None:
+        """Field present with explicit None -> text_excerpt is None."""
+        ctx = self._build_with_event(None)
+        ev = ctx.recent_events[0]
+        # Prove the source event actually contains "text": None
+        source = _make_event(text=None)
+        assert "text" in source.extra_fields
+        assert source.extra_fields["text"] is None
+        assert ev.text_excerpt is None
+        assert ev.text_truncated is False
+
+    # ── Present empty string ───────────────────────────────────────────────
+
+    def test_text_empty_string(self) -> None:
+        """Field present with '' -> text_excerpt == ''."""
+        ctx = self._build_with_event("")
+        ev = ctx.recent_events[0]
+        assert ev.text_excerpt == ""
+        assert ev.text_truncated is False
+
+    # ── Present non-string types (all produce None) ────────────────────────
+
+    @pytest.mark.parametrize(
+        "wrong_val",
+        [
+            pytest.param(0, id="zero"),
+            pytest.param(False, id="false"),
+            pytest.param([], id="empty-list"),
+            pytest.param({}, id="empty-dict"),
+        ],
+    )
+    def test_text_non_string_types(self, wrong_val: object) -> None:
+        """Non-string types -> text_excerpt is None."""
+        ctx = self._build_with_event(wrong_val)
+        ev = ctx.recent_events[0]
+        assert ev.text_excerpt is None
+        assert ev.text_truncated is False
+
+    # ── Valid short string ─────────────────────────────────────────────────
+
+    def test_text_valid_short(self) -> None:
+        """Valid short string preserved exactly."""
+        text = "Привет мир"
+        ctx = self._build_with_event(text)
+        ev = ctx.recent_events[0]
+        assert ev.text_excerpt == text
+        assert ev.text_truncated is False
+
+    # ── Long string clipped ────────────────────────────────────────────────
+
+    def test_text_long_clipped(self) -> None:
+        """String > 400 chars -> first 400 chars, text_truncated=True."""
         long_text = "x" * (_MAX_EVENT_TEXT + 50)
-        raw = _make_raw_metadata()
-        ctx = _make_builder(
-            session=FakeSessionMetadataRepository(active=raw),
-            events=FakeSessionEventRepository(events=[_make_event(text=long_text)]),
-        ).build("test")
-        assert ctx.recent_events[0].text_excerpt == long_text[:_MAX_EVENT_TEXT]
-        assert ctx.recent_events[0].text_truncated is True
+        ctx = self._build_with_event(long_text)
+        ev = ctx.recent_events[0]
+        assert ev.text_excerpt == long_text[:_MAX_EVENT_TEXT]
+        assert ev.text_truncated is True
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
