@@ -62,6 +62,7 @@
 | S9-C08 — Complete structural validation of exposed-tool snapshots | DONE |
 | S9-C09 — Fix ask CLI lifecycle, error boundaries, and real CLI E2E | DONE |
 | S9-C10 — Resolve CLI parser verification and restore green canonical suite | DONE |
+| S9-C11 — Reconcile S9-C10 canonical test evidence | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
 ## S9-02 — One-step FastAgent model decision boundary
@@ -1995,7 +1996,7 @@ vulnerable to the active console code page on Windows.  Fixed by setting
 
 #### Canonical suite
 
-Full `uv run pytest`: **4541 passed, 100 skipped, 0 failed, 0 errors**
+Full `uv run pytest`: **4557 passed, 100 skipped, 0 failed, 0 errors**
 — already green at starting SHA.
 
 ### Parser-backed mocked E2E tests
@@ -2093,7 +2094,7 @@ and `src/dnd_assistant/cli/main.py` are unchanged.
 - 10 new parser-backed integration tests: all pass
 - 6 new option-parsing evidence tests: all pass
 - Entrypoint encoding portability: test passes with `PYTHONIOENCODING=utf-8`
-- Canonical full suite: **4541 passed, 100 skipped, 0 failed, 0 errors**
+- Canonical full suite: **4557 passed, 100 skipped, 0 failed, 0 errors**
 - `uv run ruff check .`: 0 errors
 - `uv run ruff format --check .`: 0 errors
 - `git diff --check`: 0 errors
@@ -2106,3 +2107,53 @@ and `src/dnd_assistant/cli/main.py` are unchanged.
 - No S9-07 work
 - No Stage-10 work
 - `DEVELOPMENT_STATUS.md` unchanged (S9-06 DONE, S9-07 NOT STARTED)
+
+---
+
+## S9-C11 — Reconcile S9-C10 canonical test evidence
+
+**Status:** DONE
+
+**Starting base:** `593c5a34dcc0079e89eb756ba086ecfa25131ad8`
+
+### Defect
+
+Independent review found contradictory canonical pytest counts in the
+published S9-C10 documentation:
+
+- The S9-C10 commit message and Final Report reported **4557 passed, 100
+  skipped, 0 failed, 0 errors**.
+- The S9-C10 documentation in this file recorded the canonical full-suite
+  result as **4541 passed, 100 skipped, 0 failed, 0 errors** (two
+  occurrences, lines 1998 and 2096 at the time of correction).
+- The same S9-C10 documentation stated that the correction added 10
+  parser-backed integration tests and 6 option-parsing evidence tests, yet
+  the 4541 count was inconsistent with those additions relative to the
+  prior S9-06 baseline of 4526.
+
+### Correction
+
+1. **Canonical `uv run pytest`** (no exclusions, no `--ignore`, no `-k`,
+   no marker filters) was rerun from the published S9-C10 checkout:
+   **4557 passed, 100 skipped, 0 failed, 0 errors**.
+2. Both occurrences of **4541** in the S9-C10 section were corrected to
+   **4557**, matching the actual machine result.
+3. Targeted CLI collection was rechecked:
+   - `test_cli_ask.py`: **24** collected
+   - `test_cli_agent_runtime.py`: **28** collected
+   - `test_cli_ask_mocked.py`: **21** collected
+   - `test_cli_entrypoint.py`: **4** collected
+   - Total: **77** (matches the published claim)
+4. The S9-C10 documentation prose regarding targeted test counts (77
+   targeted CLI, 10 parser-backed integration, 6 option-parsing) was
+   verified against actual collection and is correct — no changes needed.
+
+### Scope
+
+- No S9-C10 implementation or tests were changed.
+- No production code, tests, dependencies, harness, or configuration were
+   modified.
+- No S9-07 work was started.
+- No Stage-10 work was started.
+- No real Ollama/model was used.
+- Exactly one file changed: `docs/stages/09_FAST_AGENT.md`.
