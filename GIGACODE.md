@@ -9,82 +9,117 @@ The durable campaign state lives in an Obsidian Vault. Python owns trusted domai
 ## Non-negotiable architecture
 
 1. Obsidian Vault is the only canonical Source of Truth.
-2. LLM output is never trusted until validated by Python.
-3. LLM code must never get arbitrary filesystem or shell access to the Vault.
-4. Every Vault write must flow through ToolExecutor/domain services/VaultRepository.
-5. Domain and storage layers must not depend on Ollama or any concrete model.
-6. SQLite, FTS indexes, cache and embeddings are derived data and must be rebuildable from the Vault.
-7. Game-time arithmetic is deterministic Python logic in CalendarService using canonical `world_tick`.
-8. Raw session logs are append-only and immutable after session end.
+2. LLM/framework output is untrusted until validated by Python.
+3. Runtime LLM/agent code must never get arbitrary filesystem or shell access to the Vault.
+4. Every Vault write must flow through `ToolExecutor` / domain/application services / `VaultRepository`.
+5. Domain and storage layers must not depend on Ollama, Pydantic AI or any concrete model/provider.
+6. SQLite/FTS/cache/embeddings/framework state are derived and rebuildable from Vault/raw history.
+7. Game-time arithmetic is deterministic Python `CalendarService` logic using canonical world time types/`world_tick`.
+8. Raw session logs are append-only and immutable after session end according to the accepted session contract.
 9. Model-generated post-session changes use `ChangeSet -> validate -> review -> apply`.
-10. Ambiguous entity resolution must prefer clarification over speculative writes.
+10. Ambiguous entity resolution prefers clarification over speculative write.
 11. Stable IDs, revisions, provenance, visibility, atomic writes and audit logging are core requirements.
-12. Do not introduce vector DB, embeddings, LoRA, voice, Web UI, graph DB, combat automation or complex RAG before MVP need is demonstrated.
-13. The application user interface is Russian-only for the MVP. All application-owned CLI/TUI help text, prompts, confirmations, status messages, warnings and user-facing error messages must be in Russian.
-14. Do not introduce i18n, locale selection, translation catalogs or additional interface languages unless the user explicitly expands the product scope.
-15. Campaign-facing text must use UTF-8 and fully support Cyrillic. Internal Python identifiers, module/file names, enum member names and serialized machine-readable enum values may remain English.
-16. Runtime LLM output intended for the user must be requested in Russian unless a later explicit requirement overrides this rule.
+12. Do not introduce vector DB, embeddings, LoRA, voice, Web UI, graph DB, combat automation or complex RAG before demonstrated MVP need.
+13. MVP application UI is Russian-only. Application-owned CLI/TUI help, prompts, confirmations, statuses, warnings and user-facing errors are Russian.
+14. Do not add i18n/locale catalogs or additional interface languages unless product scope explicitly changes.
+15. Campaign-facing text uses UTF-8 and supports Cyrillic. Internal identifiers/file/module names and serialized machine enums may remain English.
+16. Runtime LLM output intended for the user is requested in Russian unless an explicit later requirement overrides it.
+17. Framework tool visibility/filtering/approval is not an authorization boundary; `ToolExecutor` is the final trusted tool execution boundary.
 
-## Dependency order
+## Dependency order and current migration gate
 
-Develop in this order unless the user explicitly changes the roadmap:
+Base dependency order:
 
-`Environment -> Project contracts -> Domain schemas -> VaultRepository -> Calendar -> Retrieval/EntityResolver -> Session runtime -> Tool layer -> ModelGateway/Ollama -> Fast Agent -> ChangeSet -> Post-session processing -> Campaign State -> Bootstrap -> Evals/hardening`
+`Environment -> Project contracts -> Domain schemas -> VaultRepository -> Calendar -> Retrieval/EntityResolver -> Session runtime -> Tool layer -> Model/runtime -> Fast Agent -> ChangeSet -> Post-session processing -> Campaign State -> Bootstrap -> Evals/hardening`
 
-Tests are implemented together with each stage.
+Tests are implemented with each stage.
+
+Current special gate after accepted S9-06 and before S9-07/Stage 10:
+
+```text
+PAIM — Pydantic AI Runtime Migration
+```
+
+Always read `DEVELOPMENT_STATUS.md` before planning. Do not infer current status from this file.
 
 ## Development status and documentation
 
-### Current status
-
-Before planning or editing code, read:
+Canonical responsibility split:
 
 ```text
 DEVELOPMENT_STATUS.md
+  compact current roadmap state
+
+docs/stages/*.md
+  detailed stage history/evidence
+
+docs/migrations/*.md
+  detailed migration plan/history/evidence
+
+docs/adr/*.md
+  significant architecture/workflow decisions
 ```
 
-It is the canonical source for the **current roadmap stage and task progress**.
+Do not append full Final Reports or long correction narratives to `DEVELOPMENT_STATUS.md`.
 
-Do not duplicate the current stage in `GIGACODE.md`. Always read `DEVELOPMENT_STATUS.md`.
+Task completion updates compact status and detailed stage/migration record only where relevant. Final stage/migration reviews keep detailed evidence in the corresponding detailed document.
 
-### Documentation responsibility split
+## PAIM-specific instructions
 
-- `DEVELOPMENT_STATUS.md` = canonical **current** roadmap/status state.
-- `docs/stages/NN_*.md` = canonical detailed plan/history/evidence for each stage.
+The accepted custom S9-06 runtime in `main` is the reference/rollback point. PAIM is developed in a separate branch.
 
-Rules:
+Read:
 
-1. Do not append full Final Reports to `DEVELOPMENT_STATUS.md`.
-2. Do not append detailed correction narratives there.
-3. Task completion: update checkbox/current state in `DEVELOPMENT_STATUS.md`;
-   record detailed completion evidence in the relevant stage document.
-4. Correction task: keep current task state in status; append correction
-   record to the stage document.
-5. Stage final review: mark final state/date in status; write detailed
-   historical review into the stage document.
-6. Do not duplicate the same detailed report in both files.
+```text
+docs/adr/0003-pydantic-ai-runtime-migration.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+.gigacode/rules/40-pydantic-ai-migration.md
+```
 
-### Stage discipline
+Use `.gigacode/skills/pydantic-ai-migration/SKILL.md` for PAIM implementation/review tasks.
 
-- Work primarily inside the current stage.
-- Do not pull later-stage implementation forward merely because it is convenient.
-- Do not mark a task/stage `DONE` because code was generated.
-- Completion requires implementation or the requested documentation/workflow change, successful **relevant** quality gates, and final diff review.
-- Do not advance the roadmap stage automatically.
-- If the user explicitly changes stage or scope, update `DEVELOPMENT_STATUS.md` as part of that change.
-- Significant architecture/development-workflow decisions belong in `docs/adr/`.
+### Framework ownership
 
-### Development assistant vs runtime LLM
+Pydantic AI may own generic model/message/tool/structured-output/run-loop mechanics.
 
-GigaCode is a **development coding assistant**, not part of the application runtime.
+It must not own:
 
-It may edit the source repository in the approved development workflow. It must not be treated as:
-- a `ModelGateway`;
-- campaign memory;
-- a canonical data source;
-- a permitted back door for real Vault mutation.
+```text
+domain/storage authority
+Vault writes
+calendar arithmetic
+entity ambiguity policy
+permissions/session/audit authorization
+raw session truth
+ChangeSet apply policy
+```
 
-Do not expose a real campaign Vault to unrestricted agent filesystem/shell tooling.
+### Migration outcomes
+
+All are valid:
+
+```text
+ACCEPTED
+PARTIAL
+REJECTED
+```
+
+Do not weaken architecture merely to avoid `PARTIAL` or `REJECTED`.
+
+### No permanent dual runtime
+
+Short-lived comparison code/tests are allowed for qualification. Do not keep two equal-status production runtimes behind a feature flag merely for rollback. Git/main is the fallback.
+
+### Framework limitation handling
+
+```text
+focused reproduction
+→ documented public extension point
+→ selective custom component if small/cohesive
+→ recommend REJECTED if workaround becomes large/fragile/private-internal
+```
+
+Do not patch private framework internals as normal architecture.
 
 ## Technology baseline
 
@@ -100,9 +135,11 @@ Do not expose a real campaign Vault to unrestricted agent filesystem/shell tooli
 - pytest
 - Hypothesis
 - pytest-cov
-- respx
+- respx where provider HTTP mocking is used
 - Ruff
-- Ollama as the first ModelGateway provider
+- Ollama as first runtime provider
+
+Pydantic AI is a PAIM candidate dependency until qualification selects and pins an accepted version.
 
 ## Cross-platform requirements
 
@@ -110,148 +147,87 @@ The application must run natively on Windows and macOS.
 
 - Use `pathlib.Path`.
 - Use UTF-8 explicitly for project-controlled text files.
-- Do not hard-code `C:\\...`, `/Users/...`, drive letters or shell-specific paths.
+- Do not hard-code OS-user paths/drive letters.
 - Do not require Bash, Make, WSL or GNU-only utilities.
-- Prefer Python implementations and `uv run ...` commands.
+- Prefer portable Python and `uv run ...` commands.
 - Avoid `shell=True` and platform-specific shell syntax in application code.
-- Tests that touch files must use temporary directories.
-- Filesystem semantics that differ between Windows and macOS must be covered by tests when relevant.
+- Filesystem tests use temporary directories; OS-specific semantics require targeted coverage.
 
 ## Package boundaries
 
-Expected top-level package layout:
+Expected responsibility layout:
 
-- `cli/`: Typer commands and presentation only.
-- `application/`: orchestration/use cases.
-- `domain/`: pure domain models and deterministic business rules.
-- `storage/`: Vault Markdown/YAML persistence, atomic writes, audit, locks.
-- `retrieval/`: exact/fuzzy/FTS search and entity resolution.
-- `tools/`: ToolRegistry, ToolExecutor and safe read/write/calendar tools.
-- `models/`: ModelGateway contracts and provider adapters.
-- `prompts/`: versioned model prompts.
+- `cli/`: Typer commands/presentation.
+- `application/`: orchestration/use cases/agent application policy.
+- `domain/`: pure domain models/rules.
+- `storage/`: Vault persistence, atomic writes, audit, locks.
+- `retrieval/`: exact/fuzzy/FTS/entity resolution.
+- `tools/`: ToolRegistry, ToolExecutor, safe tools.
+- `models/` or runtime infrastructure: provider/model adapters and framework integration.
+- `prompts/`: versioned prompts.
 - `evals/`: deterministic model evaluation logic/data.
 
-Dependency direction must point inward toward domain contracts, never from domain/storage to model providers.
+Dependency direction points inward. Domain/storage never imports agent/provider framework code.
 
 ## Development workflow for GigaCode
 
 Before editing:
-1. Inspect the relevant existing code and tests.
-2. Identify the current roadmap stage and architectural boundary.
-3. For multi-file or architectural changes, use Plan Mode and propose affected files, tests and risks.
-4. Do not invent missing APIs if existing code can answer the question.
+
+1. Inspect relevant code/tests/docs.
+2. Read current roadmap/task state.
+3. Identify architecture boundary and exact task scope.
+4. For multi-file/architecture/storage/migration work use Plan Mode.
+5. Do not invent missing APIs when repository evidence can answer the question.
 
 While editing:
-1. Make the smallest coherent change.
-2. Reuse existing abstractions.
-3. Do not add a dependency unless it is necessary and justified.
-4. Keep public contracts typed and explicit.
-5. Add/update tests in the same change when production behavior changes.
-6. Use built-in GigaCode/IDE file-edit tools for repository text files. A JSON parsing error, oversized payload, timeout, or similar edit/write-tool failure is not permission to switch automatically to shell/PowerShell/Python file generation.
-7. After an edit/write-tool failure, inspect the working tree first, preserve already-correct partial work, and retry with smaller atomic create/edit/patch operations. For oversized tests, reduce needless duplication with parametrization/helpers without weakening required coverage.
 
-### Repository-edit rule
+1. Make the smallest coherent change.
+2. Reuse accepted abstractions.
+3. Add dependencies only when necessary/justified.
+4. Keep public contracts typed and explicit.
+5. Add/update tests with production behavior changes.
+6. Preserve fail-closed handling at untrusted structured boundaries.
+7. Do not silently broaden task/stage scope.
+
+## Repository-edit rule
 
 Repository text files must be mutated through built-in GigaCode/IDE file tools.
 
-Shell-executed Python is still shell-based mutation. The following are explicitly prohibited without prior user approval:
+A JSON parsing error, oversized payload, timeout or transport failure is not permission to automatically switch to shell/PowerShell/Python file generation.
+
+Explicitly prohibited without prior user approval:
 
 ```text
-python -c "open(..., 'w').write(...)"
-python -c "open(..., 'a').write(...)"
-python -c "Path(...).write_text(...)"
-python -c "Path(...).open(...).write(...)"
-temporary Python/PowerShell/Bash generator or append scripts
-PowerShell file-write commands (Set-Content, Add-Content, Out-File)
-shell redirection (> / >>)
+python -c with open(...).write(...)
+python -c with Path.write_text()/Path.open()
+temporary Python/PowerShell/Bash generator/append scripts
+PowerShell Set-Content/Add-Content/Out-File
+shell redirection
 base64/heredoc/generated-file workarounds
 ```
 
-The detailed always-on rule defining allowed and prohibited writing mechanisms is:
+Canonical rule:
 
 ```text
 .gigacode/rules/06-tool-usage.md
 ```
 
-### Large-file incremental editing
-
-When a built-in file edit/write operation fails or a file is too large for one reliable operation, the mandatory procedure is:
+### Large-file recovery
 
 ```text
 inspect current file/partial state
 → preserve correct work
 → split by logical sections
 → use small anchored IDE edits
-→ re-read each substantial changed region
+→ re-read changed regions
 → inspect per-file diff
 ```
 
-For a large new test/source file:
+See `.gigacode/rules/07-incremental-file-editing.md` and ADR-0002.
 
-```text
-imports/helpers/skeleton
-→ one logical section at a time
-→ parametrization/helpers where appropriate
-→ focused validation
-```
+## Adaptive quality gates
 
-A failed large IDE payload does NOT authorize changing the writing mechanism.
-
-The detailed always-on rule for the incremental-edit algorithm is:
-
-```text
-.gigacode/rules/07-incremental-file-editing.md
-```
-
-### File-edit recovery policy
-
-When a built-in file edit/write operation fails for a technical reason such as JSON parsing, payload size, timeout, or transport limits:
-
-1. Treat it as a tooling failure, not an implementation failure.
-2. Inspect `git status`/`git diff` or the relevant file before retrying so correct partial work is not overwritten.
-3. Retry using smaller repository-edit operations: create a small initial file, then add or patch logical sections incrementally.
-4. Prefer compact parametrized tests/helpers over duplicated test bodies when file size itself contributes to the problem, while preserving the task's acceptance criteria and regression coverage.
-5. Do not use Bash, PowerShell, Python one-off scripts, base64, shell redirection, or equivalent source-file generation as an automatic fallback.
-6. Shell-based file mutation is allowed only when built-in file tools are genuinely unavailable or objectively cannot support the required operation independently of payload size. Report the reason to the user and obtain explicit approval before using that fallback.
-7. After recovery, inspect the final diff for truncation, partial writes, duplicated sections, or unrelated changes.
-
-The rationale for this policy is recorded in `docs/adr/0002-agent-file-edit-recovery-policy.md`.
-
-### Prompt-level repository-edit constraint
-
-Every implementation, correction, or review-fix task prompt prepared for GigaCode is expected to repeat a short mandatory repository-edit constraint directly in the task, even though the same policy exists in the always-on repository rules above.
-
-The canonical prompt-level block is:
-
-```text
-## Mandatory repository-edit constraint
-
-All repository text-file mutations must use built-in GigaCode/IDE file tools.
-
-Explicitly prohibited without prior user approval:
-- python -c with open(...).write(...)
-- python -c with Path.write_text()/Path.open()
-- temporary Python/PowerShell/Bash generator or append scripts
-- PowerShell file-write commands
-- shell redirection
-- base64/heredoc/generated-file workarounds
-
-If a file-tool operation is too large:
-inspect current partial state
-→ preserve correct edits
-→ split by logical section
-→ apply smaller anchored IDE edits
-→ re-read changed region
-→ inspect per-file diff.
-
-Do not switch writing mechanisms because a payload is large.
-```
-
-The repository rules remain mandatory even if a particular task prompt accidentally omits this repeated block. This is defense in depth, not an alternative policy.
-
-### Adaptive quality gates
-
-Quality gates MUST be selected from the **final actual Git diff**, not mechanically from the task title or from a fixed checklist.
+Select gates from the **actual final Git diff**, not task title.
 
 Canonical rule:
 
@@ -259,131 +235,75 @@ Canonical rule:
 .gigacode/rules/31-adaptive-quality-gates.md
 ```
 
-Classification:
+### Documentation-only Markdown
+
+Required by default:
+
+- complete diff review;
+- documentation/status consistency;
+- exact changed-file inventory;
+- `git diff --check`;
+- final Git checks.
+
+Do not run full pytest/Ruff solely for evidence on ordinary docs-only changes unless the Markdown is machine-consumed or another concrete technical reason exists.
+
+### Code/test/runtime/dependency changes
+
+Run focused and broader gates appropriate to actual changed responsibilities/risks. Python changes require relevant Ruff checks. Full suite is used where task/stage risk requires it, not mechanically for every change.
+
+For PAIM provider/runtime gates, real Ollama tests remain explicit opt-in smoke tests; default suite must not require Ollama.
+
+Reclassify gates after all edits using final changed-file inventory.
+
+## Maintainability
+
+Cohesion before file size.
+
+Pointers:
 
 ```text
-final diff = documentation/agent-instruction Markdown only
-and no changed file is machine-consumed runtime/test/build data
-→ documentation-only gates
-
-final diff contains Python/tests/runtime config/dependencies/schemas/
-executable fixtures/other machine-consumed files
-→ normal relevant code/test gates
+.gigacode/rules/15-module-decomposition.md
+.gigacode/rules/35-test-decomposition.md
+.gigacode/rules/36-maintainability-ratchets.md
 ```
 
-For ordinary documentation-only work, required by default:
+Current soft/hard guidance remains:
 
-1. inspect the complete final diff;
-2. validate documentation/status consistency relevant to the task;
-3. verify exact changed-file inventory from Git;
-4. run `git diff --check`;
-5. run final Git scope/status/finalization checks.
+- production ~500 lines triggers review; new production hard max 700;
+- tests ~700 lines triggers review; new test hard max 1000;
+- >600 production / >850 test triggers headroom/decomposition review;
+- existing oversized files are legacy exceptions and may not silently grow;
+- tests are topic/capability oriented, not correction-number files;
+- preserve stable facades during decomposition where practical.
 
-Do **not** run solely for evidence on a normal Markdown-only task:
+## Untrusted-boundary reliability
 
-```text
-uv run pytest
-targeted/contract pytest suites
-uv run ruff check .
-uv run ruff format --check .
-```
+Use `.gigacode/rules/09-untrusted-boundary-validation.md`.
 
-Exceptions apply when a Markdown file is machine-consumed by runtime/tests/build tooling, is a fixture/golden/generated input/executable specification, is covered by a relevant project validator, or the task gives another concrete technical reason.
+Review structural equivalence classes explicitly. Do not use truthiness for provider/framework structural validation. Remember Python numeric traps such as bool-as-int, non-finite floats and conversion overflow.
 
-After all edits, reclassify using the final changed-file inventory. If a code/test/runtime/config/machine-consumed file appeared, restore the unintended edit or run the corresponding quality gates.
+Pydantic AI/provider responses remain untrusted even from localhost.
 
-### Completion verification
+## Test harness isolation
 
-Before considering a task complete:
-1. Derive the final changed-file inventory from Git.
-2. Classify the task under `.gigacode/rules/31-adaptive-quality-gates.md`.
-3. Run the quality gates relevant to that final diff and explicit task risk/scope.
-4. Run `git diff --check`.
-5. Review the complete diff for boundary violations, accidental generated files, secrets and unrelated edits.
-6. Re-check that the gate classification still matches the final diff.
-7. State what was changed, which gates were executed, which were intentionally skipped under policy, and any remaining risk.
+Protected harness changes require explicit scope. Do not edit global fixtures/conftest/harness behavior merely to make a local task pass.
 
-For a documentation-only task, skipping full pytest/Ruff under the adaptive policy is an expected successful outcome, not a failure.
-
-## Repository maintainability
-
-### Cohesion before file size
-
-A module should represent one coherent responsibility. File size is a
-diagnostic signal, not architecture by itself.
-
-See:
-- `.gigacode/rules/15-module-decomposition.md` — production module policy.
-- `.gigacode/rules/35-test-decomposition.md` — test decomposition policy.
-
-### Soft decomposition thresholds
-
-- Production: ~500 lines triggers review.
-- Test: ~700 lines triggers review.
-
-### Hard-limit ratchet
-
-- New production modules: 700 physical lines max.
-- New test modules: 1000 physical lines max.
-
-Existing oversized files are recorded as legacy exceptions and may not
-silently grow.
-
-### Topic-oriented tests
-
-Tests are organised by stable behaviour / capability, not by ticket number
-or correction history.
-
-New correction-number test filenames (e.g. `_c06`, `_fix2`) are prohibited.
-
-### Stable facade during decomposition
-
-When a large module is split into a package, public contracts should be
-preserved through `__init__.py` re-exports where practical.
+See `.gigacode/rules/37-test-harness-isolation.md`.
 
 ## Safety for agent actions
 
 Never perform automatically:
+
 - destructive Git history operations;
-- deleting or rewriting a real campaign Vault;
-- modifying `.env`, credentials, tokens or secret files;
-- adding shell/filesystem MCP servers with unrestricted write access;
-- database/schema migrations without explicit user request;
-- publishing releases or uploading artifacts;
-- force-pushing or rewriting published Git history;
-- changing architecture merely to make implementation easier.
+- deletion/rewrite of a real campaign Vault;
+- secret/.env/token changes;
+- unrestricted runtime filesystem/shell exposure;
+- database/schema migration outside explicit task scope;
+- publishing releases/artifacts;
+- force-push/history rewriting;
+- architecture changes merely to simplify implementation.
 
-If an operation is destructive, irreversible, credential-related or touches a real Vault, stop and require explicit user approval.
-
-## Development reliability principles
-
-Key rules for agent reliability:
-
-```text
-.gigacode/rules/09-untrusted-boundary-validation.md
-    external structured data uses explicit equivalence classes
-    truthiness is not structural validation
-    numeric Python traps must be reviewed (bool is int, NaN, overflow)
-
-.gigacode/rules/08-task-scope-and-evidence.md
-    machine-derived evidence must be reconciled after documentation edits
-    base-only / head-only are the primary Git direction terms
-
-.gigacode/rules/31-adaptive-quality-gates.md
-    quality gates are selected from the actual final diff
-    docs-only Markdown does not require pytest/Ruff by default
-    reclassify if machine-consumed/code/test files appear
-
-.gigacode/rules/37-test-harness-isolation.md
-    protected harness changes require explicit scope
-    do not modify conftest/harness tests for local task convenience
-
-.gigacode/rules/36-maintainability-ratchets.md
-    consider headroom before approaching hard limits
-    >600 production / >850 test triggers decomposition review
-```
-
-These are overview pointers. The canonical rules files are authoritative.
+If an operation is destructive/irreversible/credential-related or touches real Vault data, require explicit user approval.
 
 ## Useful commands
 
@@ -397,53 +317,35 @@ uv run ruff format --check .
 uv run dnd --help
 ```
 
-Documentation-only tasks normally use only their relevant documentation/diff checks plus Git finalization; do not run the Python suite mechanically.
+Documentation-only tasks use documentation/diff checks plus Git finalization unless a concrete exception applies.
 
 ## Git commit and push policy
 
-После успешного завершения каждой задачи агент обязан самостоятельно:
+After successful completion of each task:
 
-1. Запустить **релевантные** quality gates согласно final-diff classification.
-2. Проверить `git status` и `git diff`.
-3. Убедиться, что в commit не попали:
-   - секреты;
-   - `.env`;
-   - временные файлы;
-   - случайные/generated файлы;
-   - изменения вне текущей задачи.
-4. Выполнить `git add` только относящихся к задаче файлов.
-5. Создать commit.
-6. Сразу выполнить push текущей ветки в настроенный `origin`.
+1. Run relevant quality gates according to final diff/risk.
+2. Inspect `git status` and complete diff.
+3. Exclude secrets/temp/generated/unrelated files.
+4. Stage only task files.
+5. Create one coherent commit (prefer Conventional Commits where appropriate).
+6. Push current branch normally to `origin`.
+7. Verify local `HEAD` equals upstream/remote commit.
+8. Report branch, commit SHA, message and push result.
 
-Не спрашивать отдельного подтверждения для обычного commit/push после успешно завершённой задачи.
+Do not ask separate confirmation for ordinary commit/push after successful required gates.
 
-Запрещено автоматически:
+Do not automatically use:
 
-- `git push --force`;
-- `git push --force-with-lease`;
-- переписывать историю;
-- `git reset --hard`;
-- rebase опубликованной истории;
-- удалять remote branches;
-- пушить при проваленных **требуемых** quality gates.
+```text
+git push --force
+git push --force-with-lease
+git reset --hard
+published-history rebase
+remote branch deletion
+```
 
-Если push не удался из-за authentication, conflicts, branch protection или remote changes — остановиться и сообщить пользователю, не обходить защиту автоматически.
-
-Commit должен содержать только изменения текущей задачи.
+If push fails due to auth/conflict/protection/remote changes, stop and report exact reason. Do not bypass safeguards.
 
 ### Single-task-commit finalization
 
-Все docs/status edits должны быть завершены до task commit.
-
-После task commit запрещено:
-- редактировать docs для вставки только что созданного SHA;
-- делать amend для добавления self-SHA;
-- создавать второй docs-only или status-only commit.
-
-Полученный commit SHA указывается только в Final Report, не в том же
-commit.
-
-Репозиторная документация использует `(reported in Final Report)` или
-опускает текущий task SHA.
-
-Prefer these commands over platform-specific wrappers.
+Complete docs/status edits before task commit. Do not amend/create a second docs-only commit merely to insert the just-created task SHA into the same task documentation. Report that SHA in Final Report instead.

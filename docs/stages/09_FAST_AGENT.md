@@ -2157,3 +2157,24 @@ published S9-C10 documentation:
 - No Stage-10 work was started.
 - No real Ollama/model was used.
 - Exactly one file changed: `docs/stages/09_FAST_AGENT.md`.
+
+## Architecture migration gate after S9-06
+
+After S9-06 and correction passes were accepted, the project selected the completed custom Fast Agent + `dnd ask` runtime as the reference implementation for a controlled Pydantic AI migration.
+
+Accepted reference baseline:
+
+```text
+f424a0f659afd5f8bcbce55c4d280cc8e621133f
+```
+
+`S9-07` is intentionally deferred until the migration decision is complete. The migration is tracked separately in:
+
+```text
+docs/adr/0003-pydantic-ai-runtime-migration.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+This does not invalidate or rewrite S9-00…S9-06 history. The current Stage-9 implementation and tests define the behavioral/safety reference that the new runtime must preserve.
+
+Possible migration outcomes are `ACCEPTED`, `PARTIAL` or `REJECTED`. If rejected, custom Stage-9 runtime remains canonical and migration findings are retained as documentation.
