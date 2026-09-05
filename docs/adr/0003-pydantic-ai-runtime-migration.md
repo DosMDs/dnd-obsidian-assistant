@@ -3,6 +3,8 @@
 - **Status:** Accepted for controlled migration; final runtime adoption pending
 - **Date:** 2026-09-04
 - **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+- **Migration branch:** `feat/pydantic-ai-runtime`
+- **PAIM-00 kickoff commit:** `ac9fd4c7e19475adb2331eb010ce8c78af98b309`
 - **Decision owner:** project architecture
 
 ## Context
@@ -27,7 +29,7 @@ Pydantic AI provides typed agent/model/tool/structured-output abstractions and o
 
 Evaluate and implement a **controlled migration** to Pydantic AI in a dedicated branch from the accepted S9-06 reference baseline.
 
-Recommended branch:
+Migration branch (created from the reference SHA):
 
 ```text
 feat/pydantic-ai-runtime
@@ -190,6 +192,12 @@ Costs/risks:
 - potential semantic mismatch with strict Stage-9 safety behavior;
 - possible native Ollama feature regression through compatibility APIs;
 - thread/retry/concurrency defaults requiring explicit control.
+
+## Migration kickoff status
+
+PAIM-00 was completed on 2026-09-05 in `feat/pydantic-ai-runtime`. Git verification shows the PAIM-00 commit `ac9fd4c7e19475adb2331eb010ce8c78af98b309` is a direct child of the reference main SHA `f424a0f659afd5f8bcbce55c4d280cc8e621133f`. `main` remains unchanged at the reference SHA.
+
+The next qualification task is `PAIM-01`.
 
 ## Follow-up
 

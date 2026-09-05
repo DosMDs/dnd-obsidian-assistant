@@ -18,10 +18,16 @@ Date: 2026-09-04
 State: S9-06 accepted, S9-07 not started
 ```
 
-Recommended migration branch:
+Active migration branch:
 
 ```text
 feat/pydantic-ai-runtime
+```
+
+PAIM-00 kickoff commit:
+
+```text
+ac9fd4c7e19475adb2331eb010ce8c78af98b309
 ```
 
 Optional human-friendly reference tag may be created separately, but branch base SHA is sufficient for rollback/review.
@@ -99,7 +105,7 @@ This rule remains even if framework filtering/approval appears sufficient in nor
 
 ## 7. PAIM task map
 
-### PAIM-00 — Documentation/branch kickoff
+### PAIM-00 — Documentation/branch kickoff — DONE
 
 No runtime changes.
 
@@ -209,7 +215,43 @@ Delete superseded generic custom infrastructure and obsolete implementation-spec
 
 Decide `ACCEPTED`, `PARTIAL`, or `REJECTED`.
 
-## 8. Blocker criteria
+
+## 8. PAIM-00 completion record
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Reference/base SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+**PAIM-00 commit:** `ac9fd4c7e19475adb2331eb010ce8c78af98b309`
+
+Git verification confirms the PAIM-00 commit is a direct child of the accepted reference SHA and that the migration branch is exactly one commit ahead of the reference at this checkpoint. `main` remains at `f424a0f659afd5f8bcbce55c4d280cc8e621133f`.
+
+### Exact PAIM-00 changed-file inventory
+
+```text
+.gigacode/rules/40-pydantic-ai-migration.md
+.gigacode/skills/pydantic-ai-migration/SKILL.md
+DEVELOPMENT_STATUS.md
+GIGACODE.md
+docs/adr/0003-pydantic-ai-runtime-migration.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+docs/migrations/README.md
+docs/stages/09_FAST_AGENT.md
+```
+
+All eight changed files are Markdown documentation/agent-instruction files. No Python source, tests, `pyproject.toml`, `uv.lock`, runtime configuration, provider code, tool code or Vault/storage code changed in PAIM-00.
+
+### Evidence note
+
+The repository facts above were independently reconciled from Git after the PAIM-00 commit. This record intentionally does **not** invent command-level test/Ruff results that are not present in the retained repository evidence. PAIM-00 is accepted as the documentation/architecture kickoff; PAIM-C00 reconciles the documentation gaps before PAIM-01.
+
+### Next task
+
+```text
+PAIM-01 — Candidate dependency/framework qualification
+```
+
+## 9. Blocker criteria
 
 A framework behavior is a potential blocker when project invariants cannot be implemented through public/supported APIs without large fragile workaround.
 
@@ -222,7 +264,7 @@ Examples:
 - Ollama integration loses critical tool/structured-output correctness;
 - maintaining project semantics requires effectively rewriting the framework run loop internally.
 
-## 9. Escape hatch levels
+## 10. Escape hatch levels
 
 ### Level 1 — supported extension
 
@@ -236,7 +278,7 @@ Keep/implement only the problematic component, e.g. native Ollama adapter.
 
 Do not merge runtime branch. Preserve findings and continue custom implementation from `main`.
 
-## 10. Rollback/rejection documentation
+## 11. Rollback/rejection documentation
 
 If `REJECTED`, record:
 
@@ -251,7 +293,7 @@ If `REJECTED`, record:
 
 Port this conclusion back to `main` as documentation even though runtime changes are not merged.
 
-## 11. No-double-runtime rule
+## 12. No-double-runtime rule
 
 Reference comparison may temporarily instantiate old/new mechanics in tests or spike modules.
 
@@ -259,7 +301,7 @@ Final migration branch before merge must not expose two equal-status production 
 
 The fallback is Git/main, not a permanent feature flag.
 
-## 12. Dependency/upgrade policy
+## 13. Dependency/upgrade policy
 
 - exact framework candidate chosen by PAIM-01;
 - lock exact transitive resolution via `uv.lock`;
@@ -267,7 +309,7 @@ The fallback is Git/main, not a permanent feature flag.
 - later Pydantic AI upgrade = standalone maintenance task;
 - provider/framework release notes and regression tests required.
 
-## 13. Completion order
+## 14. Completion order
 
 ```text
 S9-06 accepted baseline

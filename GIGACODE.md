@@ -225,6 +225,38 @@ inspect current file/partial state
 
 See `.gigacode/rules/07-incremental-file-editing.md` and ADR-0002.
 
+### Prompt-level repository-edit defense in depth
+
+Every implementation, correction, review-fix, migration, or maintenance prompt prepared for GigaCode must repeat a short mandatory repository-edit constraint **inside the task prompt**, even though the same policy is also enforced by always-on repository rules.
+
+Canonical prompt-level block:
+
+```text
+## Mandatory repository-edit constraint
+
+All repository text-file mutations must use built-in GigaCode/IDE file tools.
+
+Explicitly prohibited without prior user approval:
+- python -c with open(...).write(...)
+- python -c with Path.write_text()/Path.open()
+- temporary Python/PowerShell/Bash generator or append scripts
+- PowerShell file-write commands
+- shell redirection
+- base64/heredoc/generated-file workarounds
+
+If a file-tool operation is too large:
+inspect current partial state
+→ preserve correct edits
+→ split by logical section
+→ apply smaller anchored IDE edits
+→ re-read changed region
+→ inspect per-file diff.
+
+Do not switch writing mechanisms because a payload is large.
+```
+
+The always-on rules remain authoritative if a task prompt accidentally omits this repeated block. The repeated prompt constraint is intentional defense in depth.
+
 ## Adaptive quality gates
 
 Select gates from the **actual final Git diff**, not task title.
@@ -275,6 +307,12 @@ Current soft/hard guidance remains:
 - existing oversized files are legacy exceptions and may not silently grow;
 - tests are topic/capability oriented, not correction-number files;
 - preserve stable facades during decomposition where practical.
+
+## Task scope and evidence
+
+Use `.gigacode/rules/08-task-scope-and-evidence.md`.
+
+Before editing, capture starting branch/SHA, working-tree condition and intended scope. Before finalization, derive the exact changed-file inventory from Git and reconcile machine-derived evidence after writing documentation. Do not silently absorb unrelated dirty-tree changes or reconstruct current evidence from memory when a canonical command can provide it.
 
 ## Untrusted-boundary reliability
 

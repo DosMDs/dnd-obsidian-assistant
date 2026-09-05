@@ -1,7 +1,7 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-04 (PAIM-00 migration architecture/context kickoff)
-**Current milestone:** `v0.1-dev — Vault Core`
+**Last updated:** 2026-09-05 (PAIM-C00 documentation reconciliation after accepted PAIM-00)
+**Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
 **Active migration:** PAIM — Pydantic AI Runtime Migration
@@ -81,15 +81,22 @@ Detailed plan: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`
 
 Architecture decision: `docs/adr/0003-pydantic-ai-runtime-migration.md`
 
-Recommended branch:
+Active migration branch:
 
 ```text
 feat/pydantic-ai-runtime
 ```
 
+PAIM-00 branch kickoff commit:
+
+```text
+ac9fd4c7e19475adb2331eb010ce8c78af98b309
+```
+
 | Task | Status |
 |---|---|
 | PAIM-00 — Branch + ADR + project/GigaCode migration context | DONE |
+| PAIM-C00 — Reconcile kickoff evidence/status/GigaCode safeguards | DONE |
 | PAIM-01 — Candidate dependency/framework qualification | NOT STARTED |
 | PAIM-02 — Critical blocker gate | NOT STARTED |
 | PAIM-03 — Migration-specific test harness hardening | NOT STARTED |
@@ -125,6 +132,12 @@ REJECTED
 ```
 
 `PARTIAL` is a valid successful outcome. Architecture is not weakened merely to achieve `ACCEPTED`.
+
+## Active next task
+
+```text
+PAIM-01 — Candidate dependency/framework qualification
+```
 
 ## Current blockers
 
