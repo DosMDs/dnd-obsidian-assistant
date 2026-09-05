@@ -319,3 +319,125 @@ S9-06 accepted baseline
 → Stage 9 DONE
 → Stage 10
 ```
+
+## 15. PAIM-01 completion record
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `1733d303cffd1dacdd1d7610ce1cab2853094777`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Candidate
+
+| Field | Value |
+|---|---|
+| Package | `pydantic-ai-slim[openai]` |
+| Exact version | `2.39.0` |
+| Direct dependency spec | `pydantic-ai-slim[openai]==2.39.0` |
+| Resolved Pydantic AI version | `2.39.0` |
+| Python version | `3.12.11` |
+| OS | `Windows-11-10.0.26200-SP0` |
+
+### Deterministic qualification results
+
+All 14 tests in `tests/integration/test_pydantic_ai_qualification.py` pass.
+
+| # | Scenario | Result | Evidence |
+|---|---|---|---|
+| Q1 | Import and exact version | PASS | `pydantic_ai.__version__ == "2.39.0"`; Agent, OllamaModel, OpenAIChatModel, TestModel, OpenAIProvider all importable |
+| Q2 | Synchronous entry point | PASS | `agent.run_sync("test")` returns `AgentRunResult` with `output` attribute |
+| Q3 | Plain text response | PASS | `TestModel(custom_output_text=...)` returns exact expected string |
+| Q4 | Structured output | PASS | `TestModel(custom_output_args=...)` with `output_type=QualificationResult` returns validated `BaseModel` instance |
+| Q5 | Single function tool | PASS | Tool called exactly once; result appears in output |
+| Q6 | Multiple tool calls | PASS | Both tools called in single `ModelResponse`; **sequential** execution observed |
+| Q7 | Custom Ollama base URL | PASS | `OllamaProvider(base_url="http://my-ollama:11434/v1")` correctly stores URL; `OpenAIProvider` also works with `/v1` suffix |
+| Q8 | Connection failure | PASS | `ModelAPIError` raised for unreachable endpoint |
+| Q8 | Unknown tool call | PASS | `UserError` raised for unregistered tool |
+| Q8 | Structured output validation failure | PASS | `UnexpectedModelBehavior` raised with "Exceeded maximum output retries" |
+| Q8 | Output retry behavior | PASS | Default 1 retry exhausted before raising |
+
+### Real Ollama evidence
+
+| Field | Value |
+|---|---|
+| Ollama version | `0.33.3` |
+| Model | `huihui_ai/qwen3.5-abliterated:35b` |
+| Base URL | `http://localhost:11434/v1` |
+| Plain response | PASS — `"smoke test ok"` returned correctly |
+| Structured output | PASS — `SmokeResult(answer='hello', score=42)` returned and validated |
+| Provider used | `OllamaProvider` (official Pydantic AI Ollama provider) |
+
+### Observed framework semantics
+
+| Aspect | Observation |
+|---|---|
+| Structured-output mode | **ToolOutput** (default when `output_type` is a Pydantic model — framework creates synthetic tool for output schema) |
+| Multi-tool execution | **Sequential** — tools executed one after another in main thread |
+| Retry behavior | Default 1 output validation retry; automatic transport retries observed in OpenAI client (transparent to application) |
+| Public exception classes | `ModelAPIError` (base, extends `RuntimeError`), `ModelHTTPError` (extends `ModelAPIError`), `UserError` (extends `Exception`), `UnexpectedModelBehavior` (extends `RuntimeError`) |
+| Ollama endpoint path | `<base_url>/chat/completions` — base URL should include `/v1` for Ollama compatibility |
+
+### Architecture confirmation
+
+- No FastAgent replacement
+- No AgentLoop replacement
+- No ToolExecutor bridge yet
+- No Vault access
+- No domain/storage framework dependency
+- No PAIM-02 implementation
+- Qualification tools are harmless in-memory functions only
+- No production source modules modified
+
+### Changed files
+
+```text
+pyproject.toml
+uv.lock
+tests/integration/test_pydantic_ai_qualification.py
+tests/integration/test_pydantic_ai_ollama_smoke.py
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 14 passed |
+| Real Ollama smoke | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | 2 passed |
+| Relevant existing provider tests | `uv run pytest tests/integration/test_ollama_provider_integration.py` | 8 passed (in full suite) |
+| Full pytest (excl real Ollama) | `uv run pytest --ignore=tests/integration/test_pydantic_ai_ollama_smoke.py` | 4575 passed, 100 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 327 files already formatted |
+| uv lock consistency | `uv lock --check` | Resolved 51 packages |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Dependency review
+
+- **Direct dependency added:** `pydantic-ai-slim[openai]==2.39.0`
+- **Required transitive additions:** `openai==3.8.0`, `pydantic-graph==2.39.0`, `jiter==0.16.0`, `tiktoken==0.14.0`, `regex==2026.9.3`, `sniffio==1.3.1`, `charset-normalizer==3.5.1`, `httpcore2==2.12.0`, `httpx2==2.12.0`, `requests==2.34.2`, `urllib3==2.7.0`, `truststore==0.10.4`, `griffelib==2.3.0`, `genai-prices==0.1.6`, `logfire-api==5.0.0`, `opentelemetry-api==1.44.0`
+- **No unrelated direct upgrades**
+- **Existing `httpx>=0.28.1`** resolved to `httpx2==2.12.0` (transitive via openai SDK; coexists with project's httpx)
+
+### Qualification decision
+
+```
+QUALIFIED
+```
+
+All 8 qualification dimensions pass. The framework provides:
+- Deterministic test facilities (`TestModel`) for offline testing
+- Public Ollama provider (`OllamaModel` + `OllamaProvider`) with custom base URL support
+- Structured output via ToolOutput mode
+- Sequential synchronous tool execution
+- Predictable exception hierarchy for failure handling
+- No architectural boundary violations required
+
+The observed sequential multi-tool execution and default retry behavior are documented for PAIM-02 evaluation but do not block qualification.
+
+### Next task
+
+```text
+PAIM-02 — Critical blocker gate
+```
