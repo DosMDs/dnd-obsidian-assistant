@@ -356,63 +356,88 @@ def test_q8_connection_failure() -> None:
 # an unknown function call. This is a proper runtime unknown-tool test.
 
 
-def _make_unknown_tool_response(
-    messages: list,  # ModelMessage
-    agent_info: object,
-) -> ModelResponse:
-    """FunctionModel function that returns a ToolCallPart for an unregistered tool."""
-    return ModelResponse(
-        parts=[ToolCallPart(tool_name="nonexistent_tool", args="{}")],
-    )
+def _make_unknown_tool_response_counter(
+    counter: list[int],
+) -> object:
+    """Return a FunctionModel function that counts model invocations.
+
+    Each call appends 1 to *counter* and returns a ToolCallPart for an
+    unregistered tool name.
+    """
+
+    def _respond(messages: list, agent_info: object) -> ModelResponse:
+        counter[0] += 1
+        return ModelResponse(
+            parts=[ToolCallPart(tool_name="nonexistent_tool", args="{}")],
+        )
+
+    return _respond
 
 
 def test_q8b_unknown_tool_default_retry() -> None:
-    """Unknown tool call with default retry policy triggers a retry prompt.
+    """Unknown tool call with default retry policy.
 
-    The framework emits a RetryPromptPart (model request) rather than
-    raising immediately, and no application tool handler executes.
+    Proves:
+      - model request count > 1  (semantic retry model round occurred)
+      - application tool handler count == 0
+      - exact exception type is UnexpectedModelBehavior
     """
-    model = FunctionModel(function=_make_unknown_tool_response)
+    model_requests: list[int] = [0]
+    func = _make_unknown_tool_response_counter(model_requests)
+    model = FunctionModel(function=func)
     agent = Agent(model)
+
+    handler_calls: list[int] = [0]
 
     @agent.tool_plain
     def real_tool(x: int) -> str:
+        handler_calls[0] += 1
         raise AssertionError("should not be called")
 
     with pytest.raises(UnexpectedModelBehavior) as exc_info:
         agent.run_sync("call nonexistent_tool")
 
-    error_msg = str(exc_info.value)
-    # Default retry policy causes repeated model rounds; after exhausting
-    # retries the framework raises UnexpectedModelBehavior
-    assert (
-        "Exceeded maximum" in error_msg
-        or "retries" in error_msg.lower()
-        or "tool" in error_msg.lower()
+    # Evidence: at least one semantic retry model round occurred
+    assert model_requests[0] > 1, (
+        f"expected model requests > 1 (semantic retry), got {model_requests[0]}"
     )
+    # Evidence: no application tool handler executed
+    assert handler_calls[0] == 0, f"expected 0 handler calls, got {handler_calls[0]}"
+    # Evidence: exact public exception type
+    assert "exceeded max retries count" in str(exc_info.value).lower()
 
 
 def test_q8b_unknown_tool_zero_retries() -> None:
-    """Unknown tool call with retries={'tools': 0} raises terminal exception
-    without a semantic retry model round.
+    """Unknown tool call with retries={'tools': 0}.
 
-    No application tool handler executes.
+    Proves:
+      - model request count == 1  (no semantic retry model round)
+      - application tool handler count == 0
+      - exact exception type is UnexpectedModelBehavior
     """
-    model = FunctionModel(function=_make_unknown_tool_response)
+    model_requests: list[int] = [0]
+    func = _make_unknown_tool_response_counter(model_requests)
+    model = FunctionModel(function=func)
     agent = Agent(model, retries={"tools": 0})
 
-    tool_executed: bool = False
+    handler_calls: list[int] = [0]
 
     @agent.tool_plain
     def real_tool(x: int) -> str:
-        nonlocal tool_executed
-        tool_executed = True
+        handler_calls[0] += 1
         return f"x={x}"
 
-    with pytest.raises((pydantic_ai.exceptions.UserError, UnexpectedModelBehavior)):
+    with pytest.raises(UnexpectedModelBehavior) as exc_info:
         agent.run_sync("call nonexistent_tool")
 
-    assert not tool_executed, "application tool handler must not execute for unknown tool"
+    # Evidence: no semantic retry model round
+    assert model_requests[0] == 1, (
+        f"expected model requests == 1 (no retry), got {model_requests[0]}"
+    )
+    # Evidence: no application tool handler executed
+    assert handler_calls[0] == 0, f"expected 0 handler calls, got {handler_calls[0]}"
+    # Evidence: exact public exception type
+    assert "exceeded max retries count" in str(exc_info.value).lower()
 
 
 def test_q8_structured_output_validation_failure() -> None:

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-05 (PAIM-C01 framework-semantics correction)
+**Last updated:** 2026-09-05 (PAIM-C02 retry-count evidence)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -99,6 +99,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C00 — Reconcile kickoff evidence/status/GigaCode safeguards | DONE |
 | PAIM-01 — Candidate dependency/framework qualification | DONE |
 | PAIM-C01 — Correct PAIM-01 framework-semantics evidence | DONE |
+| PAIM-C02 — Close unknown-tool retry-count evidence gap | DONE |
 | PAIM-02 — Critical blocker gate | NOT STARTED |
 | PAIM-03 — Migration-specific test harness hardening | NOT STARTED |
 | PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge | NOT STARTED |

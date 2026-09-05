@@ -248,7 +248,101 @@ The repository facts above were independently reconciled from Git after the PAIM
 ### Next task
 
 ```text
-PAIM-01 — Candidate dependency/framework qualification
+PAIM-02 — Critical blocker gate
+```
+
+## 17. PAIM-C02 correction record — close unknown-tool retry-count evidence gap
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `5d41511d7dd1f775c044b14359dc0db6bafa1ab6`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C01 proved that unknown-tool handling:
+- eventually fails under default retries;
+- fails without retry under `retries={"tools": 0}`;
+- never executes an application tool handler.
+
+But it did **not** count model requests. The documented claims about semantic
+retry model rounds were inferred rather than executable evidence.
+
+PAIM-C02 adds a model request counter to the `FunctionModel` function and
+asserts exact counts, handler counts, and exception types.
+
+### Executable retry evidence
+
+| Scenario | Model requests | Handler calls | Exception |
+|---|---|---|---|
+| Default retries | 2 | 0 | `UnexpectedModelBehavior` — "Tool 'nonexistent_tool' exceeded max retries count of 1" |
+| `retries={"tools": 0}` | 1 | 0 | `UnexpectedModelBehavior` — "Tool 'nonexistent_tool' exceeded max retries count of 0" |
+
+Key findings:
+
+- **Default retries:** `model_requests == 2` proves exactly one semantic retry
+  model round occurred (the initial request + one retry). The framework's
+  default tool retry count is 1.
+- **Zero retries:** `model_requests == 1` proves no semantic retry model round
+  occurred. The framework raises `UnexpectedModelBehavior` immediately after
+  the single model request.
+- **Both cases:** `handler_calls == 0` proves no application tool handler
+  executes regardless of retry policy.
+- **Exception type:** Both cases raise `UnexpectedModelBehavior` (not
+  `UserError`). The broad `pytest.raises((UserError, UnexpectedModelBehavior))`
+  in PAIM-C01 is narrowed to exact `UnexpectedModelBehavior`.
+
+### Changed tests
+
+```text
+tests/integration/test_pydantic_ai_qualification.py
+  - test_q8b_unknown_tool_default_retry: added model_request counter,
+    handler counter, exact exception assertions
+  - test_q8b_unknown_tool_zero_retries: same corrections
+```
+
+### Architecture confirmation
+
+- No production runtime changes
+- No dependency changes
+- No PAIM-02 implementation
+- No ToolExecutor/FastAgent/AgentLoop changes
+- No Vault/domain/storage changes
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_qualification.py
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Full pytest (excl real Ollama) | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Evidence quality
+
+The tests now explicitly distinguish:
+
+```text
+model invocation count  —  proven by FunctionModel closure counter
+tool handler invocation count  —  proven by tool_plain closure counter
+```
+
+PAIM-C01 retry evidence is now executable rather than inferred.
+
+### Next task
+
+```text
+PAIM-02 — Critical blocker gate
 ```
 
 ## 9. Blocker criteria
