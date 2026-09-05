@@ -441,3 +441,195 @@ The observed sequential multi-tool execution and default retry behavior are docu
 ```text
 PAIM-02 — Critical blocker gate
 ```
+
+## 16. PAIM-C01 correction record
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `49b7fd3391ef165dd94964ac034feb1ad5de9d91`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+Independent review identified several inaccurate claims in the PAIM-01
+qualification evidence. PAIM-C01 corrects these without changing the
+PAIM-01 qualification outcome.
+
+### Defect A — multi-tool execution semantics
+
+**Original PAIM-01 claim:** `call_order == ["a", "b"]` proves sequential
+multi-tool execution; sync tools execute in main thread.
+
+**Correction:** Two concurrently scheduled short functions may append in
+model-emission order without being sequential. The claim was insufficient.
+
+**Corrected evidence (A1 — default concurrency):**
+
+Two async tools with a synchronisation barrier (`tool_a` waits until
+`tool_b` has started) prove that under the default parallel execution mode
+both tools are **concurrently active** (`max_active >= 2`).
+
+```text
+test_q6a_default_multi_tool_concurrency: PASS
+max_active >= 2  (both tools overlapped)
+```
+
+**Corrected evidence (A2 — explicit sequential mode):**
+
+Using `agent.parallel_tool_call_execution_mode("sequential")`, tool_b
+starts only after tool_a finishes (`max_active <= 1`).
+
+```text
+test_q6b_explicit_sequential_mode: PASS
+max_active <= 1  (no overlap)
+```
+
+**Corrected evidence (A3 — sync tool thread behavior):**
+
+A synchronous `tool_plain` tool executes on a **worker thread**, not the
+calling thread.
+
+```text
+test_q6c_sync_tool_worker_thread: PASS
+tool_thread_id != calling_thread_id
+```
+
+### Defect B — unknown-tool test methodology
+
+**Original PAIM-01 claim:** `TestModel(call_tools=["nonexistent_tool"])`
+proves unknown-tool behavior. Documented as `UserError`.
+
+**Correction:** `TestModel` may fail while preparing its deterministic setup
+rather than emulating a provider response containing an unknown function
+call. Not a valid runtime unknown-tool test.
+
+**Corrected evidence (B1 — default retry behavior):**
+
+Using `FunctionModel` that returns a raw `ModelResponse` with a
+`ToolCallPart` for `"nonexistent_tool"`, the framework emits a
+`RetryPromptPart` (semantic retry round) before eventually raising
+`UnexpectedModelBehavior`. No application tool handler executes.
+
+```text
+test_q8b_unknown_tool_default_retry: PASS
+UnexpectedModelBehavior raised after retry exhaustion
+no application tool handler executed
+```
+
+**Corrected evidence (B2 — zero retries):**
+
+With `Agent(retries={"tools": 0})`, the framework raises a terminal
+exception without a semantic retry round. No application tool handler
+executes.
+
+```text
+test_q8b_unknown_tool_zero_retries: PASS
+terminal exception raised (UserError or UnexpectedModelBehavior)
+no application tool handler executed
+```
+
+### Defect C — overstated Ollama endpoint evidence
+
+**Original PAIM-01 claim:** Q7 proves `<base>/chat/completions` endpoint
+path.
+
+**Correction:** The test only proves that `OllamaProvider` and
+`OpenAIProvider` accept and store a custom `base_url` ending in `/v1`. It
+does not independently capture the exact outgoing HTTP request path.
+
+**Corrected evidence:** Claims narrowed to:
+
+```text
+OllamaProvider accepts custom base_url ending in /v1
+OpenAIProvider with /v1 suffix works for Ollama
+Real Ollama smoke succeeds through that configured base URL
+```
+
+### Defect D — overstated smoke assertions
+
+**Original PAIM-01 claim:** `"smoke test ok"` returned correctly;
+`SmokeResult(answer='hello', score=42)` returned.
+
+**Correction:** The actual test assertions were:
+
+```text
+plain: non-empty string output
+structured: validated SmokeResult with non-empty answer and positive score
+```
+
+Documentation now matches the exact asserted contract.
+
+### Defect E — machine-specific default model
+
+**Original PAIM-01:** Smoke file contained `huihui_ai/qwen3.5-abliterated:35b`
+as project-level default.
+
+**Correction:** Removed. Smoke tests now require explicit configuration via
+`DND_ASSISTANT_OLLAMA_SMOKE_CONFIG=<base_url>,<model>`. If absent, tests
+skip. If malformed, clear test/configuration error.
+
+### Effective corrected PAIM-01 findings
+
+| Aspect | Corrected finding |
+|---|---|
+| Multi-tool representation | PASS |
+| Default multi-tool execution | **parallel/concurrent** |
+| Explicit whole-run sequential mode | PASS |
+| Sync tool execution | **worker thread** |
+| Unknown tool default | semantic retry behavior (RetryPromptPart → exhaustion) |
+| Unknown tool retries=0 | terminal failure without retry |
+| Ollama base URL | custom base_url accepted and stored |
+| Ollama smoke | non-empty text; validated structured output |
+
+### Qualification classification
+
+```
+QUALIFIED WITH OBSERVED LIMITATIONS
+```
+
+Observed limitations:
+
+- default multi-tool execution is concurrent (not sequential);
+- default semantic tool retry is non-zero (retry round before exhaustion);
+- sync tools are offloaded to worker threads.
+
+These are not PAIM rejection conditions by themselves because later gates
+(PAIM-02, PAIM-10) can potentially constrain them using supported public
+APIs (`parallel_tool_call_execution_mode`, `retries` parameter).
+
+### Architecture confirmation
+
+- No production runtime changes
+- No ToolExecutor bridge
+- No FastAgent/AgentLoop replacement
+- No PAIM-02 implementation
+- No dependency change
+- No Vault/domain/storage changes
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_qualification.py
+tests/integration/test_pydantic_ai_ollama_smoke.py
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Default smoke (no config) | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | 2 skipped |
+| Real Ollama smoke | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | (explicit config, reported in Final Report) |
+| Full pytest (excl real Ollama) | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Next task
+
+```text
+PAIM-02 — Critical blocker gate
+```

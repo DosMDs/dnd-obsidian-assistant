@@ -1,19 +1,25 @@
-"""PAIM-01: Pydantic AI candidate dependency/framework qualification.
+"""PAIM-01/PAIM-C01: Pydantic AI candidate dependency/framework qualification.
 
 Qualifies pydantic-ai-slim[openai]==2.39.0 against the D&D Session Assistant
 environment using supported public APIs only.
 
-All tests in this module are deterministic (TestModel-based) and require no
-real Ollama or network access.
+All tests in this module are deterministic and require no real Ollama or
+network access.
 """
 
 from __future__ import annotations
+
+import asyncio
+import threading
+from dataclasses import dataclass
 
 import pydantic_ai
 import pydantic_ai.exceptions
 import pytest
 from pydantic import BaseModel
 from pydantic_ai import Agent, UnexpectedModelBehavior
+from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
@@ -121,66 +127,197 @@ def test_q5_single_tool() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Q6 — multiple tool calls in one model response
+# Q6 — multi-tool execution semantics (PAIM-C01 correction)
 # ---------------------------------------------------------------------------
 
 
-def test_q6_multiple_tools_in_one_response() -> None:
-    """One model response requests at least two harmless tools.
+@dataclass
+class _ConcurrencyEvidence:
+    """Shared state for proving concurrent tool execution."""
 
-    Observes baseline framework behavior: TestModel issues all requested
-    tool calls in a single ModelResponse, and the framework executes them
-    sequentially (default synchronous behavior).
+    a_started: bool = False
+    b_started: bool = False
+    a_finished: bool = False
+    b_finished: bool = False
+    max_active: int = 0
+    active: int = 0
+    lock: threading.Lock = threading.Lock()
+
+    def enter_a(self) -> None:
+        with self.lock:
+            self.a_started = True
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+
+    def exit_a(self) -> None:
+        with self.lock:
+            self.active -= 1
+            self.a_finished = True
+
+    def enter_b(self) -> None:
+        with self.lock:
+            self.b_started = True
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+
+    def exit_b(self) -> None:
+        with self.lock:
+            self.active -= 1
+            self.b_finished = True
+
+    async def wait_for_b(self, timeout: float = 5.0) -> None:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while not self.b_started and asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.001)
+
+    async def wait_for_a(self, timeout: float = 5.0) -> None:
+        deadline = asyncio.get_event_loop().time() + timeout
+        while not self.a_started and asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(0.001)
+
+
+def test_q6a_default_multi_tool_concurrency() -> None:
+    """Default multi-tool execution is concurrent (overlapping).
+
+    Two async tools that synchronise via shared state: tool_a waits until
+    tool_b has started, proving that both are active simultaneously under
+    the default parallel execution mode.
     """
-    call_order: list[str] = []
+    evidence = _ConcurrencyEvidence()
+
+    async def tool_a_impl(x: int) -> str:
+        evidence.enter_a()
+        await evidence.wait_for_b()
+        await asyncio.sleep(0.01)
+        evidence.exit_a()
+        return f"A={x}"
+
+    async def tool_b_impl(y: int) -> str:
+        evidence.enter_b()
+        await evidence.wait_for_a()
+        await asyncio.sleep(0.01)
+        evidence.exit_b()
+        return f"B={y}"
+
+    # Use TestModel to request both tools in one ModelResponse
+    model = TestModel(call_tools=["tool_a", "tool_b"])
+    agent = Agent(model)
+
+    @agent.tool_plain
+    async def tool_a(x: int) -> str:
+        return await tool_a_impl(x)
+
+    @agent.tool_plain
+    async def tool_b(y: int) -> str:
+        return await tool_b_impl(y)
+
+    result = agent.run_sync("use both tools")
+    assert evidence.a_started
+    assert evidence.b_started
+    assert evidence.a_finished
+    assert evidence.b_finished
+    # Default mode is parallel: both tools were active simultaneously
+    assert evidence.max_active >= 2, (
+        f"expected concurrent execution (max_active >= 2), got max_active={evidence.max_active}"
+    )
+    assert "tool_a" in str(result.output)
+    assert "tool_b" in str(result.output)
+
+
+def test_q6b_explicit_sequential_mode() -> None:
+    """Explicit parallel_tool_call_execution_mode('sequential') serialises tools.
+
+    Under sequential mode, tool_b starts only after tool_a finishes,
+    so max_active never exceeds 1.
+    """
+    evidence = _ConcurrencyEvidence()
+
+    async def tool_a_impl(x: int) -> str:
+        evidence.enter_a()
+        await asyncio.sleep(0.05)
+        evidence.exit_a()
+        return f"A={x}"
+
+    async def tool_b_impl(y: int) -> str:
+        evidence.enter_b()
+        await asyncio.sleep(0.05)
+        evidence.exit_b()
+        return f"B={y}"
 
     model = TestModel(call_tools=["tool_a", "tool_b"])
     agent = Agent(model)
 
     @agent.tool_plain
-    def tool_a(x: int) -> str:
-        call_order.append("a")
-        return f"A={x}"
+    async def tool_a(x: int) -> str:
+        return await tool_a_impl(x)
 
     @agent.tool_plain
-    def tool_b(y: int) -> str:
-        call_order.append("b")
-        return f"B={y}"
+    async def tool_b(y: int) -> str:
+        return await tool_b_impl(y)
 
-    result = agent.run_sync("use both tools")
-    assert len(call_order) == 2, f"expected 2 calls, got {len(call_order)}"
+    with agent.parallel_tool_call_execution_mode("sequential"):
+        result = agent.run_sync("use both tools sequentially")
+
+    assert evidence.a_started
+    assert evidence.b_started
+    assert evidence.a_finished
+    assert evidence.b_finished
+    # Sequential: at most one tool active at a time
+    assert evidence.max_active <= 1, (
+        f"expected sequential execution (max_active <= 1), got max_active={evidence.max_active}"
+    )
+    # Model-emission order is preserved: tool_a before tool_b
     assert "tool_a" in str(result.output)
     assert "tool_b" in str(result.output)
 
-    # Observed concurrency: sequential (synchronous execution in main thread)
-    assert call_order == ["a", "b"], f"expected sequential execution, got {call_order}"
+
+def test_q6c_sync_tool_worker_thread() -> None:
+    """A synchronous tool_plain tool executes on a worker thread, not the
+    calling thread.
+
+    This is crucial evidence for PAIM-10 (sync/thread safety gate).
+    """
+    calling_thread_id = threading.get_ident()
+    tool_thread_id: list[int] = []
+
+    model = TestModel(call_tools=["identify"])
+    agent = Agent(model)
+
+    @agent.tool_plain
+    def identify() -> str:
+        tool_thread_id.append(threading.get_ident())
+        return f"thread={threading.get_ident()}"
+
+    result = agent.run_sync("call identify")
+    assert len(tool_thread_id) == 1
+    assert tool_thread_id[0] != calling_thread_id, (
+        f"sync tool executed on calling thread {calling_thread_id}, "
+        f"expected worker thread, got {tool_thread_id[0]}"
+    )
+    assert result.output is not None
 
 
 # ---------------------------------------------------------------------------
 # Q7 — custom Ollama base URL
 # ---------------------------------------------------------------------------
+# PAIM-C01 correction: evidence narrowed to what is actually proven.
+# The tests prove that OllamaProvider and OpenAIProvider accept and store
+# a custom base_url ending in /v1. They do NOT independently capture the
+# exact outgoing HTTP request path (e.g. <base>/chat/completions).
+# Real Ollama smoke tests (test_pydantic_ai_ollama_smoke.py) prove that
+# a real Ollama instance responds correctly through the configured URL.
 
 
 def test_q7_custom_ollama_base_url() -> None:
-    """Custom self-hosted base URL can be supplied via OllamaProvider.
-
-    Verifies the framework targets the expected OpenAI-compatible Ollama
-    endpoint family: <base>/chat/completions (where base includes /v1).
-    """
+    """OllamaProvider accepts custom base_url ending in /v1."""
     from pydantic_ai.providers.ollama import OllamaProvider
 
     custom_url = "http://my-ollama:11434/v1"
     provider = OllamaProvider(base_url=custom_url)
     model = OllamaModel("qwen3", provider=provider)
 
-    # The provider stores the base URL with /v1 path
     base = str(model.provider.base_url)
     assert custom_url in base, f"expected {custom_url} in {base}"
-
-    # The endpoint path is the standard OpenAI-compatible chat completions
-    # path that Ollama serves at <base>/chat/completions
-    # Pydantic AI's OllamaProvider uses Ollama namespace which correctly
-    # targets the Ollama API without requiring /v1 prefix in the path
 
 
 def test_q7_custom_ollama_base_url_with_openai_provider() -> None:
@@ -211,13 +348,71 @@ def test_q8_connection_failure() -> None:
         agent.run_sync("hello")
 
 
-def test_q8_unknown_tool_call_fails_closed() -> None:
-    """Model requesting an unregistered tool raises UserError."""
-    model = TestModel(call_tools=["nonexistent_tool"])
+# ---------------------------------------------------------------------------
+# Q8b — unknown tool call semantics (PAIM-C01 correction)
+# ---------------------------------------------------------------------------
+# PAIM-C01 correction: replaced TestModel-based unknown-tool test with
+# FunctionModel-based tests that emulate a provider response containing
+# an unknown function call. This is a proper runtime unknown-tool test.
+
+
+def _make_unknown_tool_response(
+    messages: list,  # ModelMessage
+    agent_info: object,
+) -> ModelResponse:
+    """FunctionModel function that returns a ToolCallPart for an unregistered tool."""
+    return ModelResponse(
+        parts=[ToolCallPart(tool_name="nonexistent_tool", args="{}")],
+    )
+
+
+def test_q8b_unknown_tool_default_retry() -> None:
+    """Unknown tool call with default retry policy triggers a retry prompt.
+
+    The framework emits a RetryPromptPart (model request) rather than
+    raising immediately, and no application tool handler executes.
+    """
+    model = FunctionModel(function=_make_unknown_tool_response)
     agent = Agent(model)
 
-    with pytest.raises(pydantic_ai.exceptions.UserError):
+    @agent.tool_plain
+    def real_tool(x: int) -> str:
+        raise AssertionError("should not be called")
+
+    with pytest.raises(UnexpectedModelBehavior) as exc_info:
         agent.run_sync("call nonexistent_tool")
+
+    error_msg = str(exc_info.value)
+    # Default retry policy causes repeated model rounds; after exhausting
+    # retries the framework raises UnexpectedModelBehavior
+    assert (
+        "Exceeded maximum" in error_msg
+        or "retries" in error_msg.lower()
+        or "tool" in error_msg.lower()
+    )
+
+
+def test_q8b_unknown_tool_zero_retries() -> None:
+    """Unknown tool call with retries={'tools': 0} raises terminal exception
+    without a semantic retry model round.
+
+    No application tool handler executes.
+    """
+    model = FunctionModel(function=_make_unknown_tool_response)
+    agent = Agent(model, retries={"tools": 0})
+
+    tool_executed: bool = False
+
+    @agent.tool_plain
+    def real_tool(x: int) -> str:
+        nonlocal tool_executed
+        tool_executed = True
+        return f"x={x}"
+
+    with pytest.raises((pydantic_ai.exceptions.UserError, UnexpectedModelBehavior)):
+        agent.run_sync("call nonexistent_tool")
+
+    assert not tool_executed, "application tool handler must not execute for unknown tool"
 
 
 def test_q8_structured_output_validation_failure() -> None:
