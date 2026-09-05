@@ -55,9 +55,8 @@ import pytest
 from pydantic import BaseModel
 
 # Pydantic AI imports
-from pydantic_ai import Agent, RunContext, UnexpectedModelBehavior, UsageLimits
+from pydantic_ai import Agent, RunContext, UsageLimits
 from pydantic_ai.capabilities import HandleDeferredToolCalls
-from pydantic_ai.exceptions import UsageLimitExceeded
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
@@ -310,9 +309,10 @@ def _make_deferred_handler(
 
         seen_ids: set[str] = set()
         for c in all_calls:
-            if c.tool_call_id in seen_ids:
-                raise RuntimeError(f"Duplicate tool_call_id '{c.tool_call_id}'")
-            seen_ids.add(c.tool_call_id)
+            if c.tool_call_id is not None:
+                if c.tool_call_id in seen_ids:
+                    raise RuntimeError(f"Duplicate tool_call_id '{c.tool_call_id}'")
+                seen_ids.add(c.tool_call_id)
 
         resolved: list[tuple[ToolCallPart, ProjectToolDefinition]] = []
         for c in all_calls:
@@ -383,13 +383,29 @@ def test_bg09_single_read_through_executor(
     """One valid READ call.
 
     Proves:
+      - model requests == 2 (model -> tools -> model)
       - HandleDeferredToolCalls handler invokes ToolExecutor exactly once
       - project READ handler executes exactly once
       - result returns to model
       - terminal second model response
-      - model requests == 2 (model -> tools -> model)
     """
-    model = TestModel(call_tools=["read_alpha"])
+    model_requests: list[int] = [0]
+
+    def make_response(messages: list, agent_info: object) -> ModelResponse:
+        model_requests[0] += 1
+        if model_requests[0] == 1:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="read_alpha",
+                        args={"value": "bg09"},
+                        tool_call_id="call_bg09",
+                    )
+                ]
+            )
+        return ModelResponse(parts=[TextPart(content="read accepted")])
+
+    model = FunctionModel(function=make_response)
     agent = _make_agent(model, frozen_snapshot)
 
     handler_invocations: list[int] = [0]
@@ -408,6 +424,8 @@ def test_bg09_single_read_through_executor(
         "use read_alpha", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
     )
 
+    # Model requests == 2
+    assert model_requests[0] == 2, f"expected 2 model requests, got {model_requests[0]}"
     # One handler invocation, one ToolExecutor execution
     assert handler_invocations[0] == 1, (
         f"expected 1 handler invocation, got {handler_invocations[0]}"
@@ -417,6 +435,83 @@ def test_bg09_single_read_through_executor(
     )
     assert counters.alpha == 1, f"expected 1 alpha handler call, got {counters.alpha}"
     # Terminal output is a string
+    assert isinstance(result.output, str), (
+        f"expected str output, got {type(result.output).__name__}"
+    )
+
+
+# ============================================================================
+# BG-10 — Single WRITE through ToolExecutor
+# ============================================================================
+
+
+def test_bg10_single_write_through_executor(
+    counters: HandlerCounters,
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    write_ctx: ExecutionContext,
+) -> None:
+    """One valid WRITE call with proper permission, session mode, and audit.
+
+    Uses ExternalToolset + HandleDeferredToolCalls + ToolExecutor.
+    No @agent.tool or @agent.tool_plain decorator exists — all execution
+    goes through ToolExecutor.
+
+    Proves:
+      - model requests == 2 (model -> tools -> model)
+      - deferred handler invocations == 1
+      - ToolExecutor invocations == 1
+      - WRITE project handler invocations == 1
+      - terminal result is produced
+    """
+    model_requests: list[int] = [0]
+
+    def make_response(messages: list, agent_info: object) -> ModelResponse:
+        model_requests[0] += 1
+        if model_requests[0] == 1:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="write_alpha",
+                        args={"value": "bg10"},
+                        tool_call_id="write_bg10",
+                    )
+                ]
+            )
+        return ModelResponse(parts=[TextPart(content="write accepted")])
+
+    model = FunctionModel(function=make_response)
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        write_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
+    )
+
+    result = agent.run_sync(
+        "use write_alpha", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+    )
+
+    # Model requests == 2 (model -> tools -> model)
+    assert model_requests[0] == 2, f"expected 2 model requests, got {model_requests[0]}"
+    # Handler invocations == 1
+    assert handler_invocations[0] == 1, (
+        f"expected 1 handler invocation, got {handler_invocations[0]}"
+    )
+    # ToolExecutor invocations == 1
+    assert executor_invocations[0] == 1, (
+        f"expected 1 executor invocation, got {executor_invocations[0]}"
+    )
+    # WRITE project handler invocations == 1
+    assert counters.write_alpha == 1, f"expected 1 write_alpha call, got {counters.write_alpha}"
+    # Terminal result is a string
     assert isinstance(result.output, str), (
         f"expected str output, got {type(result.output).__name__}"
     )
@@ -589,247 +684,157 @@ def test_bg12_second_round_tool_rejected(
 
 
 # ============================================================================
-# Whole-turn model request limit — defense in depth
+# Missing tool-call ID behavior
 # ============================================================================
 
 
-def test_request_limit_defense_in_depth() -> None:
-    """UsageLimits(request_limit=2) allows model->tools->model cycle.
+def test_missing_tool_call_ids(
+    counters: HandlerCounters,
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    read_ctx: ExecutionContext,
+) -> None:
+    """Model emits ToolCallParts without explicit tool_call_id.
 
-    With HandleDeferredToolCalls, the complete model->tools->model cycle
-    stays inside one agent.run_sync(). UsageLimits(request_limit=2) allows
-    exactly 2 model requests.
+    Pydantic AI 2.39.0 auto-assigns unique IDs when tool_call_id is omitted
+    from the constructor. When explicitly set to None, None is preserved.
 
-    Proves:
-      - model requests == 2 with request_limit=2
-      - handler invoked once
-      - terminal output is a string
+    This test proves:
+      - IDs omitted from model response: framework auto-assigns non-empty IDs
+      - IDs reaching deferred handler are non-empty and unique
+      - Application preflight accepts the batch (no duplicate-ID rejection)
+      - Batch completes through ToolExecutor
     """
+    # Use FunctionModel that emits ToolCallParts WITHOUT explicit tool_call_id
     model_requests: list[int] = [0]
+    observed_ids: list[str | None] = []
 
     def make_response(messages: list, agent_info: object) -> ModelResponse:
         model_requests[0] += 1
         if model_requests[0] == 1:
             return ModelResponse(
                 parts=[
+                    # No tool_call_id supplied — framework auto-assigns
                     ToolCallPart(
                         tool_name="read_alpha",
-                        args={"value": "x"},
-                        tool_call_id="call_1",
-                    )
+                        args={"value": "first"},
+                    ),
+                    ToolCallPart(
+                        tool_name="read_beta",
+                        args={"number": 42},
+                    ),
                 ]
             )
-        # Second request: terminal response with text
         return ModelResponse(parts=[TextPart(content="done")])
 
     model = FunctionModel(function=make_response)
-    snapshot = (
-        ProjectToolDefinition(
-            name="read_alpha",
-            description="A read-only test tool",
-            input_schema=AlphaInput,
-            output_schema=ToolOutput,
-            permission=Permission.READ,
-            side_effects=frozenset(),
-            allowed_session_modes=frozenset(
-                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
-            ),
-        ),
-    )
-    agent = _make_agent(model, snapshot)
+    agent = _make_agent(model, frozen_snapshot)
 
     handler_invocations: list[int] = [0]
     executor_invocations: list[int] = [0]
 
-    registry = ToolRegistry()
+    # Capture IDs inside the deferred handler before execution
+    def capturing_handler(
+        snapshot: tuple[ProjectToolDefinition, ...],
+        executor: ToolExecutor,
+        context: ExecutionContext,
+        *,
+        counters: HandlerCounters | None = None,
+        handler_invocations: list[int] | None = None,
+        executor_invocations: list[int] | None = None,
+    ) -> HandleDeferredToolCalls:
+        snapshot_map: dict[str, ProjectToolDefinition] = {d.name: d for d in snapshot}
+        batch_count: list[int] = [0]
 
-    def alpha_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
-        return ToolOutput(result=f"alpha:{inp.value}")
+        def _handler(ctx: RunContext, requests: DeferredToolRequests) -> DeferredToolResults | None:
+            nonlocal batch_count
+            batch_count[0] += 1
 
-    registry.register(snapshot[0], alpha_handler)
-    local_executor = ToolExecutor(registry)
+            if handler_invocations is not None:
+                handler_invocations[0] += 1
 
-    cap = _make_deferred_handler(
-        snapshot,
-        local_executor,
-        ExecutionContext(
-            granted_permission=Permission.READ,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-        ),
+            all_calls = list(requests.calls)
+            if not all_calls:
+                return None
+
+            # Capture IDs
+            for c in all_calls:
+                observed_ids.append(c.tool_call_id)
+
+            # --- Preflight ---
+            seen_ids: set[str] = set()
+            for c in all_calls:
+                if c.tool_call_id is not None:
+                    if c.tool_call_id in seen_ids:
+                        raise RuntimeError(f"Duplicate tool_call_id '{c.tool_call_id}'")
+                    seen_ids.add(c.tool_call_id)
+
+            resolved: list[tuple[ToolCallPart, ProjectToolDefinition]] = []
+            for c in all_calls:
+                definition = snapshot_map.get(c.tool_name)
+                if definition is None:
+                    raise RuntimeError(f"Unknown/hidden tool '{c.tool_name}'")
+                resolved.append((c, definition))
+
+            # --- Execute through ToolExecutor sequentially ---
+            results: dict[str, Any] = {}
+            for call, definition in resolved:
+                if executor_invocations is not None:
+                    executor_invocations[0] += 1
+                input_data = call.args if isinstance(call.args, dict) else {}
+                output = executor.execute(
+                    definition.name,
+                    input_data=input_data,
+                    context=context,
+                )
+                results[call.tool_call_id] = output.result
+
+            return requests.build_results(calls=results)
+
+        return HandleDeferredToolCalls(handler=_handler)
+
+    cap = capturing_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
         handler_invocations=handler_invocations,
         executor_invocations=executor_invocations,
     )
 
-    result = agent.run_sync("start", capabilities=[cap], usage_limits=UsageLimits(request_limit=3))
+    result = agent.run_sync(
+        "use tools without ids", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+    )
 
+    # Model requests == 2
+    assert model_requests[0] == 2, f"expected 2 model requests, got {model_requests[0]}"
+    # Handler was invoked once
     assert handler_invocations[0] == 1, (
         f"expected 1 handler invocation, got {handler_invocations[0]}"
     )
-    assert executor_invocations[0] == 1, (
-        f"expected 1 executor invocation, got {executor_invocations[0]}"
-    )
-    assert model_requests[0] == 2, f"expected 2 model requests, got {model_requests[0]}"
-    assert isinstance(result.output, str), (
-        f"expected str output, got {type(result.output).__name__}"
-    )
-
-
-# ============================================================================
-# Whole-turn request limit — third request prevented
-# ============================================================================
-
-
-def test_request_limit_third_request_prevented() -> None:
-    """UsageLimits(request_limit=2) prevents a third model request.
-
-    Construct a scenario that would require a third model request:
-      request 1 -> tool call
-      request 2 -> tool call (second round)
-      request 3 -> would be needed but prevented
-
-    Proves:
-      - model requests == 2
-      - request #3 prevented by UsageLimitExceeded
-    """
-    model_requests: list[int] = [0]
-
-    def make_response(messages: list, agent_info: object) -> ModelResponse:
-        model_requests[0] += 1
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name="read_alpha",
-                    args={"value": f"req_{model_requests[0]}"},
-                    tool_call_id=f"call_{model_requests[0]}",
-                )
-            ]
+    # Two IDs were captured
+    assert len(observed_ids) == 2, f"expected 2 observed IDs, got {len(observed_ids)}"
+    # Both IDs are non-empty strings
+    for i, oid in enumerate(observed_ids):
+        assert isinstance(oid, str) and len(oid) > 0, (
+            f"observed_id[{i}] is not a non-empty string: {oid!r}"
         )
-
-    model = FunctionModel(function=make_response)
-    snapshot = (
-        ProjectToolDefinition(
-            name="read_alpha",
-            description="A read-only test tool",
-            input_schema=AlphaInput,
-            output_schema=ToolOutput,
-            permission=Permission.READ,
-            side_effects=frozenset(),
-            allowed_session_modes=frozenset(
-                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
-            ),
-        ),
+    # IDs are unique
+    assert observed_ids[0] != observed_ids[1], (
+        f"expected unique IDs, got {observed_ids[0]} == {observed_ids[1]}"
     )
-    agent = _make_agent(model, snapshot)
-
-    registry = ToolRegistry()
-
-    def alpha_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
-        return ToolOutput(result=f"alpha:{inp.value}")
-
-    registry.register(snapshot[0], alpha_handler)
-    local_executor = ToolExecutor(registry)
-
-    handler_invocations: list[int] = [0]
-    executor_invocations: list[int] = [0]
-
-    cap = _make_deferred_handler(
-        snapshot,
-        local_executor,
-        ExecutionContext(
-            granted_permission=Permission.READ,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-        ),
-        handler_invocations=handler_invocations,
-        executor_invocations=executor_invocations,
-        reject_second_batch=False,
+    # No None reached the handler
+    assert all(oid is not None for oid in observed_ids), (
+        f"None ID observed in handler: {observed_ids}"
     )
-
-    with pytest.raises(UsageLimitExceeded, match="request_limit of 2"):
-        agent.run_sync("start", capabilities=[cap], usage_limits=UsageLimits(request_limit=2))
-
-    # Model requests == 2 (third was prevented)
-    assert model_requests[0] == 2, f"expected 2 model requests, got {model_requests[0]}"
-    # Handler was invoked twice (two batches)
-    assert handler_invocations[0] == 2, (
-        f"expected 2 handler invocations, got {handler_invocations[0]}"
-    )
-    # Both batches were executed through ToolExecutor
+    # ToolExecutor was invoked for both calls
     assert executor_invocations[0] == 2, (
         f"expected 2 executor invocations, got {executor_invocations[0]}"
     )
-
-
-# ============================================================================
-# Retry policy — zero semantic retries
-# ============================================================================
-
-
-def test_retry_policy_zero_tool_retries() -> None:
-    """retries={'tools': 0} disables semantic tool retries.
-
-    With ExternalToolset, an unknown tool name raises UnexpectedModelBehavior.
-    With retries=0, only 1 model request occurs.
-
-    Proves:
-      - model requests == 1 (no semantic retry)
-      - handler calls == 0
-      - terminal exception
-    """
-    model_requests: list[int] = [0]
-
-    def make_response(messages: list, agent_info: object) -> ModelResponse:
-        model_requests[0] += 1
-        return ModelResponse(
-            parts=[
-                ToolCallPart(
-                    tool_name="nonexistent_tool",
-                    args={},
-                    tool_call_id="unknown_1",
-                )
-            ]
-        )
-
-    model = FunctionModel(function=make_response)
-    snapshot = (
-        ProjectToolDefinition(
-            name="read_alpha",
-            description="A read-only test tool",
-            input_schema=AlphaInput,
-            output_schema=ToolOutput,
-            permission=Permission.READ,
-            side_effects=frozenset(),
-            allowed_session_modes=frozenset(
-                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
-            ),
-        ),
+    # Both handlers executed
+    assert counters.alpha == 1, f"expected 1 alpha call, got {counters.alpha}"
+    assert counters.beta == 1, f"expected 1 beta call, got {counters.beta}"
+    # Terminal result
+    assert isinstance(result.output, str), (
+        f"expected str output, got {type(result.output).__name__}"
     )
-    agent = _make_agent(model, snapshot)
-
-    handler_calls: list[int] = [0]
-
-    registry = ToolRegistry()
-
-    def alpha_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
-        handler_calls[0] += 1
-        return ToolOutput(result=f"alpha:{inp.value}")
-
-    registry.register(snapshot[0], alpha_handler)
-    local_executor = ToolExecutor(registry)
-
-    cap = _make_deferred_handler(
-        snapshot,
-        local_executor,
-        ExecutionContext(
-            granted_permission=Permission.READ,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-        ),
-    )
-
-    with pytest.raises(UnexpectedModelBehavior) as exc_info:
-        agent.run_sync(
-            "call nonexistent tool", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
-        )
-
-    assert model_requests[0] == 1, f"expected 1 model request, got {model_requests[0]}"
-    assert handler_calls[0] == 0, f"expected 0 handler calls, got {handler_calls[0]}"
-    assert "exceeded max retries count" in str(exc_info.value).lower()

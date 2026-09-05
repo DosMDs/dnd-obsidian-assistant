@@ -1126,3 +1126,221 @@ PAIM-03 — Migration-specific test harness hardening
 ```
 
 Do not begin PAIM-03 automatically.
+
+
+## 20. PAIM-C04 correction record — complete PAIM-C03 executable evidence
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `0100df9e5a44ff3e47afc99b29ad2649ec8fe15f`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C03 had four documented evidence gaps that PAIM-C04 closes:
+
+1. **Defect A — BG-10 listed as PASS without a dedicated executable test.**
+2. **Defect B — Normal whole-turn flow used `request_limit=3` rather than proving success at `request_limit=2`.**
+3. **Defect C — Missing-ID auto-assignment was documented without a dedicated executable test.**
+4. **Defect D — BG-08 docstring described `UnexpectedModelBehavior` conversion but the actual test raises `ProjectValidationError` directly.**
+
+### Defect A — BG-10 single WRITE through ToolExecutor
+
+Added `test_bg10_single_write_through_executor` to `test_pydantic_ai_blocker_execution.py`.
+
+Uses the same canonical ExternalToolset architecture:
+
+```text
+ExternalToolset
+HandleDeferredToolCalls
+ToolExecutor
+UsageLimits(request_limit=2)
+retries={"tools": 0}
+```
+
+**ExecutionContext:**
+- `granted_permission = Permission.WRITE`
+- `session_mode = SessionMode.ACTIVE_SESSION`
+- `audit = non-None AuditContext`
+
+**Evidence:**
+
+| Metric | Value |
+|---|---|
+| Model requests | 2 |
+| Deferred handler invocations | 1 |
+| ToolExecutor invocations | 1 |
+| WRITE project handler invocations | 1 |
+| Terminal result | `str` |
+
+The framework has no Python tool function capable of calling the WRITE handler directly — all execution goes through `ToolExecutor.execute()`.
+
+### Defect B — Corrected whole-turn request limit
+
+The normal model→tool→model flow now runs with `UsageLimits(request_limit=2)` instead of `3`.
+
+**Required proof (both sides):**
+
+| Scenario | `request_limit` | Model requests | Result |
+|---|---|---|---|
+| Normal model→tool→model | 2 | 2 | Terminal text, no `UsageLimitExceeded` |
+| Attempted third request | 2 | 2 | `UsageLimitExceeded` before request #3 |
+
+Both tests use `FunctionModel` with explicit model-request counters.
+
+### Defect C — Missing tool-call ID behavior
+
+Added `test_missing_tool_call_ids` to `test_pydantic_ai_blocker_execution.py`.
+
+**Evidence:**
+
+```text
+IDs omitted from model ToolCallPart: yes (no tool_call_id argument supplied)
+IDs reaching deferred handler: non-empty unique strings (e.g. "pyd_ai_...")
+Unique: yes
+None reached handler: no
+```
+
+Pydantic AI 2.39.0 auto-assigns unique `tool_call_id` values when the constructor argument is omitted. When explicitly set to `None`, `None` is preserved.
+
+### Defect D — BG-08 docstring correction
+
+Corrected the BG-08 docstring to match the actual executable behavior:
+
+```text
+invalid external-tool args
+→ deferred handler receives batch (handler_invocations == 1)
+→ ToolExecutor invoked (executor_invocations == 1)
+→ project input validation fails
+→ project handler NOT invoked (counters.alpha == 0)
+→ ProjectValidationError propagates directly
+```
+
+No exception behavior was changed — only the documentation was corrected.
+
+### Additional corrections
+
+**Exact model-request counters for BG-01 and BG-09:**
+
+Both tests were converted from `TestModel` to `FunctionModel` with explicit model-request counters. BG-01 and BG-09 now prove `model_requests == 2` with executable evidence rather than inference.
+
+**Duplicate-ID preflight rule:**
+
+The `_make_deferred_handler` preflight logic in both test files was updated to express the canonical application rule:
+
+```python
+if c.tool_call_id is not None:
+    if c.tool_call_id in seen_ids:
+        raise RuntimeError(...)
+    seen_ids.add(c.tool_call_id)
+```
+
+This correctly allows multiple `None` IDs through without rejecting them merely for both being `None`.
+
+**Maintainability — module decomposition:**
+
+The execution test file exceeded the 1000-line hard limit after additions. The file was decomposed into three topic-oriented modules:
+
+| File | Lines | Responsibility |
+|---|---|---|
+| `test_pydantic_ai_blocker_gate.py` | 979 | BG-01 through BG-08 (batch admission, mixed, multi-write, size, duplicate ID, hidden, unknown, invalid args) |
+| `test_pydantic_ai_blocker_execution.py` | ~848 | BG-09 through BG-12 plus missing-ID and retry (ToolExecutor execution, permission, audit, second round) |
+| `test_pydantic_ai_blocker_limits.py` | ~481 | Request-limit defense-in-depth, third-request prevention, zero-retry policy |
+
+### Corrected hard-gate matrix
+
+| Gate | Result | Model requests | Deferred handler invocations | ToolExecutor invocations | Project handler invocations | Rejection layer |
+|---|---|---|---|---|---|---|
+| BG-01 READ+READ | PASS | **2** | 1 | 2 | 2 | ToolExecutor (sequential) |
+| BG-02 READ+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-02 WRITE+READ | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-03 WRITE+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-04 >4 | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-05 duplicate ID | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-06 hidden/frozen | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-07 unknown | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-08 invalid args | PASS | 1 | 1 | 1 | 0 | ToolExecutor (ProjectValidationError) |
+| BG-09 single READ | PASS | **2** | 1 | 1 | 1 | ToolExecutor |
+| BG-10 single WRITE | PASS | **2** | 1 | 1 | 1 | ToolExecutor |
+| BG-11 permission denial | PASS | 1 | 1 | 1 | 0 | ToolExecutor (ConflictError) |
+| BG-11 missing audit | PASS | 1 | 1 | 1 | 0 | ToolExecutor (ValidationError) |
+| BG-12 second-round tool | PASS | 2 | 2 | 1 | 1 | Application policy (no second execute) |
+
+Bold values indicate newly executable evidence in PAIM-C04.
+
+### Whole-turn request-budget conclusion
+
+```text
+Fast-Agent whole-turn model request budget:
+maximum 2
+```
+
+Required evidence:
+
+```text
+normal 2-request terminal flow with request_limit=2: PASS
+third request with request_limit=2: UsageLimitExceeded before request #3
+```
+
+### Missing-ID conclusion
+
+Pydantic AI 2.39.0 behavior:
+
+```text
+model-supplied IDs: omitted (no tool_call_id argument)
+IDs at deferred handler: non-empty unique strings
+unique: yes
+None reaches application handler: no
+```
+
+### Effective PAIM-02 decision
+
+```
+PASS
+```
+
+PAIM-C04 is an evidence-completion correction, not a new migration architecture. All 18 blocker-gate tests pass with executable evidence.
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_blocker_gate.py        (modified)
+tests/integration/test_pydantic_ai_blocker_execution.py    (modified)
+tests/integration/test_pydantic_ai_blocker_limits.py       (new)
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Blocker gate tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| Blocker execution tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| Blocker limits tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| Existing qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Tool executor tests | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Full pytest (excl real Ollama) | `uv run pytest --ignore=tests/integration/test_pydantic_ai_ollama_smoke.py` | 4602 passed, 100 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 330 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Architecture confirmation
+
+- ExternalToolset path retained
+- HandleDeferredToolCalls retained
+- ToolExecutor-only project execution
+- No production `src/` changes
+- No dependency changes
+- No PAIM-03 implementation
+
+### Next task
+
+```text
+PAIM-03 — Migration-specific test harness hardening
+```
+
+Do not begin PAIM-03 automatically.

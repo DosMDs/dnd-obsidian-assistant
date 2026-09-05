@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-05 (PAIM-C03 corrected blocker gate)
+**Last updated:** 2026-09-05 (PAIM-C04 completed executable evidence)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -102,6 +102,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C02 — Close unknown-tool retry-count evidence gap | DONE |
 | PAIM-02 — Critical blocker gate | DONE |
 | PAIM-C03 — Correct PAIM-02 public extension path | DONE |
+| PAIM-C04 — Complete PAIM-C03 executable evidence | DONE |
 | PAIM-03 — Migration-specific test harness hardening | NOT STARTED |
 | PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge | NOT STARTED |
 | PAIM-05 — Explicit DndAgentPolicy | NOT STARTED |

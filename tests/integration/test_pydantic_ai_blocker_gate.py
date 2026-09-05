@@ -62,7 +62,7 @@ import pytest
 from pydantic import BaseModel
 from pydantic_ai import Agent, RunContext, UnexpectedModelBehavior, UsageLimits
 from pydantic_ai.capabilities import HandleDeferredToolCalls
-from pydantic_ai.messages import ModelResponse, ToolCallPart
+from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolDefinition
@@ -328,9 +328,10 @@ def _make_deferred_handler(
         # 2. Duplicate non-null ID check
         seen_ids: set[str] = set()
         for c in all_calls:
-            if c.tool_call_id in seen_ids:
-                raise RuntimeError(f"Duplicate tool_call_id '{c.tool_call_id}'")
-            seen_ids.add(c.tool_call_id)
+            if c.tool_call_id is not None:
+                if c.tool_call_id in seen_ids:
+                    raise RuntimeError(f"Duplicate tool_call_id '{c.tool_call_id}'")
+                seen_ids.add(c.tool_call_id)
 
         # 3. Resolve against frozen snapshot
         resolved: list[tuple[ToolCallPart, ProjectToolDefinition]] = []
@@ -412,7 +413,28 @@ def test_bg01_allowed_read_read_batch(
       - model requests == 2 (model -> tools -> model)
       - no @agent.tool Python handler exists
     """
-    model = TestModel(call_tools=["read_alpha", "read_beta"])
+    model_requests: list[int] = [0]
+
+    def make_response(messages: list, agent_info: object) -> ModelResponse:
+        model_requests[0] += 1
+        if model_requests[0] == 1:
+            return ModelResponse(
+                parts=[
+                    ToolCallPart(
+                        tool_name="read_alpha",
+                        args={"value": "a"},
+                        tool_call_id="call_1",
+                    ),
+                    ToolCallPart(
+                        tool_name="read_beta",
+                        args={"number": 42},
+                        tool_call_id="call_2",
+                    ),
+                ]
+            )
+        return ModelResponse(parts=[TextPart(content="done")])
+
+    model = FunctionModel(function=make_response)
     agent = _make_agent(model, frozen_snapshot)
 
     handler_invocations: list[int] = [0]
@@ -431,6 +453,8 @@ def test_bg01_allowed_read_read_batch(
         "use both tools", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
     )
 
+    # Model requests == 2 (model -> tools -> model)
+    assert model_requests[0] == 2, f"expected 2 model requests, got {model_requests[0]}"
     # Handler invocations == 1 (complete batch received once)
     assert handler_invocations[0] == 1, (
         f"expected 1 handler invocation, got {handler_invocations[0]}"
@@ -899,14 +923,15 @@ def test_bg08_invalid_arguments(
     With ExternalToolset, the framework does not validate tool arguments
     against the Pydantic schema. Invalid args reach the deferred handler.
     The handler passes them to ToolExecutor, which validates and rejects
-    them with ValidationError. The exception propagates through the handler,
-    and the framework converts it to UnexpectedModelBehavior.
+    them with ProjectValidationError. The exception propagates directly
+    through the handler — the framework does not convert it.
 
     Proves:
-      - project handler side effects == 0
-      - ToolExecutor validation rejects invalid args
-      - handler was invoked (batch was received)
-      - ToolExecutor was invoked (validation failed inside it)
+      - deferred handler receives batch (handler_invocations == 1)
+      - ToolExecutor invoked (executor_invocations == 1)
+      - project input validation fails
+      - project handler NOT invoked (counters.alpha == 0)
+      - ProjectValidationError propagates directly
     """
     model_requests: list[int] = [0]
 
