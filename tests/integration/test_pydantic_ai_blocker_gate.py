@@ -1,32 +1,53 @@
-"""PAIM-02: Critical blocker gate — Pydantic AI 2.39.0 Stage-9 safety semantics.
+"""PAIM-C03: Corrected blocker gate — ExternalToolset + HandleDeferredToolCalls path.
 
-Proves whether Pydantic AI 2.39.0 can support the accepted Stage-9 D&D Session
-Assistant safety semantics using stable public extension points, without
-weakening project trust boundaries and without patching framework internals.
+Proves Pydantic AI 2.39.0 Stage-9 safety semantics using the intended public
+extension points:
+
+    ExternalToolset
+    +
+    HandleDeferredToolCalls
+    +
+    DeferredToolRequests.calls
+    +
+    DeferredToolResults (via requests.build_results(calls=...))
+    +
+    existing ToolExecutor
 
 Architecture under test
 ───────────────────────
     frozen application tool snapshot
         |
-    Pydantic AI ToolDefinition[]  (via @agent.tool_plain(requires_approval=True))
+    translate to Pydantic AI ToolDefinition[]
         |
-    model response with tool calls
+    ExternalToolset (no Python handler)
         |
-    DeferredToolRequests  (output_type=str | DeferredToolRequests)
+    Agent
         |
-    APPLICATION COMPLETE BATCH PREFLIGHT
+    model requests tools
+        |
+    HandleDeferredToolCalls handler receives COMPLETE batch
+        |
+    application full-batch admission
         |
     allowed?
         no ------ fail before ToolExecutor
         yes
             |
-    ToolExecutor sequentially
+    ToolExecutor.execute() sequentially
         |
-    DeferredToolResults(calls={id: result})
+    DeferredToolResults (via build_results)
         |
-    Pydantic AI continues same run
+    agent continues IN THE SAME RUN
         |
-    second model response
+    terminal model response
+
+Key invariants:
+- No @agent.tool / @agent.tool_plain Python handler functions exist.
+  All project execution goes through ToolExecutor.
+- DeferredToolRequests.approvals is empty for external tools.
+  All project calls are in DeferredToolRequests.calls.
+- The model->tools->model cycle stays inside ONE agent.run_sync().
+- UsageLimits(request_limit=N) bounds model requests.
 
 All tests are deterministic and require no real Ollama or network access.
 """
@@ -37,15 +58,17 @@ import threading
 from datetime import UTC, datetime
 from typing import Any
 
-# Pydantic AI imports
 import pytest
 from pydantic import BaseModel
-from pydantic_ai import Agent, UnexpectedModelBehavior
+from pydantic_ai import Agent, RunContext, UnexpectedModelBehavior, UsageLimits
+from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.test import TestModel
-from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults
+from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults, ToolDefinition
+from pydantic_ai.toolsets import ExternalToolset
 
+from dnd_assistant.errors import ValidationError as ProjectValidationError
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
@@ -54,7 +77,9 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
     SideEffect,
-    ToolDefinition,
+)
+from dnd_assistant.tools.types import (
+    ToolDefinition as ProjectToolDefinition,
 )
 
 # ============================================================================
@@ -72,9 +97,6 @@ class BetaInput(BaseModel):
 
 class ToolOutput(BaseModel):
     result: str
-
-
-# In-memory handler counters
 
 
 class HandlerCounters:
@@ -103,9 +125,9 @@ class HandlerCounters:
             self.all_calls.append("write_alpha")
 
 
-# Tool definitions
+# Project tool definitions
 
-READ_ALPHA_DEF = ToolDefinition(
+READ_ALPHA_DEF = ProjectToolDefinition(
     name="read_alpha",
     description="A read-only test tool",
     input_schema=AlphaInput,
@@ -115,7 +137,7 @@ READ_ALPHA_DEF = ToolDefinition(
     allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}),
 )
 
-READ_BETA_DEF = ToolDefinition(
+READ_BETA_DEF = ProjectToolDefinition(
     name="read_beta",
     description="Another read-only test tool",
     input_schema=BetaInput,
@@ -125,7 +147,7 @@ READ_BETA_DEF = ToolDefinition(
     allowed_session_modes=frozenset({SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}),
 )
 
-WRITE_ALPHA_DEF = ToolDefinition(
+WRITE_ALPHA_DEF = ProjectToolDefinition(
     name="write_alpha",
     description="A write test tool",
     input_schema=AlphaInput,
@@ -207,110 +229,164 @@ def write_ctx_no_audit() -> ExecutionContext:
 @pytest.fixture
 def frozen_snapshot(
     tool_registry: ToolRegistry,
-) -> tuple[ToolDefinition, ...]:
-    """Run-local immutable snapshot of tool definitions."""
+) -> tuple[ProjectToolDefinition, ...]:
+    """Run-local immutable snapshot of project tool definitions."""
     return tuple(tool_registry.list_definitions())
 
 
 # ============================================================================
-# Batch admission policy (test-only prototype)
+# Helper: translate project snapshot to Pydantic AI ToolDefinition[]
 # ============================================================================
 
 
-class BatchAdmissionResult:
-    """Result of a complete batch preflight check."""
+def _to_pyd_tool_defs(
+    snapshot: tuple[ProjectToolDefinition, ...],
+) -> list[ToolDefinition]:
+    """Translate frozen project tool definitions to Pydantic AI ToolDefinition list.
 
-    def __init__(
-        self,
-        allowed: bool,
-        *,
-        reason: str = "",
-        resolved: list[tuple[ToolCallPart, ToolDefinition]] | None = None,
-    ) -> None:
-        self.allowed = allowed
-        self.reason = reason
-        self.resolved = resolved or []
-
-
-def preflight_batch(
-    calls: list[ToolCallPart],
-    snapshot: tuple[ToolDefinition, ...],
-) -> BatchAdmissionResult:
-    """Test-only complete batch admission policy.
-
-    Implements minimum Stage-9 semantics:
-    1. Reject second deferred batch (caller responsibility - only call once).
-    2. Reject >4 calls.
-    3. Reject duplicate non-null tool_call_id.
-    4. Resolve every name against frozen snapshot.
-    5. Reject zero or ambiguous snapshot matches.
-    6. If batch length > 1, require every call to be Permission.READ.
+    Only name, description, and input JSON schema are mapped.
+    Permission/side-effect metadata stays in the application snapshot.
     """
-    if len(calls) > 4:
-        return BatchAdmissionResult(False, reason=f"batch size {len(calls)} exceeds 4")
-
-    seen_ids: set[str] = set()
-    for c in calls:
-        if c.tool_call_id in seen_ids:
-            return BatchAdmissionResult(False, reason=f"duplicate tool_call_id '{c.tool_call_id}'")
-        seen_ids.add(c.tool_call_id)
-
-    snapshot_map: dict[str, ToolDefinition] = {d.name: d for d in snapshot}
-    resolved: list[tuple[ToolCallPart, ToolDefinition]] = []
-    for c in calls:
-        definition = snapshot_map.get(c.tool_name)
-        if definition is None:
-            return BatchAdmissionResult(False, reason=f"unknown/hidden tool '{c.tool_name}'")
-        resolved.append((c, definition))
-
-    if len(calls) > 1:
-        for c, definition in resolved:
-            if definition.permission != Permission.READ:
-                return BatchAdmissionResult(
-                    False,
-                    reason=(f"mixed batch: WRITE tool '{c.tool_name}' not allowed in multi-call"),
-                )
-
-    return BatchAdmissionResult(True, resolved=resolved)
+    result: list[ToolDefinition] = []
+    for td in snapshot:
+        schema = td.input_schema.model_json_schema()
+        result.append(
+            ToolDefinition(
+                name=td.name,
+                description=td.description,
+                parameters_json_schema=schema,
+            )
+        )
+    return result
 
 
-def execute_deferred_batch(
-    deferred: DeferredToolRequests,
-    snapshot: tuple[ToolDefinition, ...],
+# ============================================================================
+# Helper: build ExternalToolset from project snapshot
+# ============================================================================
+
+
+def _make_external_toolset(
+    snapshot: tuple[ProjectToolDefinition, ...],
+) -> ExternalToolset:
+    """Build an ExternalToolset from the frozen project snapshot.
+
+    No Python handler functions are attached. The framework only sees
+    schema/metadata. Successful execution goes through ToolExecutor.
+    """
+    pyd_defs = _to_pyd_tool_defs(snapshot)
+    return ExternalToolset(pyd_defs)
+
+
+# ============================================================================
+# Helper: create HandleDeferredToolCalls capability
+# ============================================================================
+
+
+def _make_deferred_handler(
+    snapshot: tuple[ProjectToolDefinition, ...],
     executor: ToolExecutor,
     context: ExecutionContext,
-) -> DeferredToolResults:
-    """Run preflight then execute approved batch through ToolExecutor.
+    *,
+    counters: HandlerCounters | None = None,
+    handler_invocations: list[int] | None = None,
+    executor_invocations: list[int] | None = None,
+    reject_second_batch: bool = True,
+) -> HandleDeferredToolCalls:
+    """Create a HandleDeferredToolCalls capability with full Stage-9 safety.
 
-    Args:
-        deferred: The DeferredToolRequests from the first agent run.
-        snapshot: Frozen tool-definition snapshot.
-        executor: ToolExecutor bound to the test registry.
-        context: ExecutionContext for ToolExecutor calls.
-
-    Returns:
-        DeferredToolResults with ToolExecutor outputs keyed by tool_call_id.
+    The handler:
+    1. Increments handler_invocations counter.
+    2. If reject_second_batch and this is batch #2, raises RuntimeError.
+    3. Runs application full-batch preflight against frozen snapshot.
+    4. If batch is not allowed, raises RuntimeError.
+    5. Executes each admitted call through ToolExecutor sequentially.
+    6. Returns DeferredToolResults via build_results(calls=...).
     """
-    all_calls = list(deferred.approvals) + list(deferred.calls)
+    snapshot_map: dict[str, ProjectToolDefinition] = {d.name: d for d in snapshot}
+    batch_count: list[int] = [0]
 
-    result = preflight_batch(all_calls, snapshot)
-    if not result.allowed:
-        raise RuntimeError(f"batch rejected: {result.reason}")
+    def _handler(ctx: RunContext, requests: DeferredToolRequests) -> DeferredToolResults | None:
+        nonlocal batch_count
+        batch_count[0] += 1
 
-    results: dict[str, Any] = {}
-    for call, definition in result.resolved:
-        input_data = call.args if isinstance(call.args, dict) else {}
-        try:
+        if handler_invocations is not None:
+            handler_invocations[0] += 1
+
+        # Reject second batch if policy says so
+        if reject_second_batch and batch_count[0] > 1:
+            raise RuntimeError("Second deferred batch rejected by application policy")
+
+        all_calls = list(requests.calls)
+        if not all_calls:
+            return None
+
+        # --- Preflight ---
+        # 1. Size check
+        if len(all_calls) > 4:
+            raise RuntimeError(f"Batch size {len(all_calls)} exceeds 4")
+
+        # 2. Duplicate non-null ID check
+        seen_ids: set[str] = set()
+        for c in all_calls:
+            if c.tool_call_id in seen_ids:
+                raise RuntimeError(f"Duplicate tool_call_id '{c.tool_call_id}'")
+            seen_ids.add(c.tool_call_id)
+
+        # 3. Resolve against frozen snapshot
+        resolved: list[tuple[ToolCallPart, ProjectToolDefinition]] = []
+        for c in all_calls:
+            definition = snapshot_map.get(c.tool_name)
+            if definition is None:
+                raise RuntimeError(f"Unknown/hidden tool '{c.tool_name}'")
+            resolved.append((c, definition))
+
+        # 4. Multi-call WRITE rejection
+        if len(resolved) > 1:
+            for c, definition in resolved:
+                if definition.permission != Permission.READ:
+                    raise RuntimeError(
+                        f"Mixed batch: WRITE tool '{c.tool_name}' not allowed in multi-call"
+                    )
+
+        # --- Execute through ToolExecutor sequentially ---
+        results: dict[str, Any] = {}
+        for call, definition in resolved:
+            if executor_invocations is not None:
+                executor_invocations[0] += 1
+            input_data = call.args if isinstance(call.args, dict) else {}
             output = executor.execute(
                 definition.name,
                 input_data=input_data,
                 context=context,
             )
             results[call.tool_call_id] = output.result
-        except Exception as exc:
-            results[call.tool_call_id] = f"error:{exc}"
 
-    return DeferredToolResults(calls=results, approvals={})
+        return requests.build_results(calls=results)
+
+    return HandleDeferredToolCalls(handler=_handler)
+
+
+# ============================================================================
+# Helper: create agent with ExternalToolset
+# ============================================================================
+
+
+def _make_agent(
+    model: TestModel | FunctionModel,
+    snapshot: tuple[ProjectToolDefinition, ...],
+) -> Agent:
+    """Create a Pydantic AI Agent with ExternalToolset from project snapshot.
+
+    No @agent.tool or @agent.tool_plain decorators are used.
+    """
+    agent = Agent(model, output_type=str, retries={"tools": 0})
+    toolset = _make_external_toolset(snapshot)
+
+    @agent.toolset
+    def _toolset_factory(ctx: RunContext) -> ExternalToolset:
+        return toolset
+
+    return agent
 
 
 # ============================================================================
@@ -320,85 +396,58 @@ def execute_deferred_batch(
 
 def test_bg01_allowed_read_read_batch(
     counters: HandlerCounters,
-    frozen_snapshot: tuple[ToolDefinition, ...],
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
     executor: ToolExecutor,
     read_ctx: ExecutionContext,
 ) -> None:
     """Model requests read_alpha + read_beta in one response.
 
     Proves:
-      - complete DeferredToolRequests batch contains both calls
+      - HandleDeferredToolCalls handler receives complete batch (1 invocation)
       - application preflight sees both before execution
       - ToolExecutor executions == 2
-      - handler executions == 2
+      - project handler executions == 2
       - execution order == model emission order
-      - max simultaneous handler execution == 1
       - final model response is terminal text
+      - model requests == 2 (model -> tools -> model)
+      - no @agent.tool Python handler exists
     """
     model = TestModel(call_tools=["read_alpha", "read_beta"])
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def read_alpha(value: str) -> str:
-        counters.inc_alpha()
-        return f"alpha:{value}"
-
-    @agent.tool_plain(requires_approval=True)
-    def read_beta(number: int) -> str:
-        counters.inc_beta()
-        return f"beta:{number}"
-
-    # First run: collect deferred requests
-    result1 = agent.run_sync("use both tools")
-    assert isinstance(result1.output, DeferredToolRequests), (
-        f"expected DeferredToolRequests, got {type(result1.output).__name__}"
+    result = agent.run_sync(
+        "use both tools", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
     )
 
-    all_calls = list(result1.output.approvals) + list(result1.output.calls)
-    assert len(all_calls) == 2, f"expected 2 calls, got {len(all_calls)}"
-    assert all_calls[0].tool_name == "read_alpha"
-    assert all_calls[1].tool_name == "read_beta"
-
-    # No handlers executed during first run
-    assert counters.alpha == 0
-    assert counters.beta == 0
-
-    # Preflight
-    preflight = preflight_batch(all_calls, frozen_snapshot)
-    assert preflight.allowed, f"preflight rejected: {preflight.reason}"
-    assert len(preflight.resolved) == 2
-
-    # Execute through ToolExecutor sequentially
-    results: dict[str, Any] = {}
-    for call, definition in preflight.resolved:
-        input_data = call.args if isinstance(call.args, dict) else {}
-        output = executor.execute(definition.name, input_data=input_data, context=read_ctx)
-        results[call.tool_call_id] = output.result
-
-    assert counters.alpha == 1
-    assert counters.beta == 1
+    # Handler invocations == 1 (complete batch received once)
+    assert handler_invocations[0] == 1, (
+        f"expected 1 handler invocation, got {handler_invocations[0]}"
+    )
+    assert executor_invocations[0] == 2, (
+        f"expected 2 executor invocations, got {executor_invocations[0]}"
+    )
+    assert counters.alpha == 1, f"expected 1 alpha handler call, got {counters.alpha}"
+    assert counters.beta == 1, f"expected 1 beta handler call, got {counters.beta}"
     # Execution order matches model emission order
     assert counters.all_calls == ["read_alpha", "read_beta"], (
         f"expected [read_alpha, read_beta], got {counters.all_calls}"
     )
-
-    # Second run: provide results and get terminal response
-    deferred_results = DeferredToolResults(calls=results, approvals={})
-    result2 = agent.run_sync(
-        "",
-        message_history=result1.new_messages(),
-        deferred_tool_results=deferred_results,
+    # Terminal output is a string
+    assert isinstance(result.output, str), (
+        f"expected str output, got {type(result.output).__name__}"
     )
-    assert isinstance(result2.output, str), (
-        f"expected terminal str, got {type(result2.output).__name__}"
-    )
-    # No additional handler executions
-    assert counters.alpha == 1
-    assert counters.beta == 1
 
 
 # ============================================================================
@@ -417,50 +466,48 @@ def test_bg02_mixed_read_write_batch(
     tool_names: list[str],
     test_id: str,
     counters: HandlerCounters,
-    frozen_snapshot: tuple[ToolDefinition, ...],
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
     executor: ToolExecutor,
     write_ctx: ExecutionContext,
 ) -> None:
     """Mixed READ/WRITE batch is rejected before any ToolExecutor execution.
 
     Proves:
-      - complete batch received
+      - complete batch received by handler
       - batch rejected before execution
       - ToolExecutor calls == 0
       - READ handler calls == 0
       - WRITE handler calls == 0
     """
     model = TestModel(call_tools=tool_names)
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        write_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def read_alpha(value: str) -> str:
-        counters.inc_alpha()
-        return f"alpha:{value}"
+    with pytest.raises(RuntimeError, match="Mixed batch"):
+        agent.run_sync("use tools", capabilities=[cap], usage_limits=UsageLimits(request_limit=2))
 
-    @agent.tool_plain(requires_approval=True)
-    def write_alpha(value: str) -> str:
-        counters.inc_write_alpha()
-        return f"write:{value}"
-
-    result1 = agent.run_sync("use tools")
-    assert isinstance(result1.output, DeferredToolRequests)
-
-    all_calls = list(result1.output.approvals) + list(result1.output.calls)
-    assert len(all_calls) == 2
-
-    # Preflight must reject
-    preflight = preflight_batch(all_calls, frozen_snapshot)
-    assert not preflight.allowed, "mixed READ/WRITE batch must be rejected"
-    assert "mixed batch" in preflight.reason
-
-    # No handlers executed
-    assert counters.alpha == 0
-    assert counters.write_alpha == 0
+    # Handler was invoked (batch was received)
+    assert handler_invocations[0] == 1, (
+        f"expected 1 handler invocation, got {handler_invocations[0]}"
+    )
+    # No ToolExecutor executions
+    assert executor_invocations[0] == 0, (
+        f"expected 0 executor invocations, got {executor_invocations[0]}"
+    )
+    # No project handlers executed
+    assert counters.alpha == 0, f"expected 0 alpha calls, got {counters.alpha}"
+    assert counters.write_alpha == 0, f"expected 0 write_alpha calls, got {counters.write_alpha}"
 
 
 # ============================================================================
@@ -470,7 +517,9 @@ def test_bg02_mixed_read_write_batch(
 
 def test_bg03_multiple_write_calls(
     counters: HandlerCounters,
-    frozen_snapshot: tuple[ToolDefinition, ...],
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    write_ctx: ExecutionContext,
 ) -> None:
     """Model requests at least two WRITE calls.
 
@@ -499,30 +548,35 @@ def test_bg03_multiple_write_calls(
         )
 
     model = FunctionModel(function=make_response)
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        write_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def write_alpha(value: str) -> str:
-        counters.inc_write_alpha()
-        return f"write:{value}"
+    with pytest.raises(RuntimeError, match="Mixed batch"):
+        agent.run_sync(
+            "use write tools", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+        )
 
-    result1 = agent.run_sync("use write tools")
-    assert isinstance(result1.output, DeferredToolRequests)
-
-    all_calls = list(result1.output.approvals) + list(result1.output.calls)
-    assert len(all_calls) == 2
-
-    # Preflight must reject: multi-call with WRITE permission
-    preflight = preflight_batch(all_calls, frozen_snapshot)
-    assert not preflight.allowed, "multi-WRITE batch must be rejected"
-    assert "mixed batch" in preflight.reason
-
-    # No handlers executed
-    assert counters.write_alpha == 0
+    # Handler was invoked (batch was received)
+    assert handler_invocations[0] == 1, (
+        f"expected 1 handler invocation, got {handler_invocations[0]}"
+    )
+    # No ToolExecutor executions
+    assert executor_invocations[0] == 0, (
+        f"expected 0 executor invocations, got {executor_invocations[0]}"
+    )
+    # No project handlers executed
+    assert counters.write_alpha == 0, f"expected 0 write_alpha calls, got {counters.write_alpha}"
 
 
 # ============================================================================
@@ -532,7 +586,9 @@ def test_bg03_multiple_write_calls(
 
 def test_bg04_more_than_four_calls(
     counters: HandlerCounters,
-    frozen_snapshot: tuple[ToolDefinition, ...],
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    read_ctx: ExecutionContext,
 ) -> None:
     """Model returns five calls in one response.
 
@@ -558,30 +614,35 @@ def test_bg04_more_than_four_calls(
         )
 
     model = FunctionModel(function=make_response)
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def read_alpha(value: str) -> str:
-        counters.inc_alpha()
-        return f"alpha:{value}"
+    with pytest.raises(RuntimeError, match="exceeds 4"):
+        agent.run_sync(
+            "use many tools", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+        )
 
-    result1 = agent.run_sync("use many tools")
-    assert isinstance(result1.output, DeferredToolRequests)
-
-    all_calls = list(result1.output.approvals) + list(result1.output.calls)
-    assert len(all_calls) == 5
-
-    # Preflight must reject: >4 calls
-    preflight = preflight_batch(all_calls, frozen_snapshot)
-    assert not preflight.allowed, ">4 batch must be rejected"
-    assert "exceeds 4" in preflight.reason
-
-    # No handlers executed
-    assert counters.alpha == 0
+    # Handler was invoked (batch was received)
+    assert handler_invocations[0] == 1, (
+        f"expected 1 handler invocation, got {handler_invocations[0]}"
+    )
+    # No ToolExecutor executions
+    assert executor_invocations[0] == 0, (
+        f"expected 0 executor invocations, got {executor_invocations[0]}"
+    )
+    # No project handlers executed
+    assert counters.alpha == 0, f"expected 0 alpha calls, got {counters.alpha}"
 
 
 # ============================================================================
@@ -591,34 +652,66 @@ def test_bg04_more_than_four_calls(
 
 def test_bg05_duplicate_call_ids(
     counters: HandlerCounters,
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    read_ctx: ExecutionContext,
 ) -> None:
     """Two model tool calls with the same explicit non-null ID.
 
-    Pydantic AI 2.39.0 rejects duplicate tool_call_id values in the
-    deferred tool path before any application handler executes.
+    Pydantic AI 2.39.0 rejects duplicate tool_call_id values before
+    deferred handler execution.
 
     Proves:
       - framework rejects duplicate IDs with UnexpectedModelBehavior
       - zero handler execution
     """
-    model = TestModel(call_tools=["read_alpha", "read_alpha"])
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    model_requests: list[int] = [0]
+
+    def make_response(messages: list, agent_info: object) -> ModelResponse:
+        model_requests[0] += 1
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="read_alpha",
+                    args={"value": "a"},
+                    tool_call_id="same_id",
+                ),
+                ToolCallPart(
+                    tool_name="read_alpha",
+                    args={"value": "b"},
+                    tool_call_id="same_id",
+                ),
+            ]
+        )
+
+    model = FunctionModel(function=make_response)
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def read_alpha(value: str) -> str:
-        counters.inc_alpha()
-        return f"alpha:{value}"
+    with pytest.raises(UnexpectedModelBehavior, match="duplicate"):
+        agent.run_sync("use tools", capabilities=[cap], usage_limits=UsageLimits(request_limit=2))
 
-    with pytest.raises(UnexpectedModelBehavior) as exc_info:
-        agent.run_sync("use tools")
-
-    assert "duplicate" in str(exc_info.value).lower()
-    # No handlers executed
-    assert counters.alpha == 0
+    # Handler was NOT invoked (framework rejected before deferral)
+    assert handler_invocations[0] == 0, (
+        f"expected 0 handler invocations, got {handler_invocations[0]}"
+    )
+    # No ToolExecutor executions
+    assert executor_invocations[0] == 0, (
+        f"expected 0 executor invocations, got {executor_invocations[0]}"
+    )
+    # No project handlers executed
+    assert counters.alpha == 0, f"expected 0 alpha calls, got {counters.alpha}"
 
 
 # ============================================================================
@@ -628,20 +721,26 @@ def test_bg05_duplicate_call_ids(
 
 def test_bg06_frozen_exposure_hidden_live_tool(
     counters: HandlerCounters,
-    frozen_snapshot: tuple[ToolDefinition, ...],
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
     tool_registry: ToolRegistry,
+    executor: ToolExecutor,
+    read_ctx: ExecutionContext,
 ) -> None:
     """Register a tool after snapshot creation; model requests it.
+
+    Pydantic AI 2.39.0 rejects unknown external tool names before the
+    deferred handler executes. The tool name is absent from the ExternalToolset
+    definitions, so the framework raises UnexpectedModelBehavior.
 
     Proves:
       - live registry now contains tool
       - frozen snapshot does not
-      - framework/application path rejects call
+      - framework rejects call before deferred handler
       - ToolExecutor calls == 0
       - hidden handler calls == 0
     """
     # Register a new tool in the live registry AFTER snapshot creation
-    hidden_def = ToolDefinition(
+    hidden_def = ProjectToolDefinition(
         name="hidden_tool",
         description="A tool registered after snapshot",
         input_schema=AlphaInput,
@@ -666,34 +765,52 @@ def test_bg06_frozen_exposure_hidden_live_tool(
     snapshot_names = {d.name for d in frozen_snapshot}
     assert "hidden_tool" not in snapshot_names
 
-    # Model requests the hidden tool
-    model = TestModel(call_tools=["hidden_tool"])
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    # Use FunctionModel to request hidden_tool
+    model_requests: list[int] = [0]
+
+    def make_response(messages: list, agent_info: object) -> ModelResponse:
+        model_requests[0] += 1
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="hidden_tool",
+                    args={"value": "x"},
+                    tool_call_id="call_1",
+                )
+            ]
+        )
+
+    model = FunctionModel(function=make_response)
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def hidden_tool(value: str) -> str:
-        counters.inc_alpha()
-        return f"hidden:{value}"
+    with pytest.raises(UnexpectedModelBehavior, match="exceeded max retries count"):
+        agent.run_sync(
+            "use hidden tool", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+        )
 
-    result1 = agent.run_sync("use hidden tool")
-    assert isinstance(result1.output, DeferredToolRequests)
-
-    all_calls = list(result1.output.approvals) + list(result1.output.calls)
-    assert len(all_calls) == 1
-    assert all_calls[0].tool_name == "hidden_tool"
-
-    # Preflight must reject: hidden_tool not in frozen snapshot
-    preflight = preflight_batch(all_calls, frozen_snapshot)
-    assert not preflight.allowed, "hidden tool must be rejected"
-    assert "unknown/hidden" in preflight.reason
-
-    # No handlers executed
-    assert counters.alpha == 0
-    assert hidden_calls[0] == 0
+    # Handler was NOT invoked (framework rejected before deferral)
+    assert handler_invocations[0] == 0, (
+        f"expected 0 handler invocations, got {handler_invocations[0]}"
+    )
+    # No ToolExecutor executions
+    assert executor_invocations[0] == 0, (
+        f"expected 0 executor invocations, got {executor_invocations[0]}"
+    )
+    # No project handlers executed
+    assert counters.alpha == 0, f"expected 0 alpha calls, got {counters.alpha}"
+    assert hidden_calls[0] == 0, f"expected 0 hidden handler calls, got {hidden_calls[0]}"
 
 
 # ============================================================================
@@ -703,6 +820,9 @@ def test_bg06_frozen_exposure_hidden_live_tool(
 
 def test_bg07_unknown_tool(
     counters: HandlerCounters,
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    read_ctx: ExecutionContext,
 ) -> None:
     """Model requests a name absent from both frozen snapshot and live registry.
 
@@ -730,26 +850,37 @@ def test_bg07_unknown_tool(
         )
 
     model = FunctionModel(function=make_response)
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    handler_calls: list[int] = [0]
+    with pytest.raises(UnexpectedModelBehavior, match="exceeded max retries count"):
+        agent.run_sync(
+            "call unknown tool", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+        )
 
-    @agent.tool_plain(requires_approval=True)
-    def some_tool(x: int) -> str:
-        handler_calls[0] += 1
-        return f"x={x}"
-
-    with pytest.raises(UnexpectedModelBehavior):
-        agent.run_sync("call unknown tool")
-
-    # No handlers executed
-    assert handler_calls[0] == 0
+    # Handler was NOT invoked (framework rejected before deferral)
+    assert handler_invocations[0] == 0, (
+        f"expected 0 handler invocations, got {handler_invocations[0]}"
+    )
+    # No ToolExecutor executions
+    assert executor_invocations[0] == 0, (
+        f"expected 0 executor invocations, got {executor_invocations[0]}"
+    )
+    # No project handlers executed
+    assert counters.alpha == 0, f"expected 0 alpha calls, got {counters.alpha}"
     # Model requests == 1 (no semantic retry with retries={"tools": 0})
-    assert model_requests[0] == 1
+    assert model_requests[0] == 1, f"expected 1 model request, got {model_requests[0]}"
 
 
 # ============================================================================
@@ -759,16 +890,23 @@ def test_bg07_unknown_tool(
 
 def test_bg08_invalid_arguments(
     counters: HandlerCounters,
+    frozen_snapshot: tuple[ProjectToolDefinition, ...],
+    executor: ToolExecutor,
+    read_ctx: ExecutionContext,
 ) -> None:
     """Model emits invalid arguments for an exposed tool.
 
-    Pydantic AI 2.39.0 validates tool arguments before deferring. With
-    retries={"tools": 0}, validation failure raises UnexpectedModelBehavior
-    immediately. No project handler executes.
+    With ExternalToolset, the framework does not validate tool arguments
+    against the Pydantic schema. Invalid args reach the deferred handler.
+    The handler passes them to ToolExecutor, which validates and rejects
+    them with ValidationError. The exception propagates through the handler,
+    and the framework converts it to UnexpectedModelBehavior.
 
     Proves:
-      - actual project handler side effects == 0
-      - framework rejects invalid args before deferral
+      - project handler side effects == 0
+      - ToolExecutor validation rejects invalid args
+      - handler was invoked (batch was received)
+      - ToolExecutor was invoked (validation failed inside it)
     """
     model_requests: list[int] = [0]
 
@@ -785,19 +923,32 @@ def test_bg08_invalid_arguments(
         )
 
     model = FunctionModel(function=make_response)
-    agent = Agent(
-        model,
-        output_type=str | DeferredToolRequests,
-        retries={"tools": 0},
+    agent = _make_agent(model, frozen_snapshot)
+
+    handler_invocations: list[int] = [0]
+    executor_invocations: list[int] = [0]
+
+    cap = _make_deferred_handler(
+        frozen_snapshot,
+        executor,
+        read_ctx,
+        counters=counters,
+        handler_invocations=handler_invocations,
+        executor_invocations=executor_invocations,
     )
 
-    @agent.tool_plain(requires_approval=True)
-    def read_alpha(value: str) -> str:
-        counters.inc_alpha()
-        return f"alpha:{value}"
+    with pytest.raises(ProjectValidationError, match="Input should be a valid string"):
+        agent.run_sync(
+            "call with bad args", capabilities=[cap], usage_limits=UsageLimits(request_limit=2)
+        )
 
-    with pytest.raises(UnexpectedModelBehavior):
-        agent.run_sync("call with bad args")
-
-    # No handler executed
-    assert counters.alpha == 0
+    # Handler was invoked (batch was received)
+    assert handler_invocations[0] == 1, (
+        f"expected 1 handler invocation, got {handler_invocations[0]}"
+    )
+    # ToolExecutor was invoked (validation failed inside it)
+    assert executor_invocations[0] == 1, (
+        f"expected 1 executor invocation, got {executor_invocations[0]}"
+    )
+    # No project handlers executed (ToolExecutor rejected before handler)
+    assert counters.alpha == 0, f"expected 0 alpha calls, got {counters.alpha}"

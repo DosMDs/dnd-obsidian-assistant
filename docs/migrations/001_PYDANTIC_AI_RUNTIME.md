@@ -913,3 +913,216 @@ PAIM-03 — Migration-specific test harness hardening
 ```
 
 Do not begin PAIM-03 automatically.
+
+
+## 19. PAIM-C03 correction record — correct blocker gate to ExternalToolset path
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `aa502278d2f2be7a8498f6b9f03799fdf297560f`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-02 incorrectly stated that `ExternalToolset` and `HandleDeferredToolCalls`
+are not available in Pydantic AI 2.39.0. Both are publicly exported and
+functional in the installed 2.39.0:
+
+```python
+from pydantic_ai.toolsets import ExternalToolset
+from pydantic_ai.capabilities import HandleDeferredToolCalls
+```
+
+PAIM-02 used `requires_approval=True` + `DeferredToolRequests` as output type
+as a workaround. PAIM-C03 re-proves the entire hard blocker gate matrix using
+the intended `ExternalToolset` + `HandleDeferredToolCalls` path.
+
+### Correct framework API availability
+
+| API | Available in 2.39.0 |
+|---|---|
+| `ExternalToolset` | YES — `pydantic_ai.toolsets.ExternalToolset` |
+| `HandleDeferredToolCalls` | YES — `pydantic_ai.capabilities.HandleDeferredToolCalls` |
+| `DeferredToolRequests.calls` | YES — contains external tool calls |
+| `DeferredToolRequests.approvals` | YES — empty for external tools |
+| `requests.build_results(calls=...)` | YES — validates ID correspondence |
+
+### Correct architecture path
+
+```text
+frozen application tool snapshot
+    |
+translate to Pydantic AI ToolDefinition[]
+    |
+ExternalToolset (no Python handler functions)
+    |
+Agent (output_type=str, retries={"tools": 0})
+    |
+model requests tools
+    |
+HandleDeferredToolCalls handler receives COMPLETE batch
+    |
+application full-batch admission
+    |
+allowed?
+    no ------ fail before ToolExecutor
+    yes
+        |
+ToolExecutor.execute() sequentially
+    |
+DeferredToolResults (via requests.build_results(calls=...))
+    |
+agent continues IN THE SAME RUN
+    |
+terminal model response
+```
+
+### Deferred category proof
+
+- `requests.calls` contains all project tool calls
+- `requests.approvals` is always empty for external tools
+- Results constructed via `requests.build_results(calls=...)` which validates
+  that result IDs correspond to pending requests of the correct category
+- No project result is supplied through `approvals`
+
+### No framework Python handler
+
+This is a hard invariant proved by the architecture:
+
+- `ExternalToolset` provides schema/metadata only — no `@agent.tool` or
+  `@agent.tool_plain` decorators exist in the corrected tests
+- The framework-facing definition is schema-only (name, description,
+  parameters_json_schema)
+- Successful project execution exists only here:
+  `HandleDeferredToolCalls` → application admission → `ToolExecutor.execute()`
+- All 16 corrected tests use `_make_agent()` which creates an `ExternalToolset`
+  with zero Python handler functions
+
+### Corrected hard-gate matrix
+
+| Gate | Result | Model requests | Deferred handler invocations | ToolExecutor invocations | Project handler invocations | Rejection layer |
+|---|---|---|---|---|---|---|
+| BG-01 READ+READ | PASS | 2 | 1 | 2 | 2 | ToolExecutor (sequential) |
+| BG-02 READ+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-02 WRITE+READ | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-03 WRITE+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-04 >4 | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-05 duplicate ID | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-06 hidden/frozen | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-07 unknown | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-08 invalid args | PASS | 1 | 1 | 1 | 0 | ToolExecutor (ValidationError) |
+| BG-09 single READ | PASS | 2 | 1 | 1 | 1 | ToolExecutor |
+| BG-10 single WRITE | PASS | 2 | 1 | 1 | 1 | ToolExecutor |
+| BG-11 permission denial | PASS | 1 | 1 | 1 | 0 | ToolExecutor (ConflictError) |
+| BG-11 missing audit | PASS | 1 | 1 | 1 | 0 | ToolExecutor (ValidationError) |
+| BG-12 second-round tool | PASS | 2 | 2 | 1 | 1 | Application policy (no second execute) |
+
+Key differences from PAIM-02 matrix:
+
+- **BG-05/06/07**: Framework catches these before the deferred handler
+  (handler_invocations == 0). With `ExternalToolset`, the framework validates
+  tool names and duplicate IDs against the toolset definitions before deferring.
+- **BG-08**: Framework does NOT validate args with ExternalToolset. Invalid args
+  reach the handler, which passes them to ToolExecutor. ToolExecutor validation
+  rejects them (handler_invocations == 1, executor_invocations == 1).
+- **BG-01/BG-09/BG-10**: Model requests == 2 (model → tools → model stays
+  inside one `agent.run_sync()`).
+- **BG-11**: ToolExecutor invocation == 1 (the executor was reached; the
+  project handler was not executed).
+
+### Whole-turn request budget
+
+| Scenario | request_limit | Model requests | Exception |
+|---|---|---|---|
+| Normal model→tools→model | 3 | 2 | None (terminal text) |
+| Third request prevented | 2 | 2 | `UsageLimitExceeded` |
+
+The complete model→tools→model cycle stays inside **one** `agent.run_sync()`.
+`UsageLimits(request_limit=N)` bounds total model requests across the run.
+
+### Missing-ID behavior
+
+With `ExternalToolset`, the framework assigns unique `tool_call_id` values
+automatically. When a `FunctionModel` emits duplicate IDs, the framework
+rejects them with `UnexpectedModelBehavior` before the deferred handler
+executes. No `None` IDs reach the handler in normal operation.
+
+### Public APIs used
+
+Exact Pydantic AI 2.39.0 public APIs used:
+
+- `ExternalToolset(tool_defs)` — `pydantic_ai.toolsets.ExternalToolset`
+- `HandleDeferredToolCalls(handler=...)` — `pydantic_ai.capabilities.HandleDeferredToolCalls`
+- `ToolDefinition(name, description, parameters_json_schema)` — `pydantic_ai.tools.ToolDefinition`
+- `DeferredToolRequests.calls` — external tool calls from model
+- `DeferredToolRequests.approvals` — empty for external tools
+- `requests.build_results(calls=...)` — validated result construction
+- `Agent(model, output_type=str, retries={"tools": 0})`
+- `@agent.toolset` decorator for registering `ExternalToolset`
+- `agent.run_sync(prompt, capabilities=[...], usage_limits=...)`
+- `FunctionModel(function=...)` — deterministic model responses
+- `TestModel(call_tools=[...])` — deterministic tool-call scenarios
+- `UsageLimits(request_limit=N)`
+- `ToolCallPart`, `ModelResponse`, `TextPart`
+
+**Private API usage: none.**
+
+### Corrected gate decision
+
+```
+PASS
+```
+
+All hard Stage-9 invariants are demonstrably implementable using public
+Pydantic AI 2.39.0 APIs:
+
+- `ExternalToolset` provides schema-only tool definitions (no Python handler)
+- `HandleDeferredToolCalls` intercepts the complete batch before execution
+- Application policy owns batch admission and sequential ToolExecutor execution
+- The model→tools→model cycle stays inside one `agent.run_sync()`
+- `UsageLimits(request_limit=N)` bounds total model requests
+
+Application-owned batch admission and sequential ToolExecutor execution are
+part of the intended project architecture, not a selective custom requirement.
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_blocker_gate.py       (rewritten)
+tests/integration/test_pydantic_ai_blocker_execution.py   (rewritten)
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Blocker gate tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| Blocker execution tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 7 passed |
+| Existing qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Tool executor tests | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Full pytest (excl real Ollama) | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Architecture confirmation
+
+- No production runtime migration
+- No PAIM-03+ implementation
+- No ToolExecutor/FastAgent/AgentLoop changes
+- No Vault/domain/storage changes
+- No dependency changes
+- No `src/` modifications
+
+### Next task
+
+```text
+PAIM-03 — Migration-specific test harness hardening
+```
+
+Do not begin PAIM-03 automatically.

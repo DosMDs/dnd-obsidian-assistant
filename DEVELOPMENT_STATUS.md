@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-05 (PAIM-02 blocker gate)
+**Last updated:** 2026-09-05 (PAIM-C03 corrected blocker gate)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -101,6 +101,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C01 — Correct PAIM-01 framework-semantics evidence | DONE |
 | PAIM-C02 — Close unknown-tool retry-count evidence gap | DONE |
 | PAIM-02 — Critical blocker gate | DONE |
+| PAIM-C03 — Correct PAIM-02 public extension path | DONE |
 | PAIM-03 — Migration-specific test harness hardening | NOT STARTED |
 | PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge | NOT STARTED |
 | PAIM-05 — Explicit DndAgentPolicy | NOT STARTED |
@@ -145,29 +146,48 @@ PAIM-03 — Migration-specific test harness hardening
 
 No confirmed migration blocker.
 
-PAIM-02 blocker gate result: **PASS WITH SELECTIVE CUSTOM REQUIREMENT**
+PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
 
-All hard Stage-9 invariants are demonstrably implementable using public
-Pydantic AI 2.39.0 APIs plus application-owned policy, with ToolExecutor
-remaining the trusted execution boundary.
+PAIM-C03 re-proved the blocker gate using the intended public extension
+points:
+
+```text
+ExternalToolset
++
+HandleDeferredToolCalls
++
+DeferredToolRequests.calls
++
+DeferredToolResults (via requests.build_results(calls=...))
++
+existing ToolExecutor
+```
 
 The tested architecture path:
 ```text
 frozen app snapshot
--> @agent.tool_plain(requires_approval=True)
--> DeferredToolRequests output
--> application full-batch preflight
+-> ExternalToolset (no Python handler)
+-> HandleDeferredToolCalls handler receives COMPLETE batch
+-> application full-batch admission
 -> ToolExecutor sequentially
--> DeferredToolResults(calls={id: result})
--> second run_sync with message_history + deferred_tool_results
+-> DeferredToolResults (via build_results)
+-> agent continues IN THE SAME RUN
+-> terminal model response
 ```
 
-Selective custom requirement: tools must use `requires_approval=True` and
-the agent must use `output_type=str | DeferredToolRequests` to intercept
-the complete tool batch before any framework handler execution. This is
-a documented public extension point, not a private API workaround.
+Key differences from PAIM-02 evidence:
+- No `@agent.tool_plain(requires_approval=True)` decorators
+- No `DeferredToolRequests` as output type
+- `DeferredToolRequests.approvals` is empty (all calls in `.calls`)
+- Model->tools->model cycle stays inside ONE `agent.run_sync()`
+- `UsageLimits(request_limit=N)` bounds total model requests
+- Framework catches unknown/hidden/duplicate-ID tools before deferred handler
 
-Known risks documented in PAIM-02 evidence:
+All 16 hard-gate scenarios pass. No selective custom requirement is needed
+for the ExternalToolset path — application-owned batch admission and
+sequential ToolExecutor execution are part of the intended architecture.
+
+Known risks documented in PAIM-02 evidence (unchanged):
 - default concurrent multi-tool execution (overridden by application
   sequential execution via ToolExecutor);
 - default tool semantic retries (disabled via retries={"tools": 0});
