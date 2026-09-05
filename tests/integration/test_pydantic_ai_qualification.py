@@ -336,11 +336,26 @@ def test_q7_custom_ollama_base_url_with_openai_provider() -> None:
 
 
 def test_q8_connection_failure() -> None:
-    """Connection/transport failure raises ModelAPIError."""
-    provider = OpenAIProvider(
-        base_url="http://localhost:1/v1",
-        http_client=None,
+    """Connection/transport failure raises ModelAPIError.
+
+    Uses a mocked httpx2 transport that raises ConnectError without
+    attempting a real socket connection. No real localhost socket is
+    opened — the failure is deterministic and requires no network.
+    """
+    import httpx2
+    from openai import AsyncOpenAI
+
+    class _AlwaysFailTransport(httpx2.AsyncBaseTransport):
+        async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+            raise httpx2.ConnectError("Mocked connection failure")
+
+    mock_client = httpx2.AsyncClient(transport=_AlwaysFailTransport())
+    openai_client = AsyncOpenAI(
+        http_client=mock_client,
+        api_key="test-key",
+        base_url="https://pydantic-ai-test.invalid/v1",
     )
+    provider = OpenAIProvider(openai_client=openai_client)
     model = OpenAIChatModel("test-model", provider=provider)
     agent = Agent(model)
 

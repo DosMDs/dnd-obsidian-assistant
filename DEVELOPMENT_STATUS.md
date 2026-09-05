@@ -103,7 +103,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-02 — Critical blocker gate | DONE |
 | PAIM-C03 — Correct PAIM-02 public extension path | DONE |
 | PAIM-C04 — Complete PAIM-C03 executable evidence | DONE |
-| PAIM-03 — Migration-specific test harness hardening | NOT STARTED |
+| PAIM-03 — Migration-specific test harness hardening | DONE |
 | PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge | NOT STARTED |
 | PAIM-05 — Explicit DndAgentPolicy | NOT STARTED |
 | PAIM-06 — Context/dependencies integration | NOT STARTED |

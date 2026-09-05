@@ -304,615 +304,239 @@ tests/integration/test_pydantic_ai_qualification.py
 
 ### Architecture confirmation
 
-- No production runtime changes
+- No production `src/` changes
 - No dependency changes
-- No PAIM-02 implementation
-- No ToolExecutor/FastAgent/AgentLoop changes
-- No Vault/domain/storage changes
+- No PAIM-03 implementation
 
-### Changed files
-
-```text
-tests/integration/test_pydantic_ai_qualification.py
-docs/migrations/001_PYDANTIC_AI_RUNTIME.md
-DEVELOPMENT_STATUS.md
-```
-
-### Quality gates
-
-| Gate | Command | Result |
-|---|---|---|
-| Focused qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
-| Full pytest (excl real Ollama) | `uv run pytest` | (reported in Final Report) |
-| Ruff check | `uv run ruff check .` | (reported in Final Report) |
-| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
-| git diff --check | `git diff --check` | (reported in Final Report) |
-
-### Evidence quality
-
-The tests now explicitly distinguish:
-
-```text
-model invocation count  —  proven by FunctionModel closure counter
-tool handler invocation count  —  proven by tool_plain closure counter
-```
-
-PAIM-C01 retry evidence is now executable rather than inferred.
-
-### Next task
-
-```text
-PAIM-02 — Critical blocker gate
-```
-
-## 9. Blocker criteria
-
-A framework behavior is a potential blocker when project invariants cannot be implemented through public/supported APIs without large fragile workaround.
-
-Examples:
-
-- cannot preflight complete mixed tool batch before any execution;
-- cannot guarantee ToolExecutor-only side effects;
-- framework forces retries that can repeat writes;
-- sync/thread behavior breaks trusted storage assumptions and requires domain redesign;
-- Ollama integration loses critical tool/structured-output correctness;
-- maintaining project semantics requires effectively rewriting the framework run loop internally.
-
-## 10. Escape hatch levels
-
-### Level 1 — supported extension
-
-Use hooks/toolsets/custom model/provider/output validator/public graph API.
-
-### Level 2 — selective custom component
-
-Keep/implement only the problematic component, e.g. native Ollama adapter.
-
-### Level 3 — reject migration
-
-Do not merge runtime branch. Preserve findings and continue custom implementation from `main`.
-
-## 11. Rollback/rejection documentation
-
-If `REJECTED`, record:
-
-- exact Pydantic AI version;
-- Ollama version/model where relevant;
-- failing invariant;
-- minimal reproduction/test;
-- framework issue/limitation reference;
-- attempted public extension points;
-- why custom workaround was rejected;
-- implications for future custom runtime design.
-
-Port this conclusion back to `main` as documentation even though runtime changes are not merged.
-
-## 12. No-double-runtime rule
-
-Reference comparison may temporarily instantiate old/new mechanics in tests or spike modules.
-
-Final migration branch before merge must not expose two equal-status production agent runtimes selected by config merely to avoid deleting old code.
-
-The fallback is Git/main, not a permanent feature flag.
-
-## 13. Dependency/upgrade policy
-
-- exact framework candidate chosen by PAIM-01;
-- lock exact transitive resolution via `uv.lock`;
-- no unrelated dependency upgrades;
-- later Pydantic AI upgrade = standalone maintenance task;
-- provider/framework release notes and regression tests required.
-
-## 14. Completion order
-
-```text
-S9-06 accepted baseline
-→ PAIM-00..15
-→ outcome
-→ S9-07 Stage-9 final historical review
-→ Stage 9 DONE
-→ Stage 10
-```
-
-## 15. PAIM-01 completion record
+## 21. PAIM-03 completion record — migration-specific test harness hardening
 
 **Status:** DONE
 **Completed:** 2026-09-05
 **Branch:** `feat/pydantic-ai-runtime`
-**Starting SHA:** `1733d303cffd1dacdd1d7610ce1cab2853094777`
+**Starting SHA:** `19933320bcacc52f32f5693f962743e7874c113f`
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 
-### Candidate
+### Harness extraction
 
-| Field | Value |
-|---|---|
-| Package | `pydantic-ai-slim[openai]` |
-| Exact version | `2.39.0` |
-| Direct dependency spec | `pydantic-ai-slim[openai]==2.39.0` |
-| Resolved Pydantic AI version | `2.39.0` |
-| Python version | `3.12.11` |
-| OS | `Windows-11-10.0.26200-SP0` |
+Created `tests/support/pydantic_ai_runtime.py` (364 lines) as a shared
+test-only support module for Pydantic AI blocker-gate tests. The module
+extracts all genuinely repeated infrastructure from the three blocker
+modules:
 
-### Deterministic qualification results
+| Concept | Previously duplicated in | Now in shared helper |
+|---|---|---|
+| `AlphaInput`, `BetaInput`, `ToolOutput` schemas | 3 modules | `tests.support.pydantic_ai_runtime` (immutable, safe to reuse) |
+| `READ_ALPHA_DEF`, `READ_BETA_DEF`, `WRITE_ALPHA_DEF` | 3 modules | `tests.support.pydantic_ai_runtime` (immutable, safe to reuse) |
+| `HandlerCounters` class | 2 modules | `tests.support.pydantic_ai_runtime` |
+| `_to_pyd_tool_defs()` | 3 modules | `to_pyd_tool_defs()` |
+| `_make_external_toolset()` | 3 modules | `make_external_toolset()` |
+| `_make_deferred_handler()` | 3 modules | `make_deferred_handler()` |
+| `_make_agent()` | 3 modules | `make_agent()` |
+| Fixture factories (counters, registry, executor, contexts, snapshot) | 2 modules | `make_*()` builder functions |
 
-All 14 tests in `tests/integration/test_pydantic_ai_qualification.py` pass.
+What remained scenario-local:
+- All 18 BG test functions with their exact acceptance assertions
+- The `test_missing_tool_call_ids` `capturing_handler` (custom ID-capture logic)
+- All test-specific `FunctionModel` closures defining scenario-specific model behavior
 
-| # | Scenario | Result | Evidence |
+### Line counts before/after
+
+| File | Before | After | Delta |
 |---|---|---|---|
-| Q1 | Import and exact version | PASS | `pydantic_ai.__version__ == "2.39.0"`; Agent, OllamaModel, OpenAIChatModel, TestModel, OpenAIProvider all importable |
-| Q2 | Synchronous entry point | PASS | `agent.run_sync("test")` returns `AgentRunResult` with `output` attribute |
-| Q3 | Plain text response | PASS | `TestModel(custom_output_text=...)` returns exact expected string |
-| Q4 | Structured output | PASS | `TestModel(custom_output_args=...)` with `output_type=QualificationResult` returns validated `BaseModel` instance |
-| Q5 | Single function tool | PASS | Tool called exactly once; result appears in output |
-| Q6 | Multiple tool calls | PASS | Both tools called in single `ModelResponse`; **sequential** execution observed |
-| Q7 | Custom Ollama base URL | PASS | `OllamaProvider(base_url="http://my-ollama:11434/v1")` correctly stores URL; `OpenAIProvider` also works with `/v1` suffix |
-| Q8 | Connection failure | PASS | `ModelAPIError` raised for unreachable endpoint |
-| Q8 | Unknown tool call | PASS | `UserError` raised for unregistered tool |
-| Q8 | Structured output validation failure | PASS | `UnexpectedModelBehavior` raised with "Exceeded maximum output retries" |
-| Q8 | Output retry behavior | PASS | Default 1 retry exhausted before raising |
+| `test_pydantic_ai_blocker_gate.py` | 979 | 667 | -312 |
+| `test_pydantic_ai_blocker_execution.py` | 840 | 556 | -284 |
+| `test_pydantic_ai_blocker_limits.py` | 478 | 281 | -197 |
+| `test_pydantic_ai_qualification.py` | 483 | 498 | +15 |
+| `support/pydantic_ai_runtime.py` | — | 364 | +364 (new) |
+| `support/__init__.py` | — | 6 | +6 (new) |
 
-### Real Ollama evidence
+Total reduction in blocker modules: 793 lines.
+New support module: 364 lines — well under the 1000-line test hard limit.
 
-| Field | Value |
-|---|---|
-| Ollama version | `0.33.3` |
-| Model | `huihui_ai/qwen3.5-abliterated:35b` |
-| Base URL | `http://localhost:11434/v1` |
-| Plain response | PASS — `"smoke test ok"` returned correctly |
-| Structured output | PASS — `SmokeResult(answer='hello', score=42)` returned and validated |
-| Provider used | `OllamaProvider` (official Pydantic AI Ollama provider) |
+### State isolation
 
-### Observed framework semantics
+The shared helper contains **no module-global mutable runtime state**.
+All mutable objects are created fresh per call:
 
-| Aspect | Observation |
-|---|---|
-| Structured-output mode | **ToolOutput** (default when `output_type` is a Pydantic model — framework creates synthetic tool for output schema) |
-| Multi-tool execution | **Sequential** — tools executed one after another in main thread |
-| Retry behavior | Default 1 output validation retry; automatic transport retries observed in OpenAI client (transparent to application) |
-| Public exception classes | `ModelAPIError` (base, extends `RuntimeError`), `ModelHTTPError` (extends `ModelAPIError`), `UserError` (extends `Exception`), `UnexpectedModelBehavior` (extends `RuntimeError`) |
-| Ollama endpoint path | `<base_url>/chat/completions` — base URL should include `/v1` for Ollama compatibility |
+- `HandlerCounters` — fresh via `make_handler_counters()`
+- `ToolRegistry` — fresh via `make_tool_registry(counters)`
+- `ToolExecutor` — fresh via `make_tool_executor(registry)`
+- `Agent` — fresh via `make_agent(model, snapshot)`
+- `HandleDeferredToolCalls` — fresh via `make_deferred_handler(...)` (closure-scoped counters)
+- Batch state — closure-scoped `batch_count` list per handler instance
 
-### Architecture confirmation
+Immutable schema classes (`AlphaInput`, `BetaInput`, `ToolOutput`) and
+canonical tool-definition constants (`READ_ALPHA_DEF`, `READ_BETA_DEF`,
+`WRITE_ALPHA_DEF`) are safe to reuse because they are `BaseModel`/
+`ToolDefinition` instances with no mutable shared state.
 
-- No FastAgent replacement
-- No AgentLoop replacement
-- No ToolExecutor bridge yet
-- No Vault access
-- No domain/storage framework dependency
-- No PAIM-02 implementation
-- Qualification tools are harmless in-memory functions only
-- No production source modules modified
+### Frozen-snapshot semantics preserved
 
-### Changed files
+The shared `make_deferred_handler()` still receives the frozen snapshot
+as an immutable tuple and resolves tool calls against it at handler time.
+A tool registered after snapshot creation (as in BG-06) cannot expand
+turn-local authority because the snapshot is captured before handler
+creation.
 
-```text
-pyproject.toml
-uv.lock
-tests/integration/test_pydantic_ai_qualification.py
-tests/integration/test_pydantic_ai_ollama_smoke.py
-DEVELOPMENT_STATUS.md
-docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+### Canonical duplicate-ID policy preserved
+
+The shared `make_deferred_handler()` preflight uses the exact canonical
+rule:
+
+```python
+if c.tool_call_id is not None:
+    if c.tool_call_id in seen_ids:
+        raise RuntimeError(...)
+    seen_ids.add(c.tool_call_id)
 ```
 
-### Quality gates
+Multiple `None` IDs are not rejected solely for being `None`.
 
-| Gate | Command | Result |
+### ToolExecutor-only execution preserved
+
+`make_agent()` creates an `ExternalToolset` with zero Python handler
+functions. All successful project execution goes through
+`ToolExecutor.execute()` via `make_deferred_handler()`.
+
+### Whole-turn limits preserved
+
+The shared `make_agent()` uses `retries={"tools": 0}`. The shared
+`make_deferred_handler()` accepts `reject_second_batch=True` by default.
+Tests remain explicit about `UsageLimits(request_limit=N)`.
+
+### HTTP isolation
+
+`test_q8_connection_failure` in `test_pydantic_ai_qualification.py` no
+longer attempts a real socket connection to `http://localhost:1/v1`.
+
+**Previous behavior:** `OpenAIProvider(base_url="http://localhost:1/v1", http_client=None)`
+— still attempted a real TCP connection to localhost:1.
+
+**New behavior:** A custom `httpx2.AsyncBaseTransport` subclass raises
+`httpx2.ConnectError` deterministically without any network I/O:
+
+```python
+class _AlwaysFailTransport(httpx2.AsyncBaseTransport):
+    async def handle_async_request(self, request):
+        raise httpx2.ConnectError("Mocked connection failure")
+```
+
+The mock transport is injected through the public `AsyncOpenAI(http_client=...)`
+API, which accepts an `httpx2.AsyncClient`. No framework internals are
+patched, no `respx` is needed for `httpx2`, and no additional dependency
+is required.
+
+**Real socket dependency removed:** yes
+**Observable exception type:** `pydantic_ai.exceptions.ModelAPIError`
+**Mocked URL:** `https://pydantic-ai-test.invalid/v1`
+
+### Order-dependence evidence
+
+| Run | Module order | Result |
 |---|---|---|
-| Focused qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 14 passed |
-| Real Ollama smoke | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | 2 passed |
-| Relevant existing provider tests | `uv run pytest tests/integration/test_ollama_provider_integration.py` | 8 passed (in full suite) |
-| Full pytest (excl real Ollama) | `uv run pytest --ignore=tests/integration/test_pydantic_ai_ollama_smoke.py` | 4575 passed, 100 skipped |
-| Ruff check | `uv run ruff check .` | All checks passed |
-| Ruff format | `uv run ruff format --check .` | 327 files already formatted |
-| uv lock consistency | `uv lock --check` | Resolved 51 packages |
-| git diff --check | `git diff --check` | No whitespace errors |
+| A | qualification → gate → execution → limits → executor | 56 passed |
+| B | executor → limits → execution → gate → qualification | 56 passed |
+| C | gate → limits → execution → qualification → executor | 56 passed |
 
-### Dependency review
+All three permutations pass. No order sensitivity was found.
 
-- **Direct dependency added:** `pydantic-ai-slim[openai]==2.39.0`
-- **Required transitive additions:** `openai==3.8.0`, `pydantic-graph==2.39.0`, `jiter==0.16.0`, `tiktoken==0.14.0`, `regex==2026.9.3`, `sniffio==1.3.1`, `charset-normalizer==3.5.1`, `httpcore2==2.12.0`, `httpx2==2.12.0`, `requests==2.34.2`, `urllib3==2.7.0`, `truststore==0.10.4`, `griffelib==2.3.0`, `genai-prices==0.1.6`, `logfire-api==5.0.0`, `opentelemetry-api==1.44.0`
-- **No unrelated direct upgrades**
-- **Existing `httpx>=0.28.1`** resolved to `httpx2==2.12.0` (transitive via openai SDK; coexists with project's httpx)
-
-### Qualification decision
+### pytest-randomly decision
 
 ```
-QUALIFIED
+DO NOT ADD
 ```
 
-All 8 qualification dimensions pass. The framework provides:
-- Deterministic test facilities (`TestModel`) for offline testing
-- Public Ollama provider (`OllamaModel` + `OllamaProvider`) with custom base URL support
-- Structured output via ToolOutput mode
-- Sequential synchronous tool execution
-- Predictable exception hierarchy for failure handling
-- No architectural boundary violations required
+**Reason:** No demonstrated migration-specific need. All three order
+permutations pass, fresh-state audit found no leaked global state, and
+the canonical full suite passes. Adding `pytest-randomly` would add a
+dependency without demonstrated regression value.
 
-The observed sequential multi-tool execution and default retry behavior are documented for PAIM-02 evaluation but do not block qualification.
+**Dependency-file changes:** None. `pyproject.toml` unchanged, `uv.lock`
+unchanged.
 
-### Next task
+### Accepted safety evidence
 
-```text
-PAIM-02 — Critical blocker gate
-```
+All PAIM-02/C03/C04 safety conclusions remain unchanged:
 
-## 16. PAIM-C01 correction record
-
-**Status:** DONE
-**Completed:** 2026-09-05
-**Branch:** `feat/pydantic-ai-runtime`
-**Starting SHA:** `49b7fd3391ef165dd94964ac034feb1ad5de9d91`
-**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
-
-### Correction reason
-
-Independent review identified several inaccurate claims in the PAIM-01
-qualification evidence. PAIM-C01 corrects these without changing the
-PAIM-01 qualification outcome.
-
-### Defect A — multi-tool execution semantics
-
-**Original PAIM-01 claim:** `call_order == ["a", "b"]` proves sequential
-multi-tool execution; sync tools execute in main thread.
-
-**Correction:** Two concurrently scheduled short functions may append in
-model-emission order without being sequential. The claim was insufficient.
-
-**Corrected evidence (A1 — default concurrency):**
-
-Two async tools with a synchronisation barrier (`tool_a` waits until
-`tool_b` has started) prove that under the default parallel execution mode
-both tools are **concurrently active** (`max_active >= 2`).
-
-```text
-test_q6a_default_multi_tool_concurrency: PASS
-max_active >= 2  (both tools overlapped)
-```
-
-**Corrected evidence (A2 — explicit sequential mode):**
-
-Using `agent.parallel_tool_call_execution_mode("sequential")`, tool_b
-starts only after tool_a finishes (`max_active <= 1`).
-
-```text
-test_q6b_explicit_sequential_mode: PASS
-max_active <= 1  (no overlap)
-```
-
-**Corrected evidence (A3 — sync tool thread behavior):**
-
-A synchronous `tool_plain` tool executes on a **worker thread**, not the
-calling thread.
-
-```text
-test_q6c_sync_tool_worker_thread: PASS
-tool_thread_id != calling_thread_id
-```
-
-### Defect B — unknown-tool test methodology
-
-**Original PAIM-01 claim:** `TestModel(call_tools=["nonexistent_tool"])`
-proves unknown-tool behavior. Documented as `UserError`.
-
-**Correction:** `TestModel` may fail while preparing its deterministic setup
-rather than emulating a provider response containing an unknown function
-call. Not a valid runtime unknown-tool test.
-
-**Corrected evidence (B1 — default retry behavior):**
-
-Using `FunctionModel` that returns a raw `ModelResponse` with a
-`ToolCallPart` for `"nonexistent_tool"`, the framework emits a
-`RetryPromptPart` (semantic retry round) before eventually raising
-`UnexpectedModelBehavior`. No application tool handler executes.
-
-```text
-test_q8b_unknown_tool_default_retry: PASS
-UnexpectedModelBehavior raised after retry exhaustion
-no application tool handler executed
-```
-
-**Corrected evidence (B2 — zero retries):**
-
-With `Agent(retries={"tools": 0})`, the framework raises a terminal
-exception without a semantic retry round. No application tool handler
-executes.
-
-```text
-test_q8b_unknown_tool_zero_retries: PASS
-terminal exception raised (UserError or UnexpectedModelBehavior)
-no application tool handler executed
-```
-
-### Defect C — overstated Ollama endpoint evidence
-
-**Original PAIM-01 claim:** Q7 proves `<base>/chat/completions` endpoint
-path.
-
-**Correction:** The test only proves that `OllamaProvider` and
-`OpenAIProvider` accept and store a custom `base_url` ending in `/v1`. It
-does not independently capture the exact outgoing HTTP request path.
-
-**Corrected evidence:** Claims narrowed to:
-
-```text
-OllamaProvider accepts custom base_url ending in /v1
-OpenAIProvider with /v1 suffix works for Ollama
-Real Ollama smoke succeeds through that configured base URL
-```
-
-### Defect D — overstated smoke assertions
-
-**Original PAIM-01 claim:** `"smoke test ok"` returned correctly;
-`SmokeResult(answer='hello', score=42)` returned.
-
-**Correction:** The actual test assertions were:
-
-```text
-plain: non-empty string output
-structured: validated SmokeResult with non-empty answer and positive score
-```
-
-Documentation now matches the exact asserted contract.
-
-### Defect E — machine-specific default model
-
-**Original PAIM-01:** Smoke file contained `huihui_ai/qwen3.5-abliterated:35b`
-as project-level default.
-
-**Correction:** Removed. Smoke tests now require explicit configuration via
-`DND_ASSISTANT_OLLAMA_SMOKE_CONFIG=<base_url>,<model>`. If absent, tests
-skip. If malformed, clear test/configuration error.
-
-### Effective corrected PAIM-01 findings
-
-| Aspect | Corrected finding |
+| Scenario | Result |
 |---|---|
-| Multi-tool representation | PASS |
-| Default multi-tool execution | **parallel/concurrent** |
-| Explicit whole-run sequential mode | PASS |
-| Sync tool execution | **worker thread** |
-| Unknown tool default | semantic retry behavior (RetryPromptPart → exhaustion) |
-| Unknown tool retries=0 | terminal failure without retry |
-| Ollama base URL | custom base_url accepted and stored |
-| Ollama smoke | non-empty text; validated structured output |
-
-### Qualification classification
-
-```
-QUALIFIED WITH OBSERVED LIMITATIONS
-```
-
-Observed limitations:
-
-- default multi-tool execution is concurrent (not sequential);
-- default semantic tool retry is non-zero (retry round before exhaustion);
-- sync tools are offloaded to worker threads.
-
-These are not PAIM rejection conditions by themselves because later gates
-(PAIM-02, PAIM-10) can potentially constrain them using supported public
-APIs (`parallel_tool_call_execution_mode`, `retries` parameter).
-
-### Architecture confirmation
-
-- No production runtime changes
-- No ToolExecutor bridge
-- No FastAgent/AgentLoop replacement
-- No PAIM-02 implementation
-- No dependency change
-- No Vault/domain/storage changes
-
-### Changed files
-
-```text
-tests/integration/test_pydantic_ai_qualification.py
-tests/integration/test_pydantic_ai_ollama_smoke.py
-docs/migrations/001_PYDANTIC_AI_RUNTIME.md
-DEVELOPMENT_STATUS.md
-```
-
-### Quality gates
-
-| Gate | Command | Result |
-|---|---|---|
-| Focused qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
-| Default smoke (no config) | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | 2 skipped |
-| Real Ollama smoke | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | (explicit config, reported in Final Report) |
-| Full pytest (excl real Ollama) | `uv run pytest` | (reported in Final Report) |
-| Ruff check | `uv run ruff check .` | (reported in Final Report) |
-| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
-| git diff --check | `git diff --check` | (reported in Final Report) |
-
-### Next task
-
-```text
-PAIM-02 — Critical blocker gate
-```
-
-## 18. PAIM-02 completion record — critical blocker gate
-
-**Status:** DONE
-**Completed:** 2026-09-05
-**Branch:** `feat/pydantic-ai-runtime`
-**Starting SHA:** `464d1619b72c7e03baec1a6d5f853402ef382174`
-**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
-
-### Framework path tested
-
-The tested design used public Pydantic AI 2.39.0 APIs:
-
-```text
-frozen app snapshot (tuple[ToolDefinition, ...])
--> @agent.tool_plain(requires_approval=True) for each tool
--> Agent(output_type=str | DeferredToolRequests)
--> agent.run_sync() returns DeferredToolRequests
--> application full-batch preflight (preflight_batch)
--> ToolExecutor sequentially for approved calls
--> DeferredToolResults(calls={id: result}) constructed directly
--> second agent.run_sync(message_history=..., deferred_tool_results=...)
-```
-
-Note: `ExternalToolset` and `HandleDeferredToolCalls` are not available in
-Pydantic AI 2.39.0. The equivalent public extension point is
-`requires_approval=True` on tool definitions combined with
-`DeferredToolRequests` as output type.
-
-### Hard-gate matrix
-
-| Gate | Result | Model requests | Deferred batches | ToolExecutor calls | Project handler calls | Rejection/execution layer |
-|---|---|---|---|---|---|---|
-| BG-01 READ+READ | PASS | 1 | 1 | 2 | 2 | ToolExecutor (sequential) |
-| BG-02 READ+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
-| BG-02 WRITE+READ | PASS | 1 | 1 | 0 | 0 | Application preflight |
-| BG-03 WRITE+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
-| BG-04 >4 | PASS | 1 | 1 | 0 | 0 | Application preflight |
-| BG-05 duplicate ID | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
-| BG-06 hidden/frozen | PASS | 1 | 1 | 0 | 0 | Application preflight |
-| BG-07 unknown | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
-| BG-08 invalid args | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
-| BG-09 single READ | PASS | 1 | 1 | 1 | 1 | ToolExecutor |
-| BG-10 single WRITE | PASS | 1 | 1 | 1 | 1 | ToolExecutor |
-| BG-11 permission denial | PASS | 1 | 1 | 0 | 0 | ToolExecutor (ConflictError) |
-| BG-11 missing audit | PASS | 1 | 1 | 0 | 0 | ToolExecutor (ValidationError) |
-| BG-12 second-round tool | PASS | 2 | 2 | 1 | 1 | Application policy (no second execute) |
-
-### Request/retry evidence
-
-- **request_limit:** `UsageLimits(request_limit=1)` allows one model request
-  and returns `DeferredToolRequests`. With deferred tools, the framework
-  makes one model request per `run_sync` call. The deferred tool mechanism
-  does not consume additional model requests within the same `run_sync`.
-- **Tool retries:** `retries={"tools": 0}` disables semantic tool retries.
-  Unknown tool with zero retries produces `model_requests == 1` and
-  `handler_calls == 0`.
-- **No semantic retry occurred** in any test (all use `retries={"tools": 0}`).
-
-### Frozen exposure evidence
-
-- Snapshot contains exactly 3 definitions: `read_alpha`, `read_beta`,
-  `write_alpha`.
-- Live-registry mutation: `hidden_tool` registered after snapshot creation.
-- Model-requested hidden tool: `hidden_tool`.
-- Rejection layer: application `preflight_batch` (tool not in frozen
-  snapshot).
-- ToolExecutor/handler counts: 0 for hidden tool, 0 for all project handlers.
-
-### ToolExecutor boundary
-
-Every successful project tool execution in the tested design went through:
-
-```text
-ToolExecutor.execute()
-```
-
-No framework route could invoke project handlers directly because all tools
-use `requires_approval=True`. The framework never executes the handler — it
-collects the deferred calls and returns them as `DeferredToolRequests`.
-Application code provides results via `DeferredToolResults(calls={id: result})`,
-which bypasses framework handler execution entirely.
-
-### Public extension points used
-
-Exact Pydantic AI 2.39.0 public APIs used:
-
-- `Agent(model, output_type=str | DeferredToolRequests, retries={"tools": 0})`
-- `@agent.tool_plain(requires_approval=True)`
-- `agent.run_sync(prompt)` — returns `DeferredToolRequests`
-- `agent.run_sync(prompt, message_history=..., deferred_tool_results=...)`
-- `DeferredToolRequests.approvals` — list of `ToolCallPart`
-- `DeferredToolResults(calls={id: result}, approvals={})`
-- `FunctionModel(function=...)` — for deterministic model responses
-- `TestModel(call_tools=[...])` — for deterministic tool-call scenarios
-- `UsageLimits(request_limit=N)`
-- `ToolCallPart`, `ModelResponse`
-
-**Private API usage: none.**
-
-### Discovered limitations
-
-#### Framework defaults (not blockers)
-
-| Default | Mitigation |
-|---|---|
-| Concurrent multi-tool execution | Application executes sequentially via ToolExecutor |
-| Tool validation before deferral | Framework validates args before deferring; with `retries=0`, invalid args raise `UnexpectedModelBehavior` immediately (fail-closed) |
-| Unknown tool raises `UnexpectedModelBehavior` | Correct fail-closed behavior — no handler executes |
-| Sync tools on worker threads | PAIM-10 gate owns this evaluation |
-
-#### Application-required policy
-
-1. **All tools must use `requires_approval=True`** — this is the interception
-   mechanism that prevents framework handler execution.
-2. **Agent must use `output_type=str | DeferredToolRequests`** — this is
-   required for the framework to return deferred tool calls instead of
-   executing them.
-3. **Two-phase execution** — first `run_sync` collects deferred calls,
-   application preflights and executes via ToolExecutor, second `run_sync`
-   with `message_history` + `deferred_tool_results` completes the agent flow.
-4. **Second-round tool rejection** — application policy must detect and
-   reject a second `DeferredToolRequests` batch. The framework does not
-   enforce this automatically.
-5. **`retries={"tools": 0}`** — required to prevent semantic retry rounds
-   that could repeat tool calls.
-
-#### Actual blockers
-
-**None.** All hard Stage-9 invariants are demonstrably implementable using
-public Pydantic AI 2.39.0 APIs plus application-owned policy.
-
-### Gate decision
-
-```
-PASS WITH SELECTIVE CUSTOM REQUIREMENT
-```
-
-The selective custom requirement is the application-owned batch preflight
-and sequential ToolExecutor execution. This is not a framework limitation —
-it is the intended architecture where Pydantic AI handles generic
-model/tool-call mechanics and the application owns safety policy.
-
-The `requires_approval=True` + `DeferredToolRequests` pattern is a
-documented public extension point, not a private API workaround.
-
-### Changed files
-
-```text
-tests/integration/test_pydantic_ai_blocker_gate.py       (new)
-tests/integration/test_pydantic_ai_blocker_execution.py   (new)
-DEVELOPMENT_STATUS.md
-docs/migrations/001_PYDANTIC_AI_RUNTIME.md
-```
-
-No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+| BG-01 READ+READ | PASS |
+| BG-02 READ+WRITE / WRITE+READ | PASS |
+| BG-03 WRITE+WRITE | PASS |
+| BG-04 >4 calls | PASS |
+| BG-05 duplicate IDs | PASS |
+| BG-06 hidden/frozen | PASS |
+| BG-07 unknown tool | PASS |
+| BG-08 invalid args | PASS |
+| BG-09 single READ | PASS |
+| BG-10 single WRITE | PASS |
+| BG-11 permission denial | PASS |
+| BG-11 missing audit | PASS |
+| BG-12 second-round tool | PASS |
+| Missing IDs (auto-assignment) | PASS |
+| Normal request_limit=2 flow | PASS |
+| Third request prevented | PASS |
+| Zero semantic retries | PASS |
 
 ### Quality gates
 
 | Gate | Command | Result |
 |---|---|---|
 | Blocker gate tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
-| Blocker execution tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 7 passed |
-| Existing qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Blocker execution tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| Blocker limits tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| Qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
 | Tool executor tests | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
-| Full pytest (excl real Ollama) | `uv run pytest --ignore=tests/integration/test_pydantic_ai_ollama_smoke.py` | 4598 passed, 100 skipped |
+| Ollama smoke (default) | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | 2 skipped |
+| Order A | qualification→gate→execution→limits→executor | 56 passed |
+| Order B | executor→limits→execution→gate→qualification | 56 passed |
+| Order C | gate→limits→execution→qualification→executor | 56 passed |
+| Test-harness contract | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Maintainability contract | `uv run pytest tests/contract/test_maintainability.py -v` | 358 passed |
+| Canonical full suite | `uv run pytest` | 4606 passed, 102 skipped |
 | Ruff check | `uv run ruff check .` | All checks passed |
-| Ruff format | `uv run ruff format --check .` | 329 files already formatted |
+| Ruff format | `uv run ruff format --check .` | 332 files already formatted |
 | git diff --check | `git diff --check` | No whitespace errors |
+
+Warnings: 1 `DeprecationWarning` from `pydantic_graph/_utils.py` (same as
+baseline, associated with `test_bg09_single_read_through_executor`).
+
+### Changed files
+
+```text
+tests/support/__init__.py                          (new)
+tests/support/pydantic_ai_runtime.py               (new)
+tests/integration/test_pydantic_ai_blocker_gate.py
+tests/integration/test_pydantic_ai_blocker_execution.py
+tests/integration/test_pydantic_ai_blocker_limits.py
+tests/integration/test_pydantic_ai_qualification.py
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+No `tests/conftest.py` changes. No `tests/contract/test_test_harness_policy.py` changes.
 
 ### Architecture confirmation
 
-- No production runtime migration
-- No PAIM-03+ implementation
-- No ToolExecutor/FastAgent/AgentLoop changes
-- No Vault/domain/storage changes
-- No dependency changes
-- No `src/` modifications
+- **No production `src/` changes** — verified
+- **No runtime migration** — verified
+- **No Toolset production bridge** — verified
+- **No DndAgentPolicy** — verified
+- **No PAIM-04 implementation** — verified
+- **No dependency change** — verified (`pyproject.toml` and `uv.lock` unchanged)
+
+### Finalization
+
+Commit and push will be performed after this record.
 
 ### Next task
 
 ```text
-PAIM-03 — Migration-specific test harness hardening
+PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
 ```
 
-Do not begin PAIM-03 automatically.
+Do not begin PAIM-04 automatically.
 
 
 ## 19. PAIM-C03 correction record — correct blocker gate to ExternalToolset path
