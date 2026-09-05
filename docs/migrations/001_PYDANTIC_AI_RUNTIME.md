@@ -727,3 +727,189 @@ DEVELOPMENT_STATUS.md
 ```text
 PAIM-02 — Critical blocker gate
 ```
+
+## 18. PAIM-02 completion record — critical blocker gate
+
+**Status:** DONE
+**Completed:** 2026-09-05
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `464d1619b72c7e03baec1a6d5f853402ef382174`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Framework path tested
+
+The tested design used public Pydantic AI 2.39.0 APIs:
+
+```text
+frozen app snapshot (tuple[ToolDefinition, ...])
+-> @agent.tool_plain(requires_approval=True) for each tool
+-> Agent(output_type=str | DeferredToolRequests)
+-> agent.run_sync() returns DeferredToolRequests
+-> application full-batch preflight (preflight_batch)
+-> ToolExecutor sequentially for approved calls
+-> DeferredToolResults(calls={id: result}) constructed directly
+-> second agent.run_sync(message_history=..., deferred_tool_results=...)
+```
+
+Note: `ExternalToolset` and `HandleDeferredToolCalls` are not available in
+Pydantic AI 2.39.0. The equivalent public extension point is
+`requires_approval=True` on tool definitions combined with
+`DeferredToolRequests` as output type.
+
+### Hard-gate matrix
+
+| Gate | Result | Model requests | Deferred batches | ToolExecutor calls | Project handler calls | Rejection/execution layer |
+|---|---|---|---|---|---|---|
+| BG-01 READ+READ | PASS | 1 | 1 | 2 | 2 | ToolExecutor (sequential) |
+| BG-02 READ+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-02 WRITE+READ | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-03 WRITE+WRITE | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-04 >4 | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-05 duplicate ID | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-06 hidden/frozen | PASS | 1 | 1 | 0 | 0 | Application preflight |
+| BG-07 unknown | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-08 invalid args | PASS | 1 | 0 | 0 | 0 | Framework (UnexpectedModelBehavior) |
+| BG-09 single READ | PASS | 1 | 1 | 1 | 1 | ToolExecutor |
+| BG-10 single WRITE | PASS | 1 | 1 | 1 | 1 | ToolExecutor |
+| BG-11 permission denial | PASS | 1 | 1 | 0 | 0 | ToolExecutor (ConflictError) |
+| BG-11 missing audit | PASS | 1 | 1 | 0 | 0 | ToolExecutor (ValidationError) |
+| BG-12 second-round tool | PASS | 2 | 2 | 1 | 1 | Application policy (no second execute) |
+
+### Request/retry evidence
+
+- **request_limit:** `UsageLimits(request_limit=1)` allows one model request
+  and returns `DeferredToolRequests`. With deferred tools, the framework
+  makes one model request per `run_sync` call. The deferred tool mechanism
+  does not consume additional model requests within the same `run_sync`.
+- **Tool retries:** `retries={"tools": 0}` disables semantic tool retries.
+  Unknown tool with zero retries produces `model_requests == 1` and
+  `handler_calls == 0`.
+- **No semantic retry occurred** in any test (all use `retries={"tools": 0}`).
+
+### Frozen exposure evidence
+
+- Snapshot contains exactly 3 definitions: `read_alpha`, `read_beta`,
+  `write_alpha`.
+- Live-registry mutation: `hidden_tool` registered after snapshot creation.
+- Model-requested hidden tool: `hidden_tool`.
+- Rejection layer: application `preflight_batch` (tool not in frozen
+  snapshot).
+- ToolExecutor/handler counts: 0 for hidden tool, 0 for all project handlers.
+
+### ToolExecutor boundary
+
+Every successful project tool execution in the tested design went through:
+
+```text
+ToolExecutor.execute()
+```
+
+No framework route could invoke project handlers directly because all tools
+use `requires_approval=True`. The framework never executes the handler — it
+collects the deferred calls and returns them as `DeferredToolRequests`.
+Application code provides results via `DeferredToolResults(calls={id: result})`,
+which bypasses framework handler execution entirely.
+
+### Public extension points used
+
+Exact Pydantic AI 2.39.0 public APIs used:
+
+- `Agent(model, output_type=str | DeferredToolRequests, retries={"tools": 0})`
+- `@agent.tool_plain(requires_approval=True)`
+- `agent.run_sync(prompt)` — returns `DeferredToolRequests`
+- `agent.run_sync(prompt, message_history=..., deferred_tool_results=...)`
+- `DeferredToolRequests.approvals` — list of `ToolCallPart`
+- `DeferredToolResults(calls={id: result}, approvals={})`
+- `FunctionModel(function=...)` — for deterministic model responses
+- `TestModel(call_tools=[...])` — for deterministic tool-call scenarios
+- `UsageLimits(request_limit=N)`
+- `ToolCallPart`, `ModelResponse`
+
+**Private API usage: none.**
+
+### Discovered limitations
+
+#### Framework defaults (not blockers)
+
+| Default | Mitigation |
+|---|---|
+| Concurrent multi-tool execution | Application executes sequentially via ToolExecutor |
+| Tool validation before deferral | Framework validates args before deferring; with `retries=0`, invalid args raise `UnexpectedModelBehavior` immediately (fail-closed) |
+| Unknown tool raises `UnexpectedModelBehavior` | Correct fail-closed behavior — no handler executes |
+| Sync tools on worker threads | PAIM-10 gate owns this evaluation |
+
+#### Application-required policy
+
+1. **All tools must use `requires_approval=True`** — this is the interception
+   mechanism that prevents framework handler execution.
+2. **Agent must use `output_type=str | DeferredToolRequests`** — this is
+   required for the framework to return deferred tool calls instead of
+   executing them.
+3. **Two-phase execution** — first `run_sync` collects deferred calls,
+   application preflights and executes via ToolExecutor, second `run_sync`
+   with `message_history` + `deferred_tool_results` completes the agent flow.
+4. **Second-round tool rejection** — application policy must detect and
+   reject a second `DeferredToolRequests` batch. The framework does not
+   enforce this automatically.
+5. **`retries={"tools": 0}`** — required to prevent semantic retry rounds
+   that could repeat tool calls.
+
+#### Actual blockers
+
+**None.** All hard Stage-9 invariants are demonstrably implementable using
+public Pydantic AI 2.39.0 APIs plus application-owned policy.
+
+### Gate decision
+
+```
+PASS WITH SELECTIVE CUSTOM REQUIREMENT
+```
+
+The selective custom requirement is the application-owned batch preflight
+and sequential ToolExecutor execution. This is not a framework limitation —
+it is the intended architecture where Pydantic AI handles generic
+model/tool-call mechanics and the application owns safety policy.
+
+The `requires_approval=True` + `DeferredToolRequests` pattern is a
+documented public extension point, not a private API workaround.
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_blocker_gate.py       (new)
+tests/integration/test_pydantic_ai_blocker_execution.py   (new)
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Blocker gate tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| Blocker execution tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 7 passed |
+| Existing qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Tool executor tests | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Full pytest (excl real Ollama) | `uv run pytest --ignore=tests/integration/test_pydantic_ai_ollama_smoke.py` | 4598 passed, 100 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 329 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Architecture confirmation
+
+- No production runtime migration
+- No PAIM-03+ implementation
+- No ToolExecutor/FastAgent/AgentLoop changes
+- No Vault/domain/storage changes
+- No dependency changes
+- No `src/` modifications
+
+### Next task
+
+```text
+PAIM-03 — Migration-specific test harness hardening
+```
+
+Do not begin PAIM-03 automatically.

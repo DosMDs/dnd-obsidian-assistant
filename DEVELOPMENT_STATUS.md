@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-05 (PAIM-C02 retry-count evidence)
+**Last updated:** 2026-09-05 (PAIM-02 blocker gate)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -100,7 +100,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-01 — Candidate dependency/framework qualification | DONE |
 | PAIM-C01 — Correct PAIM-01 framework-semantics evidence | DONE |
 | PAIM-C02 — Close unknown-tool retry-count evidence gap | DONE |
-| PAIM-02 — Critical blocker gate | NOT STARTED |
+| PAIM-02 — Critical blocker gate | DONE |
 | PAIM-03 — Migration-specific test harness hardening | NOT STARTED |
 | PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge | NOT STARTED |
 | PAIM-05 — Explicit DndAgentPolicy | NOT STARTED |
@@ -138,16 +138,40 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-02 — Critical blocker gate
+PAIM-03 — Migration-specific test harness hardening
 ```
 
 ## Current blockers
 
 No confirmed migration blocker.
-Known PAIM-02 risks:
-- default concurrent multi-tool execution;
-- default tool semantic retries;
-- sync-tool worker-thread execution.
+
+PAIM-02 blocker gate result: **PASS WITH SELECTIVE CUSTOM REQUIREMENT**
+
+All hard Stage-9 invariants are demonstrably implementable using public
+Pydantic AI 2.39.0 APIs plus application-owned policy, with ToolExecutor
+remaining the trusted execution boundary.
+
+The tested architecture path:
+```text
+frozen app snapshot
+-> @agent.tool_plain(requires_approval=True)
+-> DeferredToolRequests output
+-> application full-batch preflight
+-> ToolExecutor sequentially
+-> DeferredToolResults(calls={id: result})
+-> second run_sync with message_history + deferred_tool_results
+```
+
+Selective custom requirement: tools must use `requires_approval=True` and
+the agent must use `output_type=str | DeferredToolRequests` to intercept
+the complete tool batch before any framework handler execution. This is
+a documented public extension point, not a private API workaround.
+
+Known risks documented in PAIM-02 evidence:
+- default concurrent multi-tool execution (overridden by application
+  sequential execution via ToolExecutor);
+- default tool semantic retries (disabled via retries={"tools": 0});
+- sync-tool worker-thread execution (PAIM-10 gate).
 
 ## Documentation map
 
