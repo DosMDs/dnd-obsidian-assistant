@@ -1824,3 +1824,143 @@ PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
 ```
 
 Do not begin PAIM-04 automatically.
+
+## 24. PAIM-04 completion record — ToolRegistry → framework Toolset → ToolExecutor bridge
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `bdebdc28c7091a518f1fc2ae42d88888466b4196`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Production bridge
+
+| Field | Value |
+|---|---|
+| Module | `src/dnd_assistant/application/pydantic_ai_tool_bridge.py` |
+| Public classes | `PydanticAIToolSnapshot`, `PydanticAIToolBridge` |
+| Constructor dependency | `ToolRegistry` (one canonical registry) |
+| Snapshot representation | `dataclass(frozen=True, slots=True)` with `tuple[ToolDefinition, ...]` |
+
+### Snapshot evidence
+
+| Property | Result |
+|---|---|
+| Canonical source | `ToolRegistry` |
+| Input | Selected `Sequence[ToolPublicDefinition]` |
+| Stored authority | `tuple[ToolDefinition, ...]` (project-owned, immutable) |
+| Empty snapshot | `names == ()`, `ExternalToolset` with zero tools |
+| Live-registry mutation | Old snapshot unchanged; new tool absent from fresh `ExternalToolset` |
+| Source-list mutation | Snapshot unchanged after caller clears list |
+| Framework-toolset mutation | `toolset_a.tool_defs.clear()` does not affect `toolset_b` from same snapshot |
+
+### Translation evidence
+
+For a representative READ tool (`read_alpha`):
+
+| Field | Framework exposure |
+|---|---|
+| Project name → framework name | `"read_alpha"` → `"read_alpha"` |
+| Description preserved | `"A read-only test tool"` → `"A read-only test tool"` |
+| Input schema preserved | `AlphaInput.model_json_schema()` → `parameters_json_schema` |
+| Output schema exposed to framework | **No** (stays in project snapshot) |
+| Permission metadata as framework authority | **No** (stays in project snapshot) |
+| Python handler attached | **No** (schema-only `ExternalToolset`) |
+
+### Malformed snapshot evidence
+
+| Scenario | Result |
+|---|---|
+| Duplicate name | `ValidationError` — "Duplicate tool name" |
+| Unknown name | `ValidationError` — "not registered in the canonical ToolRegistry" |
+| Permission mismatch | `ValidationError` — "permission mismatch" |
+| Session-mode mismatch | `ValidationError` — "allowed_session_modes mismatch" |
+| Description mismatch | `ValidationError` — "description mismatch" |
+| Input schema mismatch | `ValidationError` — "input_schema mismatch" |
+
+### Execution evidence
+
+| Scenario | Bridge reached | ToolExecutor authority | Handler calls | Result |
+|---|---|---|---|---|
+| READ valid | Yes | Yes | 1 | `ToolOutput(result="alpha:hello")` |
+| JSON-string object | Yes | Yes | 1 | `ToolOutput(result="alpha:x")` |
+| Malformed JSON | Yes | No (fail closed) | 0 | `ValidationError` |
+| Non-object JSON | Yes | No (fail closed) | 0 | `ValidationError` |
+| Schema-invalid dict | Yes | Yes | 0 | `ValidationError` from ToolExecutor |
+| Hidden live tool | Yes | No (fail closed) | 0 | `ValidationError` — "not in the frozen exposure" |
+| Unknown tool | Yes | No (fail closed) | 0 | `ValidationError` — "not in the frozen exposure" |
+| WRITE valid | Yes | Yes | 1 | `ToolOutput(result="write:test")` |
+| READ→WRITE denial | Yes | Yes | 0 | `ConflictError` — "Permission denied" |
+| Missing audit | Yes | Yes | 0 | `ValidationError` — "requires a non-None AuditContext" |
+| Session denial | Yes | Yes | 0 | `ConflictError` — "Session mode" |
+
+### Exception propagation
+
+| Scenario | Result |
+|---|---|
+| Handler raises `RuntimeError` | Propagates unchanged |
+| Handler returns incompatible output | `ValidationError` from ToolExecutor propagates |
+
+### Scope confirmation
+
+| Component | Status |
+|---|---|
+| `ToolRegistry` | Unchanged |
+| `ToolExecutor` | Unchanged |
+| Tool Layer has Pydantic AI dependency | **No** |
+| `FastAgent` | Unchanged |
+| `AgentLoop` | Unchanged |
+| `AgentToolExecutionService` | Unchanged |
+| `select_agent_tools` | Unchanged |
+| `HandleDeferredToolCalls` production runtime | Not implemented |
+| PAIM-05 implementation | Not started |
+| `pyproject.toml` | Unchanged |
+| `uv.lock` | Unchanged |
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| New bridge tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | 27 passed |
+| Tool registry | `uv run pytest tests/unit/test_tool_registry.py -v` | 16 passed |
+| Tool catalog | `uv run pytest tests/unit/test_tool_catalog.py -v` | 33 passed |
+| Tool executor | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Agent tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | 44 passed |
+| Agent tool execution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | 29 passed |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 361 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical full suite | `uv run pytest` | 4636 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 334 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py          (new, 351 lines)
+tests/unit/test_pydantic_ai_tool_bridge.py                        (new, 783 lines)
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+### Architecture confirmation
+
+- Tool Layer (`src/dnd_assistant/tools/`) has no Pydantic AI dependency
+- `pyproject.toml` and `uv.lock` unchanged
+- No `FastAgent`, `AgentLoop`, `select_agent_tools`, or `AgentToolExecutionService` changes
+- No `HandleDeferredToolCalls` production runtime
+- No PAIM-05 implementation
+- No Vault/domain/storage/retrieval/cli changes
+
+### Next task
+
+```text
+PAIM-05 — Explicit DndAgentPolicy
+```
+
+Do not begin PAIM-05 automatically.
