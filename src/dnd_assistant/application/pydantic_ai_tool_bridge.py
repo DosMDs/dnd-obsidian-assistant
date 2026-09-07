@@ -55,6 +55,7 @@ This module must not import from:
 from __future__ import annotations
 
 import json
+import weakref
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
@@ -83,7 +84,7 @@ if TYPE_CHECKING:
 # ── Public types ─────────────────────────────────────────────────────────────
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False, weakref_slot=True)
 class PydanticAIToolSnapshot:
     """Immutable project-owned authority for one turn-local tool exposure.
 
@@ -100,6 +101,13 @@ class PydanticAIToolSnapshot:
         Do **not** construct this class directly.  Use
         ``PydanticAIToolSnapshot._create()`` or the owning bridge's
         ``freeze()`` method.
+
+    .. important::
+
+        ``eq=False`` ensures that equality is identity-based.  A
+        ``dataclasses.replace`` copy is a different object and is **not**
+        equal to the original.  This is intentional — the snapshot is a
+        capability issued by the bridge, not a serialisable DTO.
     """
 
     definitions: tuple[ToolDefinition, ...]
@@ -151,6 +159,7 @@ class PydanticAIToolBridge:
             raise TypeError("registry must be a ToolRegistry instance")
         self._registry = registry
         self._snapshot_owner_token: object = object()
+        self._issued_snapshots: weakref.WeakSet[PydanticAIToolSnapshot] = weakref.WeakSet()
         self._executor: ToolExecutor | None = None
 
     # ── Freeze (snapshot creation) ──────────────────────────────────────────
@@ -210,10 +219,16 @@ class PydanticAIToolBridge:
 
             canonical_defs.append(canonical)
 
-        return PydanticAIToolSnapshot._create(
+        result = PydanticAIToolSnapshot._create(
             definitions=tuple(canonical_defs),
             owner_token=self._snapshot_owner_token,
         )
+
+        # Register the exact issued instance for capability tracking.
+        # A copied/reconstructed snapshot must not inherit authority.
+        self._issued_snapshots.add(result)
+
+        return result
 
     # ── Framework translation ───────────────────────────────────────────────
 
@@ -334,8 +349,11 @@ class PydanticAIToolBridge:
         Proves:
         1. Correct runtime type.
         2. Owner token belongs to this bridge.
-        3. No duplicate definitions/names.
-        4. Every stored definition is still the exact canonical registered
+        3. Exact snapshot instance was issued by this bridge (capability
+           identity — prevents ``dataclasses.replace`` copies from inheriting
+           authority).
+        4. No duplicate definitions/names.
+        5. Every stored definition is still the exact canonical registered
            definition for this bridge's registry.
 
         Raises:
@@ -351,14 +369,21 @@ class PydanticAIToolBridge:
                 "snapshot was created by a different bridge and cannot be used here"
             )
 
-        # 3. No duplicate names
+        # 3. Exact snapshot instance was issued by this bridge.
+        #    This prevents dataclasses.replace() copies from inheriting
+        #    authority even when they carry the correct owner token and
+        #    canonical definitions from the same registry.
+        if snapshot not in self._issued_snapshots:
+            raise ValidationError("snapshot was not issued by this bridge and cannot be used here")
+
+        # 4. No duplicate names
         seen: set[str] = set()
         for td in snapshot.definitions:
             if td.name in seen:
                 raise ValidationError(f"Duplicate definition name in snapshot: '{td.name}'")
             seen.add(td.name)
 
-        # 4. Every stored definition is still the exact canonical registered
+        # 5. Every stored definition is still the exact canonical registered
         #    definition for this bridge's registry (identity check).
         from dnd_assistant.errors import NotFoundError as NFE
 

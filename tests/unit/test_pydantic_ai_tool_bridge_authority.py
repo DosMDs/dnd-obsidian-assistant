@@ -254,7 +254,7 @@ class TestTamperedCopyDefense:
 
         tool_call = ToolCallPart(tool_name="extra_tool", args='{"value": "x"}')
 
-        with pytest.raises(ValidationError, match="no longer registered"):
+        with pytest.raises(ValidationError, match="not issued by this bridge"):
             bridge.execute(tampered, tool_call, execution_context=read_context)
 
 
@@ -535,3 +535,326 @@ class TestMetadataDrift:
         )
         with pytest.raises(ValidationError, match="output_schema mismatch"):
             bridge.freeze([drifted])
+
+
+# ==============================================================================
+# PAIM-C08 — Same-registry snapshot-copy authority expansion
+# ==============================================================================
+
+
+@dataclass
+class C08Counters:
+    """Handler invocation counters for PAIM-C08 same-registry tests."""
+
+    read_alpha: int = 0
+    read_beta: int = 0
+    write_alpha: int = 0
+
+
+class TestSameRegistryTampering:
+    """A dataclasses.replace() copy of a valid snapshot must not expand
+    authority, even when the added definitions are canonical objects from
+    the same ToolRegistry.
+
+    The snapshot is a capability issued by the bridge.  A copied object
+    must not inherit that authority merely because its fields are valid.
+    """
+
+    def _make_registry_with_write(
+        self,
+    ) -> tuple[ToolRegistry, C08Counters]:
+        """Build a registry with read_alpha (READ) and write_alpha (WRITE)."""
+        counters = C08Counters()
+
+        read_def = ToolDefinition(
+            name="read_alpha",
+            description="A read-only test tool",
+            input_schema=AlphaInput,
+            output_schema=ToolOutput,
+            permission=Permission.READ,
+            side_effects=frozenset(),
+            allowed_session_modes=frozenset(
+                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+            ),
+        )
+        write_def = ToolDefinition(
+            name="write_alpha",
+            description="A write test tool",
+            input_schema=AlphaInput,
+            output_schema=ToolOutput,
+            permission=Permission.WRITE,
+            side_effects=frozenset({SideEffect.ENTITY_MUTATION}),
+            allowed_session_modes=frozenset({SessionMode.ACTIVE_SESSION}),
+        )
+
+        reg = ToolRegistry()
+        reg.register(
+            read_def,
+            lambda inp, ctx: (
+                setattr(counters, "read_alpha", counters.read_alpha + 1)
+                or ToolOutput(result="read")
+            ),
+        )
+        reg.register(
+            write_def,
+            lambda inp, ctx: (
+                setattr(counters, "write_alpha", counters.write_alpha + 1)
+                or ToolOutput(result="write")
+            ),
+        )
+        return reg, counters
+
+    def _read_public(self, reg: ToolRegistry) -> ToolPublicDefinition:
+        """Build a ToolPublicDefinition for read_alpha from the registry."""
+        binding = reg.get("read_alpha")
+        d = binding.definition
+        return ToolPublicDefinition(
+            name=d.name,
+            description=d.description,
+            input_schema=d.input_schema.model_json_schema(),
+            output_schema=d.output_schema.model_json_schema(),
+            permission=d.permission,
+            side_effects=sorted(d.side_effects, key=lambda e: e.value),
+            allowed_session_modes=sorted(d.allowed_session_modes, key=lambda m: m.value),
+        )
+
+    def _write_public(self, reg: ToolRegistry) -> ToolPublicDefinition:
+        """Build a ToolPublicDefinition for write_alpha from the registry."""
+        binding = reg.get("write_alpha")
+        d = binding.definition
+        return ToolPublicDefinition(
+            name=d.name,
+            description=d.description,
+            input_schema=d.input_schema.model_json_schema(),
+            output_schema=d.output_schema.model_json_schema(),
+            permission=d.permission,
+            side_effects=sorted(d.side_effects, key=lambda e: e.value),
+            allowed_session_modes=sorted(d.allowed_session_modes, key=lambda m: m.value),
+        )
+
+    def _read_context(self) -> ExecutionContext:
+        return ExecutionContext(
+            granted_permission=Permission.READ,
+            session_mode=SessionMode.NO_ACTIVE_SESSION,
+        )
+
+    def _write_context(self) -> ExecutionContext:
+        from datetime import UTC, datetime
+
+        from dnd_assistant.storage.audit import AuditContext
+
+        return ExecutionContext(
+            granted_permission=Permission.WRITE,
+            session_mode=SessionMode.ACTIVE_SESSION,
+            audit=AuditContext(
+                operation_id="c08-test",
+                real_time=datetime.now(UTC),
+                source="test",
+            ),
+        )
+
+    # C08-A1 — add canonical hidden WRITE definition
+    def test_c08a1_add_canonical_hidden_write_rejected(
+        self,
+    ) -> None:
+        """READ-only original snapshot + canonical registered WRITE definition
+        via dataclasses.replace must be rejected."""
+        reg, counters = self._make_registry_with_write()
+        bridge = PydanticAIToolBridge(registry=reg)
+
+        # Freeze only READ tool
+        snapshot = bridge.freeze([self._read_public(reg)])
+        assert snapshot.names == ("read_alpha",)
+
+        # Get canonical WRITE definition from the same registry
+        write_binding = reg.get("write_alpha")
+        canonical_write_def = write_binding.definition
+
+        # Tamper: add canonical WRITE definition via dataclasses.replace
+        tampered = dataclasses.replace(
+            snapshot,
+            definitions=snapshot.definitions + (canonical_write_def,),
+        )
+
+        # Must be rejected for execution
+        tool_call = ToolCallPart(tool_name="write_alpha", args='{"value": "x"}')
+        with pytest.raises(ValidationError):
+            bridge.execute(tampered, tool_call, execution_context=self._write_context())
+
+        # Must be rejected for framework exposure
+        with pytest.raises(ValidationError):
+            bridge.to_external_toolset(tampered)
+
+        # Zero handler calls
+        assert counters.read_alpha == 0
+        assert counters.write_alpha == 0
+
+    # C08-A2 — replace exposed canonical definition
+    def test_c08a2_replace_canonical_definition_rejected(
+        self,
+    ) -> None:
+        """Replace read_alpha with read_beta (both canonical in same registry)
+        via dataclasses.replace must be rejected."""
+        reg, counters = self._make_registry_with_write()
+
+        # Add read_beta to the registry
+        read_beta_def = ToolDefinition(
+            name="read_beta",
+            description="Another read test tool",
+            input_schema=AlphaInput,
+            output_schema=ToolOutput,
+            permission=Permission.READ,
+            side_effects=frozenset(),
+            allowed_session_modes=frozenset(
+                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+            ),
+        )
+        reg.register(read_beta_def, lambda inp, ctx: ToolOutput(result="beta"))
+
+        bridge = PydanticAIToolBridge(registry=reg)
+
+        # Freeze only read_alpha
+        snapshot = bridge.freeze([self._read_public(reg)])
+        assert snapshot.names == ("read_alpha",)
+
+        # Get canonical read_beta definition
+        beta_binding = reg.get("read_beta")
+        canonical_beta_def = beta_binding.definition
+
+        # Tamper: replace read_alpha with read_beta
+        tampered = dataclasses.replace(
+            snapshot,
+            definitions=(canonical_beta_def,),
+        )
+
+        # Must be rejected for execution
+        tool_call = ToolCallPart(tool_name="read_beta", args='{"value": "x"}')
+        with pytest.raises(ValidationError):
+            bridge.execute(tampered, tool_call, execution_context=self._read_context())
+
+        # Must be rejected for framework exposure
+        with pytest.raises(ValidationError):
+            bridge.to_external_toolset(tampered)
+
+        # Zero handler calls
+        assert counters.read_alpha == 0
+        assert counters.read_beta == 0
+
+    # C08-A3 — reordered canonical definitions
+    def test_c08a3_reordered_canonical_definitions_rejected(
+        self,
+    ) -> None:
+        """Reordering exposed definitions via dataclasses.replace must be
+        rejected.  The exposure order itself is part of the capability."""
+        reg, counters = self._make_registry_with_write()
+
+        # Add read_beta
+        read_beta_def = ToolDefinition(
+            name="read_beta",
+            description="Another read test tool",
+            input_schema=AlphaInput,
+            output_schema=ToolOutput,
+            permission=Permission.READ,
+            side_effects=frozenset(),
+            allowed_session_modes=frozenset(
+                {SessionMode.NO_ACTIVE_SESSION, SessionMode.ACTIVE_SESSION}
+            ),
+        )
+        reg.register(read_beta_def, lambda inp, ctx: ToolOutput(result="beta"))
+
+        bridge = PydanticAIToolBridge(registry=reg)
+
+        # Freeze: read_alpha, read_beta
+        snapshot = bridge.freeze(
+            [
+                self._read_public(reg),
+                ToolPublicDefinition(
+                    name="read_beta",
+                    description=read_beta_def.description,
+                    input_schema=read_beta_def.input_schema.model_json_schema(),
+                    output_schema=read_beta_def.output_schema.model_json_schema(),
+                    permission=read_beta_def.permission,
+                    side_effects=sorted(read_beta_def.side_effects, key=lambda e: e.value),
+                    allowed_session_modes=sorted(
+                        read_beta_def.allowed_session_modes, key=lambda m: m.value
+                    ),
+                ),
+            ]
+        )
+        assert snapshot.names == ("read_alpha", "read_beta")
+
+        # Get canonical definitions
+        alpha_binding = reg.get("read_alpha")
+        beta_binding = reg.get("read_beta")
+
+        # Tamper: reorder to read_beta, read_alpha
+        tampered = dataclasses.replace(
+            snapshot,
+            definitions=(beta_binding.definition, alpha_binding.definition),
+        )
+
+        # Must be rejected for execution
+        tool_call = ToolCallPart(tool_name="read_beta", args='{"value": "x"}')
+        with pytest.raises(ValidationError):
+            bridge.execute(tampered, tool_call, execution_context=self._read_context())
+
+        # Must be rejected for framework exposure
+        with pytest.raises(ValidationError):
+            bridge.to_external_toolset(tampered)
+
+        # Zero handler calls
+        assert counters.read_alpha == 0
+        assert counters.read_beta == 0
+
+    # Correct-owner-token but non-issued snapshot
+    def test_c08_correct_token_but_not_issued_rejected(
+        self,
+    ) -> None:
+        """A snapshot with the correct owner token but not issued by the
+        bridge must be rejected.  This proves issuance identity is the
+        stronger boundary."""
+        reg, counters = self._make_registry_with_write()
+        bridge = PydanticAIToolBridge(registry=reg)
+
+        # Get a canonical definition
+        binding = reg.get("read_alpha")
+        canonical_def = binding.definition
+
+        # Deliberately forge a snapshot with the bridge's own owner token
+        # (accessing private internals in a negative test to prove the
+        # issuance identity boundary is stronger than token ownership).
+        forged = PydanticAIToolSnapshot._create(
+            definitions=(canonical_def,),
+            owner_token=bridge._snapshot_owner_token,  # type: ignore[arg-type]
+        )
+
+        # Must be rejected for execution
+        tool_call = ToolCallPart(tool_name="read_alpha", args='{"value": "x"}')
+        with pytest.raises(ValidationError):
+            bridge.execute(forged, tool_call, execution_context=self._read_context())
+
+        # Must be rejected for framework exposure
+        with pytest.raises(ValidationError):
+            bridge.to_external_toolset(forged)
+
+        # Zero handler calls
+        assert counters.read_alpha == 0
+        assert counters.write_alpha == 0
+
+    # Snapshot equality must not be value-based
+    def test_c08_snapshot_identity_not_value_equality(
+        self,
+    ) -> None:
+        """Snapshot equality must be identity-based so that a
+        dataclasses.replace copy is not equal to the original and cannot
+        be accepted by issuance tracking."""
+        reg, _ = self._make_registry_with_write()
+        bridge = PydanticAIToolBridge(registry=reg)
+
+        snapshot = bridge.freeze([self._read_public(reg)])
+        copied = dataclasses.replace(snapshot)
+
+        # Identity check
+        assert snapshot is not copied
+        # Equality check — must NOT be value-equal
+        assert snapshot != copied

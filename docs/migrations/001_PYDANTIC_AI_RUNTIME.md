@@ -2146,3 +2146,204 @@ PAIM-05 — Explicit DndAgentPolicy
 ```
 
 Do not begin PAIM-05 automatically.
+
+
+## 26. PAIM-C08 completion record — Prevent same-registry snapshot-copy authority expansion
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `26c7238e0a6c3a9f2ebce0fd8aaf40d08a9e1c33`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Defect description
+
+PAIM-C07 correctly prevented cross-bridge snapshots, random-token forged
+snapshots, unregistered-definition tampering, foreign enum metadata, and
+malformed framework calls. However, an issued snapshot could still be
+expanded with another **canonical definition from the same registry** using
+`dataclasses.replace()`.
+
+The copied snapshot inherited the legitimate bridge `_owner_token`. Both
+definitions were canonical objects from the same registry. Therefore the
+C07 checks — owner token identity, unique names, registry lookup,
+`binding.definition is td` — all passed.
+
+This let an ordinary copied snapshot expand authority beyond its original
+exposure.
+
+### Pre-fix logic
+
+```text
+original exposure:  read_alpha (READ)
+canonical hidden:   write_alpha (WRITE, registered in same ToolRegistry)
+owner token matched: yes (inherited via dataclasses.replace)
+canonical identity matched: yes (write_alpha is a canonical registry object)
+why C07 accepted:   issuance was not tracked — only structural/identity
+                    checks were performed
+```
+
+### Issuance mechanism
+
+The fix treats each snapshot as an **issued capability** by object identity.
+
+**PydanticAIToolSnapshot** changes:
+
+```python
+@dataclass(frozen=True, slots=True, eq=False, weakref_slot=True)
+```
+
+- `eq=False` ensures equality is identity-based. A `dataclasses.replace()`
+  copy is not equal to the original and cannot be accepted by the issuance
+  registry.
+- `weakref_slot=True` enables weak-reference support so the bridge can
+  track snapshots without preventing garbage collection.
+
+**Bridge** changes:
+
+```python
+self._issued_snapshots: weakref.WeakSet[PydanticAIToolSnapshot] = weakref.WeakSet()
+```
+
+During `freeze()`:
+
+```python
+snapshot = PydanticAIToolSnapshot._create(...)
+self._issued_snapshots.add(snapshot)
+return snapshot
+```
+
+During `_validate_snapshot()` — new step 3:
+
+```text
+1. runtime type
+2. owner token identity
+3. exact issued-instance membership (snapshot not in self._issued_snapshots?)
+4. duplicate/name integrity
+5. canonical definition identity
+```
+
+A `WeakSet` is used so completed turn-local snapshots are not retained
+indefinitely.
+
+### Exact-instance semantics
+
+With issuance tracking:
+
+```text
+original snapshot returned by freeze()   → valid
+dataclasses.replace(snapshot)            → new object, NOT issued → invalid
+dataclasses.replace(snapshot, defs=...)  → new object, NOT issued → invalid
+manually constructed snapshot            → NOT issued → invalid
+snapshot from another bridge             → NOT issued by this bridge → invalid
+```
+
+The snapshot is a capability, not a serialisable DTO.
+
+### Same-registry copy evidence
+
+| Scenario | Definition canonical in same registry | Owner token preserved | Result | Handler calls |
+|---|---|---|---|---|
+| Add hidden WRITE | yes | yes | `ValidationError` | 0 read_alpha, 0 write_alpha |
+| Replace READ A with READ B | yes | yes | `ValidationError` | 0 read_alpha, 0 read_beta |
+| Reorder exposed definitions | yes | yes | `ValidationError` | 0 read_alpha, 0 read_beta |
+
+### Forgery evidence
+
+| Scenario | to_external_toolset | execute |
+|---|---|---|
+| Random owner token | `ValidationError` — "different bridge" | `ValidationError` — "different bridge" |
+| Correct stolen owner token but non-issued object | `ValidationError` — "not issued by this bridge" | `ValidationError` — "not issued by this bridge" |
+| Cross-bridge object | `ValidationError` — "different bridge" | `ValidationError` — "different bridge" |
+
+The correct-owner-token test deliberately accesses `bridge._snapshot_owner_token`
+(private internals) in a negative test to prove issuance identity is the
+stronger boundary. Production callers must not do this.
+
+### Preserved C07 protections
+
+All C07 protections remain intact and are independently tested:
+
+- Foreign-StrEnum impostor rejection (C07-E1 through C07-E4)
+- Structural ToolCallPart validation (C07-T1 through C07-T3)
+- Metadata drift rejection (side-effect, output-schema)
+- Cross-bridge snapshot rejection
+- Forged/manual snapshot rejection
+- ToolCallPart argument parsing
+- ToolExecutor remains sole execution boundary
+- No framework handler decorators in bridge source
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py          (modified)
+tests/unit/test_pydantic_ai_tool_bridge_authority.py              (modified)
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No Tool Layer changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Bridge tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | 30 passed |
+| Authority tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | 19 passed |
+| Tool registry | `uv run pytest tests/unit/test_tool_registry.py -v` | 16 passed |
+| Tool catalog | `uv run pytest tests/unit/test_tool_catalog.py -v` | 33 passed |
+| Tool executor | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Agent tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | 44 passed |
+| Agent tool execution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | 29 passed |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 361 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical full suite | `uv run pytest` | 4660 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 335 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Scope confirmation
+
+| Component | Status |
+|---|---|
+| `ToolRegistry` | Unchanged |
+| `ToolExecutor` | Unchanged |
+| Tool Layer has Pydantic AI dependency | **No** |
+| `FastAgent` | Unchanged |
+| `AgentLoop` | Unchanged |
+| `select_agent_tools` | Unchanged |
+| `AgentToolExecutionService` | Unchanged |
+| `HandleDeferredToolCalls` production runtime | Not implemented |
+| PAIM-05 implementation | Not started |
+| `pyproject.toml` | Unchanged |
+| `uv.lock` | Unchanged |
+
+### Effective PAIM-04 decision
+
+```
+ACCEPTED
+```
+
+C07's tampered-copy proof covered an extra unregistered ToolDefinition.
+Independent review found that `dataclasses.replace()` could still add another
+canonical ToolDefinition already registered in the same ToolRegistry.
+Because the copied snapshot retained the bridge owner token and every added
+definition passed canonical identity checks, the copied object could expand
+the original exposure authority.
+
+PAIM-C08 closes this by requiring exact bridge-issued snapshot identity.
+
+Effective C07 evidence remains valid for its other corrections.
+
+### Next task
+
+```text
+PAIM-05 — Explicit DndAgentPolicy
+```
+
+Do not begin PAIM-05 automatically.
