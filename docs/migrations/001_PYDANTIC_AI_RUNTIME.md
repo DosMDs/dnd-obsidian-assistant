@@ -2671,6 +2671,222 @@ PAIM-06 — Context/dependencies integration
 
 Do not begin PAIM-06 automatically.
 
+
+## 29. PAIM-06 completion record — Context/dependencies integration
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `5218dd701f67f550754e8fab728cca192aa619df`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Production API
+
+**Module:** `src/dnd_assistant/application/pydantic_ai_run_deps.py`
+
+| Type | Description |
+|---|---|
+| `DndAgentDeps` | Frozen run-local dependency bundle for one Pydantic AI agent run |
+| `PreparedDndAgentRun` | Result of successful preparation — deps + exposed tool defs |
+| `DndAgentRunPreparer` | Deterministic pre-model preparation orchestration |
+
+**`DndAgentDeps` fields:**
+
+```
+agent_context       AgentContext              (immutable snapshot)
+execution_context   ExecutionContext          (frozen trusted context)
+tool_bridge         PydanticAIToolBridge      (trusted adapter)
+tool_snapshot       PydanticAIToolSnapshot    (issued immutable capability)
+policy              DndAgentPolicy            (intentionally run-local mutable state)
+```
+
+**`PreparedDndAgentRun` fields:**
+
+```
+deps            DndAgentDeps
+exposed_tools   tuple[ToolPublicDefinition, ...]
+```
+
+**`DndAgentRunPreparer` constructor:**
+
+```python
+DndAgentRunPreparer(
+    *,
+    context_builder: AgentContextBuilder,
+    tool_catalog: ToolRegistrySchema,
+    tool_bridge: PydanticAIToolBridge,
+)
+```
+
+**`prepare()` signature:**
+
+```python
+def prepare(
+    self,
+    user_input: str,
+    *,
+    execution_context: ExecutionContext,
+) -> PreparedDndAgentRun:
+```
+
+**Production line count:** 197 lines.
+
+### Preparation flow
+
+Exact ordered steps:
+
+1. **Validate `execution_context` runtime type** — `TypeError` before context reads.
+2. **`AgentContextBuilder.build(user_input)`** — validates input, builds context.
+3. **`select_agent_tools(tool_catalog, context=execution_context)`** — deterministic exposure.
+4. **`PydanticAIToolBridge.freeze(selected)`** — issue immutable snapshot.
+5. **Construct one fresh `DndAgentPolicy`** — bound to this run's snapshot.
+6. **Construct `DndAgentDeps`** — bundle all prepared values.
+7. **Return `PreparedDndAgentRun`** — deps + exposed tool defs.
+
+No tool execution. No model calls. No framework objects.
+
+### Context evidence
+
+| Property | Value |
+|---|---|
+| `context_builder.build` calls per preparation | 1 |
+| Exact `AgentContext` identity preserved | YES |
+| Raw repositories/services in deps | NO |
+| Raw builder in deps | NO |
+| Context post-processing by preparer | NO |
+
+### Exposure evidence
+
+| Scenario | Exposed names | Snapshot names | Handler calls |
+|---|---|---|---|
+| Empty exposure | `()` | `()` | 0 |
+| READ | `read_alpha, read_beta` | `read_alpha, read_beta` | 0 |
+| WRITE + audit | `read_alpha, read_beta, write_alpha` | `read_alpha, read_beta, write_alpha` | 0 |
+| WRITE without audit | `read_alpha, read_beta` | `read_alpha, read_beta` | 0 |
+| Session filtered (NO_ACTIVE_SESSION) | READ-only | READ-only | 0 |
+
+### Run isolation
+
+| Property | Value |
+|---|---|
+| `run_a.deps is run_b.deps` | NO |
+| Snapshot identity distinct | YES |
+| Policy identity distinct | YES |
+| Same names allowed | YES |
+| Policy state leak | NO — run B's first batch admissible after run A consumed its batch |
+
+### Framework deps evidence
+
+| Property | Value |
+|---|---|
+| Pydantic AI public API used | `Agent(deps_type=...)`, `RunContext`, `FunctionModel` |
+| `deps_type` | `DndAgentDeps` |
+| RunContext callback mechanism | `instructions=` callable receiving `RunContext[DndAgentDeps]` |
+| `ctx.deps is prepared.deps` | YES |
+| Model request count | 1 |
+| Project handler count | 0 |
+| Context builder count before framework run | 1 |
+| Context builder count after framework run | 1 (unchanged) |
+| Real network attempted | NO |
+
+### Model-leak evidence
+
+| Property | Value |
+|---|---|
+| Sentinel used | `🛡️PAIM-06-SENTINEL-NOT-IN-MODEL` |
+| Sentinel present in deps | YES (in `agent_context.user_input`) |
+| Sentinel present automatically in model request | NO |
+
+**Result:** NO automatic serialization — `DndAgentDeps` is not implicitly model-facing.
+
+### Immutability
+
+| Type | Frozen | Policy mutable run-state |
+|---|---|---|
+| `DndAgentDeps` | YES | Intentionally preserved |
+| `PreparedDndAgentRun` | YES | N/A |
+
+### Import/boundary confirmation
+
+| Check | Result |
+|---|---|
+| Fresh import does not eagerly load `pydantic_ai` | PASS |
+| Fresh import does not eagerly load `dnd_assistant.models` | PASS |
+| Fresh import does not eagerly load `dnd_assistant.storage` | PASS |
+| Fresh import does not eagerly load `dnd_assistant.retrieval` | PASS |
+| Fresh import does not eagerly load `dnd_assistant.cli` | PASS |
+| `AgentContext` unchanged | CONFIRMED |
+| `select_agent_tools` unchanged | CONFIRMED |
+| `FastAgent` unchanged | CONFIRMED |
+| `AgentLoop` unchanged | CONFIRMED |
+| Tool Layer unchanged | CONFIRMED |
+| Prompts unchanged | CONFIRMED |
+| No production `Agent` | CONFIRMED |
+| No production `RunContext` | CONFIRMED |
+| No PAIM-07 implementation | CONFIRMED |
+
+### Tests
+
+| Test file | Count | Result |
+|---|---|---|
+| `tests/unit/test_pydantic_ai_run_deps.py` | 23 | 23 passed |
+| `tests/integration/test_pydantic_ai_context_deps.py` | 7 | 7 passed |
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused deps unit tests | `uv run pytest tests/unit/test_pydantic_ai_run_deps.py -v` | 23 passed |
+| Framework integration test | `uv run pytest tests/integration/test_pydantic_ai_context_deps.py -v` | 7 passed |
+| AgentContext | `uv run pytest tests/unit/test_agent_context.py -v` | 44 passed |
+| Tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | 44 passed |
+| Policy | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | 51 passed |
+| Bridge + authority | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | 30 passed |
+| Bridge authority | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | 19 passed |
+| FastAgent | `uv run pytest tests/unit/test_fast_agent.py -v` | 36 passed |
+| FastAgent boundaries | `uv run pytest tests/unit/test_fast_agent_boundaries.py -v` | 14 passed |
+| AgentLoop | `uv run pytest tests/unit/test_agent_loop.py -v` | 36 passed |
+| AgentToolExecution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | 29 passed |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 366 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical full suite | `uv run pytest` | 4749 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 340 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_run_deps.py       (new, 197 lines)
+
+tests/unit/test_pydantic_ai_run_deps.py                     (new)
+tests/integration/test_pydantic_ai_context_deps.py           (new)
+
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No Tool Layer changes. No `pyproject.toml` or `uv.lock` changes. No `FastAgent`, `AgentLoop`, `AgentContext`, or `select_agent_tools` changes.
+
+### Effective PAIM-06 decision
+
+```
+ACCEPTED
+```
+
+### Next task
+
+```text
+PAIM-07 — Replace one-step FastAgent mechanics
+```
+
+Do not begin PAIM-07 automatically.
+
 ## 30. PAIM-C10 correction record — seal Pydantic AI run dependency binding
 
 **Status:** DONE
@@ -2820,6 +3036,159 @@ Tool Layer changes.
 ```
 ACCEPTED
 PAIM-C10 — DONE
+```
+
+### Next task
+
+```text
+PAIM-07 — Replace one-step FastAgent mechanics
+```
+
+Do not begin PAIM-07 automatically.
+
+
+## 31. PAIM-C11 correction record — Restore PAIM-06 history and seal prepared-run boundary
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `fbc0941c092e8a998f54436860df8b7f28c5aba3`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C11 closes two defects:
+
+1. **Defect A — PreparedDndAgentRun did not validate `deps` runtime type.**
+   `PreparedDndAgentRun.__post_init__()` validated `exposed_tools` container
+   type, item types, name alignment, and snapshot re-validation, but did not
+   first validate that `deps` is a `DndAgentDeps` instance. Malformed trusted
+   API input such as `PreparedDndAgentRun(deps=object(), ...)` could leak an
+   `AttributeError` from `self.deps.tool_snapshot.names` instead of a project
+   `ValidationError`.
+
+2. **Defect B — PAIM-06 completion record was accidentally deleted.**
+   PAIM-C10 restored the pre-PAIM-06 historical content (PAIM-C09 record)
+   from `5218dd...` but inadvertently removed the PAIM-06 completion record
+   (section 29). The C10 record claimed "PAIM-06 record is retained as
+   historical evidence" but this was false in the committed file.
+
+### Defect A — PreparedDndAgentRun deps runtime validation
+
+**PAIM-C11 behavior:** `PreparedDndAgentRun.__post_init__()` now validates
+`deps` runtime type as its first check, before any other validation:
+
+```python
+if not isinstance(self.deps, DndAgentDeps):
+    raise ValidationError(f"deps must be a DndAgentDeps instance, got {type(self.deps).__name__}")
+```
+
+**Validation order:**
+
+1. `deps` runtime type — must be `DndAgentDeps`
+2. `exposed_tools` container type — must be `tuple`
+3. Every exposed item type — must be `ToolPublicDefinition`
+4. Exposed names == snapshot names (exact order)
+5. Re-validate issued snapshot
+
+### Executable malformed-deps evidence
+
+| Scenario | Result | Exception |
+|---|---|---|
+| C11-R1 `object()` deps | ValidationError | `deps must be a DndAgentDeps instance, got object` |
+| C11-R2 duck-typed fake deps | ValidationError | `deps must be a DndAgentDeps instance, got _FakeDeps` |
+| C11-R3 zero handler calls | 0 handler calls | ValidationError |
+
+All C10 binding protections preserved:
+
+| Scenario | Result |
+|---|---|
+| Policy A + bridge/snapshot B | ValidationError (different tool bridge) |
+| Same bridge + snapshot B + policy A | ValidationError (different snapshot) |
+| Copied snapshot | ValidationError (not issued) |
+| Extra exposure | ValidationError (do not match) |
+| Missing exposure | ValidationError (do not match) |
+| Reordered exposure | ValidationError (do not match) |
+
+### Defect B — Migration history restoration
+
+PAIM-C10 accidentally removed the PAIM-06 completion record while restoring
+the earlier PAIM-C09 historical text.
+
+PAIM-C11 restores the exact PAIM-06 completion record from
+`ad7610e0dca2f706051bb98f5ed783b2622402b2` without rewriting its historical
+claims (including then-inaccurate line count of 197 and `TypeError` taxonomy).
+
+PAIM-C10 remains the superseding correction for taxonomy, line count and
+dependency binding.
+
+### Migration ordering
+
+```
+## 28. PAIM-C09 completion record — exact 5218dd... historical content
+## 29. PAIM-06 completion record — exact ad7610e... historical content (restored)
+## 30. PAIM-C10 correction record — retained
+## 31. PAIM-C11 correction record — new append-only record
+```
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_run_deps.py
+
+tests/unit/test_pydantic_ai_run_deps.py
+
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+Expected unchanged:
+
+```text
+src/dnd_assistant/application/dnd_agent_policy.py
+tests/integration/test_pydantic_ai_context_deps.py
+AgentContext
+select_agent_tools
+FastAgent
+AgentLoop
+Tool Layer
+prompts
+pyproject.toml
+uv.lock
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused deps unit tests | `uv run pytest tests/unit/test_pydantic_ai_run_deps.py -v` | 36 passed |
+| Agent policy | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | (reported in Final Report) |
+| Context deps integration | `uv run pytest tests/integration/test_pydantic_ai_context_deps.py -v` | (reported in Final Report) |
+| Agent context | `uv run pytest tests/unit/test_agent_context.py -v` | (reported in Final Report) |
+| Agent tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | (reported in Final Report) |
+| Tool bridge | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | (reported in Final Report) |
+| Bridge authority | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | (reported in Final Report) |
+| FastAgent | `uv run pytest tests/unit/test_fast_agent.py -v` | (reported in Final Report) |
+| FastAgent boundaries | `uv run pytest tests/unit/test_fast_agent_boundaries.py -v` | (reported in Final Report) |
+| AgentLoop | `uv run pytest tests/unit/test_agent_loop.py -v` | (reported in Final Report) |
+| AgentToolExecution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | (reported in Final Report) |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | (reported in Final Report) |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | (reported in Final Report) |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | (reported in Final Report) |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | (reported in Final Report) |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | (reported in Final Report) |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | (reported in Final Report) |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | (reported in Final Report) |
+| Canonical full suite | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Effective PAIM-06 decision
+
+```
+ACCEPTED
+PAIM-C11 — DONE
 ```
 
 ### Next task

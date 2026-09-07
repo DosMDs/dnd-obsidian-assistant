@@ -165,19 +165,31 @@ class PreparedDndAgentRun:
     exposed_tools: tuple[ToolPublicDefinition, ...]
 
     def __post_init__(self) -> None:
-        """Validate that exposed tool names match the authoritative snapshot.
+        """Validate that deps is a DndAgentDeps and exposed tool names match.
+
+        Validation order:
+
+        1. ``deps`` runtime type — must be ``DndAgentDeps``.
+        2. ``exposed_tools`` container type — must be ``tuple``.
+        3. Every exposed item type — must be ``ToolPublicDefinition``.
+        4. Exposed names == snapshot names (exact order).
+        5. Re-validate issued snapshot.
 
         Raises:
-            ValidationError: If ``exposed_tools`` is not a tuple, contains
-                non-``ToolPublicDefinition`` items, or the name sequence
-                does not match the snapshot names exactly (same order).
+            ValidationError: If any validation fails.
         """
         from dnd_assistant.errors import ValidationError as VE
         from dnd_assistant.tools.catalog import ToolPublicDefinition as TPD
 
+        # 1. deps runtime type
+        if not isinstance(self.deps, DndAgentDeps):
+            raise VE(f"deps must be a DndAgentDeps instance, got {type(self.deps).__name__}")
+
+        # 2. exposed_tools container type
         if not isinstance(self.exposed_tools, tuple):
             raise VE("exposed_tools must be a tuple")
 
+        # 3. Every exposed item type
         for i, item in enumerate(self.exposed_tools):
             if not isinstance(item, TPD):
                 raise VE(
@@ -185,6 +197,7 @@ class PreparedDndAgentRun:
                     f"got {type(item).__name__}"
                 )
 
+        # 4. Exposed names == snapshot names (exact order)
         exposed_names = tuple(t.name for t in self.exposed_tools)
         snapshot_names = self.deps.tool_snapshot.names
         if exposed_names != snapshot_names:
@@ -192,7 +205,7 @@ class PreparedDndAgentRun:
                 f"Exposed tool names {exposed_names} do not match snapshot names {snapshot_names}"
             )
 
-        # Re-validate deps binding (structural validation + bridge + policy)
+        # 5. Re-validate deps binding (structural validation + bridge + policy)
         self.deps.tool_bridge.validate_snapshot(self.deps.tool_snapshot)
 
 

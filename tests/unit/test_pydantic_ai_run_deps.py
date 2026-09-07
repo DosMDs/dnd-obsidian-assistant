@@ -792,3 +792,53 @@ class TestPreparedRunExposure:
         assert counters.alpha == 0
         assert counters.beta == 0
         assert counters.write_alpha == 0
+
+
+# ==============================================================================
+# PAIM-C11 — PreparedDndAgentRun deps runtime type validation
+# ==============================================================================
+#
+# | Scenario                         | Result          |
+# | -------------------------------- | --------------- |
+# | C11-R1 object() deps             | ValidationError |
+# | C11-R2 duck-typed fake deps      | ValidationError |
+
+
+class TestPreparedRunDepsValidation:
+    """PAIM-C11: PreparedDndAgentRun deps runtime type validation."""
+
+    def test_c11_r1_object_deps(self) -> None:
+        """object() deps raises ValidationError, not AttributeError."""
+        with pytest.raises(ValidationError, match="deps must be a DndAgentDeps"):
+            PreparedDndAgentRun(
+                deps=object(),  # type: ignore[arg-type]
+                exposed_tools=(),
+            )
+
+    def test_c11_r2_duck_typed_fake_deps(self) -> None:
+        """Duck-typed fake with tool_snapshot/tool_bridge raises ValidationError."""
+
+        class _FakeDeps:
+            tool_snapshot = None
+            tool_bridge = None
+
+        with pytest.raises(ValidationError, match="deps must be a DndAgentDeps"):
+            PreparedDndAgentRun(
+                deps=_FakeDeps(),  # type: ignore[arg-type]
+                exposed_tools=(),
+            )
+
+    def test_c11_r3_zero_handler_calls(
+        self,
+        counters: HandlerCounters,
+    ) -> None:
+        """Malformed deps causes zero handler calls."""
+        with pytest.raises(ValidationError):
+            PreparedDndAgentRun(
+                deps=object(),  # type: ignore[arg-type]
+                exposed_tools=(),
+            )
+
+        assert counters.alpha == 0
+        assert counters.beta == 0
+        assert counters.write_alpha == 0
