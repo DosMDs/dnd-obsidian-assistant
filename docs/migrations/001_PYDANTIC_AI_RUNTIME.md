@@ -2347,3 +2347,167 @@ PAIM-05 — Explicit DndAgentPolicy
 ```
 
 Do not begin PAIM-05 automatically.
+
+
+## 27. PAIM-05 completion record — Explicit DndAgentPolicy
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `f71a5ebadf1b22db0fa624c4f193b0b62ab893ef`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Policy API
+
+| Field | Value |
+|---|---|
+| Module | `src/dnd_assistant/application/dnd_agent_policy.py` |
+| Public classes | `DndAgentPolicy`, `DndAgentBatchAdmission`, `AdmittedToolCall` |
+| Public constants | `MAX_TOOL_CALLS_PER_RUN=4`, `MAX_MODEL_REQUESTS_PER_RUN=2`, `MAX_DEFERRED_TOOL_BATCHES_PER_RUN=1` |
+| Run-local mutable state | `_batch_observed: bool` — whether a deferred batch has been observed |
+| Constructor | `DndAgentPolicy(*, tool_bridge, snapshot)` — validates snapshot at construction |
+| Admission method | `admit_tool_batch(tool_calls: Sequence[ToolCallPart]) -> DndAgentBatchAdmission` |
+
+### Snapshot authority
+
+| Scenario | Result |
+|---|---|
+| Cross-bridge snapshot | `ValidationError` — "different bridge" |
+| Copied snapshot (`dataclasses.replace`) | `ValidationError` — "not issued" |
+| Stolen owner token but non-issued snapshot | `ValidationError` — "not issued" |
+| Live-registry hidden tool | `ModelError` — "not in the frozen exposure" |
+
+### Admission matrix
+
+| Scenario | Result | Admitted count | Handler calls |
+|---|---|---|---|
+| POL-01 single READ | admitted | 1 | 0 |
+| POL-02 single WRITE | admitted | 1 | 0 |
+| POL-03 2 READ | admitted | 2 | 0 |
+| POL-04 4 READ | admitted | 4 | 0 |
+| POL-05 5 READ | `ModelError` | 0 | 0 |
+| POL-06 READ+WRITE | `ModelError` | 0 | 0 |
+| POL-07 WRITE+WRITE | `ModelError` | 0 | 0 |
+| POL-08 duplicate ID | `ModelError` | 0 | 0 |
+| POL-09 distinct IDs | admitted | 2 | 0 |
+| POL-10 repeated same READ name | admitted | 2 | 0 |
+| POL-11 hidden tool | `ModelError` | 0 | 0 |
+| POL-12 unknown tool | `ModelError` | 0 | 0 |
+
+### Second-batch evidence
+
+| Scenario | Result |
+|---|---|
+| First valid → second valid | `ModelError` — "already been observed" |
+| First rejected → second valid | `ModelError` — "already been observed" |
+| New policy instance | fresh state — second batch admitted |
+| Empty batch → subsequent first real batch | empty: `ValidationError`; real: admitted |
+
+### Separation of responsibilities
+
+| Property | Evidence |
+|---|---|
+| Policy parses args | **No** — malformed args `"{broken"` admitted by policy |
+| Policy executes handlers | **No** — all handler counters are 0 across all 45 tests |
+| Policy calls ToolExecutor | **No** — no ToolExecutor import in policy module |
+| Single WRITE admitted by policy | **Yes** |
+| Same WRITE rejected by ToolExecutor under READ context | `ConflictError` — "Permission denied" |
+
+### Admission immutability
+
+| Property | Assertion |
+|---|---|
+| `DndAgentBatchAdmission` frozen | `AttributeError` on `.calls.append()` |
+| `calls` is tuple | `isinstance(admission.calls, tuple)` |
+| `AdmittedToolCall` frozen | `AttributeError` on `.tool_name = ...` |
+| Canonical definition identity | `admission.calls[0].definition is snapshot.definitions[0]` |
+| Order preservation | batch order `[read_beta, read_alpha]` → positions 0, 1 |
+
+### Scope confirmation
+
+| Component | Status |
+|---|---|
+| Tool Layer (`src/dnd_assistant/tools/`) | Unchanged |
+| `FastAgent` | Unchanged |
+| `AgentLoop` | Unchanged |
+| `AgentToolSelection` | Unchanged |
+| `AgentToolExecutionService` | Unchanged |
+| No `Agent` production runtime | Confirmed |
+| No `HandleDeferredToolCalls` production runtime | Confirmed |
+| No PAIM-06 implementation | Confirmed |
+| `pyproject.toml` | Unchanged |
+| `uv.lock` | Unchanged |
+
+### Bridge extension
+
+`PydanticAIToolBridge` gained one public method:
+
+```python
+def validate_snapshot(self, snapshot: PydanticAIToolSnapshot) -> None:
+    self._validate_snapshot(snapshot)
+```
+
+The existing C07/C08 `_validate_snapshot` logic (owner token, issued-instance membership, duplicate names, canonical definition identity) is unchanged.
+
+### C08 evidence caveat
+
+The independent-review C08 caveat about `read_beta` handler counters in A2/A3 tests is acknowledged. PAIM-05 does not modify `tests/unit/test_pydantic_ai_tool_bridge_authority.py`. The caveat does not affect PAIM-05 acceptance because the policy's own handler-count evidence uses dedicated `HandlerCounters` instances with exact assertions.
+
+### Tests
+
+| File | Lines | Tests |
+|---|---|---|
+| `tests/unit/test_dnd_agent_policy.py` | ~895 | 45 |
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| New policy tests | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | 45 passed |
+| Bridge tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | 30 passed |
+| Authority tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | 19 passed |
+| Agent loop | `uv run pytest tests/unit/test_agent_loop.py -v` | 36 passed |
+| Agent tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | 44 passed |
+| Agent tool execution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | 29 passed |
+| Tool registry | `uv run pytest tests/unit/test_tool_registry.py -v` | 16 passed |
+| Tool catalog | `uv run pytest tests/unit/test_tool_catalog.py -v` | 33 passed |
+| Tool executor | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 361 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical full suite | `uv run pytest` | 4708 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 337 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Changed files
+
+```text
+src/dnd_assistant/application/dnd_agent_policy.py          (new)
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py   (modified)
+
+tests/unit/test_dnd_agent_policy.py                        (new)
+
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No Tool Layer changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Effective PAIM-05 decision
+
+```
+ACCEPTED
+```
+
+### Next task
+
+```text
+PAIM-06 — Context/dependencies integration
+```
+
+Do not begin PAIM-06 automatically.

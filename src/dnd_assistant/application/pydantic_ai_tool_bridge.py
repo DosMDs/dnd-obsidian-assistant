@@ -341,6 +341,27 @@ class PydanticAIToolBridge:
         # 7. Return typed output unchanged
         return output
 
+    # ── Public snapshot validation ──────────────────────────────────────────
+
+    def validate_snapshot(
+        self,
+        snapshot: PydanticAIToolSnapshot,
+    ) -> None:
+        """Public entrypoint for snapshot validation.
+
+        Delegates to the internal ``_validate_snapshot``.  This is the
+        intended public API for ``DndAgentPolicy`` to verify snapshot
+        provenance without accessing private internals.
+
+        Args:
+            snapshot: A ``PydanticAIToolSnapshot`` to validate.
+
+        Raises:
+            ValidationError: If the snapshot is not valid or not owned by
+                this bridge.
+        """
+        self._validate_snapshot(snapshot)
+
     # ── Snapshot validation ─────────────────────────────────────────────────
 
     def _validate_snapshot(self, snapshot: PydanticAIToolSnapshot) -> None:
