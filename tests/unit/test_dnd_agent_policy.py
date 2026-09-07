@@ -517,17 +517,20 @@ class TestPol11HiddenTool:
             ),
         )
 
+        hidden_calls = 0
+
         def hidden_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
+            nonlocal hidden_calls
+            hidden_calls += 1
             return ToolOutput(result="hidden")
 
         registry.register(hidden_canonical, hidden_handler)
 
-        counters2 = HandlerCounters()
         pol = DndAgentPolicy(tool_bridge=bridge, snapshot=snap)
         calls = [_make_tool_call("hidden_tool")]
         with pytest.raises(ModelError):
             pol.admit_tool_batch(calls)
-        assert counters2.alpha == 0
+        assert hidden_calls == 0
 
 
 # ==============================================================================
@@ -699,6 +702,103 @@ class TestPol20EmptyBatch:
             policy.admit_tool_batch([])
         admission = policy.admit_tool_batch([_make_tool_call("read_alpha")])
         assert len(admission.calls) == 1
+
+
+# ==============================================================================
+# PAIM-C09 — Runtime Sequence validation + immutable tuple snapshot
+# ==============================================================================
+#
+# | Scenario                              | Result         | State consumed |
+# | ------------------------------------- | -------------- | -------------- |
+# | C09-S1 arbitrary object               | ValidationError| NO             |
+# | C09-S2 generator                      | ValidationError| NO             |
+# | C09-S3 non-ToolCallPart entry         | ValidationError| NO             |
+# | C09-S4 mutable list captured once     | admitted       | YES            |
+
+
+class TestPaimC09SequenceBoundary:
+    """PAIM-C09: Runtime Sequence validation and immutable tuple snapshot."""
+
+    def test_c09_s1_arbitrary_object(self, policy: DndAgentPolicy) -> None:
+        """Arbitrary object() raises ValidationError, does not consume state."""
+        with pytest.raises(ValidationError) as excinfo:
+            policy.admit_tool_batch(object())  # type: ignore[arg-type]
+        assert "Sequence" in str(excinfo.value)
+
+        # Subsequent valid batch is still admitted.
+        admission = policy.admit_tool_batch([_make_tool_call("read_alpha")])
+        assert len(admission.calls) == 1
+        assert admission.calls[0].tool_name == "read_alpha"
+
+    def test_c09_s2_generator(self, policy: DndAgentPolicy) -> None:
+        """Generator expression raises ValidationError, does not consume state."""
+        gen = (tc for tc in [_make_tool_call("read_alpha")])
+        with pytest.raises(ValidationError) as excinfo:
+            policy.admit_tool_batch(gen)  # type: ignore[arg-type]
+        assert "Sequence" in str(excinfo.value)
+
+        # Subsequent valid batch is still admitted.
+        admission = policy.admit_tool_batch([_make_tool_call("read_alpha")])
+        assert len(admission.calls) == 1
+
+    def test_c09_s3_non_tool_call_part(self, policy: DndAgentPolicy) -> None:
+        """Non-ToolCallPart entry raises ValidationError, does not consume state."""
+        calls: list[object] = ["not_a_tool_call_part"]
+        with pytest.raises(ValidationError) as excinfo:
+            policy.admit_tool_batch(calls)  # type: ignore[arg-type]
+        assert "ToolCallPart" in str(excinfo.value)
+
+        # Subsequent valid batch is still admitted.
+        admission = policy.admit_tool_batch([_make_tool_call("read_alpha")])
+        assert len(admission.calls) == 1
+
+    def test_c09_s4_mutable_list_captured_once(self, policy: DndAgentPolicy) -> None:
+        """Mutable list is captured as an immutable tuple; caller mutation after
+        the call returns does not affect the admission result."""
+        original = [_make_tool_call("read_alpha"), _make_tool_call("read_beta")]
+        admission = policy.admit_tool_batch(original)
+
+        # Mutate the original list after the call.
+        original.clear()
+
+        # Admission result is independent of caller mutation.
+        assert len(admission.calls) == 2
+        assert admission.calls[0].tool_name == "read_alpha"
+        assert admission.calls[1].tool_name == "read_beta"
+
+    def test_c09_s5_five_calls_still_consumes_opportunity(
+        self, read_only_policy: DndAgentPolicy
+    ) -> None:
+        """Structurally valid but policy-rejected batch (5 calls) still
+        consumes the batch opportunity."""
+        five = [
+            _make_tool_call("read_alpha"),
+            _make_tool_call("read_beta"),
+            _make_tool_call("read_alpha"),
+            _make_tool_call("read_beta"),
+            _make_tool_call("read_alpha"),
+        ]
+        with pytest.raises(ModelError):
+            read_only_policy.admit_tool_batch(five)
+
+        # Second real batch is rejected (opportunity consumed).
+        second = [_make_tool_call("read_alpha")]
+        with pytest.raises(ModelError) as excinfo:
+            read_only_policy.admit_tool_batch(second)
+        assert "already been observed" in str(excinfo.value)
+
+    def test_c09_s6_read_write_still_consumes_opportunity(self, policy: DndAgentPolicy) -> None:
+        """Structurally valid but policy-rejected batch (READ+WRITE) still
+        consumes the batch opportunity."""
+        mixed = [_make_tool_call("read_alpha"), _make_tool_call("write_alpha")]
+        with pytest.raises(ModelError):
+            policy.admit_tool_batch(mixed)
+
+        # Second real batch is rejected (opportunity consumed).
+        second = [_make_tool_call("read_alpha")]
+        with pytest.raises(ModelError) as excinfo:
+            policy.admit_tool_batch(second)
+        assert "already been observed" in str(excinfo.value)
 
 
 # ==============================================================================

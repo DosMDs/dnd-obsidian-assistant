@@ -29,6 +29,7 @@ The policy performs **zero** tool execution, **zero** argument parsing, and
 
 from __future__ import annotations
 
+import collections.abc
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -161,10 +162,23 @@ class DndAgentPolicy:
         # 1. Re-validate snapshot before every admission.
         self._tool_bridge.validate_snapshot(self._snapshot)
 
-        # 2. Structural validation: non-empty Sequence of ToolCallPart
-        self._validate_batch_structure(tool_calls)
+        # 2. Runtime Sequence check (PAIM-C09).
+        #    Must be a real collections.abc.Sequence, not a generator,
+        #    iterator, object() or other non-Sequence.
+        if not isinstance(tool_calls, collections.abc.Sequence):
+            raise ValidationError(
+                f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
+            )
 
-        # 3. Second-batch rejection (before content admission — a rejected
+        # 3. Freeze the complete batch into one immutable tuple (PAIM-C09).
+        #    All subsequent preflight passes use this exact tuple, never
+        #    re-reading the caller-owned mutable sequence.
+        calls: tuple[ToolCallPart, ...] = tuple(tool_calls)
+
+        # 4. Structural validation: non-empty tuple of ToolCallPart
+        self._validate_batch_structure(calls)
+
+        # 5. Second-batch rejection (before content admission — a rejected
         #    first batch still consumes the one batch opportunity).
         if self._batch_observed:
             raise ModelError(
@@ -176,23 +190,23 @@ class DndAgentPolicy:
         # A rejected first batch still consumes the one batch opportunity.
         self._batch_observed = True
 
-        # 4. Size check
-        if len(tool_calls) > MAX_TOOL_CALLS_PER_RUN:
+        # 6. Size check
+        if len(calls) > MAX_TOOL_CALLS_PER_RUN:
             raise ModelError(
-                f"Maximum {MAX_TOOL_CALLS_PER_RUN} tool calls per batch, got {len(tool_calls)}"
+                f"Maximum {MAX_TOOL_CALLS_PER_RUN} tool calls per batch, got {len(calls)}"
             )
 
-        # 5. Duplicate non-null call_id check
-        self._reject_duplicate_call_ids(tool_calls)
+        # 7. Duplicate non-null call_id check
+        self._reject_duplicate_call_ids(calls)
 
-        # 6. Resolve each call against the frozen snapshot.
-        resolved = self._resolve_calls(tool_calls)
+        # 8. Resolve each call against the frozen snapshot.
+        resolved = self._resolve_calls(calls)
 
-        # 7. Multi-call WRITE rejection
+        # 9. Multi-call WRITE rejection
         if len(resolved) > 1:
             self._reject_multi_call_write(resolved)
 
-        # 8. Build immutable admission result preserving exact model order.
+        # 10. Build immutable admission result preserving exact model order.
         admitted = tuple(
             AdmittedToolCall(
                 position=i,
@@ -208,8 +222,11 @@ class DndAgentPolicy:
     # ── Internal validation helpers ─────────────────────────────────────────
 
     @staticmethod
-    def _validate_batch_structure(tool_calls: Sequence[ToolCallPart]) -> None:
+    def _validate_batch_structure(calls: tuple[ToolCallPart, ...]) -> None:
         """Validate the structural shape of the tool-call batch.
+
+        Args:
+            calls: The frozen tuple snapshot of the batch (PAIM-C09).
 
         Raises:
             ValidationError: If the batch is empty or contains non-
@@ -217,28 +234,31 @@ class DndAgentPolicy:
         """
         from pydantic_ai.messages import ToolCallPart as TCP
 
-        if not tool_calls:
+        if not calls:
             raise ValidationError("Tool-call batch must not be empty")
 
-        for i, item in enumerate(tool_calls):
+        for i, item in enumerate(calls):
             if not isinstance(item, TCP):
                 raise ValidationError(
                     f"Batch entry {i} must be a ToolCallPart instance, got {type(item).__name__}"
                 )
 
     @staticmethod
-    def _reject_duplicate_call_ids(tool_calls: Sequence[ToolCallPart]) -> None:
+    def _reject_duplicate_call_ids(calls: tuple[ToolCallPart, ...]) -> None:
         """Reject duplicate non-null ``tool_call_id`` values.
 
         Multiple ``None`` IDs are permitted.  Duplicate non-null IDs are
         ambiguous and fail closed.
+
+        Args:
+            calls: The frozen tuple snapshot of the batch (PAIM-C09).
 
         Raises:
             ModelError: If any non-null ``tool_call_id`` appears more than
                 once in the batch.
         """
         seen: set[str] = set()
-        for tc in tool_calls:
+        for tc in calls:
             cid = tc.tool_call_id
             if cid is not None:
                 if cid in seen:
@@ -249,9 +269,12 @@ class DndAgentPolicy:
 
     def _resolve_calls(
         self,
-        tool_calls: Sequence[ToolCallPart],
+        calls: tuple[ToolCallPart, ...],
     ) -> list[tuple[ToolCallPart, ToolDefinition]]:
         """Resolve each call against the frozen snapshot.
+
+        Args:
+            calls: The frozen tuple snapshot of the batch (PAIM-C09).
 
         Returns:
             List of ``(ToolCallPart, ToolDefinition)`` tuples in batch order.
@@ -260,7 +283,7 @@ class DndAgentPolicy:
             ModelError: If any tool name is not in the frozen snapshot.
         """
         resolved: list[tuple[ToolCallPart, ToolDefinition]] = []
-        for tc in tool_calls:
+        for tc in calls:
             definition = self._def_map.get(tc.tool_name)
             if definition is None:
                 raise ModelError(

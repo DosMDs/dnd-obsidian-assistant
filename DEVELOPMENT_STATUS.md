@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-07 (PAIM-05)
+**Last updated:** 2026-09-07 (PAIM-C09)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -110,6 +110,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C07 — Harden PAIM-04 bridge authority | DONE |
 | PAIM-C08 — Prevent same-registry snapshot-copy authority expansion | DONE |
 | PAIM-05 — Explicit DndAgentPolicy | DONE |
+| PAIM-C09 — Seal DndAgentPolicy batch input boundary | DONE |
 | PAIM-06 — Context/dependencies integration | NOT STARTED |
 | PAIM-07 — Replace one-step FastAgent mechanics | NOT STARTED |
 | PAIM-08 — Replace bounded AgentLoop mechanics | NOT STARTED |

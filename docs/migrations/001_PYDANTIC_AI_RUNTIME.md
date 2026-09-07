@@ -2511,3 +2511,162 @@ PAIM-06 — Context/dependencies integration
 ```
 
 Do not begin PAIM-06 automatically.
+
+
+## 28. PAIM-C09 completion record — Seal DndAgentPolicy batch input boundary
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `b0447f29e321136ef8c7a403bb91c08f0c4148fe`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Defect description
+
+The `DndAgentPolicy.admit_tool_batch()` method was type-annotated as
+`Sequence[ToolCallPart]` but did not enforce this at runtime. Non-Sequence
+inputs such as `object()`, generators, or iterators could leak a Python
+`TypeError` from `len()` or `not tool_calls` rather than a project-level
+`ValidationError`. The policy also re-read the caller-owned mutable
+`Sequence` across several preflight passes, meaning a concurrent or
+malicious caller could mutate the batch between admission phases.
+
+### Correction
+
+**Runtime Sequence check** — Before any structural or content validation,
+the input is checked against `collections.abc.Sequence`:
+
+```python
+if not isinstance(tool_calls, collections.abc.Sequence):
+    raise ValidationError(
+        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
+    )
+```
+
+**Immutable tuple capture** — After the runtime check, the batch is
+immediately frozen into a `tuple`:
+
+```python
+calls: tuple[ToolCallPart, ...] = tuple(tool_calls)
+```
+
+All subsequent preflight passes (`_validate_batch_structure`,
+`_reject_duplicate_call_ids`, `_resolve_calls`, size check, WRITE policy)
+use only this tuple. The caller-owned mutable sequence is never re-read.
+
+### Structural boundary evidence
+
+| Input | Exception type | State consumed | Subsequent valid batch admitted |
+|---|---|---|---|
+| `object()` | `ValidationError` — "Sequence" | NO | YES |
+| Generator expression | `ValidationError` — "Sequence" | NO | YES |
+| `["not_a_tool_call_part"]` | `ValidationError` — "ToolCallPart" | NO | YES |
+| Normal list | Admitted | YES | N/A (second batch rejected) |
+
+### State-consumption semantics preserved
+
+| Scenario | First batch result | Second batch result |
+|---|---|---|
+| Empty `[]` | `ValidationError` — "must not be empty" | Admitted (state not consumed) |
+| `object()` | `ValidationError` — "Sequence" | Admitted (state not consumed) |
+| Generator | `ValidationError` — "Sequence" | Admitted (state not consumed) |
+| Non-ToolCallPart string list | `ValidationError` — "ToolCallPart" | Admitted (state not consumed) |
+| 5 calls | `ModelError` — "Maximum 4" | `ModelError` — "already been observed" |
+| READ+WRITE | `ModelError` — "WRITE" | `ModelError` — "already been observed" |
+
+### Mutable-list capture evidence
+
+A normal list `[read_alpha, read_beta]` is admitted. After `admit_tool_batch()`
+returns, the original list is cleared. The admission result is independent of
+caller mutation:
+
+```python
+assert len(admission.calls) == 2
+assert admission.calls[0].tool_name == "read_alpha"
+assert admission.calls[1].tool_name == "read_beta"
+```
+
+### POL-11 counter evidence correction
+
+The hidden-tool zero-handler test previously created a disconnected
+`counters2 = HandlerCounters()` that was not wired to the hidden handler.
+This was replaced with a real invocation counter:
+
+```python
+hidden_calls = 0
+
+def hidden_handler(inp, ctx):
+    nonlocal hidden_calls
+    hidden_calls += 1
+    return ToolOutput(result="hidden")
+
+registry.register(hidden_canonical, hidden_handler)
+# ... policy rejects hidden_tool ...
+assert hidden_calls == 0
+```
+
+### Scope confirmation
+
+| Component | Status |
+|---|---|
+| `src/dnd_assistant/application/dnd_agent_policy.py` | Modified (321 lines, +23) |
+| Tool Layer | Unchanged |
+| `FastAgent` | Unchanged |
+| `AgentLoop` | Unchanged |
+| `AgentToolSelection` | Unchanged |
+| `AgentToolExecutionService` | Unchanged |
+| `PydanticAIToolBridge` | Unchanged |
+| No `HandleDeferredToolCalls` production runtime | Confirmed |
+| No PAIM-06 implementation | Confirmed |
+| `pyproject.toml` | Unchanged |
+| `uv.lock` | Unchanged |
+
+### Changed files
+
+```text
+src/dnd_assistant/application/dnd_agent_policy.py          (modified)
+
+tests/unit/test_dnd_agent_policy.py                        (modified)
+
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No Tool Layer changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused policy tests | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | 51 passed |
+| Bridge tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | 30 passed |
+| Bridge authority | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | 19 passed |
+| Agent loop | `uv run pytest tests/unit/test_agent_loop.py -v` | 36 passed |
+| Agent tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | 44 passed |
+| Agent tool execution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | 29 passed |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 366 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical full suite | `uv run pytest` | 4714 passed, 95 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 337 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Effective PAIM-05 decision
+
+```
+ACCEPTED
+PAIM-C09 — DONE
+```
+
+### Next task
+
+```text
+PAIM-06 — Context/dependencies integration
+```
+
+Do not begin PAIM-06 automatically.
