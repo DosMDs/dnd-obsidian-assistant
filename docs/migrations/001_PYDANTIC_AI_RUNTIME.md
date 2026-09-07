@@ -1704,3 +1704,123 @@ PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
 ```
 
 Do not begin PAIM-04 automatically.
+
+## 23. PAIM-C06 correction record — Close Q8 HTTP client lifecycle evidence
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `f0c118cdc5062764676d833601ee1b84b95bbf11`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C05 incorrectly claimed that the injected `httpx2.AsyncClient` was
+explicitly closed in the `test_q8_connection_failure` finally block. The
+actual `finally` body checked for a running event loop and then executed
+`pass` — no close operation was performed.
+
+PAIM-C06 adds executable explicit closure and asserts the underlying client
+is closed.
+
+### Corrected lifecycle behavior
+
+The `finally` block now uses the supported public async API:
+
+```python
+openai_client: AsyncOpenAI | None = None
+try:
+    openai_client = AsyncOpenAI(http_client=mock_client, ...)
+    ...
+finally:
+    if openai_client is not None:
+        asyncio.run(openai_client.close())
+    else:
+        asyncio.run(mock_client.aclose())
+```
+
+`AsyncOpenAI.close()` is an async method that closes the underlying HTTP
+client. `asyncio.run()` is used because the synchronous pytest test returns
+to a context with no running asyncio loop.
+
+### Executable close assertion
+
+After cleanup, the test proves the client is actually closed:
+
+```python
+assert openai_client.is_closed(), "AsyncOpenAI client was not closed"
+assert mock_client.is_closed, "underlying httpx2 AsyncClient was not closed"
+```
+
+Both assertions use the public `is_closed` API:
+- `AsyncOpenAI.is_closed()` — method returning `True` after close
+- `httpx2.AsyncClient.is_closed` — property returning `True` after close
+
+### Exact path evidence
+
+The captured request path assertion was changed from a substring check to an
+exact path match:
+
+```python
+# Before:
+assert "/chat/completions" in str(first.url)
+
+# After:
+assert first.url.path == "/v1/chat/completions"
+```
+
+The actual captured path is `/v1/chat/completions` (the base URL
+`https://pydantic-ai-test.invalid/v1` combined with the OpenAI SDK's
+default `/chat/completions` suffix).
+
+### Lifecycle evidence summary
+
+| Evidence | Value |
+|---|---|
+| ModelAPIError type | `pydantic_ai.exceptions.ModelAPIError` |
+| Captured requests | 1 |
+| Method | POST |
+| Host | `pydantic-ai-test.invalid` |
+| Path | `/v1/chat/completions` |
+| Real network | NO (mocked transport) |
+| AsyncOpenAI close called | YES (`asyncio.run(openai_client.close())`) |
+| AsyncOpenAI is_closed | True |
+| Underlying httpx2 AsyncClient is_closed | True |
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_qualification.py
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused Q8 test | `uv run pytest tests/integration/test_pydantic_ai_qualification.py::test_q8_connection_failure -v` | 1 passed |
+| Full qualification suite | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Blocker gate tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| Blocker execution tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| Blocker limits tests | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| Tool executor tests | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Full pytest | `uv run pytest` | 4606 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 332 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Architecture confirmation
+
+- No `src/` changes
+- No dependency changes
+- PAIM-03 harness unchanged
+- PAIM-04 not started
+
+### Next task
+
+```text
+PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
+```
+
+Do not begin PAIM-04 automatically.

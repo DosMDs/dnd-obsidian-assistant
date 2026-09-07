@@ -355,6 +355,7 @@ def test_q8_connection_failure() -> None:
 
     transport = _AlwaysFailTransport()
     mock_client = httpx2.AsyncClient(transport=transport)
+    openai_client: AsyncOpenAI | None = None
     try:
         openai_client = AsyncOpenAI(
             http_client=mock_client,
@@ -368,16 +369,17 @@ def test_q8_connection_failure() -> None:
         with pytest.raises(pydantic_ai.exceptions.ModelAPIError):
             agent.run_sync("hello")
     finally:
-        # Explicitly close the injected client through supported public API
-        import asyncio
-
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            pass
+        # Explicitly close the injected client through supported public async API
+        if openai_client is not None:
+            asyncio.run(openai_client.close())
         else:
-            # Only close if an event loop is running
-            pass
+            # mock_client was created but openai_client was never assigned
+            asyncio.run(mock_client.aclose())
+
+    # --- Client-closed evidence ---
+    assert openai_client is not None, "openai_client was not assigned"
+    assert openai_client.is_closed(), "AsyncOpenAI client was not closed"
+    assert mock_client.is_closed, "underlying httpx2 AsyncClient was not closed"
 
     # --- Request capture evidence ---
     assert len(captured_requests) > 0, "expected at least one captured request"
@@ -394,8 +396,8 @@ def test_q8_connection_failure() -> None:
 
     # The expected OpenAI-compatible Chat Completions path
     first = captured_requests[0]
-    assert "/chat/completions" in str(first.url), (
-        f"expected /chat/completions in URL, got {first.url}"
+    assert first.url.path == "/v1/chat/completions", (
+        f"expected /v1/chat/completions, got {first.url.path}"
     )
     assert first.method.upper() == "POST", f"expected POST method, got {first.method}"
 
