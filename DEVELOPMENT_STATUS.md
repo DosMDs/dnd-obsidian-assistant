@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-07 (PAIM-C11)
+**Last updated:** 2026-09-07 (PAIM-C12)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -114,6 +114,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-06 — Context/dependencies integration | DONE |
 | PAIM-C10 — Seal Pydantic AI run dependency binding | DONE |
 | PAIM-C11 — Restore PAIM-06 history and seal prepared-run boundary | DONE |
+| PAIM-C12 — Restore exact PAIM historical text | DONE |
 | PAIM-07 — Replace one-step FastAgent mechanics | NOT STARTED |
 | PAIM-08 — Replace bounded AgentLoop mechanics | NOT STARTED |
 | PAIM-09 — Ollama integration decision gate | NOT STARTED |

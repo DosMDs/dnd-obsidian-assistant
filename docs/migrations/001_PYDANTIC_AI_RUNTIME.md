@@ -2538,7 +2538,9 @@ the input is checked against `collections.abc.Sequence`:
 
 ```python
 if not isinstance(tool_calls, collections.abc.Sequence):
-    raise ValidationError(f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}")
+    raise ValidationError(
+        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
+    )
 ```
 
 **Immutable tuple capture** — After the runtime check, the batch is
@@ -2593,12 +2595,10 @@ This was replaced with a real invocation counter:
 ```python
 hidden_calls = 0
 
-
 def hidden_handler(inp, ctx):
     nonlocal hidden_calls
     hidden_calls += 1
     return ToolOutput(result="hidden")
-
 
 registry.register(hidden_canonical, hidden_handler)
 # ... policy rejects hidden_tool ...
@@ -2670,7 +2670,6 @@ PAIM-06 — Context/dependencies integration
 ```
 
 Do not begin PAIM-06 automatically.
-
 
 ## 29. PAIM-06 completion record — Context/dependencies integration
 
@@ -3189,6 +3188,55 @@ uv.lock
 ```
 ACCEPTED
 PAIM-C11 — DONE
+```
+
+### Next task
+
+```text
+PAIM-07 — Replace one-step FastAgent mechanics
+```
+
+Do not begin PAIM-07 automatically.
+
+## 32. PAIM-C12 correction record — Restore exact PAIM historical text
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `38c8f330c14dd7311e53bdad977d71d463e16929`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C11 restored the missing PAIM-06 section and sealed the
+`PreparedDndAgentRun` runtime boundary.
+
+Independent review confirmed one remaining evidence defect:
+section 28 was only semantically equivalent to its historical source,
+not textually exact.
+
+PAIM-C12 restores section 28 verbatim from `5218dd701f67f550754e8fab728cca192aa619df`.
+
+Section 29 was verified/restored against `ad7610e0dca2f706051bb98f5ed783b2622402b2`.
+
+No production or test code changed.
+
+### Changed files
+
+```text
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+No production files changed.
+No test files changed.
+No dependency changes.
+
+### Effective PAIM-06 decision
+
+```
+ACCEPTED
+PAIM-C12 — DONE
 ```
 
 ### Next task
