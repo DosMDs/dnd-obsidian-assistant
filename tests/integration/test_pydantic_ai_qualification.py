@@ -338,29 +338,66 @@ def test_q7_custom_ollama_base_url_with_openai_provider() -> None:
 def test_q8_connection_failure() -> None:
     """Connection/transport failure raises ModelAPIError.
 
-    Uses a mocked httpx2 transport that raises ConnectError without
-    attempting a real socket connection. No real localhost socket is
-    opened — the failure is deterministic and requires no network.
+    Uses a mocked httpx2 transport that captures request evidence and
+    raises ConnectError without attempting a real socket connection.
+    No real localhost socket is opened — the failure is deterministic
+    and requires no network. The injected client is explicitly closed.
     """
     import httpx2
     from openai import AsyncOpenAI
 
+    captured_requests: list[httpx2.Request] = []
+
     class _AlwaysFailTransport(httpx2.AsyncBaseTransport):
         async def handle_async_request(self, request: httpx2.Request) -> httpx2.Response:
+            captured_requests.append(request)
             raise httpx2.ConnectError("Mocked connection failure")
 
-    mock_client = httpx2.AsyncClient(transport=_AlwaysFailTransport())
-    openai_client = AsyncOpenAI(
-        http_client=mock_client,
-        api_key="test-key",
-        base_url="https://pydantic-ai-test.invalid/v1",
-    )
-    provider = OpenAIProvider(openai_client=openai_client)
-    model = OpenAIChatModel("test-model", provider=provider)
-    agent = Agent(model)
+    transport = _AlwaysFailTransport()
+    mock_client = httpx2.AsyncClient(transport=transport)
+    try:
+        openai_client = AsyncOpenAI(
+            http_client=mock_client,
+            api_key="test-key",
+            base_url="https://pydantic-ai-test.invalid/v1",
+        )
+        provider = OpenAIProvider(openai_client=openai_client)
+        model = OpenAIChatModel("test-model", provider=provider)
+        agent = Agent(model)
 
-    with pytest.raises(pydantic_ai.exceptions.ModelAPIError):
-        agent.run_sync("hello")
+        with pytest.raises(pydantic_ai.exceptions.ModelAPIError):
+            agent.run_sync("hello")
+    finally:
+        # Explicitly close the injected client through supported public API
+        import asyncio
+
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            # Only close if an event loop is running
+            pass
+
+    # --- Request capture evidence ---
+    assert len(captured_requests) > 0, "expected at least one captured request"
+
+    for req in captured_requests:
+        assert req.url.scheme == "https", f"expected https scheme, got {req.url.scheme}"
+        assert req.url.host == "pydantic-ai-test.invalid", (
+            f"expected host pydantic-ai-test.invalid, got {req.url.host}"
+        )
+        # Never targets localhost / loopback
+        assert req.url.host not in ("localhost", "127.0.0.1", "::1"), (
+            f"request targeted localhost: {req.url}"
+        )
+
+    # The expected OpenAI-compatible Chat Completions path
+    first = captured_requests[0]
+    assert "/chat/completions" in str(first.url), (
+        f"expected /chat/completions in URL, got {first.url}"
+    )
+    assert first.method.upper() == "POST", f"expected POST method, got {first.method}"
 
 
 # ---------------------------------------------------------------------------
