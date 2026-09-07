@@ -39,12 +39,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from dnd_assistant.errors import ModelError
+from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole
 from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION, SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
     from dnd_assistant.models.gateway import ModelGateway
-    from dnd_assistant.models.types import ChatRequest, ToolAwareResponse
+    from dnd_assistant.models.types import ToolAwareResponse
     from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
     from dnd_assistant.tools.types import ExecutionContext
 
@@ -115,7 +116,6 @@ class FastAgent:
         # Deferred runtime imports: keep provider/tool/storage packages out
         # of module-import scope.
         from dnd_assistant.application.agent_tool_selection import select_agent_tools
-        from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole
 
         # 1. Determine the turn-local exposed-tool snapshot
         exposed_list = select_agent_tools(
@@ -127,14 +127,8 @@ class FastAgent:
         # 2. Build AgentContext
         context = self._context_builder.build(user_input)
 
-        # 3. Build deterministic ChatRequest
-        user_payload = _build_user_json(context)
-        request = ChatRequest(
-            messages=(
-                ChatMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT),
-                ChatMessage(role=MessageRole.USER, content=user_payload),
-            ),
-        )
+        # 3. Build deterministic ChatRequest via shared projection
+        request = build_agent_request(context)
 
         # 4. Call ModelGateway.chat_with_tools() exactly once
         response = self._model_gateway.chat_with_tools(request, exposed_list)
@@ -154,6 +148,28 @@ class FastAgent:
             exposed_tools=exposed_tools,
             response=response,
         )
+
+
+# ── Public deterministic request builder ───────────────────────────────────────
+
+
+def build_agent_request(context: AgentContext) -> ChatRequest:
+    """Build a deterministic ``ChatRequest`` from an ``AgentContext``.
+
+    This is the shared projection used by both the custom ``FastAgent`` and
+    the migration ``PydanticAIFastAgent``.  It produces the exact provider-
+    neutral ``SYSTEM + USER`` conversation snapshot.
+
+    The USER payload is deterministic JSON with ``sort_keys=True``,
+    ``separators=(",", ":")``, ``ensure_ascii=False``, and ``allow_nan=False``.
+    """
+    user_payload = _build_user_json(context)
+    return ChatRequest(
+        messages=(
+            ChatMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT),
+            ChatMessage(role=MessageRole.USER, content=user_payload),
+        ),
+    )
 
 
 # ── Deterministic USER JSON payload ────────────────────────────────────────────

@@ -3246,3 +3246,218 @@ PAIM-07 — Replace one-step FastAgent mechanics
 ```
 
 Do not begin PAIM-07 automatically.
+
+## 33. PAIM-07 completion record — Replace one-step FastAgent mechanics
+
+### Starting state
+
+```text
+Branch:                     feat/pydantic-ai-runtime
+Starting SHA:               48d109d9290c407c2aa77a295de37f452e1ef01d
+Reference main SHA:         f424a0f659afd5f8bcbce55c4d280cc8e621133f
+Working tree:               dirty (pre-existing fast_agent.py refactor + new files)
+Upstream equality:          HEAD == upstream
+Canonical starting baseline: 4762 passed, 102 skipped
+```
+
+### Pydantic AI version
+
+```text
+pydantic-ai-slim[openai]==2.39.0
+```
+
+### New production runtime
+
+```text
+Module:     src/dnd_assistant/application/pydantic_ai_fast_agent.py (new, 327 lines)
+Class:      PydanticAIFastAgent
+Constructor:
+    PydanticAIFastAgent(*, run_preparer: DndAgentRunPreparer, model: Model)
+decide():
+    user_input: str, *, execution_context: ExecutionContext -> AgentDecision
+```
+
+### Framework configuration
+
+```text
+Agent deps_type:     type(prepared.deps)  (DndAgentDeps)
+Instructions:        SYSTEM_PROMPT (agent_v2)
+Output types:        str | DeferredToolRequests
+Tool retries:        0
+Output retries:      0
+UsageLimits:         request_limit=1
+Runtime toolset:     fresh ExternalToolset per run via to_external_toolset()
+```
+
+### One-step flow
+
+```text
+1. DndAgentRunPreparer.prepare(user_input, execution_context=...)
+2. build_agent_request(prepared.deps.agent_context)  [shared projection]
+3. fresh ExternalToolset from issued snapshot
+4. one Pydantic AI model request (request_limit=1, retries=0)
+5. adapt str/DeferredToolRequests to ToolAwareResponse
+6. return AgentDecision
+```
+
+### Observable parity
+
+| Scenario       | Content               | Tool calls | Requests | Handlers |
+| -------------- | --------------------- | ---------: | -------: | -------: |
+| text only      | "Hello, I am Gandalf" |          0 |        1 |        0 |
+| single READ    | None                  |          1 |        1 |        0 |
+| single WRITE   | None                  |          1 |        1 |        0 |
+| text + tool    | "Looking up..."       |          1 |        1 |        0 |
+| 2 READ calls   | None                  |          2 |        1 |        0 |
+| empty exposure | "No tools available." |          0 |        1 |        0 |
+
+### Exposure evidence
+
+```text
+READ authority:              read_alpha, read_beta only
+WRITE + audit:               read_alpha, read_beta, write_alpha
+WRITE without audit:         read_alpha, read_beta only (write_alpha hidden)
+Session-mode filtering:      only NO_ACTIVE_SESSION tools exposed
+FunctionModel tool order:    matches snapshot name order
+```
+
+### Prompt/context evidence
+
+```text
+AgentInfo.instructions == SYSTEM_PROMPT:         PASS
+Campaign sentinel in instructions:               NO
+Framework UserPromptPart == AgentDecision USER:  PASS (exact value match)
+Adversarial content in instructions:             NO
+Adversarial content in USER data:                YES
+```
+
+### Argument-boundary evidence
+
+```text
+Schema-invalid dict args (empty {} for required field):
+  First decision succeeds:                       YES
+  Project schema validation occurred:            NO
+  Handler calls:                                 0
+
+Malformed non-object args ("not-a-dict"):
+  ModelError:                                    YES
+  Handler calls:                                 0
+
+Non-finite JSON (NaN, Infinity):
+  ModelError:                                    YES
+  Handler calls:                                 0
+```
+
+### Failure matrix
+
+| Scenario                 | Project exception | Requests | Handler calls |
+| ------------------------ | ----------------- | -------: | ------------: |
+| unknown tool             | ModelError        |        1 |             0 |
+| hidden tool (WRITE)      | ModelError        |        1 |             0 |
+| duplicate call ID        | ModelError        |        1 |             0 |
+| malformed args           | ModelError        |        1 |             0 |
+| framework model error    | ModelError        |        1 |             0 |
+| invalid ExecutionContext | ValidationError   |        0 |             0 |
+
+### Policy isolation
+
+```text
+PAIM-07 called policy.admit_tool_batch:     NO
+First post-decision admission succeeds:     YES
+```
+
+### Run isolation
+
+```text
+Run A (READ) exposed names:         read_alpha, read_beta
+Run B (WRITE+audit) exposed names:  read_alpha, read_beta, write_alpha
+ExternalToolset leakage:            NO (fresh per run)
+```
+
+### Reference parity
+
+Comparison against old FastAgent for text-only and tool-only scenarios:
+
+```text
+ChatRequest equality:               PASS (model_dump() identical)
+Exposed names equality:             PASS
+ToolAwareResponse content parity:   PASS
+ToolAwareResponse tool_calls parity: PASS
+```
+
+### Scope confirmation
+
+```text
+AgentLoop unchanged:                YES
+AgentToolExecution unchanged:       YES
+Tool Layer unchanged:               YES
+ModelGateway unchanged:             YES
+Ollama unchanged:                   YES
+Prompt unchanged:                   YES
+CLI unchanged:                      YES
+
+No HandleDeferredToolCalls:         YES
+No DeferredToolResults:             YES
+No ToolExecutor dependency:         YES (fresh import test)
+No second model request:            YES
+No PAIM-08 implementation:          YES
+
+pyproject.toml unchanged:           YES
+uv.lock unchanged:                  YES
+```
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_fast_agent.py          (new, 327 lines)
+src/dnd_assistant/application/fast_agent.py                      (refactored: shared build_agent_request helper)
+
+tests/integration/test_pydantic_ai_fast_agent.py                 (new, 865 lines)
+tests/integration/test_pydantic_ai_fast_agent_boundaries.py      (new, 954 lines)
+
+DEVELOPMENT_STATUS.md                                             (updated)
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md                       (updated)
+```
+
+### Quality gates
+
+```text
+Gate class:                     Code/test (final diff contains Python changes)
+
+Reference FastAgent tests:      41 passed (test_fast_agent.py)
+                                19 passed (test_fast_agent_boundaries.py)
+PAIM-06 regression:             36 passed (test_pydantic_ai_run_deps.py)
+DndAgentPolicy tests:           58 passed (test_dnd_agent_policy.py)
+PAIM context/deps tests:        18 passed (test_pydantic_ai_context_deps.py)
+Blocker gate tests:             16 passed (test_pydantic_ai_blocker_gate.py)
+                                + execution + limits + qualification
+PAIM-07 new tests:              42 passed (22 + 20 across both files)
+Contract tests:                 376 passed (boundaries + maintainability + harness)
+
+Full canonical suite:           4809 passed, 102 skipped
+```
+
+### Ruff
+
+```text
+Changed Python files formatting:  PASS
+Full ruff format --check:         Historical PAIM-C12 Markdown-only exception
+                                  (docs/migrations/001_PYDANTIC_AI_RUNTIME.md sections 28-32)
+ruff check .:                     PASS
+git diff --check:                 PASS
+```
+
+### Effective PAIM-07 decision
+
+```text
+ACCEPTED
+PAIM-07 — DONE
+```
+
+### Next task
+
+```text
+PAIM-08 — Replace bounded AgentLoop mechanics
+```
+
+Do not begin PAIM-08 automatically.
