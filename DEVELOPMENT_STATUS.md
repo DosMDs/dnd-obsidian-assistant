@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-07 (PAIM-04)
+**Last updated:** 2026-09-07 (PAIM-C07)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -107,6 +107,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C05 — Restore PAIM history and close PAIM-03 evidence | DONE |
 | PAIM-C06 — Close Q8 HTTP client lifecycle evidence | DONE |
 | PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge | DONE |
+| PAIM-C07 — Harden PAIM-04 bridge authority | DONE |
 | PAIM-05 — Explicit DndAgentPolicy | NOT STARTED |
 | PAIM-06 — Context/dependencies integration | NOT STARTED |
 | PAIM-07 — Replace one-step FastAgent mechanics | NOT STARTED |

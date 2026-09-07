@@ -4,6 +4,8 @@ This is the first production Pydantic AI integration boundary.  It provides:
 
 1. ``PydanticAIToolSnapshot`` — an immutable project-owned authority that
    stores canonical ``ToolDefinition`` values for one turn-local exposure.
+   Each snapshot is bound to the bridge that created it via an opaque
+   ``_owner_token``.
 2. ``PydanticAIToolBridge`` — the application-layer bridge that:
    - validates incoming ``ToolPublicDefinition`` against the canonical
      ``ToolRegistry`` (``freeze()``);
@@ -24,7 +26,7 @@ Architecture
     Sequence[ToolPublicDefinition]   ← already-selected turn-local exposure
         ↓  bridge.freeze()
     PydanticAIToolSnapshot           ← immutable project authority
-        ↓  snapshot.to_external_toolset()
+        ↓  bridge.to_external_toolset(snapshot)
     ExternalToolset                  ← fresh schema-only framework view
         ↓
     Pydantic AI model loop
@@ -53,7 +55,8 @@ This module must not import from:
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
@@ -86,39 +89,40 @@ class PydanticAIToolSnapshot:
 
     Stores canonical ``ToolDefinition`` instances validated against the
     ``ToolRegistry``.  This is the authoritative source of truth for what
-    tools the model may see and call.  The ``ExternalToolset`` generated
-    from this snapshot is a derived framework view — mutating the framework
-    object does not change project authority.
+    tools the model may see and call.
+
+    Each snapshot is bound to the bridge that created it via an opaque
+    ``_owner_token``.  A snapshot from one bridge cannot authorise execution
+    or framework exposure through another bridge.
+
+    .. note::
+
+        Do **not** construct this class directly.  Use
+        ``PydanticAIToolSnapshot._create()`` or the owning bridge's
+        ``freeze()`` method.
     """
 
     definitions: tuple[ToolDefinition, ...]
+    _owner_token: object = field(repr=False, compare=False)
+
+    @staticmethod
+    def _create(
+        definitions: tuple[ToolDefinition, ...],
+        owner_token: object,
+    ) -> PydanticAIToolSnapshot:
+        """Internal factory — create a snapshot bound to an owner token.
+
+        This is the only way to construct a snapshot with a valid owner
+        token.  The public dataclass-generated constructor requires an
+        explicit ``_owner_token`` argument, which callers outside the
+        bridge cannot supply without access to the bridge's private token.
+        """
+        return PydanticAIToolSnapshot(definitions=definitions, _owner_token=owner_token)
 
     @property
     def names(self) -> tuple[str, ...]:
-        """Return the sorted names of all tools in the snapshot."""
+        """Return tool names in frozen exposure order."""
         return tuple(d.name for d in self.definitions)
-
-    def to_external_toolset(self) -> ExternalToolset:
-        """Return a **fresh** schema-only ``ExternalToolset``.
-
-        Each call creates a new framework object.  Mutating the returned
-        toolset does not affect this snapshot or any future toolset.
-        """
-        # Deferred import: Pydantic AI is an optional dependency for this
-        # module and must not be eagerly loaded at module-import time.
-        from pydantic_ai.tools import ToolDefinition as PydToolDef
-        from pydantic_ai.toolsets import ExternalToolset
-
-        pyd_defs: list[PydToolDef] = []
-        for td in self.definitions:
-            pyd_defs.append(
-                PydToolDef(
-                    name=td.name,
-                    description=td.description,
-                    parameters_json_schema=td.input_schema.model_json_schema(),
-                )
-            )
-        return ExternalToolset(pyd_defs)
 
 
 # ── Bridge ───────────────────────────────────────────────────────────────────
@@ -127,14 +131,26 @@ class PydanticAIToolSnapshot:
 class PydanticAIToolBridge:
     """Application-layer bridge between ToolRegistry and Pydantic AI.
 
+    Each bridge owns one private opaque ``_snapshot_owner_token``.  A
+    snapshot created by one bridge cannot authorise execution or framework
+    exposure through another bridge.
+
     Args:
         registry: The canonical ``ToolRegistry``.  All incoming public
             definitions are revalidated against this registry during
             ``freeze()``.
+
+    Raises:
+        TypeError: If ``registry`` is not a ``ToolRegistry`` instance.
     """
 
     def __init__(self, *, registry: ToolRegistry) -> None:
+        from dnd_assistant.tools.registry import ToolRegistry as TR
+
+        if not isinstance(registry, TR):
+            raise TypeError("registry must be a ToolRegistry instance")
         self._registry = registry
+        self._snapshot_owner_token: object = object()
         self._executor: ToolExecutor | None = None
 
     # ── Freeze (snapshot creation) ──────────────────────────────────────────
@@ -151,7 +167,7 @@ class PydanticAIToolBridge:
 
         Returns:
             An immutable ``PydanticAIToolSnapshot`` containing canonical
-            ``ToolDefinition`` instances.
+            ``ToolDefinition`` instances, bound to this bridge's owner token.
 
         Raises:
             ValidationError: If any tool is malformed, duplicated, unknown,
@@ -175,10 +191,13 @@ class PydanticAIToolBridge:
                 raise ValidationError(f"Duplicate tool name in exposure: '{item.name}'")
             seen_names.add(item.name)
 
-            # 3. Resolve against canonical registry
+            # 3. Resolve against canonical registry — catch only the expected
+            #    project-level unknown-tool error.
+            from dnd_assistant.errors import NotFoundError
+
             try:
                 binding = self._registry.get(item.name)
-            except Exception as exc:
+            except NotFoundError as exc:
                 raise ValidationError(
                     f"Tool '{item.name}' is not registered in the canonical ToolRegistry",
                     cause=exc,
@@ -191,7 +210,50 @@ class PydanticAIToolBridge:
 
             canonical_defs.append(canonical)
 
-        return PydanticAIToolSnapshot(definitions=tuple(canonical_defs))
+        return PydanticAIToolSnapshot._create(
+            definitions=tuple(canonical_defs),
+            owner_token=self._snapshot_owner_token,
+        )
+
+    # ── Framework translation ───────────────────────────────────────────────
+
+    def to_external_toolset(
+        self,
+        snapshot: PydanticAIToolSnapshot,
+    ) -> ExternalToolset:
+        """Return a **fresh** schema-only ``ExternalToolset`` from a snapshot.
+
+        Validates snapshot provenance first.  Each call creates a new
+        framework object.  Mutating the returned toolset does not affect
+        this snapshot or any future toolset.
+
+        Args:
+            snapshot: A ``PydanticAIToolSnapshot`` created by this bridge.
+
+        Returns:
+            A fresh schema-only ``ExternalToolset``.
+
+        Raises:
+            ValidationError: If the snapshot is not valid or not owned by
+                this bridge.
+        """
+        self._validate_snapshot(snapshot)
+
+        # Deferred import: Pydantic AI is an optional dependency for this
+        # module and must not be eagerly loaded at module-import time.
+        from pydantic_ai.tools import ToolDefinition as PydToolDef
+        from pydantic_ai.toolsets import ExternalToolset
+
+        pyd_defs: list[PydToolDef] = []
+        for td in snapshot.definitions:
+            pyd_defs.append(
+                PydToolDef(
+                    name=td.name,
+                    description=td.description,
+                    parameters_json_schema=td.input_schema.model_json_schema(),
+                )
+            )
+        return ExternalToolset(pyd_defs)
 
     # ── Execute (per-call adapter) ──────────────────────────────────────────
 
@@ -213,17 +275,17 @@ class PydanticAIToolBridge:
             The validated typed ``BaseModel`` output from ``ToolExecutor``.
 
         Raises:
-            ValidationError: If the tool name is not in the snapshot, or
-                the raw arguments cannot be parsed as a JSON object.
+            ValidationError: If the snapshot is invalid, the tool name is
+                not in the snapshot, or the raw arguments cannot be parsed
+                as a JSON object.
             NotFoundError: Propagated from ``ToolExecutor``.
             ConflictError: Propagated from ``ToolExecutor``.
             DndAssistantError: Propagated from ``ToolExecutor`` / handler.
             Exception: Any non-DndAssistantError from the handler propagates
                 unchanged.
         """
-        # 1. Validate snapshot type
-        if not isinstance(snapshot, PydanticAIToolSnapshot):
-            raise ValidationError("snapshot must be a PydanticAIToolSnapshot instance")
+        # 1. Validate snapshot provenance and structure
+        self._validate_snapshot(snapshot)
 
         # 2. Validate execution context type
         from dnd_assistant.tools.types import ExecutionContext as EC
@@ -231,12 +293,20 @@ class PydanticAIToolBridge:
         if not isinstance(execution_context, EC):
             raise ValidationError("execution_context must be an ExecutionContext instance")
 
-        # 3. Validate tool name against frozen snapshot
+        # 3. Structural validation: tool_call must be a ToolCallPart
+        from pydantic_ai.messages import ToolCallPart as TCP
+
+        if not isinstance(tool_call, TCP):
+            raise ValidationError(
+                f"tool_call must be a ToolCallPart instance, got {type(tool_call).__name__}"
+            )
+
+        # 4. Validate tool name against frozen snapshot
         name = tool_call.tool_name
         if name not in snapshot.names:
             raise ValidationError(f"Tool '{name}' is not in the frozen exposure snapshot")
 
-        # 4. Convert raw arguments — fail closed on malformed/non-object JSON
+        # 5. Convert raw arguments — fail closed on malformed/non-object JSON
         try:
             raw_args = tool_call.args_as_dict(raise_if_invalid=True)
         except (ValueError, AssertionError) as exc:
@@ -245,7 +315,7 @@ class PydanticAIToolBridge:
                 cause=exc,
             ) from exc
 
-        # 5. Delegate to ToolExecutor (lazy-created, bound to same registry)
+        # 6. Delegate to ToolExecutor (lazy-created, bound to same registry)
         executor = self._get_executor()
         output = executor.execute(
             name,
@@ -253,8 +323,57 @@ class PydanticAIToolBridge:
             context=execution_context,
         )
 
-        # 6. Return typed output unchanged
+        # 7. Return typed output unchanged
         return output
+
+    # ── Snapshot validation ─────────────────────────────────────────────────
+
+    def _validate_snapshot(self, snapshot: PydanticAIToolSnapshot) -> None:
+        """Validate snapshot provenance and structural integrity.
+
+        Proves:
+        1. Correct runtime type.
+        2. Owner token belongs to this bridge.
+        3. No duplicate definitions/names.
+        4. Every stored definition is still the exact canonical registered
+           definition for this bridge's registry.
+
+        Raises:
+            ValidationError: On any validation failure.
+        """
+        # 1. Correct runtime type
+        if not isinstance(snapshot, PydanticAIToolSnapshot):
+            raise ValidationError("snapshot must be a PydanticAIToolSnapshot instance")
+
+        # 2. Owner token belongs to this bridge
+        if snapshot._owner_token is not self._snapshot_owner_token:
+            raise ValidationError(
+                "snapshot was created by a different bridge and cannot be used here"
+            )
+
+        # 3. No duplicate names
+        seen: set[str] = set()
+        for td in snapshot.definitions:
+            if td.name in seen:
+                raise ValidationError(f"Duplicate definition name in snapshot: '{td.name}'")
+            seen.add(td.name)
+
+        # 4. Every stored definition is still the exact canonical registered
+        #    definition for this bridge's registry (identity check).
+        from dnd_assistant.errors import NotFoundError as NFE
+
+        for td in snapshot.definitions:
+            try:
+                binding = self._registry.get(td.name)
+            except NFE as exc:
+                raise ValidationError(
+                    f"Snapshot definition '{td.name}' is no longer registered in the canonical registry",
+                    cause=exc,
+                ) from exc
+            if binding.definition is not td:
+                raise ValidationError(
+                    f"Snapshot definition '{td.name}' is not the canonical registry object"
+                )
 
     # ── Internal helpers ────────────────────────────────────────────────────
 
@@ -283,16 +402,17 @@ def _verify_metadata_match(
 ) -> None:
     """Verify that a public definition matches its canonical counterpart.
 
-    Uses strict ``is`` identity for enum comparisons to reject foreign or
-    plain-string impostors.
+    Uses strict ``type() is`` identity for enum comparisons to reject
+    foreign or plain-string impostors.  Collection members are validated
+    individually for exact enum type before semantic comparison.
 
     Raises:
         ValidationError: On any mismatch.
     """
     name = public.name
 
-    # Permission
-    if not isinstance(public.permission, permission_enum):
+    # Permission — exact type check, then identity
+    if type(public.permission) is not permission_enum:
         raise ValidationError(f"Tool '{name}': permission is not a valid Permission enum instance")
     if public.permission is not canonical.permission:
         raise ValidationError(
@@ -300,25 +420,23 @@ def _verify_metadata_match(
             f"(public={public.permission!r}, canonical={canonical.permission!r})"
         )
 
-    # Session modes — compare sets of identity
-    public_modes_set = set(public.allowed_session_modes)
-    canonical_modes_set = set(canonical.allowed_session_modes)
-    if public_modes_set != canonical_modes_set:
-        raise ValidationError(
-            f"Tool '{name}': allowed_session_modes mismatch "
-            f"(public={sorted(m.value for m in public_modes_set)}, "
-            f"canonical={sorted(m.value for m in canonical_modes_set)})"
-        )
+    # Session modes — exact type for every member, then semantic comparison
+    _verify_exact_enum_members(
+        name,
+        "allowed_session_modes",
+        public.allowed_session_modes,
+        canonical.allowed_session_modes,
+        session_mode_enum,
+    )
 
-    # Side effects — compare sets of identity
-    public_effects_set = set(public.side_effects)
-    canonical_effects_set = set(canonical.side_effects)
-    if public_effects_set != canonical_effects_set:
-        raise ValidationError(
-            f"Tool '{name}': side_effects mismatch "
-            f"(public={sorted(e.value for e in public_effects_set)}, "
-            f"canonical={sorted(e.value for e in canonical_effects_set)})"
-        )
+    # Side effects — exact type for every member, then semantic comparison
+    _verify_exact_enum_members(
+        name,
+        "side_effects",
+        public.side_effects,
+        canonical.side_effects,
+        side_effect_enum,
+    )
 
     # Description
     if public.description != canonical.description:
@@ -349,3 +467,52 @@ def _normalize_json_schema(schema: dict[str, Any]) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def _verify_exact_enum_members(
+    tool_name: str,
+    field_name: str,
+    public_values: list[StrEnum],
+    canonical_values: frozenset[StrEnum],
+    expected_enum: type[StrEnum],
+) -> None:
+    """Verify that a collection of enum values has exact types and matches.
+
+    Every member of ``public_values`` must:
+    - Be the exact ``expected_enum`` type (``type() is``).
+    - Be a member of the canonical set (``is`` identity).
+
+    The collection must have the same cardinality as the canonical set with
+    no duplicates.
+
+    Raises:
+        ValidationError: On any mismatch.
+    """
+    # Exact type for every member
+    for v in public_values:
+        if type(v) is not expected_enum:
+            raise ValidationError(
+                f"Tool '{tool_name}': {field_name} contains a value that is not "
+                f"the expected enum type (got {type(v).__name__})"
+            )
+
+    # No duplicates
+    seen: set[StrEnum] = set()
+    for v in public_values:
+        if v in seen:
+            raise ValidationError(f"Tool '{tool_name}': duplicate value in {field_name}")
+        seen.add(v)
+
+    # Same cardinality as canonical
+    if len(public_values) != len(canonical_values):
+        raise ValidationError(
+            f"Tool '{tool_name}': {field_name} cardinality mismatch "
+            f"(public={len(public_values)}, canonical={len(canonical_values)})"
+        )
+
+    # Every public member is the identical canonical member
+    for v in public_values:
+        if v not in canonical_values:
+            raise ValidationError(
+                f"Tool '{tool_name}': {field_name} contains unexpected value '{v.value}'"
+            )

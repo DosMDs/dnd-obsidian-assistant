@@ -1964,3 +1964,185 @@ PAIM-05 — Explicit DndAgentPolicy
 ```
 
 Do not begin PAIM-05 automatically.
+
+
+## 25. PAIM-C07 completion record — Harden PAIM-04 bridge authority
+
+**Status:** DONE
+**Completed:** 2026-09-07
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `69d8faa4f07fdfbdcb7f04ffa7abe1b73ebc2ffc`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Defects found
+
+| Defect | Description |
+|---|---|
+| A — Snapshot not bound to issuing bridge | `execute()` verified only snapshot type and tool name membership. A snapshot from Bridge A could conceptually authorise execution through Bridge B if the tool name existed in Registry B. |
+| B — Enum comparison not identity-safe | `_verify_metadata_match` used `set ==` for session-mode and side-effect collections, allowing foreign same-value `StrEnum` impostors and plain strings to pass. |
+| C — Missing structural `ToolCallPart` validation | `execute()` type-annotated `tool_call: ToolCallPart` but did not validate runtime type before accessing `.tool_name`. |
+| D — Handler counts inferred | PAIM-04 handler-count table was documented from inference rather than executable test assertions. |
+
+### Snapshot provenance mechanism
+
+Each `PydanticAIToolBridge` owns one private opaque token (`self._snapshot_owner_token = object()`).
+
+`freeze()` produces snapshots via `PydanticAIToolSnapshot._create(definitions=..., owner_token=self._snapshot_owner_token)`.
+
+`PydanticAIToolSnapshot._create()` is a `@staticmethod` internal factory. The public dataclass-generated constructor requires an explicit `_owner_token` argument, which callers outside the bridge cannot supply without access to the bridge's private token.
+
+`_validate_snapshot()` proves:
+1. Correct runtime type (`isinstance(snapshot, PydanticAIToolSnapshot)`).
+2. Owner token identity (`snapshot._owner_token is self._snapshot_owner_token`).
+3. No duplicate names in stored definitions.
+4. Every stored definition is still the exact canonical registered object (`binding.definition is td`).
+
+### API hardening
+
+The `to_external_toolset()` method moved from `PydanticAIToolSnapshot` to `PydanticAIToolBridge`:
+
+```python
+# Before:
+snapshot.to_external_toolset()
+
+# After:
+bridge.to_external_toolset(snapshot)
+```
+
+Both `to_external_toolset()` and `execute()` call `_validate_snapshot()` first, ensuring foreign/cross-bridge snapshots are rejected at both the framework-exposure and execution boundaries.
+
+### Cross-bridge proof
+
+Constructed:
+- Registry A: tool `"same_tool"` → handler A (increments `alpha_a`)
+- Registry B: tool `"same_tool"` → handler B (increments `alpha_b`)
+- Bridge A freezes snapshot with `"same_tool"`
+- Bridge B rejects `bridge_b.execute(snapshot_a, ...)` with `ValidationError`
+- Handler A calls: 0, Handler B calls: 0
+
+Also proved: `bridge_b.to_external_toolset(snapshot_a)` raises `ValidationError`.
+
+### Forged/manual snapshot proof
+
+A snapshot constructed via `PydanticAIToolSnapshot._create(definitions=..., owner_token=object())` with a random token is rejected by both `execute()` and `to_external_toolset()` with `ValidationError`.
+
+### Tampered-copy proof
+
+`dataclasses.replace(snapshot, definitions=...)` with an extra unregistered definition produces a snapshot whose `_owner_token` still matches the bridge, but whose extra definition fails the canonical-registry identity check. Rejected with `ValidationError`.
+
+### Exact enum evidence
+
+| Scenario | Textual value matches canonical | Runtime type canonical | Result |
+|---|---|---|---|
+| ForeignPermission.READ | yes | no | `ValidationError` — "not a valid Permission" |
+| ForeignSessionMode.ACTIVE_SESSION | yes | no | `ValidationError` — "not the expected enum type" |
+| ForeignSideEffect.ENTITY_MUTATION | yes | no | `ValidationError` — "not the expected enum type" |
+| Plain string `"read"` | yes | no | `ValidationError` — "not a valid Permission" |
+
+### Structural call evidence
+
+| Input | Exception type | Handler calls |
+|---|---|---|
+| `object()` as `tool_call` | `ValidationError` — "must be a ToolCallPart" | 0 |
+| `object()` as `snapshot` | `ValidationError` — "must be a PydanticAIToolSnapshot" | 0 |
+| `object()` as `execution_context` | `ValidationError` — "must be an ExecutionContext" | 0 |
+
+### Metadata drift evidence
+
+| Drift type | Result |
+|---|---|
+| Side-effect drift (READ tool with ENTITY_MUTATION) | `ValidationError` — "cardinality mismatch" |
+| Output-schema drift | `ValidationError` — "output_schema mismatch" |
+
+### Handler-count evidence
+
+The following handler-count assertions are now executable:
+
+| Scenario | Required project-handler count | Asserted |
+|---|---|---|
+| BR-10 valid READ | exactly 1 | `counters.alpha == 1` |
+| BR-11 JSON-object string | exactly 1 | `counters.alpha == 1` |
+| BR-12 malformed JSON | 0 | `counters.alpha == 0` |
+| BR-13 non-object JSON | 0 | `counters.alpha == 0` |
+| BR-14 schema-invalid args | 0 | `counters.alpha == 0` |
+| BR-15 hidden live tool | 0 | `counters.alpha == 0, beta == 0, write == 0` |
+| BR-16 unknown tool | 0 | `counters.alpha == 0, beta == 0, write == 0` |
+| BR-17 valid WRITE | exactly 1 | `counters.write == 1` |
+| BR-18 permission denial | 0 | `counters.write == 0` |
+| BR-19 missing audit | 0 | `counters.write == 0` |
+| BR-20 session denial | 0 | `call_count == 0` |
+| handler RuntimeError | exactly 1 | `call_count == 1` |
+| output-validation failure | exactly 1 | `call_count == 1` |
+
+### Constructor validation
+
+`PydanticAIToolBridge(registry=object())` raises `TypeError("registry must be a ToolRegistry instance")` immediately.
+
+### Narrowed exception handling
+
+`freeze()` now catches only `NotFoundError` (the expected project-level unknown-tool error) instead of broad `Exception`. Unexpected programming/runtime exceptions remain visible.
+
+### Scope confirmation
+
+| Component | Status |
+|---|---|
+| `ToolRegistry` | Unchanged |
+| `ToolExecutor` | Unchanged |
+| Tool Layer has Pydantic AI dependency | **No** |
+| `FastAgent` | Unchanged |
+| `AgentLoop` | Unchanged |
+| `select_agent_tools` | Unchanged |
+| `AgentToolExecutionService` | Unchanged |
+| `HandleDeferredToolCalls` production runtime | Not implemented |
+| PAIM-05 implementation | Not started |
+| `pyproject.toml` | Unchanged |
+| `uv.lock` | Unchanged |
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py          (modified, 520 lines)
+tests/unit/test_pydantic_ai_tool_bridge.py                        (modified, 880 lines)
+tests/unit/test_pydantic_ai_tool_bridge_authority.py              (new, 545 lines)
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Bridge tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | 30 passed |
+| Authority tests | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | 14 passed |
+| Tool registry | `uv run pytest tests/unit/test_tool_registry.py -v` | 16 passed |
+| Tool catalog | `uv run pytest tests/unit/test_tool_catalog.py -v` | 33 passed |
+| Tool executor | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
+| Agent tool selection | `uv run pytest tests/unit/test_agent_tool_selection.py -v` | 44 passed |
+| Agent tool execution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | 29 passed |
+| PAIM blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| PAIM blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| PAIM blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| PAIM qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 361 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical full suite | `uv run pytest` | 4655 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 335 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Effective PAIM-04 decision
+
+```
+ACCEPTED
+```
+
+PAIM-C07 corrects the four documented authority defects in PAIM-04. The original PAIM-04 handler-count table was not executable evidence until C07. All handler counts are now executable assertions.
+
+### Next task
+
+```text
+PAIM-05 — Explicit DndAgentPolicy
+```
+
+Do not begin PAIM-05 automatically.

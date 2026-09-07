@@ -17,13 +17,16 @@ Organisation
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 import pytest
 from pydantic import BaseModel
 from pydantic_ai.messages import ToolCallPart
 
-from dnd_assistant.application.pydantic_ai_tool_bridge import PydanticAIToolBridge
+from dnd_assistant.application.pydantic_ai_tool_bridge import (
+    PydanticAIToolBridge,
+)
 from dnd_assistant.errors import ConflictError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import ToolPublicDefinition
@@ -54,16 +57,29 @@ class ToolOutput(BaseModel):
     result: str
 
 
-def _alpha_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
-    return ToolOutput(result=f"alpha:{inp.value}")
+@dataclass
+class HandlerCounters:
+    """Per-test handler invocation counters for executable call-count evidence."""
+
+    alpha: int = 0
+    beta: int = 0
+    write: int = 0
 
 
-def _beta_handler(inp: BetaInput, ctx: object) -> ToolOutput:
-    return ToolOutput(result=f"beta:{inp.number}")
+def _make_counting_handlers(counters: HandlerCounters) -> tuple:
+    def alpha_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
+        counters.alpha += 1
+        return ToolOutput(result=f"alpha:{inp.value}")
 
+    def beta_handler(inp: BetaInput, ctx: object) -> ToolOutput:
+        counters.beta += 1
+        return ToolOutput(result=f"beta:{inp.number}")
 
-def _write_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
-    return ToolOutput(result=f"write:{inp.value}")
+    def write_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
+        counters.write += 1
+        return ToolOutput(result=f"write:{inp.value}")
+
+    return alpha_handler, beta_handler, write_handler
 
 
 # ==============================================================================
@@ -115,15 +131,22 @@ def write_tool_def() -> ToolDefinition:
 
 
 @pytest.fixture
+def counters() -> HandlerCounters:
+    return HandlerCounters()
+
+
+@pytest.fixture
 def registry(
     read_tool_def: ToolDefinition,
     read_beta_def: ToolDefinition,
     write_tool_def: ToolDefinition,
+    counters: HandlerCounters,
 ) -> ToolRegistry:
+    alpha_h, beta_h, write_h = _make_counting_handlers(counters)
     reg = ToolRegistry()
-    reg.register(read_tool_def, _alpha_handler)
-    reg.register(read_beta_def, _beta_handler)
-    reg.register(write_tool_def, _write_handler)
+    reg.register(read_tool_def, alpha_h)
+    reg.register(read_beta_def, beta_h)
+    reg.register(write_tool_def, write_h)
     return reg
 
 
@@ -217,7 +240,7 @@ class TestPydanticAIToolSnapshot:
         assert snapshot.names == ()
         assert len(snapshot.definitions) == 0
 
-        toolset = snapshot.to_external_toolset()
+        toolset = bridge.to_external_toolset(snapshot)
         assert len(toolset.tool_defs) == 0
 
     # BR-02 — deterministic mapping
@@ -230,7 +253,7 @@ class TestPydanticAIToolSnapshot:
         snapshot = bridge.freeze([read_public, read_beta_public])
         assert snapshot.names == ("read_alpha", "read_beta")
 
-        toolset = snapshot.to_external_toolset()
+        toolset = bridge.to_external_toolset(snapshot)
         assert len(toolset.tool_defs) == 2
 
         names = [d.name for d in toolset.tool_defs]
@@ -286,7 +309,7 @@ class TestPydanticAIToolSnapshot:
         registry.register(new_def, _new_handler)
 
         assert snapshot.names == ("read_alpha",)
-        toolset = snapshot.to_external_toolset()
+        toolset = bridge.to_external_toolset(snapshot)
         assert len(toolset.tool_defs) == 1
         assert toolset.tool_defs[0].name == "read_alpha"
 
@@ -313,20 +336,20 @@ class TestPydanticAIToolSnapshot:
     ) -> None:
         snapshot = bridge.freeze([read_public])
 
-        toolset_a = snapshot.to_external_toolset()
+        toolset_a = bridge.to_external_toolset(snapshot)
         assert len(toolset_a.tool_defs) == 1
 
         toolset_a.tool_defs.clear()
 
-        toolset_b = snapshot.to_external_toolset()
+        toolset_b = bridge.to_external_toolset(snapshot)
         assert len(toolset_b.tool_defs) == 1
         assert toolset_b.tool_defs[0].name == "read_alpha"
 
-        toolset_c = snapshot.to_external_toolset()
+        toolset_c = bridge.to_external_toolset(snapshot)
         if toolset_c.tool_defs[0].parameters_json_schema is not None:
             toolset_c.tool_defs[0].parameters_json_schema.clear()
 
-        toolset_d = snapshot.to_external_toolset()
+        toolset_d = bridge.to_external_toolset(snapshot)
         assert toolset_d.tool_defs[0].parameters_json_schema is not None
         assert "properties" in toolset_d.tool_defs[0].parameters_json_schema
 
@@ -398,7 +421,7 @@ class TestPydanticAIToolFreeze:
             side_effects=sorted(read_public.side_effects, key=lambda e: e.value),
             allowed_session_modes=[SessionMode.ACTIVE_SESSION],
         )
-        with pytest.raises(ValidationError, match="allowed_session_modes mismatch"):
+        with pytest.raises(ValidationError, match="cardinality mismatch"):
             bridge.freeze([mismatched])
 
     # BR-09 — description mismatch
@@ -450,6 +473,7 @@ class TestPydanticAIToolExecute:
     def test_br10_read_execution(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -459,11 +483,15 @@ class TestPydanticAIToolExecute:
         output = bridge.execute(snapshot, tool_call, execution_context=read_context)
         assert isinstance(output, ToolOutput)
         assert output.result == "alpha:hello"
+        assert counters.alpha == 1
+        assert counters.beta == 0
+        assert counters.write == 0
 
     # BR-11 — JSON-string object arguments
     def test_br11_json_string_object_args(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -473,11 +501,13 @@ class TestPydanticAIToolExecute:
         output = bridge.execute(snapshot, tool_call, execution_context=read_context)
         assert isinstance(output, ToolOutput)
         assert output.result == "alpha:x"
+        assert counters.alpha == 1
 
     # BR-12 — malformed JSON
     def test_br12_malformed_json(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -486,11 +516,13 @@ class TestPydanticAIToolExecute:
 
         with pytest.raises(ValidationError, match="Failed to parse arguments"):
             bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert counters.alpha == 0
 
     # BR-13 — non-object JSON
     def test_br13_non_object_json(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -499,11 +531,13 @@ class TestPydanticAIToolExecute:
 
         with pytest.raises(ValidationError, match="Failed to parse arguments"):
             bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert counters.alpha == 0
 
     # BR-14 — schema-invalid dict
     def test_br14_schema_invalid_dict(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -512,11 +546,13 @@ class TestPydanticAIToolExecute:
 
         with pytest.raises(ValidationError):
             bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert counters.alpha == 0
 
     # BR-15 — hidden live tool
     def test_br15_hidden_live_tool(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         registry: ToolRegistry,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
@@ -543,11 +579,15 @@ class TestPydanticAIToolExecute:
         tool_call = ToolCallPart(tool_name="hidden_tool", args='{"value": "x"}')
         with pytest.raises(ValidationError, match="not in the frozen exposure"):
             bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert counters.alpha == 0
+        assert counters.beta == 0
+        assert counters.write == 0
 
     # BR-16 — completely unknown tool
     def test_br16_completely_unknown_tool(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         read_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -556,6 +596,9 @@ class TestPydanticAIToolExecute:
 
         with pytest.raises(ValidationError, match="not in the frozen exposure"):
             bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert counters.alpha == 0
+        assert counters.beta == 0
+        assert counters.write == 0
 
 
 # ==============================================================================
@@ -571,6 +614,7 @@ class TestPydanticAIToolAuthority:
     def test_br17_write_success(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         write_public: ToolPublicDefinition,
         write_context: ExecutionContext,
     ) -> None:
@@ -580,11 +624,15 @@ class TestPydanticAIToolAuthority:
         output = bridge.execute(snapshot, tool_call, execution_context=write_context)
         assert isinstance(output, ToolOutput)
         assert output.result == "write:test"
+        assert counters.write == 1
+        assert counters.alpha == 0
+        assert counters.beta == 0
 
     # BR-18 — permission denial (READ authority cannot execute WRITE tool)
     def test_br18_permission_denial(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         write_public: ToolPublicDefinition,
         read_context: ExecutionContext,
     ) -> None:
@@ -593,11 +641,13 @@ class TestPydanticAIToolAuthority:
 
         with pytest.raises(ConflictError, match="Permission denied"):
             bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert counters.write == 0
 
     # BR-19 — missing audit for WRITE tool
     def test_br19_missing_audit(
         self,
         bridge: PydanticAIToolBridge,
+        counters: HandlerCounters,
         write_public: ToolPublicDefinition,
         write_context_no_audit: ExecutionContext,
     ) -> None:
@@ -606,6 +656,7 @@ class TestPydanticAIToolAuthority:
 
         with pytest.raises(ValidationError, match="requires a non-None AuditContext"):
             bridge.execute(snapshot, tool_call, execution_context=write_context_no_audit)
+        assert counters.write == 0
 
     # BR-20 — session-mode denial
     def test_br20_session_mode_denial(
@@ -624,7 +675,11 @@ class TestPydanticAIToolAuthority:
             allowed_session_modes=frozenset({SessionMode.ACTIVE_SESSION}),
         )
 
+        call_count = 0
+
         def _session_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
+            nonlocal call_count
+            call_count += 1
             return ToolOutput(result="ok")
 
         reg = ToolRegistry()
@@ -653,6 +708,7 @@ class TestPydanticAIToolAuthority:
 
         with pytest.raises(ConflictError, match="Session mode"):
             local_bridge.execute(snapshot, tool_call, execution_context=no_session_ctx)
+        assert call_count == 0
 
 
 # ==============================================================================
@@ -681,7 +737,11 @@ class TestPydanticAIToolErrors:
             ),
         )
 
+        call_count = 0
+
         def _error_handler(inp: AlphaInput, ctx: object) -> ToolOutput:
+            nonlocal call_count
+            call_count += 1
             raise RuntimeError("handler boom")
 
         reg = ToolRegistry()
@@ -703,6 +763,7 @@ class TestPydanticAIToolErrors:
 
         with pytest.raises(RuntimeError, match="handler boom"):
             local_bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert call_count == 1
 
     def test_output_validation_failure_propagates(
         self,
@@ -722,7 +783,11 @@ class TestPydanticAIToolErrors:
             ),
         )
 
+        call_count = 0
+
         def _bad_handler(inp: AlphaInput, ctx: object) -> str:
+            nonlocal call_count
+            call_count += 1
             return "not_a_pydantic_model"
 
         reg = ToolRegistry()
@@ -746,6 +811,7 @@ class TestPydanticAIToolErrors:
 
         with pytest.raises(ValidationError):
             local_bridge.execute(snapshot, tool_call, execution_context=read_context)
+        assert call_count == 1
 
 
 # ==============================================================================
@@ -781,3 +847,33 @@ class TestPydanticAIToolArchitecture:
         bridge = PydanticAIToolBridge(registry=reg)
         executor = bridge._get_executor()
         assert isinstance(executor, ToolExecutor)
+
+    def test_constructor_rejects_non_registry(self) -> None:
+        """Bridge constructor must reject non-ToolRegistry objects immediately."""
+        with pytest.raises(TypeError, match="ToolRegistry"):
+            PydanticAIToolBridge(registry=object())  # type: ignore[arg-type]
+
+    def test_to_external_toolset_rejects_foreign_snapshot(self) -> None:
+        """A snapshot from one bridge cannot generate framework exposure through another."""
+        reg = ToolRegistry()
+        bridge_a = PydanticAIToolBridge(registry=reg)
+        bridge_b = PydanticAIToolBridge(registry=reg)
+
+        snapshot = bridge_a.freeze([])
+        with pytest.raises(ValidationError, match="different bridge"):
+            bridge_b.to_external_toolset(snapshot)
+
+    def test_execute_rejects_foreign_snapshot(self) -> None:
+        """A snapshot from one bridge cannot execute through another."""
+        reg = ToolRegistry()
+        bridge_a = PydanticAIToolBridge(registry=reg)
+        bridge_b = PydanticAIToolBridge(registry=reg)
+
+        snapshot = bridge_a.freeze([])
+        tool_call = ToolCallPart(tool_name="read_alpha", args="{}")
+        ctx = ExecutionContext(
+            granted_permission=Permission.READ,
+            session_mode=SessionMode.NO_ACTIVE_SESSION,
+        )
+        with pytest.raises(ValidationError, match="different bridge"):
+            bridge_b.execute(snapshot, tool_call, execution_context=ctx)
