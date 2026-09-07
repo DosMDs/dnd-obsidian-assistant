@@ -140,6 +140,38 @@ class DndAgentPolicy:
 
     # ── Public API ──────────────────────────────────────────────────────────
 
+    def validate_binding(
+        self,
+        *,
+        tool_bridge: PydanticAIToolBridge,
+        snapshot: PydanticAIToolSnapshot,
+    ) -> None:
+        """Validate that this policy is bound to the exact bridge and snapshot.
+
+        Required checks:
+        - ``tool_bridge`` is the exact bridge used to construct this policy.
+        - ``snapshot`` is the exact snapshot used to construct this policy.
+        - ``tool_bridge.validate_snapshot(snapshot)`` succeeds.
+
+        This method:
+        - does **not** consume batch state;
+        - does **not** inspect/parse tool calls;
+        - does **not** execute anything.
+
+        Args:
+            tool_bridge: The bridge to validate against.
+            snapshot: The snapshot to validate against.
+
+        Raises:
+            ValidationError: If the bridge or snapshot do not match this
+                policy's construction-time arguments.
+        """
+        if tool_bridge is not self._tool_bridge:
+            raise ValidationError("Policy was constructed with a different tool bridge")
+        if snapshot is not self._snapshot:
+            raise ValidationError("Policy was constructed with a different snapshot")
+        tool_bridge.validate_snapshot(snapshot)
+
     def admit_tool_batch(
         self,
         tool_calls: Sequence[ToolCallPart],

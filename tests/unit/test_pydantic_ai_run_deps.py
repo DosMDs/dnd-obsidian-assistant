@@ -20,7 +20,8 @@ Test matrix
 | DEP-12   | Separate preparations distinct    | not is              |
 | DEP-13   | Policy isolation                  | fresh batch state   |
 | DEP-14   | Same names, different snapshots   | not same snapshot   |
-| DEP-15   | Malformed ExecutionContext        | TypeError           |
+| DEP-15   | Malformed ExecutionContext        | ValidationError      |
+| DEP-15a  | Malformed EC — zero builder reads | ValidationError      |
 | DEP-16   | Invalid user input                | ValidationError     |
 | DEP-17   | Frozen DndAgentDeps               | FrozenInstanceError |
 | DEP-18   | Frozen PreparedDndAgentRun        | FrozenInstanceError |
@@ -389,9 +390,30 @@ class TestInvalidInput:
         self,
         preparer: DndAgentRunPreparer,
     ) -> None:
-        """Malformed ExecutionContext raises TypeError before context reads."""
-        with pytest.raises(TypeError, match="ExecutionContext"):
+        """Malformed ExecutionContext raises ValidationError before context reads."""
+        with pytest.raises(ValidationError, match="execution_context must be an ExecutionContext"):
             preparer.prepare("test query", execution_context=object())  # type: ignore[arg-type]
+
+    def test_dep15a_malformed_ec_zero_builder_reads(
+        self,
+        preparer: DndAgentRunPreparer,
+    ) -> None:
+        """Malformed ExecutionContext causes zero context_builder.build() calls."""
+        build_count: list[int] = [0]
+        original_build = preparer._context_builder.build
+
+        def counting_build(user_input: str) -> AgentContext:
+            build_count[0] += 1
+            return original_build(user_input)
+
+        preparer._context_builder.build = counting_build  # type: ignore[method-assign]
+
+        with pytest.raises(ValidationError):
+            preparer.prepare("test query", execution_context=object())  # type: ignore[arg-type]
+
+        assert build_count[0] == 0, (
+            f"Expected 0 builder calls for malformed EC, got {build_count[0]}"
+        )
 
     def test_dep16_invalid_user_input(
         self,
@@ -545,3 +567,228 @@ print('PASS')
         )
         assert result.returncode == 0, f"Import isolation failed: {result.stderr}"
         assert "PASS" in result.stdout
+
+
+# ==============================================================================
+# PAIM-C10 — Cross-run dependency binding mismatch tests
+# ==============================================================================
+#
+# | Bundle                              | Bridge | Snapshot | Policy | Result          |
+# | ----------------------------------- | ------ | -------- | ------ | --------------- |
+# | Valid run A                         | A      | A        | A      | PreparedRun OK  |
+# | Bridge B + snapshot B + policy A    | B      | B        | A      | ValidationError |
+# | Same bridge + snapshot B + policy A | same   | B        | A      | ValidationError |
+# | Copied snapshot                     | A      | copy(A)  | A      | ValidationError |
+
+
+class TestCrossRunBinding:
+    """PAIM-C10: cross-run dependency binding mismatch tests."""
+
+    def test_c10_valid_run_a(
+        self, preparer: DndAgentRunPreparer, read_context: ExecutionContext
+    ) -> None:
+        """Valid run A produces a valid PreparedDndAgentRun."""
+        run_a = preparer.prepare("query a", execution_context=read_context)
+        assert isinstance(run_a, PreparedDndAgentRun)
+        assert isinstance(run_a.deps, DndAgentDeps)
+
+    def test_c10_bridge_b_snapshot_b_policy_a(
+        self,
+        tool_registry: ToolRegistry,
+        tool_catalog: ToolRegistrySchema,
+        context_builder: AgentContextBuilder,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Bridge B + snapshot B + policy A raises ValidationError."""
+        bridge_a = PydanticAIToolBridge(registry=tool_registry)
+        bridge_b = PydanticAIToolBridge(registry=tool_registry)
+
+        preparer_a = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=tool_catalog,
+            tool_bridge=bridge_a,
+        )
+        preparer_b = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=tool_catalog,
+            tool_bridge=bridge_b,
+        )
+
+        run_a = preparer_a.prepare("query a", execution_context=read_context)
+        run_b = preparer_b.prepare("query b", execution_context=read_context)
+
+        # Construct invalid deps: bridge_b + snapshot_b + policy_a
+        with pytest.raises(ValidationError, match="different tool bridge"):
+            DndAgentDeps(
+                agent_context=run_b.deps.agent_context,
+                execution_context=run_b.deps.execution_context,
+                tool_bridge=run_b.deps.tool_bridge,
+                tool_snapshot=run_b.deps.tool_snapshot,
+                policy=run_a.deps.policy,
+            )
+
+    def test_c10_same_bridge_different_snapshot(
+        self,
+        preparer: DndAgentRunPreparer,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Same bridge + snapshot B + policy A raises ValidationError."""
+        run_a = preparer.prepare("query a", execution_context=read_context)
+        run_b = preparer.prepare("query b", execution_context=read_context)
+
+        # Same bridge, different snapshot, policy A
+        with pytest.raises(ValidationError, match="different snapshot"):
+            DndAgentDeps(
+                agent_context=run_b.deps.agent_context,
+                execution_context=run_b.deps.execution_context,
+                tool_bridge=run_a.deps.tool_bridge,
+                tool_snapshot=run_b.deps.tool_snapshot,
+                policy=run_a.deps.policy,
+            )
+
+    def test_c10_copied_snapshot(
+        self,
+        preparer: DndAgentRunPreparer,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Copied/non-issued snapshot raises ValidationError."""
+        run_a = preparer.prepare("query a", execution_context=read_context)
+
+        copied_snapshot = dataclasses.replace(run_a.deps.tool_snapshot)
+
+        with pytest.raises(ValidationError, match="not issued"):
+            DndAgentDeps(
+                agent_context=run_a.deps.agent_context,
+                execution_context=run_a.deps.execution_context,
+                tool_bridge=run_a.deps.tool_bridge,
+                tool_snapshot=copied_snapshot,
+                policy=run_a.deps.policy,
+            )
+
+    def test_c10_zero_handler_calls(
+        self,
+        preparer: DndAgentRunPreparer,
+        read_context: ExecutionContext,
+        counters: HandlerCounters,
+    ) -> None:
+        """Cross-run mismatch causes zero handler calls."""
+        run_a = preparer.prepare("query a", execution_context=read_context)
+        run_b = preparer.prepare("query b", execution_context=read_context)
+
+        with pytest.raises(ValidationError):
+            DndAgentDeps(
+                agent_context=run_b.deps.agent_context,
+                execution_context=run_b.deps.execution_context,
+                tool_bridge=run_b.deps.tool_bridge,
+                tool_snapshot=run_b.deps.tool_snapshot,
+                policy=run_a.deps.policy,
+            )
+
+        assert counters.alpha == 0
+        assert counters.beta == 0
+        assert counters.write_alpha == 0
+
+
+# ==============================================================================
+# PAIM-C10 — PreparedDndAgentRun exposure mismatch tests
+# ==============================================================================
+#
+# | Scenario                                  | Result          |
+# | ----------------------------------------- | --------------- |
+# | C10-R1 hidden extra public exposure       | ValidationError |
+# | C10-R2 missing public exposure            | ValidationError |
+# | C10-R3 reordered exposure                 | ValidationError |
+
+
+class TestPreparedRunExposure:
+    """PAIM-C10: PreparedDndAgentRun exposure consistency."""
+
+    def test_c10_r1_extra_exposure(
+        self,
+        tool_registry: ToolRegistry,
+        tool_catalog: ToolRegistrySchema,
+        context_builder: AgentContextBuilder,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Extra exposed tool not in snapshot raises ValidationError."""
+        bridge = PydanticAIToolBridge(registry=tool_registry)
+        preparer_obj = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=tool_catalog,
+            tool_bridge=bridge,
+        )
+        run = preparer_obj.prepare("query", execution_context=read_context)
+
+        from dnd_assistant.tools.catalog import ToolPublicDefinition
+
+        # Build extra exposure with a tool not in the snapshot
+        extra_tools = list(run.exposed_tools)
+        extra_tools.append(
+            ToolPublicDefinition(
+                name="nonexistent_tool",
+                description="Not in snapshot",
+                input_schema={"type": "object", "properties": {}},
+                output_schema={"type": "object", "properties": {}},
+                permission=run.exposed_tools[0].permission,
+                side_effects=list(run.exposed_tools[0].side_effects),
+                allowed_session_modes=list(run.exposed_tools[0].allowed_session_modes),
+            )
+        )
+
+        with pytest.raises(ValidationError, match="do not match"):
+            PreparedDndAgentRun(
+                deps=run.deps,
+                exposed_tools=tuple(extra_tools),
+            )
+
+    def test_c10_r2_missing_exposure(
+        self,
+        preparer: DndAgentRunPreparer,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Missing exposed tool raises ValidationError."""
+        run = preparer.prepare("query", execution_context=read_context)
+
+        missing_tools = run.exposed_tools[:-1]  # drop last tool
+
+        with pytest.raises(ValidationError, match="do not match"):
+            PreparedDndAgentRun(
+                deps=run.deps,
+                exposed_tools=missing_tools,
+            )
+
+    def test_c10_r3_reordered_exposure(
+        self,
+        preparer: DndAgentRunPreparer,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Reordered exposed tools raise ValidationError."""
+        run = preparer.prepare("query", execution_context=read_context)
+
+        reordered = tuple(reversed(run.exposed_tools))
+
+        with pytest.raises(ValidationError, match="do not match"):
+            PreparedDndAgentRun(
+                deps=run.deps,
+                exposed_tools=reordered,
+            )
+
+    def test_c10_r3_zero_handler_calls(
+        self,
+        preparer: DndAgentRunPreparer,
+        read_context: ExecutionContext,
+        counters: HandlerCounters,
+    ) -> None:
+        """Exposure mismatch causes zero handler calls."""
+        run = preparer.prepare("query", execution_context=read_context)
+        reordered = tuple(reversed(run.exposed_tools))
+
+        with pytest.raises(ValidationError):
+            PreparedDndAgentRun(
+                deps=run.deps,
+                exposed_tools=reordered,
+            )
+
+        assert counters.alpha == 0
+        assert counters.beta == 0
+        assert counters.write_alpha == 0

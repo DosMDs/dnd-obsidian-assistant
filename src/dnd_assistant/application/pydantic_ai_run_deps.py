@@ -92,12 +92,56 @@ class DndAgentDeps:
     policy: DndAgentPolicy
 
     def __post_init__(self) -> None:
-        """Validate that the policy is bound to the exact snapshot in this bundle."""
-        # Deferred import to avoid eager loading of DndAgentPolicy at module scope.
-        from dnd_assistant.application.dnd_agent_policy import DndAgentPolicy as DAP
+        """Validate that all five fields have correct runtime types and binding.
 
+        Raises:
+            ValidationError: If any field has a malformed runtime type or
+                if the policy is not bound to the exact bridge and snapshot
+                in this bundle.
+        """
+        from dnd_assistant.application.agent_context import AgentContext as AC
+        from dnd_assistant.application.dnd_agent_policy import DndAgentPolicy as DAP
+        from dnd_assistant.application.pydantic_ai_tool_bridge import (
+            PydanticAIToolBridge as PTB,
+        )
+        from dnd_assistant.application.pydantic_ai_tool_bridge import (
+            PydanticAIToolSnapshot as PTS,
+        )
+        from dnd_assistant.errors import ValidationError as VE
+        from dnd_assistant.tools.types import ExecutionContext as EC
+
+        # 1. Runtime type validation for all five fields
+        if not isinstance(self.agent_context, AC):
+            raise VE(
+                f"agent_context must be an AgentContext instance, "
+                f"got {type(self.agent_context).__name__}"
+            )
+        if not isinstance(self.execution_context, EC):
+            raise VE(
+                f"execution_context must be an ExecutionContext instance, "
+                f"got {type(self.execution_context).__name__}"
+            )
+        if not isinstance(self.tool_bridge, PTB):
+            raise VE(
+                f"tool_bridge must be a PydanticAIToolBridge instance, "
+                f"got {type(self.tool_bridge).__name__}"
+            )
+        if not isinstance(self.tool_snapshot, PTS):
+            raise VE(
+                f"tool_snapshot must be a PydanticAIToolSnapshot instance, "
+                f"got {type(self.tool_snapshot).__name__}"
+            )
         if not isinstance(self.policy, DAP):
-            raise TypeError("policy must be a DndAgentPolicy instance")
+            raise VE(f"policy must be a DndAgentPolicy instance, got {type(self.policy).__name__}")
+
+        # 2. Validate bridge-issued snapshot
+        self.tool_bridge.validate_snapshot(self.tool_snapshot)
+
+        # 3. Validate policy binding
+        self.policy.validate_binding(
+            tool_bridge=self.tool_bridge,
+            snapshot=self.tool_snapshot,
+        )
 
 
 # ── Prepared run ───────────────────────────────────────────────────────────────
@@ -119,6 +163,37 @@ class PreparedDndAgentRun:
 
     deps: DndAgentDeps
     exposed_tools: tuple[ToolPublicDefinition, ...]
+
+    def __post_init__(self) -> None:
+        """Validate that exposed tool names match the authoritative snapshot.
+
+        Raises:
+            ValidationError: If ``exposed_tools`` is not a tuple, contains
+                non-``ToolPublicDefinition`` items, or the name sequence
+                does not match the snapshot names exactly (same order).
+        """
+        from dnd_assistant.errors import ValidationError as VE
+        from dnd_assistant.tools.catalog import ToolPublicDefinition as TPD
+
+        if not isinstance(self.exposed_tools, tuple):
+            raise VE("exposed_tools must be a tuple")
+
+        for i, item in enumerate(self.exposed_tools):
+            if not isinstance(item, TPD):
+                raise VE(
+                    f"exposed_tools[{i}] must be a ToolPublicDefinition instance, "
+                    f"got {type(item).__name__}"
+                )
+
+        exposed_names = tuple(t.name for t in self.exposed_tools)
+        snapshot_names = self.deps.tool_snapshot.names
+        if exposed_names != snapshot_names:
+            raise VE(
+                f"Exposed tool names {exposed_names} do not match snapshot names {snapshot_names}"
+            )
+
+        # Re-validate deps binding (structural validation + bridge + policy)
+        self.deps.tool_bridge.validate_snapshot(self.deps.tool_snapshot)
 
 
 # ── Preparer ───────────────────────────────────────────────────────────────────
@@ -206,19 +281,17 @@ class DndAgentRunPreparer:
             ValidationError: If ``execution_context`` is malformed or
                 ``user_input`` is invalid (propagated from
                 ``AgentContextBuilder``).
-            TypeError: If ``execution_context`` is not an
-                ``ExecutionContext`` instance (raised before any context
-                reads).
         """
         # Deferred runtime imports: keep provider/tool/storage packages out
         # of module-import scope.
         from dnd_assistant.application.agent_tool_selection import select_agent_tools
         from dnd_assistant.application.dnd_agent_policy import DndAgentPolicy
+        from dnd_assistant.errors import ValidationError as VE
         from dnd_assistant.tools.types import ExecutionContext as EC
 
         # 1. Validate ExecutionContext runtime type (fail before context reads)
         if not isinstance(execution_context, EC):
-            raise TypeError(
+            raise VE(
                 f"execution_context must be an ExecutionContext instance, "
                 f"got {type(execution_context).__name__}"
             )
