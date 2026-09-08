@@ -152,15 +152,8 @@ class AgentToolExecutionService:
             context=execution_context,
         )
 
-        # 7. Deterministic TOOL-result JSON serialisation.
-        tool_message = _build_tool_message(output, tool_call)
-
-        # 8. Return frozen result.
-        return AgentToolExecutionResult(
-            tool_call=tool_call,
-            output=output,
-            tool_message=tool_message,
-        )
+        # 7. Deterministic TOOL-result JSON serialisation via shared helper.
+        return build_agent_tool_execution_result(tool_call, output)
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────────────
@@ -220,6 +213,31 @@ def _json_args_equal(left: object, right: object) -> bool:
             return False
         return all(_json_args_equal(a, b) for a, b in zip(left, right, strict=True))
     return left == right
+
+
+def build_agent_tool_execution_result(
+    tool_call: ToolCall,
+    output: BaseModel,
+) -> AgentToolExecutionResult:
+    """Build a frozen ``AgentToolExecutionResult`` from a tool call and output.
+
+    Reuses the deterministic TOOL-message serialisation from
+    ``_build_tool_message``.  This is the shared factory used by both
+    ``AgentToolExecutionService`` and ``PydanticAIAgentRuntime``.
+
+    Args:
+        tool_call: The ``ToolCall`` that was executed.
+        output: The validated typed ``BaseModel`` from ``ToolExecutor``.
+
+    Returns:
+        An ``AgentToolExecutionResult`` with deterministic TOOL message.
+    """
+    tool_message = _build_tool_message(output, tool_call)
+    return AgentToolExecutionResult(
+        tool_call=tool_call,
+        output=output,
+        tool_message=tool_message,
+    )
 
 
 def _build_tool_message(

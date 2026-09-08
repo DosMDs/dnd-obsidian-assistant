@@ -4059,3 +4059,239 @@ PAIM-08 — Replace bounded AgentLoop mechanics
 ```
 
 Do not begin PAIM-08 automatically.
+
+## 36. PAIM-08 completion record — Replace bounded AgentLoop mechanics
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `176170a5625e5f5d5fe9b4f6e1a1a5e3c9c9a9a9`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### New production runtime
+
+| Field | Value |
+|---|---|
+| Module | `src/dnd_assistant/application/pydantic_ai_agent_runtime.py` |
+| Class | `PydanticAIAgentRuntime` |
+| Line count | 576 |
+| Constructor | `PydanticAIAgentRuntime(*, run_preparer: DndAgentRunPreparer, model: Model)` |
+| Entry method | `run(user_input: str, *, execution_context: ExecutionContext) -> AgentRunResult` |
+
+### Framework configuration
+
+```text
+Agent deps_type:         type(prepared.deps)  (DndAgentDeps)
+Instructions:            SYSTEM_PROMPT (agent_v2)
+Output types:            str | DeferredToolRequests
+Tool retries:            0
+Output retries:          0
+UsageLimits:             request_limit=2
+Runtime toolset:         fresh ExternalToolset per run via to_external_toolset()
+Deferred handler:        fresh HandleDeferredToolCalls per run (closure-scoped)
+```
+
+### Bounded flow
+
+```text
+1. DndAgentRunPreparer.prepare(user_input, execution_context=...)
+2. build_agent_request(prepared.deps.agent_context)  [shared projection]
+3. fresh ExternalToolset from issued snapshot
+4. fresh HandleDeferredToolCalls (bound to this run)
+5. one Pydantic AI run (request_limit=2)
+       ├── request #1: text OR DeferredToolRequests
+       ├── deferred handler: policy → bridge → build_results
+       └── request #2: terminal text
+6. map to AgentRunResult
+```
+
+### Observable parity
+
+| Scenario | Tool calls | Model requests | Tool executions | Outcome |
+|---|---|---|---|---|
+| P8-01 direct respond | 0 | 1 | 0 | RESPOND |
+| P8-02 direct clarify | 0 | 1 | 0 | CLARIFY |
+| P8-03 single READ → respond | 1 | 2 | 1 | RESPOND |
+| P8-04 single READ → clarify | 1 | 2 | 1 | CLARIFY |
+| P8-05 single WRITE → respond | 1 | 2 | 1 | RESPOND |
+| P8-06 2 READ sequential | 2 | 2 | 2 | RESPOND |
+| P8-07 4 READ maximum | 4 | 2 | 4 | RESPOND |
+| P8-08 repeated same READ | 2 | 2 | 2 | RESPOND |
+
+### Deterministic tool-result replay
+
+| Property | Value |
+|---|---|
+| Tool message role | `MessageRole.TOOL` |
+| Tool message content | Deterministic compact JSON (`{"result":"alpha:replay"}`) |
+| Content format | `json.dumps(..., ensure_ascii=False, sort_keys=True, separators=(",", ":"))` |
+| Tool name preserved | YES |
+| Tool call ID preserved | YES |
+
+### Same exposure on both requests
+
+```text
+Request #1 AgentInfo.function_tools:    read_alpha, read_beta
+Request #2 AgentInfo.function_tools:    read_alpha, read_beta
+Exact object identity:                  YES
+```
+
+### Context preparation exactly once
+
+```text
+AgentContextBuilder.build() calls:      1
+```
+
+### Same framework run continuation
+
+```text
+Both model requests inside one agent.run_sync():    YES
+```
+
+### Safety matrix
+
+| Scenario | Exception | Model requests | Tool executions | Handler calls |
+|---|---|---|---|---|
+| P8-13 5 calls | `ModelError` | 1 | 0 | 0 |
+| P8-14 READ+WRITE | `ModelError` | 1 | 0 | 0 |
+| P8-15 WRITE+WRITE | `ModelError` | 1 | 0 | 0 |
+| P8-16 duplicate ID | `ModelError` | 1 | 0 | 0 |
+| P8-17 unknown tool | `ModelError` | 1 | 0 | 0 |
+| P8-18 hidden tool | `ModelError` | 1 | 0 | 0 |
+| P8-19 invalid schema | `ValidationError` | 1 | 0 | 0 |
+| P8-20 sequential fail-fast | `ValidationError` | 1 | 1 | 1 |
+| P8-21 second deferred batch | `ModelError` | 2 | 1 | 1 |
+| P8-22 malformed direct outcome | `ModelError` | 1 | 0 | 0 |
+| P8-23 malformed post-tool outcome | `ModelError` | 2 | 1 | 1 |
+
+### First-response preservation
+
+```text
+P8-24 text + tool call:
+  initial_decision.response.message.content:  "Looking up..."
+  tool_calls[0].name:                         "read_alpha"
+  tool_executions count:                      1
+```
+
+### ThinkingPart hiding
+
+```text
+P8-25 ThinkingPart + ToolCallPart:
+  content surfaced:                           None (only TextPart)
+  tool execution:                             1
+```
+
+### Tool-call ID behavior
+
+| Scenario | Result |
+|---|---|
+| P8-26 omitted IDs | Framework assigns unique non-None IDs |
+| P8-27 explicit None ID | Framework resolves inline, execution proceeds |
+
+### Import boundary (P8-28)
+
+A fresh-process import of `pydantic_ai_agent_runtime` must not eagerly load:
+
+```text
+dnd_assistant.models.gateway
+dnd_assistant.models.ollama
+dnd_assistant.storage
+dnd_assistant.retrieval
+dnd_assistant.cli
+dnd_assistant.tools.executor
+```
+
+**Result:** PASS — all six forbidden module prefixes are absent from `sys.modules` after a fresh import.
+
+### Shared helper extraction
+
+`agent_tool_execution.py` gained one public factory function:
+
+```python
+def build_agent_tool_execution_result(
+    tool_call: ToolCall,
+    output: BaseModel,
+) -> AgentToolExecutionResult:
+```
+
+This is the shared deterministic TOOL-message factory used by both
+`AgentToolExecutionService` and `PydanticAIAgentRuntime`.
+
+### Scope confirmation
+
+```text
+AgentLoop unchanged:                        YES
+AgentToolExecutionService unchanged:        YES (shared helper extracted)
+Tool Layer unchanged:                       YES
+ModelGateway unchanged:                     YES
+Ollama unchanged:                           YES
+Prompt unchanged:                           YES
+CLI unchanged:                              YES
+FastAgent unchanged:                        YES
+PydanticAIFastAgent unchanged:              YES
+
+No ToolExecutor import at module level:     YES (import boundary test)
+No storage/retrieval/cli import:            YES (import boundary test)
+
+pyproject.toml unchanged:                   YES
+uv.lock unchanged:                          YES
+```
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_agent_runtime.py    (new, 576 lines)
+src/dnd_assistant/application/agent_tool_execution.py          (modified)
+
+tests/integration/test_pydantic_ai_agent_runtime.py            (new, 843 lines)
+tests/integration/test_pydantic_ai_agent_runtime_boundaries.py (new, 843 lines)
+
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| PAIM-08 core tests | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime.py -v` | 12 passed |
+| PAIM-08 boundary tests | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime_boundaries.py -v` | 16 passed |
+| PAIM-08 total | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime.py tests/integration/test_pydantic_ai_agent_runtime_boundaries.py -v` | 28 passed |
+| PAIM-07 fast agent | `uv run pytest tests/integration/test_pydantic_ai_fast_agent.py -v` | (reported in Final Report) |
+| PAIM-07 boundaries | `uv run pytest tests/integration/test_pydantic_ai_fast_agent_boundaries.py -v` | (reported in Final Report) |
+| PAIM-07 evidence | `uv run pytest tests/integration/test_pydantic_ai_fast_agent_evidence.py -v` | (reported in Final Report) |
+| PAIM-06 deps | `uv run pytest tests/unit/test_pydantic_ai_run_deps.py -v` | (reported in Final Report) |
+| PAIM-06 context deps | `uv run pytest tests/integration/test_pydantic_ai_context_deps.py -v` | (reported in Final Report) |
+| DndAgentPolicy | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | (reported in Final Report) |
+| Tool bridge | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | (reported in Final Report) |
+| Bridge authority | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | (reported in Final Report) |
+| Blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | (reported in Final Report) |
+| Blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | (reported in Final Report) |
+| Blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | (reported in Final Report) |
+| Qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | (reported in Final Report) |
+| Reference FastAgent | `uv run pytest tests/unit/test_fast_agent.py -v` | (reported in Final Report) |
+| Reference FastAgent boundaries | `uv run pytest tests/unit/test_fast_agent_boundaries.py -v` | (reported in Final Report) |
+| Reference AgentLoop | `uv run pytest tests/unit/test_agent_loop.py -v` | (reported in Final Report) |
+| Agent tool execution | `uv run pytest tests/unit/test_agent_tool_execution.py -v` | (reported in Final Report) |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | (reported in Final Report) |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | (reported in Final Report) |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | (reported in Final Report) |
+| Canonical full suite | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Effective PAIM-08 decision
+
+```text
+ACCEPTED
+PAIM-08 — DONE
+```
+
+### Next task
+
+```text
+PAIM-09 — Ollama integration decision gate
+```
+
+Do not begin PAIM-09 automatically.
