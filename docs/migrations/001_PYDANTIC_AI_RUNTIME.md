@@ -5484,6 +5484,227 @@ Active next task: PAIM-10 — Sync/thread-safety gate
 
 ---
 
+## 44. PAIM-10 completion record — Sync/thread-safety gate
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `37adc76ecde5db4775d67da1a4b69d4fa228db1c`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### PAIM-10 decision
+
+```text
+PASS — SAME-THREAD SYNC RUNTIME
+```
+
+### Framework facts
+
+| Aspect | Mechanism |
+|---|---|
+| `Agent.run_sync()` | `pydantic_graph._utils.run_until_complete()` → current/caller event loop → `loop.run_until_complete(task)` |
+| `HandleDeferredToolCalls` sync handler | Called directly by `handle_deferred_tool_calls()` — checks `inspect.isawaitable(result)` and returns sync result unchanged |
+| Generic `run_in_executor` | `pydantic_ai._utils.run_in_executor()` — uses `anyio.to_thread.run_sync` or `loop.run_in_executor(executor, ...)` — used for generic sync callbacks (FunctionModel, @agent.tool_plain) but NOT for HandleDeferredToolCalls |
+
+### Thread identity
+
+| Point | Thread ID |
+|---|---|
+| caller before | same |
+| preparer | same |
+| policy | same |
+| bridge | same |
+| caller after | same |
+
+All project path IDs equal: **YES**
+
+The `FunctionModel` callback itself may execute on a different thread (generic sync callback dispatched through `run_in_executor`). This is expected framework behavior and does not affect the D&D external-tool path.
+
+### Executor evidence
+
+```text
+Pydantic _utils.run_in_executor calls on D&D path:
+0 (bridge.execute completed successfully inline)
+
+generic sync callback caller thread:
+<test caller>
+
+generic sync callback execution thread:
+<may differ>
+
+different:
+YES (confirmed — generic sync callbacks CAN be worker-thread dispatched)
+```
+
+### ContextVar evidence
+
+```text
+production ContextVar inventory:
+NONE — no ContextVar usage in src/dnd_assistant/
+
+caller value readable by preparer:
+YES
+
+caller value readable by deferred handler (policy):
+YES
+
+caller value readable by bridge.execute:
+YES
+
+write inside run visible later in same run:
+YES
+
+write inside run visible in outer caller after run:
+NO (asyncio task-local semantics — writes are run/task-local)
+```
+
+### SQLite evidence
+
+```text
+default check_same_thread:
+YES (unchanged — not set to False)
+
+connection owner thread:
+<caller thread>
+
+handler thread:
+<caller thread>
+
+query succeeds:
+YES
+
+production SQLite inventory:
+src/dnd_assistant/retrieval/index.py — operation-local sqlite3.connect()
+per call, no persistent shared Connection objects
+```
+
+### Runtime reuse
+
+```text
+sequential runs (A, B, C):
+all PASS
+
+fresh policies:
+YES
+
+failure → next run recovery:
+PASS
+```
+
+### Worker-thread ownership
+
+```text
+runtime created inside worker:
+YES
+
+runtime executed in same worker:
+YES
+
+project execution thread:
+same worker thread
+
+success:
+YES
+```
+
+### Active-loop limitation
+
+`Agent.run_sync()` cannot be used from code already running an asyncio event loop. The subprocess test confirms `RuntimeError` is raised. The current supported MVP composition is sync CLI only. No async application API is added in PAIM-10.
+
+### Production decision
+
+```text
+production runtime changes:
+NONE
+
+thread pool:
+NONE
+
+SQLite safety weakening:
+NONE
+
+async rewrite:
+NONE
+
+ContextVar application dependency:
+NONE
+```
+
+### Migration history
+
+```text
+sections 1–43 unchanged:
+YES (byte-identical to starting SHA 37adc76e...)
+
+section 44 appended:
+YES
+```
+
+### Status
+
+```text
+PAIM-10 DONE
+PAIM-11 NOT STARTED
+Active next task: PAIM-11 — Full Stage-9 behavioral parity
+```
+
+### Changed files
+
+```text
+A tests/integration/test_pydantic_ai_sync_thread_safety.py
+A tests/integration/test_pydantic_ai_sync_thread_contract.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+Expected unchanged:
+
+```text
+src/**
+pyproject.toml
+uv.lock
+```
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| PAIM-10 thread safety (P10-E01–E07) | 7 passed |
+| PAIM-10 thread contract (P10-E08–E10) | 3 passed |
+| PAIM-08 runtime + boundaries + evidence + parity | 80 passed |
+| PAIM-09 unit + integration | 41 passed |
+| PAIM-07 fast agent + boundaries + evidence | 53 passed |
+| PAIM-06 deps + context | 43 passed |
+| PAIM-05 policy | 51 passed |
+| PAIM-04 bridge + authority | 49 passed |
+| Tool executor + registry + catalog | 70 passed |
+| Contract boundaries + maintainability + harness | 527 passed |
+| Canonical full suite | **4992 passed, 102 skipped, 0 failed, 0 errors** |
+
+### Ruff
+
+```text
+ruff check .:                        All checks passed
+ruff format --check .:               358 files already formatted
+                                      1 historical Markdown exception (sections 1–43)
+git diff --check:                    No whitespace errors
+```
+
+### Finalization
+
+```text
+commit SHA:                         (reported in Final Report)
+commit message:                     test: prove Pydantic AI sync thread safety (PAIM-10)
+push result:                        (reported in Final Report)
+HEAD == upstream:                   (reported in Final Report)
+working tree clean:                 (reported in Final Report)
+
+effective PAIM-10:                  DONE
+next:                               PAIM-11 — Full Stage-9 behavioral parity
+```
+
+Do not begin PAIM-11 automatically.
+
 ## 43. PAIM-C20 correction record — Seal PAIM-09 transport and continuation evidence
 
 ### C20-E1 — Exact HTTP transport attempt count
