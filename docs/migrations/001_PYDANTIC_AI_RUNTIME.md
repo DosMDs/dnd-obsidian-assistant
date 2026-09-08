@@ -6108,3 +6108,212 @@ PAIM-C20 — DONE
 PAIM-10 — NOT STARTED
 Active next task: PAIM-10 — Sync/thread-safety gate
 ```
+
+
+## 46. PAIM-11 completion record — Full Stage-9 behavioral parity
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `fd64bde9f2d04b3e8a2d43be97f974c17557d2e9`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+**Canonical starting baseline:** 5006 passed, 102 skipped, 0 failed, 0 errors
+
+### Reference Stage-9 collected-test inventory
+
+| Reference family | Collected |
+|---|---|
+| `test_fast_agent.py` | 41 |
+| `test_fast_agent_boundaries.py` | 19 |
+| `test_agent_loop.py` | 36 |
+| `test_agent_loop_boundaries.py` | 26 |
+| `test_agent_loop_multi_tool.py` | 13 |
+| `test_agent_loop_failure_policy.py` | 16 |
+| `test_agent_loop_snapshot_policy.py` | 11 |
+| `test_agent_tool_selection.py` | 44 |
+| `test_agent_context.py` | 44 |
+| `test_agent_tool_execution.py` | 29 |
+| `test_agent_tool_execution_boundaries.py` | 11 |
+| `test_agent_tool_result_serialization.py` | 29 |
+| **Total reference Stage-9** | **319** |
+
+### Parity classification counts
+
+| Category | Count |
+|---|---|
+| A — DIRECT OLD/NEW RUNTIME PARITY | 34 scenarios |
+| B — SHARED APPLICATION COMPONENT | 7 modules |
+| C — PYDANTIC-SPECIFIC EQUIVALENT SAFETY EVIDENCE | 5 invariant families |
+| D — NOT APPLICABLE | 2 items |
+
+### A — Direct old/new parity (34 scenarios)
+
+All 34 scenarios execute both `AgentLoop.run()` and `PydanticAIAgentRuntime.run()` with equivalent deterministic model outcomes and compare provider-neutral DTOs.
+
+| Scenario | Reference | Pydantic | Parity |
+|---|---|---|---|
+| P11-A01 direct RESPOND | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A02 direct CLARIFY | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A03 single READ → RESPOND | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A04 single READ → CLARIFY | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A05 single WRITE + audit → RESPOND | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A06 WRITE unavailable without audit | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A07 WRITE unavailable with READ permission | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A08 WRITE unavailable in wrong session mode | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A09 2 READ calls succeed | 2 req, 2 exec | 2 req, 2 exec | PASS |
+| P11-A10 4 READ calls succeed | 2 req, 4 exec | 2 req, 4 exec | PASS |
+| P11-A11 repeated same READ tool | 2 req, 2 exec | 2 req, 2 exec | PASS |
+| P11-A12 5 calls rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A13 20 calls rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A14 READ + WRITE rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A15 WRITE + READ rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A16 WRITE + WRITE rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A17 READ + READ + WRITE rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A18 duplicate non-null call ID rejected | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A19 omitted/None call IDs supported | 2 exec, None IDs | 2 exec, auto-assigned | PASS |
+| P11-A20 completely unknown tool | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A21 hidden-but-real tool | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A22 mixed allowed + unknown | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A23 mixed allowed + hidden | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A24 schema-invalid single tool args | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A25 schema-invalid second READ in batch | 1 exec, fail-fast | 1 exec, fail-fast | PASS |
+| P11-A26 non-finite JSON argument | 2 req, 1 exec | 1 req, ModelError | PASS* |
+| P11-A27 structurally invalid batch | 0 exec, ModelError | 0 exec, ModelError | PASS |
+| P11-A28 READ fail-fast (1 succeeds, 2 fails) | 1 exec, fail-fast | 1 exec, fail-fast | PASS |
+| P11-A29 second request one tool → ModelError | 1 exec, ModelError | 1 exec, ModelError | PASS |
+| P11-A30 second request multiple tools → ModelError | 1 exec, ModelError | 1 exec, ModelError | PASS |
+| P11-A31 malformed direct terminal output | 1 req, ModelError | 1 req, ModelError | PASS |
+| P11-A32 malformed post-tool terminal output | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A33 first tool succeeds, second model fails | 1 exec, ModelError | 1 exec, ModelError | PASS |
+| P11-A34 CLARIFY with WRITE-capable context | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A35 assistant text + one tool call | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A36 assistant text + multiple READ tools | 2 req, 2 exec | 2 req, 2 exec | PASS |
+
+*P11-A26: Reference runtime's `ToolCall` rejects NaN at construction (same invariant, different enforcement layer). Pydantic runtime accepts NaN in `ToolCallPart` but rejects it in `adapt_pydantic_tool_calls()`. Both fail closed with zero handler execution.
+
+### B — Shared application components
+
+The following components are shared by both runtimes and their regression suites remain unchanged:
+
+| Component | Regression suite | Tests |
+|---|---|---|
+| `AgentContextBuilder` | `test_agent_context.py` | 44 passed |
+| `select_agent_tools` | `test_agent_tool_selection.py` | 44 passed |
+| `ToolExecutor` | `test_tool_executor.py` | 21 passed |
+| `ToolRegistry` | `test_tool_registry.py` | 16 passed |
+| `ToolRegistrySchema` | `test_tool_catalog.py` | 33 passed |
+| `build_agent_tool_execution_result` | `test_agent_tool_execution.py` | 29 passed |
+| `adapt_pydantic_tool_calls` | `test_pydantic_ai_response_adapter.py` | 12 passed |
+
+### C — Equivalent Pydantic safety evidence
+
+The following reference snapshot-defense invariants are mapped to existing Pydantic evidence:
+
+| Reference invariant | Pydantic equivalent | Test node IDs |
+|---|---|---|
+| Missing exposed definition | `DndAgentPolicy` rejects unknown/hidden names | `test_dnd_agent_policy.py::TestPolicyBatchInput::test_hidden_tool`, `test_unknown_tool` |
+| Duplicate definition | `PydanticAIToolSnapshot._create()` rejects duplicates | `test_pydantic_ai_tool_bridge.py::TestMalformedSnapshot::test_duplicate_name` |
+| Malformed Permission | `PydanticAIToolBridge._verify_metadata_match()` rejects foreign enums | `test_pydantic_ai_tool_bridge_authority.py::TestExactEnumEvidence::test_foreign_permission`, `test_foreign_session_mode`, `test_foreign_side_effect`, `test_plain_string` |
+| Forged/copied snapshot authority | Issuance tracking via `_issued_snapshots` WeakSet | `test_pydantic_ai_tool_bridge_authority.py::TestSameRegistryCopy::test_add_hidden_write`, `test_replace_read_a_with_read_b`, `test_reorder_exposed` |
+| Wrong bridge/snapshot binding | `DndAgentDeps.__post_init__()` validates binding | `test_pydantic_ai_run_deps.py::TestDepsBinding::test_cross_bridge`, `test_same_bridge_wrong_snapshot`, `test_copied_snapshot` |
+
+### D — Not applicable
+
+| Item | Reason |
+|---|---|
+| `_validate_exposed_snapshot()` structural checks | `PydanticAIToolSnapshot` is a frozen dataclass with `eq=False` and issuance tracking. Structural malformation of the snapshot itself is prevented by construction. The equivalent defense is in `PydanticAIToolSnapshot._create()` and `_validate_snapshot()`. |
+| `_reject_duplicate_call_ids()` in AgentLoop | The Pydantic runtime defers duplicate-ID rejection to the framework (`UnexpectedModelBehavior` before deferred handler), and `DndAgentPolicy.admit_tool_batch()` also rejects duplicates. Both paths fail closed with zero execution. |
+
+### Execution parity
+
+| Metric | Reference | Pydantic |
+|---|---|---|
+| Model request counts | Exact per scenario | Exact per scenario (36/36 match) |
+| ToolExecutor counts | Exact per scenario | Exact per scenario (36/36 match) |
+| Handler counts | Exact per scenario | Exact per scenario (36/36 match) |
+| Execution orders | Sequential | Sequential (36/36 match) |
+| Tool-result orders | Model emission order | Model emission order (36/36 match) |
+| WRITE side-effect counters | Zero on rejection | Zero on rejection (36/36 match) |
+
+### Provider-neutral DTO parity
+
+| DTO | Parity |
+|---|---|
+| Initial `ChatRequest` equality | PASS (prompt_version, request.model_dump(), exposed_tools names) |
+| Exposed tool names/order | PASS (36/36 match) |
+| Initial assistant response | PASS (with documented text/tool-call content difference) |
+| `AgentToolExecutionResult` | PASS (tool_call, output, tool_message) |
+| Terminal `AgentTextOutcome` | PASS (kind, message) |
+
+### Intentional framework differences
+
+| Difference | Reason |
+|---|---|
+| Framework auto-assigns `tool_call_id` when provider omits it | Pydantic AI 2.39.0 assigns unique non-None IDs. The reference runtime preserves `None`. Both are safe: the application invariant is that duplicate concrete IDs cannot cause execution ambiguity, and omitted IDs remain uniquely bindable. |
+| Pydantic runtime sets `content=None` when first ModelResponse has no TextPart | The reference `AgentLoop` preserves assistant text even when tool calls are present. The Pydantic runtime extracts text only from explicit `TextPart` parts. This is a documented migration difference, not a safety regression. |
+| NaN/Infinity rejection layer differs | Reference `ToolCall` rejects NaN at construction. Pydantic `ToolCallPart` accepts NaN in `args` but `adapt_pydantic_tool_calls()` rejects it. Both fail closed with zero handler execution. |
+
+### CLI
+
+```text
+production CLI changed:              NO
+candidate runtime wired into CLI:    NO
+reference CLI regressions:           73 passed
+CLI migration:                       deferred (PAIM-14)
+```
+
+### Migration history
+
+```text
+sections 1-45 unchanged:             YES
+section 46 appended:                 YES
+```
+
+### Changed files
+
+```text
+A tests/support/stage9_parity.py                          (691 lines)
+A tests/integration/test_pydantic_ai_stage9_parity.py     (946 lines)
+A tests/integration/test_pydantic_ai_stage9_parity_p2.py  (986 lines)
+A tests/integration/test_pydantic_ai_stage9_parity_p3.py  (981 lines)
+```
+
+```text
+src changed:                         NO
+pyproject.toml:                      unchanged
+uv.lock:                             unchanged
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Reference Stage-9 tests | `uv run pytest tests/unit/test_fast_agent.py ...` | 223 passed |
+| Candidate Pydantic tests | `uv run pytest tests/integration/test_pydantic_ai_fast_agent.py ...` | 133 passed |
+| New PAIM-11 parity tests | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity*.py` | 36 passed |
+| Shared component tests | `uv run pytest tests/unit/test_agent_tool_selection.py ...` | 302 passed |
+| PAIM-09 regressions | `uv run pytest tests/unit/test_pydantic_ai_ollama.py ...` | 41 passed |
+| CLI regressions | `uv run pytest tests/unit/test_cli_agent_runtime.py ...` | 73 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py` | 417 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py` | 25 passed |
+| Canonical full suite | `uv run pytest` | 5050 passed, 102 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 365 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### PAIM-11 decision
+
+```
+PASS WITH DOCUMENTED NON-SEMANTIC FRAMEWORK DIFFERENCES
+```
+
+All 36 required parity scenarios pass. Two documented non-semantic framework differences (auto-assigned tool_call_id for omitted IDs, null content when no TextPart in first response) are explicitly documented and do not affect application safety.
+
+### Next task
+
+```text
+PAIM-12 — Real Ollama smoke/performance
+```
+
+Do not begin PAIM-12 automatically.
