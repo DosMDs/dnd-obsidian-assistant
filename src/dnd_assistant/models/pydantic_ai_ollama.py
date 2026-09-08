@@ -64,13 +64,15 @@ def build_pydantic_ai_ollama_model(
         ``OllamaProvider``.
 
     Raises:
-        ValidationError: If the profile has a non-ollama provider, a
-            non-AGENT role, or a non-None ``keep_alive`` value.
-        TypeError: If ``profile`` is not a ``ModelProfile`` instance.
+        ValidationError: If ``profile`` is not a ``ModelProfile`` instance,
+            or has a non-ollama provider, a non-AGENT role, or a non-None
+            ``keep_alive`` value.
     """
     # ── Runtime type check ──────────────────────────────────────────────
     if not isinstance(profile, ModelProfile):
-        raise TypeError(f"profile must be a ModelProfile instance, got {type(profile).__name__}")
+        raise ValidationError(
+            f"profile must be a ModelProfile instance, got {type(profile).__name__}"
+        )
 
     # ── Provider validation ─────────────────────────────────────────────
     if profile.provider != "ollama":

@@ -5230,3 +5230,253 @@ working tree clean:                 (reported in Final Report)
 effective PAIM-09:                  DONE
 next:                               PAIM-10 — Sync/thread-safety gate
 ```
+
+## 42. PAIM-C19 correction record — Close PAIM-09 factory/runtime evidence defects
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `bddae45c491b2489e31d6256c0c75e7e74e808e0`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+Independent review of PAIM-09 identified four defects:
+
+1. **C19-D01** — malformed ``profile`` uses ``TypeError`` instead of project
+   ``ValidationError``.
+2. **C19-D02** — integration tests bypass the production factory by
+   duplicating ``build_pydantic_ai_ollama_model()`` logic in a test helper.
+3. **C19-D03** — section 41 incorrectly claims 111 physical lines; the
+   committed file has 160 (now 162 after correction).
+4. **C19-D04** — ``DEVELOPMENT_STATUS.md`` active-next task still points to
+   ``PAIM-09`` instead of ``PAIM-10``.
+
+### C19-D01 — malformed profile error contract
+
+**Before:** ``TypeError`` for ``object()``, ``dict``, or duck-fake ``profile``.
+
+**After:** ``ValidationError`` for all malformed runtime types, before any
+framework/provider construction.
+
+| Input | Before | After |
+|---|---|---|
+| ``object()`` | ``TypeError`` | ``ValidationError`` |
+| ``{"provider": "ollama"}`` | ``TypeError`` | ``ValidationError`` |
+| Duck-typed fake | not tested | ``ValidationError`` |
+
+Provider, role, ``keep_alive``, and temperature validation remain unchanged.
+
+### C19-D02 — production factory integration
+
+**Before:** ``_make_runtime()`` test helper duplicated the production
+factory logic:
+
+```text
+_normalize_v1()
+→ manual OllamaProvider(base_url=..., http_client=...)
+→ manual ModelSettings(...)
+→ manual OllamaModel(...)
+```
+
+**After:** ``_make_runtime()`` calls the real production factory:
+
+```text
+build_pydantic_ai_ollama_model(profile)
+→ official OllamaModel
+→ official OllamaProvider (with mock http_client injected via
+  monkeypatch on the production module's namespace)
+→ PydanticAIAgentRuntime
+```
+
+The mock ``http_client`` is injected by temporarily replacing
+``OllamaProvider`` in the production module's namespace with a narrow
+factory that passes ``http_client`` to the real constructor.
+
+Every integration test now proves:
+
+```text
+build_pydantic_ai_ollama_model called exactly once per runtime construction
+```
+
+via a ``factory_call_count`` counter.
+
+### C19-D03 — corrected line count
+
+Section 41 historical claim:
+
+```text
+Line count | 111 physical lines
+```
+
+Correct Git-derived PAIM-09 production line count (at commit ``bddae45c``):
+
+```text
+160 physical lines
+```
+
+After C19-D01 correction (current):
+
+```text
+162 physical lines
+```
+
+Section 41 remains untouched as historical evidence.
+
+### C19-D04 — status correction
+
+**Before:**
+
+```text
+Active next task:
+PAIM-09 — Ollama integration decision gate
+```
+
+**After:**
+
+```text
+Active next task:
+PAIM-10 — Sync/thread-safety gate
+```
+
+### Factory path
+
+```text
+ModelProfile
+→ build_pydantic_ai_ollama_model()
+→ official OllamaModel (type(model) is OllamaModel)
+→ official OllamaProvider (with mocked http_client)
+→ PydanticAIAgentRuntime
+```
+
+### Snapshot/wire evidence
+
+Captured via spy on ``DndAgentRunPreparer.prepare()``:
+
+```text
+snapshot names:                 read_alpha, read_beta
+wire tool names/order:          read_alpha, read_beta
+exposed tool names/order:       read_alpha, read_beta
+
+snapshot == wire:               YES
+wire == exposed:                YES
+hidden tool (write_alpha):      NOT on wire
+```
+
+### Tool continuation evidence
+
+| Metric | Value |
+|---|---|
+| HTTP requests | 2 |
+| ToolExecutor executions | 1 |
+| Handler calls | 1 (read_alpha) |
+| Tool name | ``read_alpha`` |
+| Tool call ID | ``call-1`` |
+| Tool result content | contains ``alpha:hello`` |
+| Terminal outcome | RESPOND |
+
+Request #2 preserves:
+
+```text
+tool call ID:           call-preserve-1
+tool result content:    contains "preserve"
+```
+
+### Null-content evidence
+
+```text
+response #1 content:    null
+tool_calls:             [read_alpha]
+HTTP requests:          2
+handler calls:          1
+terminal outcome:       RESPOND
+```
+
+### Provider failure
+
+```text
+HTTP transport attempts:    >= 1 (OpenAI SDK auto-retry)
+project exception:          ModelError
+exact framework cause:      ModelAPIError
+ToolExecutor executions:    0
+handler calls:              0
+```
+
+### Import-boundary evidence
+
+A fresh-process import of ``dnd_assistant.models.pydantic_ai_ollama`` does
+NOT eagerly import:
+
+```text
+dnd_assistant.application.pydantic_ai_agent_runtime
+dnd_assistant.storage
+dnd_assistant.retrieval
+dnd_assistant.cli
+dnd_assistant.tools.executor
+```
+
+It may import:
+
+```text
+pydantic_ai
+openai
+dnd_assistant.models.profiles
+```
+
+### Migration history
+
+```text
+sections 1–41 unchanged:            YES (byte-identical to starting SHA)
+section 42 appended:                YES
+section 41 incorrect historical count: 111
+correct PAIM-09 production count:      160
+current production count:              162
+```
+
+### Changed files
+
+```text
+M src/dnd_assistant/models/pydantic_ai_ollama.py
+M tests/unit/test_pydantic_ai_ollama.py
+M tests/integration/test_pydantic_ai_ollama_runtime.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| PAIM-09 unit (``test_pydantic_ai_ollama.py``) | 32 passed |
+| PAIM-09 integration (``test_pydantic_ai_ollama_runtime.py``) | 9 passed |
+| Native Ollama provider | 64 passed |
+| Native Ollama tool calling | 76 passed |
+| Native Ollama structured | 47 passed |
+| Native Ollama embeddings | 67 passed |
+| Native Ollama cross-operation | 18 passed |
+| PAIM-08 runtime + boundaries + evidence + parity | 67 passed |
+| PAIM-01 qualification | 17 passed |
+| PAIM-07 fast agent + boundaries + evidence | 53 passed |
+| PAIM-06 deps + context | 43 passed |
+| PAIM-05 policy | 51 passed |
+| PAIM-04 bridge + authority | 49 passed |
+| Contract boundaries | 97 passed |
+| Contract maintainability | 401 passed |
+| Contract test harness policy | 25 passed |
+
+### Ruff
+
+```text
+ruff check .:                        All checks passed
+ruff format --check .:               (reported in Final Report)
+git diff --check:                    (reported in Final Report)
+```
+
+### Effective status
+
+```text
+PAIM-09 — ACCEPTED (SELECTIVE FRAMEWORK OLLAMA ADOPTION)
+PAIM-C19 — DONE
+PAIM-10 — NOT STARTED
+Active next task: PAIM-10 — Sync/thread-safety gate
+```

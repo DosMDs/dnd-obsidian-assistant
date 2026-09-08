@@ -5,6 +5,9 @@ All tests are deterministic and require no real Ollama or network access.
 
 from __future__ import annotations
 
+import subprocess
+import sys
+
 import pytest
 from pydantic_ai.models.ollama import OllamaModel
 
@@ -276,15 +279,30 @@ def test_p9_u16_original_profile_unchanged() -> None:
 
 
 def test_non_model_profile_rejected() -> None:
-    """Passing ``object()`` as profile raises ``TypeError``."""
-    with pytest.raises(TypeError, match="ModelProfile"):
+    """Passing ``object()`` as profile raises ``ValidationError``."""
+    with pytest.raises(ValidationError, match="ModelProfile"):
         build_pydantic_ai_ollama_model(object())  # type: ignore[arg-type]
 
 
 def test_dict_as_profile_rejected() -> None:
-    """Passing a plain dict as profile raises ``TypeError``."""
-    with pytest.raises(TypeError, match="ModelProfile"):
+    """Passing a plain dict as profile raises ``ValidationError``."""
+    with pytest.raises(ValidationError, match="ModelProfile"):
         build_pydantic_ai_ollama_model({"provider": "ollama"})  # type: ignore[arg-type]
+
+
+def test_duck_fake_profile_rejected() -> None:
+    """Passing a duck-typed fake as profile raises ``ValidationError``."""
+
+    class _FakeProfile:
+        provider = "ollama"
+        model = "qwen3"
+        base_url = "http://localhost:11434"
+        role = ModelProfileRole.AGENT
+        keep_alive = None
+        temperature = None
+
+    with pytest.raises(ValidationError, match="ModelProfile"):
+        build_pydantic_ai_ollama_model(_FakeProfile())  # type: ignore[arg-type]
 
 
 # ==============================================================================
@@ -339,3 +357,51 @@ class TestNormalizeBaseUrl:
         assert _normalize_openai_compatible_base_url("http://my-ollama:11434") == (
             "http://my-ollama:11434/v1"
         )
+
+
+# ==============================================================================
+# Import-boundary evidence — PAIM-C19
+# ==============================================================================
+
+
+def test_fresh_process_import_boundary() -> None:
+    """Importing ``dnd_assistant.models.pydantic_ai_ollama`` in a fresh process
+    must NOT eagerly load forbidden modules.
+
+    Forbidden:
+        dnd_assistant.application.pydantic_ai_agent_runtime
+        dnd_assistant.storage
+        dnd_assistant.retrieval
+        dnd_assistant.cli
+        dnd_assistant.tools.executor
+
+    Allowed:
+        pydantic_ai
+        openai
+        dnd_assistant.models.profiles
+    """
+    code = """import sys
+sys.modules.pop('dnd_assistant.models.pydantic_ai_ollama', None)
+import dnd_assistant.models.pydantic_ai_ollama
+forbidden = [
+    'dnd_assistant.application.pydantic_ai_agent_runtime',
+    'dnd_assistant.storage',
+    'dnd_assistant.retrieval',
+    'dnd_assistant.cli',
+    'dnd_assistant.tools.executor',
+]
+loaded = [m for m in sys.modules if any(m == f or m.startswith(f + '.') for f in forbidden)]
+if loaded:
+    print('FAIL: forbidden packages loaded:', loaded)
+    sys.exit(1)
+else:
+    print('OK')
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, f"Fresh import failed: {result.stderr}"
+    assert "OK" in result.stdout

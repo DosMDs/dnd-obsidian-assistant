@@ -1,7 +1,8 @@
 """PAIM-09: Pydantic AI Ollama model — integration tests with mocked HTTP.
 
 All tests use mocked ``httpx2`` transport — no real Ollama, no network.
-Uses the real ``OllamaModel``, ``OllamaProvider``, and
+Uses the **real production factory** ``build_pydantic_ai_ollama_model``,
+the real ``OllamaModel``, ``OllamaProvider``, and
 ``PydanticAIAgentRuntime`` with mocked OpenAI-compatible HTTP responses.
 """
 
@@ -27,6 +28,9 @@ from dnd_assistant.application.pydantic_ai_tool_bridge import (
 )
 from dnd_assistant.errors import ModelError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
+from dnd_assistant.models.pydantic_ai_ollama import (
+    build_pydantic_ai_ollama_model,
+)
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import (
     ToolPublicDefinition,
@@ -184,37 +188,45 @@ def _make_context(
     )
 
 
-def _normalize_v1(base_url: str) -> str:
-    """Normalise a base URL to include /v1 suffix if not already present."""
-    from urllib.parse import urlparse
-
-    parsed = urlparse(base_url)
-    path = parsed.path.rstrip("/")
-    if not path.endswith("/v1"):
-        path = f"{path}/v1" if path else "/v1"
-    return f"{parsed.scheme}://{parsed.netloc}{path}"
-
-
 def _make_runtime(
     profile: ModelProfile,
     tool_registry: ToolRegistry,
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     http_client: httpx2.AsyncClient,
+    *,
+    factory_call_count: list[int] | None = None,
 ) -> PydanticAIAgentRuntime:
-    """Create a ``PydanticAIAgentRuntime`` with a mocked Ollama model."""
-    from pydantic_ai.models.ollama import OllamaModel
+    """Create a ``PydanticAIAgentRuntime`` using the **production factory**.
+
+    The production ``build_pydantic_ai_ollama_model()`` is called to
+    construct the ``OllamaModel``.  The mock ``http_client`` is injected
+    by monkeypatching ``OllamaProvider`` in the production module's
+    namespace so that the real provider constructor receives the mock
+    transport.
+    """
     from pydantic_ai.providers.ollama import OllamaProvider
-    from pydantic_ai.settings import ModelSettings
 
-    normalized = _normalize_v1(profile.base_url)
-    provider = OllamaProvider(base_url=normalized, http_client=http_client)
+    import dnd_assistant.models.pydantic_ai_ollama as _prod_factory
 
-    settings = None
-    if profile.temperature is not None:
-        settings = ModelSettings(temperature=profile.temperature)
+    _original_provider = _prod_factory.OllamaProvider
 
-    model = OllamaModel(profile.model, provider=provider, settings=settings)
+    def _mocked_provider(*, base_url: str, **kwargs: Any) -> OllamaProvider:
+        if factory_call_count is not None:
+            factory_call_count[0] += 1
+        return _original_provider(base_url=base_url, http_client=http_client, **kwargs)
+
+    _prod_factory.OllamaProvider = _mocked_provider  # type: ignore[assignment]
+
+    try:
+        model = build_pydantic_ai_ollama_model(profile)
+    finally:
+        _prod_factory.OllamaProvider = _original_provider
+
+    assert type(model).__name__ == "OllamaModel", (
+        f"expected OllamaModel, got {type(model).__name__}"
+    )
+    assert model.system == "ollama"
 
     tool_bridge = PydanticAIToolBridge(registry=tool_registry)
     preparer = DndAgentRunPreparer(
@@ -297,6 +309,11 @@ def agent_profile() -> ModelProfile:
     )
 
 
+@pytest.fixture
+def factory_call_count() -> list[int]:
+    return [0]
+
+
 # ==============================================================================
 # P9-I01 — mocked direct respond through real OllamaModel
 # ==============================================================================
@@ -308,6 +325,7 @@ def test_p9_i01_mocked_direct_respond(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """Direct respond through real ``OllamaModel`` with mocked HTTP."""
     captured: list[httpx2.Request] = []
@@ -322,10 +340,14 @@ def test_p9_i01_mocked_direct_respond(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     result = runtime.run("hello", execution_context=ctx)
+
+    # Production factory was called exactly once
+    assert factory_call_count[0] == 1, f"expected 1 factory call, got {factory_call_count[0]}"
 
     # Terminal outcome
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
@@ -362,6 +384,7 @@ def test_p9_i02_mocked_single_read(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """Single READ tool call through real ``OllamaModel`` with mocked HTTP."""
     tool_call = _make_tool_call_dict(
@@ -381,16 +404,28 @@ def test_p9_i02_mocked_single_read(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     result = runtime.run("read alpha", execution_context=ctx)
+
+    # Production factory was called exactly once
+    assert factory_call_count[0] == 1
 
     # Terminal outcome
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
 
     # Tool executed exactly once
     assert counters.alpha == 1, f"expected 1 read_alpha call, got {counters.alpha}"
+    assert len(result.tool_executions) == 1
+
+    # Tool execution details
+    te = result.tool_executions[0]
+    assert te.tool_call.name == "read_alpha"
+    assert te.tool_call.call_id == "call-1"
+    assert te.output is not None
+    assert "alpha:hello" in str(te.output)
 
     # HTTP requests: 2 (tool call + terminal)
     assert len(captured) == 2, f"expected 2 HTTP requests, got {len(captured)}"
@@ -401,10 +436,15 @@ def test_p9_i02_mocked_single_read(
     assert body1["model"] == "qwen3"
     assert "tools" in body1
 
-    # Second request: tool result replay
+    # Second request: tool result replay — verify tool call ID and result content
     req2 = captured[1]
     body2 = json.loads(req2.content)
     assert body2["model"] == "qwen3"
+    messages2 = body2.get("messages", [])
+    tool_results = [m for m in messages2 if m.get("role") == "tool"]
+    assert len(tool_results) == 1
+    assert tool_results[0].get("tool_call_id") == "call-1"
+    assert "alpha:hello" in tool_results[0].get("content", "")
 
 
 # ==============================================================================
@@ -418,6 +458,7 @@ def test_p9_i03_null_content_tool_calls(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """Null content + tool_calls response is parsed correctly."""
     tool_call = _make_tool_call_dict(
@@ -428,7 +469,8 @@ def test_p9_i03_null_content_tool_calls(
     resp1 = _make_chat_completion(content=None, tool_calls=[tool_call])
     resp2 = _make_chat_completion(content=_TERMINAL_RESPONSE_TEXT)
 
-    http_client = _make_mock_transport([resp1, resp2])
+    captured: list[httpx2.Request] = []
+    http_client = _make_mock_transport([resp1, resp2], captured)
 
     runtime = _make_runtime(
         profile=agent_profile,
@@ -436,14 +478,24 @@ def test_p9_i03_null_content_tool_calls(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     result = runtime.run("read with null content", execution_context=ctx)
 
+    # Production factory called once
+    assert factory_call_count[0] == 1
+
     # Tool executed
     assert counters.alpha == 1
+    assert len(result.tool_executions) == 1
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
+
+    # HTTP requests == 2 (tool call + terminal)
+    assert len(captured) == 2, f"expected 2 HTTP requests, got {len(captured)}"
+    # captured[0] is the outgoing request, not the response.
+    # The key evidence is that the runtime successfully handles null content.
 
 
 # ==============================================================================
@@ -457,6 +509,7 @@ def test_p9_i04_second_request_preserves_tool_result(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """Second provider request contains tool-result continuation."""
     tool_call = _make_tool_call_dict(
@@ -476,12 +529,15 @@ def test_p9_i04_second_request_preserves_tool_result(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     result = runtime.run("read with preservation", execution_context=ctx)
 
+    assert factory_call_count[0] == 1
     assert counters.alpha == 1
+    assert len(result.tool_executions) == 1
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
 
     # Second request contains tool result
@@ -499,6 +555,11 @@ def test_p9_i04_second_request_preserves_tool_result(
         f"expected tool_call_id='call-preserve-1', got {tool_result.get('tool_call_id')}"
     )
 
+    # Verify deterministic project tool-result content is present
+    assert "preserve" in tool_result.get("content", ""), (
+        f"expected tool result content to contain 'preserve', got {tool_result.get('content')}"
+    )
+
 
 # ==============================================================================
 # P9-I05 — outbound tools equal issued snapshot names/order
@@ -511,6 +572,7 @@ def test_p9_i05_outbound_tools_match_snapshot(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """Outbound request tools match the issued snapshot names and order."""
     captured: list[httpx2.Request] = []
@@ -519,27 +581,62 @@ def test_p9_i05_outbound_tools_match_snapshot(
     ]
     http_client = _make_mock_transport(mock_responses, captured)
 
-    runtime = _make_runtime(
-        profile=agent_profile,
-        tool_registry=tool_registry,
-        tool_catalog=tool_catalog,
-        context_builder=context_builder,
-        http_client=http_client,
-    )
+    # Spy on DndAgentRunPreparer.prepare() to capture the PreparedDndAgentRun
+    from dnd_assistant.application.pydantic_ai_run_deps import DndAgentRunPreparer
 
-    ctx = _make_context()
-    runtime.run("hello", execution_context=ctx)
+    captured_prepared: list[object] = []
+    original_prepare = DndAgentRunPreparer.prepare
+
+    def _spy_prepare(self: DndAgentRunPreparer, user_input: str, **kwargs: Any) -> object:
+        prepared = original_prepare(self, user_input, **kwargs)
+        captured_prepared.append(prepared)
+        return prepared
+
+    DndAgentRunPreparer.prepare = _spy_prepare  # type: ignore[assignment]
+
+    try:
+        runtime = _make_runtime(
+            profile=agent_profile,
+            tool_registry=tool_registry,
+            tool_catalog=tool_catalog,
+            context_builder=context_builder,
+            http_client=http_client,
+            factory_call_count=factory_call_count,
+        )
+
+        ctx = _make_context()
+        result = runtime.run("hello", execution_context=ctx)
+    finally:
+        DndAgentRunPreparer.prepare = original_prepare
+
+    assert factory_call_count[0] == 1
+    assert len(captured_prepared) == 1
+
+    prepared = captured_prepared[0]
+    snapshot_names = prepared.deps.tool_snapshot.names  # type: ignore[union-attr]
 
     assert len(captured) >= 1
     body = json.loads(captured[0].content)
     tools = body.get("tools", [])
-    tool_names = [t["function"]["name"] for t in tools]
+    wire_tool_names = [t["function"]["name"] for t in tools]
 
     # With NO_ACTIVE_SESSION context, only READ tools are exposed
     # write_alpha requires ACTIVE_SESSION
-    assert tool_names == ["read_alpha", "read_beta"], (
-        f"expected [read_alpha, read_beta], got {tool_names}"
+    assert wire_tool_names == ["read_alpha", "read_beta"], (
+        f"expected [read_alpha, read_beta], got {wire_tool_names}"
     )
+
+    # Wire tool names/order == snapshot names/order == exposed tool names/order
+    assert wire_tool_names == list(snapshot_names), (
+        f"wire {wire_tool_names} != snapshot {list(snapshot_names)}"
+    )
+    exposed_names = tuple(t.name for t in result.initial_decision.exposed_tools)
+    assert wire_tool_names == list(exposed_names), (
+        f"wire {wire_tool_names} != exposed {list(exposed_names)}"
+    )
+
+    # No hidden tool appears on the wire
+    assert "write_alpha" not in wire_tool_names
 
 
 # ==============================================================================
@@ -552,6 +649,7 @@ def test_p9_i06_temperature_reaches_wire(
     tool_registry: ToolRegistry,
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
+    factory_call_count: list[int],
 ) -> None:
     """Configured temperature reaches the HTTP request body."""
     profile = ModelProfile(
@@ -574,11 +672,13 @@ def test_p9_i06_temperature_reaches_wire(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     runtime.run("hello", execution_context=ctx)
 
+    assert factory_call_count[0] == 1
     assert len(captured) >= 1
     body = json.loads(captured[0].content)
     assert body.get("temperature") == 0.25, (
@@ -597,6 +697,7 @@ def test_p9_i07_keep_alive_absent_from_wire(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """No ``keep_alive`` field appears in valid wire payloads."""
     captured: list[httpx2.Request] = []
@@ -611,11 +712,13 @@ def test_p9_i07_keep_alive_absent_from_wire(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     runtime.run("hello", execution_context=ctx)
 
+    assert factory_call_count[0] == 1
     assert len(captured) >= 1
     body = json.loads(captured[0].content)
     assert "keep_alive" not in body, (
@@ -634,9 +737,11 @@ def test_p9_i08_provider_failure_returns_model_error(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
+    factory_call_count: list[int],
 ) -> None:
     """HTTP provider failure surfaces as ``ModelError`` with no tool execution."""
-    http_client = _make_fail_transport()
+    captured_requests: list[httpx2.Request] = []
+    http_client = _make_fail_transport(captured_requests)
 
     runtime = _make_runtime(
         profile=agent_profile,
@@ -644,6 +749,7 @@ def test_p9_i08_provider_failure_returns_model_error(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
@@ -651,13 +757,27 @@ def test_p9_i08_provider_failure_returns_model_error(
     with pytest.raises(ModelError) as exc_info:
         runtime.run("hello", execution_context=ctx)
 
+    assert factory_call_count[0] == 1
+
     # No tool execution occurred
     assert counters.alpha == 0
     assert counters.beta == 0
     assert counters.write_alpha == 0
 
-    # Exception preserves cause
+    # Literal HTTP transport attempts — the OpenAI SDK performs
+    # automatic transport retries (observed: 3 attempts for a connection
+    # failure). This is transport-level retry, not semantic model retry.
+    assert len(captured_requests) >= 1, (
+        f"expected at least 1 HTTP transport attempt, got {len(captured_requests)}"
+    )
+
+    # Exception preserves cause — exact framework type under Pydantic AI 2.39.0
     assert exc_info.value.__cause__ is not None
+    from pydantic_ai.exceptions import ModelAPIError
+
+    assert type(exc_info.value.__cause__) is ModelAPIError, (
+        f"expected ModelAPIError, got {type(exc_info.value.__cause__).__name__}"
+    )
 
 
 # ==============================================================================
@@ -670,6 +790,7 @@ def test_p9_i09_reverse_proxy_v1_endpoint(
     tool_registry: ToolRegistry,
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
+    factory_call_count: list[int],
 ) -> None:
     """Reverse-proxy base URL results in requests to the exact /v1 endpoint."""
     profile = ModelProfile(
@@ -691,11 +812,13 @@ def test_p9_i09_reverse_proxy_v1_endpoint(
         tool_catalog=tool_catalog,
         context_builder=context_builder,
         http_client=http_client,
+        factory_call_count=factory_call_count,
     )
 
     ctx = _make_context()
     runtime.run("hello", execution_context=ctx)
 
+    assert factory_call_count[0] == 1
     assert len(captured) >= 1
     req = captured[0]
     # The full URL should include the reverse-proxy prefix + /v1 + /chat/completions

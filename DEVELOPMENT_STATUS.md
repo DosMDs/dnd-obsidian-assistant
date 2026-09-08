@@ -124,6 +124,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C17 — Complete literal PAIM-08 runtime evidence | DONE |
 | PAIM-C18 — Close final PAIM-08 evidence defects | DONE |
 | PAIM-09 — Ollama integration decision gate | DONE |
+| PAIM-C19 — Close PAIM-09 factory/runtime evidence defects | DONE |
 | PAIM-10 — Sync/thread-safety gate | NOT STARTED |
 | PAIM-11 — Full Stage-9 behavioral parity | NOT STARTED |
 | PAIM-12 — Real Ollama smoke/performance | NOT STARTED |
@@ -154,7 +155,7 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-09 — Ollama integration decision gate
+PAIM-10 — Sync/thread-safety gate
 ```
 
 ## Current blockers
