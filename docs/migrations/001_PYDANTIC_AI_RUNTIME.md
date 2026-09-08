@@ -1,4 +1,4 @@
-# Migration 001 — Pydantic AI Runtime Migration
+# Migration 001 вЂ” Pydantic AI Runtime Migration
 
 ## 1. Decision
 
@@ -53,7 +53,7 @@ Pydantic AI should reduce maintenance of generic infrastructure:
 - provider/message protocol details;
 - tool-call/tool-result mechanics;
 - structured output plumbing;
-- generic model→tool→model loop;
+- generic modelв†’toolв†’model loop;
 - request/tool usage accounting;
 - standard tracing/instrumentation.
 
@@ -96,16 +96,16 @@ No framework facility is trusted as the final authorization boundary.
 
 ```text
 framework-visible tool
-→ application adapter
-→ ToolExecutor
-→ trusted side effect
+в†’ application adapter
+в†’ ToolExecutor
+в†’ trusted side effect
 ```
 
 This rule remains even if framework filtering/approval appears sufficient in normal cases.
 
 ## 7. PAIM task map
 
-### PAIM-00 — Documentation/branch kickoff — DONE
+### PAIM-00 вЂ” Documentation/branch kickoff вЂ” DONE
 
 No runtime changes.
 
@@ -119,7 +119,7 @@ Deliverables:
 - exact base SHA;
 - outcome/rollback policy.
 
-### PAIM-01 — Candidate dependency qualification
+### PAIM-01 вЂ” Candidate dependency qualification
 
 Build minimal isolated tests/spike using chosen Pydantic AI candidate.
 
@@ -136,7 +136,7 @@ Prove:
 
 No FastAgent replacement yet.
 
-### PAIM-02 — Blocker gate
+### PAIM-02 вЂ” Blocker gate
 
 Prove the exact architecture-critical capabilities:
 
@@ -150,7 +150,7 @@ Prove the exact architecture-critical capabilities:
 
 If not achievable using stable public extension points, stop and classify issue before continuing.
 
-### PAIM-03 — Test harness improvements directly needed by migration
+### PAIM-03 вЂ” Test harness improvements directly needed by migration
 
 Only if necessary:
 
@@ -159,29 +159,29 @@ Only if necessary:
 
 Do not bundle unrelated infrastructure libraries.
 
-### PAIM-04 — Toolset bridge
+### PAIM-04 вЂ” Toolset bridge
 
 Translate `ToolRegistry` public definitions into Pydantic AI tool definitions/toolset without moving handler logic.
 
 Invocation goes to `ToolExecutor`.
 
-### PAIM-05 — DndAgentPolicy
+### PAIM-05 вЂ” DndAgentPolicy
 
 Create explicit application policy component or equivalent cohesive layer covering all Stage-9 agent safety semantics.
 
-### PAIM-06 — Context/deps integration
+### PAIM-06 вЂ” Context/deps integration
 
 Reuse accepted Context Builder/retrieval path. Context remains application-prepared data.
 
-### PAIM-07 — Replace one-step FastAgent mechanics
+### PAIM-07 вЂ” Replace one-step FastAgent mechanics
 
 Use framework for first model decision while preserving observable app contract/safety behavior.
 
-### PAIM-08 — Replace bounded AgentLoop mechanics
+### PAIM-08 вЂ” Replace bounded AgentLoop mechanics
 
 Use framework generic orchestration. Preserve D&D-specific limits/admission/terminal rules.
 
-### PAIM-09 — Ollama gate
+### PAIM-09 вЂ” Ollama gate
 
 Compare framework integration to native reference. Select:
 
@@ -191,27 +191,27 @@ custom/native Ollama component
 migration reconsideration
 ```
 
-### PAIM-10 — Sync/thread gate
+### PAIM-10 вЂ” Sync/thread gate
 
 Prove worker-thread/tool-callback behavior does not violate storage/audit/session assumptions.
 
-### PAIM-11 — Full behavioral parity
+### PAIM-11 вЂ” Full behavioral parity
 
 Run Stage-9 negative/boundary suite against final migration runtime.
 
-### PAIM-12 — Real Ollama smoke/performance
+### PAIM-12 вЂ” Real Ollama smoke/performance
 
 Use actual accepted local model/profile for operational evidence.
 
-### PAIM-13 — Eval comparison
+### PAIM-13 вЂ” Eval comparison
 
 Measure safety/correctness/latency vs reference.
 
-### PAIM-14 — Cleanup
+### PAIM-14 вЂ” Cleanup
 
 Delete superseded generic custom infrastructure and obsolete implementation-specific tests. Avoid permanent dual runtime.
 
-### PAIM-15 — Final review
+### PAIM-15 вЂ” Final review
 
 Decide `ACCEPTED`, `PARTIAL`, or `REJECTED`.
 
@@ -248,10 +248,10 @@ The repository facts above were independently reconciled from Git after the PAIM
 ### Next task
 
 ```text
-PAIM-02 — Critical blocker gate
+PAIM-02 вЂ” Critical blocker gate
 ```
 
-## 17. PAIM-C02 correction record — close unknown-tool retry-count evidence gap
+## 17. PAIM-C02 correction record вЂ” close unknown-tool retry-count evidence gap
 
 **Status:** DONE
 **Completed:** 2026-09-05
@@ -276,8 +276,8 @@ asserts exact counts, handler counts, and exception types.
 
 | Scenario | Model requests | Handler calls | Exception |
 |---|---|---|---|
-| Default retries | 2 | 0 | `UnexpectedModelBehavior` — "Tool 'nonexistent_tool' exceeded max retries count of 1" |
-| `retries={"tools": 0}` | 1 | 0 | `UnexpectedModelBehavior` — "Tool 'nonexistent_tool' exceeded max retries count of 0" |
+| Default retries | 2 | 0 | `UnexpectedModelBehavior` вЂ” "Tool 'nonexistent_tool' exceeded max retries count of 1" |
+| `retries={"tools": 0}` | 1 | 0 | `UnexpectedModelBehavior` вЂ” "Tool 'nonexistent_tool' exceeded max retries count of 0" |
 
 Key findings:
 
@@ -333,8 +333,8 @@ DEVELOPMENT_STATUS.md
 The tests now explicitly distinguish:
 
 ```text
-model invocation count  —  proven by FunctionModel closure counter
-tool handler invocation count  —  proven by tool_plain closure counter
+model invocation count  вЂ”  proven by FunctionModel closure counter
+tool handler invocation count  вЂ”  proven by tool_plain closure counter
 ```
 
 PAIM-C01 retry evidence is now executable rather than inferred.
@@ -342,7 +342,7 @@ PAIM-C01 retry evidence is now executable rather than inferred.
 ### Next task
 
 ```text
-PAIM-02 — Critical blocker gate
+PAIM-02 вЂ” Critical blocker gate
 ```
 
 ## 9. Blocker criteria
@@ -360,15 +360,15 @@ Examples:
 
 ## 10. Escape hatch levels
 
-### Level 1 — supported extension
+### Level 1 вЂ” supported extension
 
 Use hooks/toolsets/custom model/provider/output validator/public graph API.
 
-### Level 2 — selective custom component
+### Level 2 вЂ” selective custom component
 
 Keep/implement only the problematic component, e.g. native Ollama adapter.
 
-### Level 3 — reject migration
+### Level 3 вЂ” reject migration
 
 Do not merge runtime branch. Preserve findings and continue custom implementation from `main`.
 
@@ -407,11 +407,11 @@ The fallback is Git/main, not a permanent feature flag.
 
 ```text
 S9-06 accepted baseline
-→ PAIM-00..15
-→ outcome
-→ S9-07 Stage-9 final historical review
-→ Stage 9 DONE
-→ Stage 10
+в†’ PAIM-00..15
+в†’ outcome
+в†’ S9-07 Stage-9 final historical review
+в†’ Stage 9 DONE
+в†’ Stage 10
 ```
 
 ## 15. PAIM-01 completion record
@@ -458,19 +458,19 @@ All 14 tests in `tests/integration/test_pydantic_ai_qualification.py` pass.
 | Ollama version | `0.33.3` |
 | Model | `huihui_ai/qwen3.5-abliterated:35b` |
 | Base URL | `http://localhost:11434/v1` |
-| Plain response | PASS — `"smoke test ok"` returned correctly |
-| Structured output | PASS — `SmokeResult(answer='hello', score=42)` returned and validated |
+| Plain response | PASS вЂ” `"smoke test ok"` returned correctly |
+| Structured output | PASS вЂ” `SmokeResult(answer='hello', score=42)` returned and validated |
 | Provider used | `OllamaProvider` (official Pydantic AI Ollama provider) |
 
 ### Observed framework semantics
 
 | Aspect | Observation |
 |---|---|
-| Structured-output mode | **ToolOutput** (default when `output_type` is a Pydantic model — framework creates synthetic tool for output schema) |
-| Multi-tool execution | **Sequential** — tools executed one after another in main thread |
+| Structured-output mode | **ToolOutput** (default when `output_type` is a Pydantic model вЂ” framework creates synthetic tool for output schema) |
+| Multi-tool execution | **Sequential** вЂ” tools executed one after another in main thread |
 | Retry behavior | Default 1 output validation retry; automatic transport retries observed in OpenAI client (transparent to application) |
 | Public exception classes | `ModelAPIError` (base, extends `RuntimeError`), `ModelHTTPError` (extends `ModelAPIError`), `UserError` (extends `Exception`), `UnexpectedModelBehavior` (extends `RuntimeError`) |
-| Ollama endpoint path | `<base_url>/chat/completions` — base URL should include `/v1` for Ollama compatibility |
+| Ollama endpoint path | `<base_url>/chat/completions` вЂ” base URL should include `/v1` for Ollama compatibility |
 
 ### Architecture confirmation
 
@@ -533,7 +533,7 @@ The observed sequential multi-tool execution and default retry behavior are docu
 ### Next task
 
 ```text
-PAIM-02 — Critical blocker gate
+PAIM-02 вЂ” Critical blocker gate
 ```
 
 ## 16. PAIM-C01 correction record
@@ -550,7 +550,7 @@ Independent review identified several inaccurate claims in the PAIM-01
 qualification evidence. PAIM-C01 corrects these without changing the
 PAIM-01 qualification outcome.
 
-### Defect A — multi-tool execution semantics
+### Defect A вЂ” multi-tool execution semantics
 
 **Original PAIM-01 claim:** `call_order == ["a", "b"]` proves sequential
 multi-tool execution; sync tools execute in main thread.
@@ -558,7 +558,7 @@ multi-tool execution; sync tools execute in main thread.
 **Correction:** Two concurrently scheduled short functions may append in
 model-emission order without being sequential. The claim was insufficient.
 
-**Corrected evidence (A1 — default concurrency):**
+**Corrected evidence (A1 вЂ” default concurrency):**
 
 Two async tools with a synchronisation barrier (`tool_a` waits until
 `tool_b` has started) prove that under the default parallel execution mode
@@ -569,7 +569,7 @@ test_q6a_default_multi_tool_concurrency: PASS
 max_active >= 2  (both tools overlapped)
 ```
 
-**Corrected evidence (A2 — explicit sequential mode):**
+**Corrected evidence (A2 вЂ” explicit sequential mode):**
 
 Using `agent.parallel_tool_call_execution_mode("sequential")`, tool_b
 starts only after tool_a finishes (`max_active <= 1`).
@@ -579,7 +579,7 @@ test_q6b_explicit_sequential_mode: PASS
 max_active <= 1  (no overlap)
 ```
 
-**Corrected evidence (A3 — sync tool thread behavior):**
+**Corrected evidence (A3 вЂ” sync tool thread behavior):**
 
 A synchronous `tool_plain` tool executes on a **worker thread**, not the
 calling thread.
@@ -589,7 +589,7 @@ test_q6c_sync_tool_worker_thread: PASS
 tool_thread_id != calling_thread_id
 ```
 
-### Defect B — unknown-tool test methodology
+### Defect B вЂ” unknown-tool test methodology
 
 **Original PAIM-01 claim:** `TestModel(call_tools=["nonexistent_tool"])`
 proves unknown-tool behavior. Documented as `UserError`.
@@ -598,7 +598,7 @@ proves unknown-tool behavior. Documented as `UserError`.
 rather than emulating a provider response containing an unknown function
 call. Not a valid runtime unknown-tool test.
 
-**Corrected evidence (B1 — default retry behavior):**
+**Corrected evidence (B1 вЂ” default retry behavior):**
 
 Using `FunctionModel` that returns a raw `ModelResponse` with a
 `ToolCallPart` for `"nonexistent_tool"`, the framework emits a
@@ -611,7 +611,7 @@ UnexpectedModelBehavior raised after retry exhaustion
 no application tool handler executed
 ```
 
-**Corrected evidence (B2 — zero retries):**
+**Corrected evidence (B2 вЂ” zero retries):**
 
 With `Agent(retries={"tools": 0})`, the framework raises a terminal
 exception without a semantic retry round. No application tool handler
@@ -623,7 +623,7 @@ terminal exception raised (UserError or UnexpectedModelBehavior)
 no application tool handler executed
 ```
 
-### Defect C — overstated Ollama endpoint evidence
+### Defect C вЂ” overstated Ollama endpoint evidence
 
 **Original PAIM-01 claim:** Q7 proves `<base>/chat/completions` endpoint
 path.
@@ -640,7 +640,7 @@ OpenAIProvider with /v1 suffix works for Ollama
 Real Ollama smoke succeeds through that configured base URL
 ```
 
-### Defect D — overstated smoke assertions
+### Defect D вЂ” overstated smoke assertions
 
 **Original PAIM-01 claim:** `"smoke test ok"` returned correctly;
 `SmokeResult(answer='hello', score=42)` returned.
@@ -654,7 +654,7 @@ structured: validated SmokeResult with non-empty answer and positive score
 
 Documentation now matches the exact asserted contract.
 
-### Defect E — machine-specific default model
+### Defect E вЂ” machine-specific default model
 
 **Original PAIM-01:** Smoke file contained `huihui_ai/qwen3.5-abliterated:35b`
 as project-level default.
@@ -671,7 +671,7 @@ skip. If malformed, clear test/configuration error.
 | Default multi-tool execution | **parallel/concurrent** |
 | Explicit whole-run sequential mode | PASS |
 | Sync tool execution | **worker thread** |
-| Unknown tool default | semantic retry behavior (RetryPromptPart → exhaustion) |
+| Unknown tool default | semantic retry behavior (RetryPromptPart в†’ exhaustion) |
 | Unknown tool retries=0 | terminal failure without retry |
 | Ollama base URL | custom base_url accepted and stored |
 | Ollama smoke | non-empty text; validated structured output |
@@ -725,10 +725,10 @@ DEVELOPMENT_STATUS.md
 ### Next task
 
 ```text
-PAIM-02 — Critical blocker gate
+PAIM-02 вЂ” Critical blocker gate
 ```
 
-## 18. PAIM-02 completion record — critical blocker gate
+## 18. PAIM-02 completion record вЂ” critical blocker gate
 
 **Status:** DONE
 **Completed:** 2026-09-05
@@ -805,7 +805,7 @@ ToolExecutor.execute()
 ```
 
 No framework route could invoke project handlers directly because all tools
-use `requires_approval=True`. The framework never executes the handler — it
+use `requires_approval=True`. The framework never executes the handler вЂ” it
 collects the deferred calls and returns them as `DeferredToolRequests`.
 Application code provides results via `DeferredToolResults(calls={id: result})`,
 which bypasses framework handler execution entirely.
@@ -816,12 +816,12 @@ Exact Pydantic AI 2.39.0 public APIs used:
 
 - `Agent(model, output_type=str | DeferredToolRequests, retries={"tools": 0})`
 - `@agent.tool_plain(requires_approval=True)`
-- `agent.run_sync(prompt)` — returns `DeferredToolRequests`
+- `agent.run_sync(prompt)` вЂ” returns `DeferredToolRequests`
 - `agent.run_sync(prompt, message_history=..., deferred_tool_results=...)`
-- `DeferredToolRequests.approvals` — list of `ToolCallPart`
+- `DeferredToolRequests.approvals` вЂ” list of `ToolCallPart`
 - `DeferredToolResults(calls={id: result}, approvals={})`
-- `FunctionModel(function=...)` — for deterministic model responses
-- `TestModel(call_tools=[...])` — for deterministic tool-call scenarios
+- `FunctionModel(function=...)` вЂ” for deterministic model responses
+- `TestModel(call_tools=[...])` вЂ” for deterministic tool-call scenarios
 - `UsageLimits(request_limit=N)`
 - `ToolCallPart`, `ModelResponse`
 
@@ -835,23 +835,23 @@ Exact Pydantic AI 2.39.0 public APIs used:
 |---|---|
 | Concurrent multi-tool execution | Application executes sequentially via ToolExecutor |
 | Tool validation before deferral | Framework validates args before deferring; with `retries=0`, invalid args raise `UnexpectedModelBehavior` immediately (fail-closed) |
-| Unknown tool raises `UnexpectedModelBehavior` | Correct fail-closed behavior — no handler executes |
+| Unknown tool raises `UnexpectedModelBehavior` | Correct fail-closed behavior вЂ” no handler executes |
 | Sync tools on worker threads | PAIM-10 gate owns this evaluation |
 
 #### Application-required policy
 
-1. **All tools must use `requires_approval=True`** — this is the interception
+1. **All tools must use `requires_approval=True`** вЂ” this is the interception
    mechanism that prevents framework handler execution.
-2. **Agent must use `output_type=str | DeferredToolRequests`** — this is
+2. **Agent must use `output_type=str | DeferredToolRequests`** вЂ” this is
    required for the framework to return deferred tool calls instead of
    executing them.
-3. **Two-phase execution** — first `run_sync` collects deferred calls,
+3. **Two-phase execution** вЂ” first `run_sync` collects deferred calls,
    application preflights and executes via ToolExecutor, second `run_sync`
    with `message_history` + `deferred_tool_results` completes the agent flow.
-4. **Second-round tool rejection** — application policy must detect and
+4. **Second-round tool rejection** вЂ” application policy must detect and
    reject a second `DeferredToolRequests` batch. The framework does not
    enforce this automatically.
-5. **`retries={"tools": 0}`** — required to prevent semantic retry rounds
+5. **`retries={"tools": 0}`** вЂ” required to prevent semantic retry rounds
    that could repeat tool calls.
 
 #### Actual blockers
@@ -866,7 +866,7 @@ PASS WITH SELECTIVE CUSTOM REQUIREMENT
 ```
 
 The selective custom requirement is the application-owned batch preflight
-and sequential ToolExecutor execution. This is not a framework limitation —
+and sequential ToolExecutor execution. This is not a framework limitation вЂ”
 it is the intended architecture where Pydantic AI handles generic
 model/tool-call mechanics and the application owns safety policy.
 
@@ -909,12 +909,12 @@ No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
 ### Next task
 
 ```text
-PAIM-03 — Migration-specific test harness hardening
+PAIM-03 вЂ” Migration-specific test harness hardening
 ```
 
 Do not begin PAIM-03 automatically.
 
-## 21. PAIM-03 completion record — migration-specific test harness hardening
+## 21. PAIM-03 completion record вЂ” migration-specific test harness hardening
 
 **Status:** DONE
 **Completed:** 2026-09-05
@@ -953,23 +953,23 @@ What remained scenario-local:
 | `test_pydantic_ai_blocker_execution.py` | 840 | 556 | -284 |
 | `test_pydantic_ai_blocker_limits.py` | 478 | 281 | -197 |
 | `test_pydantic_ai_qualification.py` | 483 | 498 | +15 |
-| `support/pydantic_ai_runtime.py` | — | 364 | +364 (new) |
-| `support/__init__.py` | — | 6 | +6 (new) |
+| `support/pydantic_ai_runtime.py` | вЂ” | 364 | +364 (new) |
+| `support/__init__.py` | вЂ” | 6 | +6 (new) |
 
 Total reduction in blocker modules: 793 lines.
-New support module: 364 lines — well under the 1000-line test hard limit.
+New support module: 364 lines вЂ” well under the 1000-line test hard limit.
 
 ### State isolation
 
 The shared helper contains **no module-global mutable runtime state**.
 All mutable objects are created fresh per call:
 
-- `HandlerCounters` — fresh via `make_handler_counters()`
-- `ToolRegistry` — fresh via `make_tool_registry(counters)`
-- `ToolExecutor` — fresh via `make_tool_executor(registry)`
-- `Agent` — fresh via `make_agent(model, snapshot)`
-- `HandleDeferredToolCalls` — fresh via `make_deferred_handler(...)` (closure-scoped counters)
-- Batch state — closure-scoped `batch_count` list per handler instance
+- `HandlerCounters` вЂ” fresh via `make_handler_counters()`
+- `ToolRegistry` вЂ” fresh via `make_tool_registry(counters)`
+- `ToolExecutor` вЂ” fresh via `make_tool_executor(registry)`
+- `Agent` вЂ” fresh via `make_agent(model, snapshot)`
+- `HandleDeferredToolCalls` вЂ” fresh via `make_deferred_handler(...)` (closure-scoped counters)
+- Batch state вЂ” closure-scoped `batch_count` list per handler instance
 
 Immutable schema classes (`AlphaInput`, `BetaInput`, `ToolOutput`) and
 canonical tool-definition constants (`READ_ALPHA_DEF`, `READ_BETA_DEF`,
@@ -1016,7 +1016,7 @@ Tests remain explicit about `UsageLimits(request_limit=N)`.
 longer attempts a real socket connection to `http://localhost:1/v1`.
 
 **Previous behavior:** `OpenAIProvider(base_url="http://localhost:1/v1", http_client=None)`
-— still attempted a real TCP connection to localhost:1.
+вЂ” still attempted a real TCP connection to localhost:1.
 
 **New behavior:** A custom `httpx2.AsyncBaseTransport` subclass raises
 `httpx2.ConnectError` deterministically without any network I/O:
@@ -1040,9 +1040,9 @@ is required.
 
 | Run | Module order | Result |
 |---|---|---|
-| A | qualification → gate → execution → limits → executor | 56 passed |
-| B | executor → limits → execution → gate → qualification | 56 passed |
-| C | gate → limits → execution → qualification → executor | 56 passed |
+| A | qualification в†’ gate в†’ execution в†’ limits в†’ executor | 56 passed |
+| B | executor в†’ limits в†’ execution в†’ gate в†’ qualification | 56 passed |
+| C | gate в†’ limits в†’ execution в†’ qualification в†’ executor | 56 passed |
 
 All three permutations pass. No order sensitivity was found.
 
@@ -1094,9 +1094,9 @@ All PAIM-02/C03/C04 safety conclusions remain unchanged:
 | Qualification tests | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
 | Tool executor tests | `uv run pytest tests/unit/test_tool_executor.py -v` | 21 passed |
 | Ollama smoke (default) | `uv run pytest tests/integration/test_pydantic_ai_ollama_smoke.py -v` | 2 skipped |
-| Order A | qualification→gate→execution→limits→executor | 56 passed |
-| Order B | executor→limits→execution→gate→qualification | 56 passed |
-| Order C | gate→limits→execution→qualification→executor | 56 passed |
+| Order A | qualificationв†’gateв†’executionв†’limitsв†’executor | 56 passed |
+| Order B | executorв†’limitsв†’executionв†’gateв†’qualification | 56 passed |
+| Order C | gateв†’limitsв†’executionв†’qualificationв†’executor | 56 passed |
 | Test-harness contract | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
 | Maintainability contract | `uv run pytest tests/contract/test_maintainability.py -v` | 358 passed |
 | Canonical full suite | `uv run pytest` | 4606 passed, 102 skipped |
@@ -1125,12 +1125,12 @@ No `tests/conftest.py` changes. No `tests/contract/test_test_harness_policy.py` 
 
 ### Architecture confirmation
 
-- **No production `src/` changes** — verified
-- **No runtime migration** — verified
-- **No Toolset production bridge** — verified
-- **No DndAgentPolicy** — verified
-- **No PAIM-04 implementation** — verified
-- **No dependency change** — verified (`pyproject.toml` and `uv.lock` unchanged)
+- **No production `src/` changes** вЂ” verified
+- **No runtime migration** вЂ” verified
+- **No Toolset production bridge** вЂ” verified
+- **No DndAgentPolicy** вЂ” verified
+- **No PAIM-04 implementation** вЂ” verified
+- **No dependency change** вЂ” verified (`pyproject.toml` and `uv.lock` unchanged)
 
 ### Finalization
 
@@ -1139,13 +1139,13 @@ Commit and push will be performed after this record.
 ### Next task
 
 ```text
-PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
+PAIM-04 вЂ” ToolRegistry в†’ framework Toolset в†’ ToolExecutor bridge
 ```
 
 Do not begin PAIM-04 automatically.
 
 
-## 19. PAIM-C03 correction record — correct blocker gate to ExternalToolset path
+## 19. PAIM-C03 correction record вЂ” correct blocker gate to ExternalToolset path
 
 **Status:** DONE
 **Completed:** 2026-09-05
@@ -1172,11 +1172,11 @@ the intended `ExternalToolset` + `HandleDeferredToolCalls` path.
 
 | API | Available in 2.39.0 |
 |---|---|
-| `ExternalToolset` | YES — `pydantic_ai.toolsets.ExternalToolset` |
-| `HandleDeferredToolCalls` | YES — `pydantic_ai.capabilities.HandleDeferredToolCalls` |
-| `DeferredToolRequests.calls` | YES — contains external tool calls |
-| `DeferredToolRequests.approvals` | YES — empty for external tools |
-| `requests.build_results(calls=...)` | YES — validates ID correspondence |
+| `ExternalToolset` | YES вЂ” `pydantic_ai.toolsets.ExternalToolset` |
+| `HandleDeferredToolCalls` | YES вЂ” `pydantic_ai.capabilities.HandleDeferredToolCalls` |
+| `DeferredToolRequests.calls` | YES вЂ” contains external tool calls |
+| `DeferredToolRequests.approvals` | YES вЂ” empty for external tools |
+| `requests.build_results(calls=...)` | YES вЂ” validates ID correspondence |
 
 ### Correct architecture path
 
@@ -1220,12 +1220,12 @@ terminal model response
 
 This is a hard invariant proved by the architecture:
 
-- `ExternalToolset` provides schema/metadata only — no `@agent.tool` or
+- `ExternalToolset` provides schema/metadata only вЂ” no `@agent.tool` or
   `@agent.tool_plain` decorators exist in the corrected tests
 - The framework-facing definition is schema-only (name, description,
   parameters_json_schema)
 - Successful project execution exists only here:
-  `HandleDeferredToolCalls` → application admission → `ToolExecutor.execute()`
+  `HandleDeferredToolCalls` в†’ application admission в†’ `ToolExecutor.execute()`
 - All 16 corrected tests use `_make_agent()` which creates an `ExternalToolset`
   with zero Python handler functions
 
@@ -1256,7 +1256,7 @@ Key differences from PAIM-02 matrix:
 - **BG-08**: Framework does NOT validate args with ExternalToolset. Invalid args
   reach the handler, which passes them to ToolExecutor. ToolExecutor validation
   rejects them (handler_invocations == 1, executor_invocations == 1).
-- **BG-01/BG-09/BG-10**: Model requests == 2 (model → tools → model stays
+- **BG-01/BG-09/BG-10**: Model requests == 2 (model в†’ tools в†’ model stays
   inside one `agent.run_sync()`).
 - **BG-11**: ToolExecutor invocation == 1 (the executor was reached; the
   project handler was not executed).
@@ -1265,10 +1265,10 @@ Key differences from PAIM-02 matrix:
 
 | Scenario | request_limit | Model requests | Exception |
 |---|---|---|---|
-| Normal model→tools→model | 3 | 2 | None (terminal text) |
+| Normal modelв†’toolsв†’model | 3 | 2 | None (terminal text) |
 | Third request prevented | 2 | 2 | `UsageLimitExceeded` |
 
-The complete model→tools→model cycle stays inside **one** `agent.run_sync()`.
+The complete modelв†’toolsв†’model cycle stays inside **one** `agent.run_sync()`.
 `UsageLimits(request_limit=N)` bounds total model requests across the run.
 
 ### Missing-ID behavior
@@ -1282,17 +1282,17 @@ executes. No `None` IDs reach the handler in normal operation.
 
 Exact Pydantic AI 2.39.0 public APIs used:
 
-- `ExternalToolset(tool_defs)` — `pydantic_ai.toolsets.ExternalToolset`
-- `HandleDeferredToolCalls(handler=...)` — `pydantic_ai.capabilities.HandleDeferredToolCalls`
-- `ToolDefinition(name, description, parameters_json_schema)` — `pydantic_ai.tools.ToolDefinition`
-- `DeferredToolRequests.calls` — external tool calls from model
-- `DeferredToolRequests.approvals` — empty for external tools
-- `requests.build_results(calls=...)` — validated result construction
+- `ExternalToolset(tool_defs)` вЂ” `pydantic_ai.toolsets.ExternalToolset`
+- `HandleDeferredToolCalls(handler=...)` вЂ” `pydantic_ai.capabilities.HandleDeferredToolCalls`
+- `ToolDefinition(name, description, parameters_json_schema)` вЂ” `pydantic_ai.tools.ToolDefinition`
+- `DeferredToolRequests.calls` вЂ” external tool calls from model
+- `DeferredToolRequests.approvals` вЂ” empty for external tools
+- `requests.build_results(calls=...)` вЂ” validated result construction
 - `Agent(model, output_type=str, retries={"tools": 0})`
 - `@agent.toolset` decorator for registering `ExternalToolset`
 - `agent.run_sync(prompt, capabilities=[...], usage_limits=...)`
-- `FunctionModel(function=...)` — deterministic model responses
-- `TestModel(call_tools=[...])` — deterministic tool-call scenarios
+- `FunctionModel(function=...)` вЂ” deterministic model responses
+- `TestModel(call_tools=[...])` вЂ” deterministic tool-call scenarios
 - `UsageLimits(request_limit=N)`
 - `ToolCallPart`, `ModelResponse`, `TextPart`
 
@@ -1310,7 +1310,7 @@ Pydantic AI 2.39.0 APIs:
 - `ExternalToolset` provides schema-only tool definitions (no Python handler)
 - `HandleDeferredToolCalls` intercepts the complete batch before execution
 - Application policy owns batch admission and sequential ToolExecutor execution
-- The model→tools→model cycle stays inside one `agent.run_sync()`
+- The modelв†’toolsв†’model cycle stays inside one `agent.run_sync()`
 - `UsageLimits(request_limit=N)` bounds total model requests
 
 Application-owned batch admission and sequential ToolExecutor execution are
@@ -1352,13 +1352,13 @@ No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
 ### Next task
 
 ```text
-PAIM-03 — Migration-specific test harness hardening
+PAIM-03 вЂ” Migration-specific test harness hardening
 ```
 
 Do not begin PAIM-03 automatically.
 
 
-## 20. PAIM-C04 correction record — complete PAIM-C03 executable evidence
+## 20. PAIM-C04 correction record вЂ” complete PAIM-C03 executable evidence
 
 **Status:** DONE
 **Completed:** 2026-09-05
@@ -1370,12 +1370,12 @@ Do not begin PAIM-03 automatically.
 
 PAIM-C03 had four documented evidence gaps that PAIM-C04 closes:
 
-1. **Defect A — BG-10 listed as PASS without a dedicated executable test.**
-2. **Defect B — Normal whole-turn flow used `request_limit=3` rather than proving success at `request_limit=2`.**
-3. **Defect C — Missing-ID auto-assignment was documented without a dedicated executable test.**
-4. **Defect D — BG-08 docstring described `UnexpectedModelBehavior` conversion but the actual test raises `ProjectValidationError` directly.**
+1. **Defect A вЂ” BG-10 listed as PASS without a dedicated executable test.**
+2. **Defect B вЂ” Normal whole-turn flow used `request_limit=3` rather than proving success at `request_limit=2`.**
+3. **Defect C вЂ” Missing-ID auto-assignment was documented without a dedicated executable test.**
+4. **Defect D вЂ” BG-08 docstring described `UnexpectedModelBehavior` conversion but the actual test raises `ProjectValidationError` directly.**
 
-### Defect A — BG-10 single WRITE through ToolExecutor
+### Defect A вЂ” BG-10 single WRITE through ToolExecutor
 
 Added `test_bg10_single_write_through_executor` to `test_pydantic_ai_blocker_execution.py`.
 
@@ -1404,22 +1404,22 @@ retries={"tools": 0}
 | WRITE project handler invocations | 1 |
 | Terminal result | `str` |
 
-The framework has no Python tool function capable of calling the WRITE handler directly — all execution goes through `ToolExecutor.execute()`.
+The framework has no Python tool function capable of calling the WRITE handler directly вЂ” all execution goes through `ToolExecutor.execute()`.
 
-### Defect B — Corrected whole-turn request limit
+### Defect B вЂ” Corrected whole-turn request limit
 
-The normal model→tool→model flow now runs with `UsageLimits(request_limit=2)` instead of `3`.
+The normal modelв†’toolв†’model flow now runs with `UsageLimits(request_limit=2)` instead of `3`.
 
 **Required proof (both sides):**
 
 | Scenario | `request_limit` | Model requests | Result |
 |---|---|---|---|
-| Normal model→tool→model | 2 | 2 | Terminal text, no `UsageLimitExceeded` |
+| Normal modelв†’toolв†’model | 2 | 2 | Terminal text, no `UsageLimitExceeded` |
 | Attempted third request | 2 | 2 | `UsageLimitExceeded` before request #3 |
 
 Both tests use `FunctionModel` with explicit model-request counters.
 
-### Defect C — Missing tool-call ID behavior
+### Defect C вЂ” Missing tool-call ID behavior
 
 Added `test_missing_tool_call_ids` to `test_pydantic_ai_blocker_execution.py`.
 
@@ -1432,22 +1432,22 @@ Unique: yes
 None reached handler: no
 ```
 
-Pydantic AI 2.39.0 auto-assigns unique `tool_call_id` values when the constructor argument is omitted. The executable test does **not** prove behavior when `tool_call_id` is explicitly set to `None` — the test only omits the argument. The documented claim that explicit `None` is preserved is removed because it is unsupported by executable evidence.
+Pydantic AI 2.39.0 auto-assigns unique `tool_call_id` values when the constructor argument is omitted. The executable test does **not** prove behavior when `tool_call_id` is explicitly set to `None` вЂ” the test only omits the argument. The documented claim that explicit `None` is preserved is removed because it is unsupported by executable evidence.
 
-### Defect D — BG-08 docstring correction
+### Defect D вЂ” BG-08 docstring correction
 
 Corrected the BG-08 docstring to match the actual executable behavior:
 
 ```text
 invalid external-tool args
-→ deferred handler receives batch (handler_invocations == 1)
-→ ToolExecutor invoked (executor_invocations == 1)
-→ project input validation fails
-→ project handler NOT invoked (counters.alpha == 0)
-→ ProjectValidationError propagates directly
+в†’ deferred handler receives batch (handler_invocations == 1)
+в†’ ToolExecutor invoked (executor_invocations == 1)
+в†’ project input validation fails
+в†’ project handler NOT invoked (counters.alpha == 0)
+в†’ ProjectValidationError propagates directly
 ```
 
-No exception behavior was changed — only the documentation was corrected.
+No exception behavior was changed вЂ” only the documentation was corrected.
 
 ### Additional corrections
 
@@ -1468,7 +1468,7 @@ if c.tool_call_id is not None:
 
 This correctly allows multiple `None` IDs through without rejecting them merely for both being `None`.
 
-**Maintainability — module decomposition:**
+**Maintainability вЂ” module decomposition:**
 
 The execution test file exceeded the 1000-line hard limit after additions. The file was decomposed into three topic-oriented modules:
 
@@ -1570,13 +1570,13 @@ No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
 ### Next task
 
 ```text
-PAIM-03 — Migration-specific test harness hardening
+PAIM-03 вЂ” Migration-specific test harness hardening
 ```
 
 Do not begin PAIM-03 automatically.
 
 
-## 22. PAIM-C05 correction record — restore PAIM history and close PAIM-03 evidence
+## 22. PAIM-C05 correction record вЂ” restore PAIM history and close PAIM-03 evidence
 
 **Status:** DONE
 **Completed:** 2026-09-05
@@ -1591,15 +1591,15 @@ PAIM-03 was required to append a completion record to the migration history
 document. Instead, its commit destructively replaced the document, deleting
 approximately 536 lines of historical content including:
 
-- §9 Blocker criteria
-- §10 Escape hatch levels
-- §11 Rollback/rejection documentation
-- §12 No-double-runtime rule
-- §13 Dependency/upgrade policy
-- §14 Completion order
-- §15 PAIM-01 completion record
-- §16 PAIM-C01 correction record
-- §18 PAIM-02 completion record
+- В§9 Blocker criteria
+- В§10 Escape hatch levels
+- В§11 Rollback/rejection documentation
+- В§12 No-double-runtime rule
+- В§13 Dependency/upgrade policy
+- В§14 Completion order
+- В§15 PAIM-01 completion record
+- В§16 PAIM-C01 correction record
+- В§18 PAIM-02 completion record
 
 PAIM-C05 restores all accidentally deleted content from the parent commit
 (`19933320bcacc52f32f5693f962743e7874c113f`) while preserving the valid
@@ -1609,22 +1609,22 @@ PAIM-03 harness implementation and completion record.
 
 All historical content was restored from the parent commit at
 `19933320bcacc52f32f5693f962743e7874c113f`. The PAIM-03 completion record
-was retained unchanged. No Git history was rewritten — the restoration is
+was retained unchanged. No Git history was rewritten вЂ” the restoration is
 a forward correction commit.
 
 ### PAIM-03 harness preserved
 
 The following PAIM-03 deliverables remain intact:
 
-- `tests/support/__init__.py` — unchanged
-- `tests/support/pydantic_ai_runtime.py` — unchanged
-- `tests/integration/test_pydantic_ai_blocker_gate.py` — unchanged
-- `tests/integration/test_pydantic_ai_blocker_execution.py` — unchanged
-- `tests/integration/test_pydantic_ai_blocker_limits.py` — unchanged
-- All blocker-gate test assertions — unchanged
-- HTTP isolation via custom `httpx2.AsyncBaseTransport` — retained
+- `tests/support/__init__.py` вЂ” unchanged
+- `tests/support/pydantic_ai_runtime.py` вЂ” unchanged
+- `tests/integration/test_pydantic_ai_blocker_gate.py` вЂ” unchanged
+- `tests/integration/test_pydantic_ai_blocker_execution.py` вЂ” unchanged
+- `tests/integration/test_pydantic_ai_blocker_limits.py` вЂ” unchanged
+- All blocker-gate test assertions вЂ” unchanged
+- HTTP isolation via custom `httpx2.AsyncBaseTransport` вЂ” retained
 
-### Defect C — HTTP request-capture evidence
+### Defect C вЂ” HTTP request-capture evidence
 
 The `test_q8_connection_failure` test in
 `tests/integration/test_pydantic_ai_qualification.py` was enhanced to
@@ -1642,18 +1642,18 @@ capture and assert intercepted request evidence:
 - The injected `httpx2.AsyncClient` is explicitly closed through the
   `try/finally` lifecycle
 
-### Defect D — unsupported explicit-None claim narrowed
+### Defect D вЂ” unsupported explicit-None claim narrowed
 
 The PAIM-C04 record previously stated:
 
 > When explicitly set to `None`, `None` is preserved.
 
-This claim was not supported by executable evidence — the test only omits
+This claim was not supported by executable evidence вЂ” the test only omits
 the `tool_call_id` argument rather than explicitly passing `None`. The
 claim has been replaced with:
 
 > The executable test does **not** prove behavior when `tool_call_id` is
-> explicitly set to `None` — the test only omits the argument. The
+> explicitly set to `None` вЂ” the test only omits the argument. The
 > documented claim that explicit `None` is preserved is removed because
 > it is unsupported by executable evidence.
 
@@ -1688,9 +1688,9 @@ No `pyproject.toml` or `uv.lock` changes.
 ### Effective migration status after correction
 
 ```text
-PAIM-03 — DONE
-PAIM-C05 — DONE
-PAIM-04 — NOT STARTED
+PAIM-03 вЂ” DONE
+PAIM-C05 вЂ” DONE
+PAIM-04 вЂ” NOT STARTED
 ```
 
 PAIM-02 effective blocker decision remains: **PASS**
@@ -1700,12 +1700,12 @@ No migration blocker is introduced by PAIM-C05.
 ### Next task
 
 ```text
-PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
+PAIM-04 вЂ” ToolRegistry в†’ framework Toolset в†’ ToolExecutor bridge
 ```
 
 Do not begin PAIM-04 automatically.
 
-## 23. PAIM-C06 correction record — Close Q8 HTTP client lifecycle evidence
+## 23. PAIM-C06 correction record вЂ” Close Q8 HTTP client lifecycle evidence
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -1718,7 +1718,7 @@ Do not begin PAIM-04 automatically.
 PAIM-C05 incorrectly claimed that the injected `httpx2.AsyncClient` was
 explicitly closed in the `test_q8_connection_failure` finally block. The
 actual `finally` body checked for a running event loop and then executed
-`pass` — no close operation was performed.
+`pass` вЂ” no close operation was performed.
 
 PAIM-C06 adds executable explicit closure and asserts the underlying client
 is closed.
@@ -1753,8 +1753,8 @@ assert mock_client.is_closed, "underlying httpx2 AsyncClient was not closed"
 ```
 
 Both assertions use the public `is_closed` API:
-- `AsyncOpenAI.is_closed()` — method returning `True` after close
-- `httpx2.AsyncClient.is_closed` — property returning `True` after close
+- `AsyncOpenAI.is_closed()` вЂ” method returning `True` after close
+- `httpx2.AsyncClient.is_closed` вЂ” property returning `True` after close
 
 ### Exact path evidence
 
@@ -1820,12 +1820,12 @@ DEVELOPMENT_STATUS.md
 ### Next task
 
 ```text
-PAIM-04 — ToolRegistry → framework Toolset → ToolExecutor bridge
+PAIM-04 вЂ” ToolRegistry в†’ framework Toolset в†’ ToolExecutor bridge
 ```
 
 Do not begin PAIM-04 automatically.
 
-## 24. PAIM-04 completion record — ToolRegistry → framework Toolset → ToolExecutor bridge
+## 24. PAIM-04 completion record вЂ” ToolRegistry в†’ framework Toolset в†’ ToolExecutor bridge
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -1860,9 +1860,9 @@ For a representative READ tool (`read_alpha`):
 
 | Field | Framework exposure |
 |---|---|
-| Project name → framework name | `"read_alpha"` → `"read_alpha"` |
-| Description preserved | `"A read-only test tool"` → `"A read-only test tool"` |
-| Input schema preserved | `AlphaInput.model_json_schema()` → `parameters_json_schema` |
+| Project name в†’ framework name | `"read_alpha"` в†’ `"read_alpha"` |
+| Description preserved | `"A read-only test tool"` в†’ `"A read-only test tool"` |
+| Input schema preserved | `AlphaInput.model_json_schema()` в†’ `parameters_json_schema` |
 | Output schema exposed to framework | **No** (stays in project snapshot) |
 | Permission metadata as framework authority | **No** (stays in project snapshot) |
 | Python handler attached | **No** (schema-only `ExternalToolset`) |
@@ -1871,12 +1871,12 @@ For a representative READ tool (`read_alpha`):
 
 | Scenario | Result |
 |---|---|
-| Duplicate name | `ValidationError` — "Duplicate tool name" |
-| Unknown name | `ValidationError` — "not registered in the canonical ToolRegistry" |
-| Permission mismatch | `ValidationError` — "permission mismatch" |
-| Session-mode mismatch | `ValidationError` — "allowed_session_modes mismatch" |
-| Description mismatch | `ValidationError` — "description mismatch" |
-| Input schema mismatch | `ValidationError` — "input_schema mismatch" |
+| Duplicate name | `ValidationError` вЂ” "Duplicate tool name" |
+| Unknown name | `ValidationError` вЂ” "not registered in the canonical ToolRegistry" |
+| Permission mismatch | `ValidationError` вЂ” "permission mismatch" |
+| Session-mode mismatch | `ValidationError` вЂ” "allowed_session_modes mismatch" |
+| Description mismatch | `ValidationError` вЂ” "description mismatch" |
+| Input schema mismatch | `ValidationError` вЂ” "input_schema mismatch" |
 
 ### Execution evidence
 
@@ -1887,12 +1887,12 @@ For a representative READ tool (`read_alpha`):
 | Malformed JSON | Yes | No (fail closed) | 0 | `ValidationError` |
 | Non-object JSON | Yes | No (fail closed) | 0 | `ValidationError` |
 | Schema-invalid dict | Yes | Yes | 0 | `ValidationError` from ToolExecutor |
-| Hidden live tool | Yes | No (fail closed) | 0 | `ValidationError` — "not in the frozen exposure" |
-| Unknown tool | Yes | No (fail closed) | 0 | `ValidationError` — "not in the frozen exposure" |
+| Hidden live tool | Yes | No (fail closed) | 0 | `ValidationError` вЂ” "not in the frozen exposure" |
+| Unknown tool | Yes | No (fail closed) | 0 | `ValidationError` вЂ” "not in the frozen exposure" |
 | WRITE valid | Yes | Yes | 1 | `ToolOutput(result="write:test")` |
-| READ→WRITE denial | Yes | Yes | 0 | `ConflictError` — "Permission denied" |
-| Missing audit | Yes | Yes | 0 | `ValidationError` — "requires a non-None AuditContext" |
-| Session denial | Yes | Yes | 0 | `ConflictError` — "Session mode" |
+| READв†’WRITE denial | Yes | Yes | 0 | `ConflictError` вЂ” "Permission denied" |
+| Missing audit | Yes | Yes | 0 | `ValidationError` вЂ” "requires a non-None AuditContext" |
+| Session denial | Yes | Yes | 0 | `ConflictError` вЂ” "Session mode" |
 
 ### Exception propagation
 
@@ -1960,13 +1960,13 @@ docs/migrations/001_PYDANTIC_AI_RUNTIME.md
 ### Next task
 
 ```text
-PAIM-05 — Explicit DndAgentPolicy
+PAIM-05 вЂ” Explicit DndAgentPolicy
 ```
 
 Do not begin PAIM-05 automatically.
 
 
-## 25. PAIM-C07 completion record — Harden PAIM-04 bridge authority
+## 25. PAIM-C07 completion record вЂ” Harden PAIM-04 bridge authority
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -1978,10 +1978,10 @@ Do not begin PAIM-05 automatically.
 
 | Defect | Description |
 |---|---|
-| A — Snapshot not bound to issuing bridge | `execute()` verified only snapshot type and tool name membership. A snapshot from Bridge A could conceptually authorise execution through Bridge B if the tool name existed in Registry B. |
-| B — Enum comparison not identity-safe | `_verify_metadata_match` used `set ==` for session-mode and side-effect collections, allowing foreign same-value `StrEnum` impostors and plain strings to pass. |
-| C — Missing structural `ToolCallPart` validation | `execute()` type-annotated `tool_call: ToolCallPart` but did not validate runtime type before accessing `.tool_name`. |
-| D — Handler counts inferred | PAIM-04 handler-count table was documented from inference rather than executable test assertions. |
+| A вЂ” Snapshot not bound to issuing bridge | `execute()` verified only snapshot type and tool name membership. A snapshot from Bridge A could conceptually authorise execution through Bridge B if the tool name existed in Registry B. |
+| B вЂ” Enum comparison not identity-safe | `_verify_metadata_match` used `set ==` for session-mode and side-effect collections, allowing foreign same-value `StrEnum` impostors and plain strings to pass. |
+| C вЂ” Missing structural `ToolCallPart` validation | `execute()` type-annotated `tool_call: ToolCallPart` but did not validate runtime type before accessing `.tool_name`. |
+| D вЂ” Handler counts inferred | PAIM-04 handler-count table was documented from inference rather than executable test assertions. |
 
 ### Snapshot provenance mechanism
 
@@ -2014,8 +2014,8 @@ Both `to_external_toolset()` and `execute()` call `_validate_snapshot()` first, 
 ### Cross-bridge proof
 
 Constructed:
-- Registry A: tool `"same_tool"` → handler A (increments `alpha_a`)
-- Registry B: tool `"same_tool"` → handler B (increments `alpha_b`)
+- Registry A: tool `"same_tool"` в†’ handler A (increments `alpha_a`)
+- Registry B: tool `"same_tool"` в†’ handler B (increments `alpha_b`)
 - Bridge A freezes snapshot with `"same_tool"`
 - Bridge B rejects `bridge_b.execute(snapshot_a, ...)` with `ValidationError`
 - Handler A calls: 0, Handler B calls: 0
@@ -2034,25 +2034,25 @@ A snapshot constructed via `PydanticAIToolSnapshot._create(definitions=..., owne
 
 | Scenario | Textual value matches canonical | Runtime type canonical | Result |
 |---|---|---|---|
-| ForeignPermission.READ | yes | no | `ValidationError` — "not a valid Permission" |
-| ForeignSessionMode.ACTIVE_SESSION | yes | no | `ValidationError` — "not the expected enum type" |
-| ForeignSideEffect.ENTITY_MUTATION | yes | no | `ValidationError` — "not the expected enum type" |
-| Plain string `"read"` | yes | no | `ValidationError` — "not a valid Permission" |
+| ForeignPermission.READ | yes | no | `ValidationError` вЂ” "not a valid Permission" |
+| ForeignSessionMode.ACTIVE_SESSION | yes | no | `ValidationError` вЂ” "not the expected enum type" |
+| ForeignSideEffect.ENTITY_MUTATION | yes | no | `ValidationError` вЂ” "not the expected enum type" |
+| Plain string `"read"` | yes | no | `ValidationError` вЂ” "not a valid Permission" |
 
 ### Structural call evidence
 
 | Input | Exception type | Handler calls |
 |---|---|---|
-| `object()` as `tool_call` | `ValidationError` — "must be a ToolCallPart" | 0 |
-| `object()` as `snapshot` | `ValidationError` — "must be a PydanticAIToolSnapshot" | 0 |
-| `object()` as `execution_context` | `ValidationError` — "must be an ExecutionContext" | 0 |
+| `object()` as `tool_call` | `ValidationError` вЂ” "must be a ToolCallPart" | 0 |
+| `object()` as `snapshot` | `ValidationError` вЂ” "must be a PydanticAIToolSnapshot" | 0 |
+| `object()` as `execution_context` | `ValidationError` вЂ” "must be an ExecutionContext" | 0 |
 
 ### Metadata drift evidence
 
 | Drift type | Result |
 |---|---|
-| Side-effect drift (READ tool with ENTITY_MUTATION) | `ValidationError` — "cardinality mismatch" |
-| Output-schema drift | `ValidationError` — "output_schema mismatch" |
+| Side-effect drift (READ tool with ENTITY_MUTATION) | `ValidationError` вЂ” "cardinality mismatch" |
+| Output-schema drift | `ValidationError` вЂ” "output_schema mismatch" |
 
 ### Handler-count evidence
 
@@ -2142,13 +2142,13 @@ PAIM-C07 corrects the four documented authority defects in PAIM-04. The original
 ### Next task
 
 ```text
-PAIM-05 — Explicit DndAgentPolicy
+PAIM-05 вЂ” Explicit DndAgentPolicy
 ```
 
 Do not begin PAIM-05 automatically.
 
 
-## 26. PAIM-C08 completion record — Prevent same-registry snapshot-copy authority expansion
+## 26. PAIM-C08 completion record вЂ” Prevent same-registry snapshot-copy authority expansion
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -2166,8 +2166,8 @@ expanded with another **canonical definition from the same registry** using
 
 The copied snapshot inherited the legitimate bridge `_owner_token`. Both
 definitions were canonical objects from the same registry. Therefore the
-C07 checks — owner token identity, unique names, registry lookup,
-`binding.definition is td` — all passed.
+C07 checks вЂ” owner token identity, unique names, registry lookup,
+`binding.definition is td` вЂ” all passed.
 
 This let an ordinary copied snapshot expand authority beyond its original
 exposure.
@@ -2179,7 +2179,7 @@ original exposure:  read_alpha (READ)
 canonical hidden:   write_alpha (WRITE, registered in same ToolRegistry)
 owner token matched: yes (inherited via dataclasses.replace)
 canonical identity matched: yes (write_alpha is a canonical registry object)
-why C07 accepted:   issuance was not tracked — only structural/identity
+why C07 accepted:   issuance was not tracked вЂ” only structural/identity
                     checks were performed
 ```
 
@@ -2213,7 +2213,7 @@ self._issued_snapshots.add(snapshot)
 return snapshot
 ```
 
-During `_validate_snapshot()` — new step 3:
+During `_validate_snapshot()` вЂ” new step 3:
 
 ```text
 1. runtime type
@@ -2231,11 +2231,11 @@ indefinitely.
 With issuance tracking:
 
 ```text
-original snapshot returned by freeze()   → valid
-dataclasses.replace(snapshot)            → new object, NOT issued → invalid
-dataclasses.replace(snapshot, defs=...)  → new object, NOT issued → invalid
-manually constructed snapshot            → NOT issued → invalid
-snapshot from another bridge             → NOT issued by this bridge → invalid
+original snapshot returned by freeze()   в†’ valid
+dataclasses.replace(snapshot)            в†’ new object, NOT issued в†’ invalid
+dataclasses.replace(snapshot, defs=...)  в†’ new object, NOT issued в†’ invalid
+manually constructed snapshot            в†’ NOT issued в†’ invalid
+snapshot from another bridge             в†’ NOT issued by this bridge в†’ invalid
 ```
 
 The snapshot is a capability, not a serialisable DTO.
@@ -2252,9 +2252,9 @@ The snapshot is a capability, not a serialisable DTO.
 
 | Scenario | to_external_toolset | execute |
 |---|---|---|
-| Random owner token | `ValidationError` — "different bridge" | `ValidationError` — "different bridge" |
-| Correct stolen owner token but non-issued object | `ValidationError` — "not issued by this bridge" | `ValidationError` — "not issued by this bridge" |
-| Cross-bridge object | `ValidationError` — "different bridge" | `ValidationError` — "different bridge" |
+| Random owner token | `ValidationError` вЂ” "different bridge" | `ValidationError` вЂ” "different bridge" |
+| Correct stolen owner token but non-issued object | `ValidationError` вЂ” "not issued by this bridge" | `ValidationError` вЂ” "not issued by this bridge" |
+| Cross-bridge object | `ValidationError` вЂ” "different bridge" | `ValidationError` вЂ” "different bridge" |
 
 The correct-owner-token test deliberately accesses `bridge._snapshot_owner_token`
 (private internals) in a negative test to prove issuance identity is the
@@ -2343,13 +2343,13 @@ Effective C07 evidence remains valid for its other corrections.
 ### Next task
 
 ```text
-PAIM-05 — Explicit DndAgentPolicy
+PAIM-05 вЂ” Explicit DndAgentPolicy
 ```
 
 Do not begin PAIM-05 automatically.
 
 
-## 27. PAIM-05 completion record — Explicit DndAgentPolicy
+## 27. PAIM-05 completion record вЂ” Explicit DndAgentPolicy
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -2364,18 +2364,18 @@ Do not begin PAIM-05 automatically.
 | Module | `src/dnd_assistant/application/dnd_agent_policy.py` |
 | Public classes | `DndAgentPolicy`, `DndAgentBatchAdmission`, `AdmittedToolCall` |
 | Public constants | `MAX_TOOL_CALLS_PER_RUN=4`, `MAX_MODEL_REQUESTS_PER_RUN=2`, `MAX_DEFERRED_TOOL_BATCHES_PER_RUN=1` |
-| Run-local mutable state | `_batch_observed: bool` — whether a deferred batch has been observed |
-| Constructor | `DndAgentPolicy(*, tool_bridge, snapshot)` — validates snapshot at construction |
+| Run-local mutable state | `_batch_observed: bool` вЂ” whether a deferred batch has been observed |
+| Constructor | `DndAgentPolicy(*, tool_bridge, snapshot)` вЂ” validates snapshot at construction |
 | Admission method | `admit_tool_batch(tool_calls: Sequence[ToolCallPart]) -> DndAgentBatchAdmission` |
 
 ### Snapshot authority
 
 | Scenario | Result |
 |---|---|
-| Cross-bridge snapshot | `ValidationError` — "different bridge" |
-| Copied snapshot (`dataclasses.replace`) | `ValidationError` — "not issued" |
-| Stolen owner token but non-issued snapshot | `ValidationError` — "not issued" |
-| Live-registry hidden tool | `ModelError` — "not in the frozen exposure" |
+| Cross-bridge snapshot | `ValidationError` вЂ” "different bridge" |
+| Copied snapshot (`dataclasses.replace`) | `ValidationError` вЂ” "not issued" |
+| Stolen owner token but non-issued snapshot | `ValidationError` вЂ” "not issued" |
+| Live-registry hidden tool | `ModelError` вЂ” "not in the frozen exposure" |
 
 ### Admission matrix
 
@@ -2398,20 +2398,20 @@ Do not begin PAIM-05 automatically.
 
 | Scenario | Result |
 |---|---|
-| First valid → second valid | `ModelError` — "already been observed" |
-| First rejected → second valid | `ModelError` — "already been observed" |
-| New policy instance | fresh state — second batch admitted |
-| Empty batch → subsequent first real batch | empty: `ValidationError`; real: admitted |
+| First valid в†’ second valid | `ModelError` вЂ” "already been observed" |
+| First rejected в†’ second valid | `ModelError` вЂ” "already been observed" |
+| New policy instance | fresh state вЂ” second batch admitted |
+| Empty batch в†’ subsequent first real batch | empty: `ValidationError`; real: admitted |
 
 ### Separation of responsibilities
 
 | Property | Evidence |
 |---|---|
-| Policy parses args | **No** — malformed args `"{broken"` admitted by policy |
-| Policy executes handlers | **No** — all handler counters are 0 across all 45 tests |
-| Policy calls ToolExecutor | **No** — no ToolExecutor import in policy module |
+| Policy parses args | **No** вЂ” malformed args `"{broken"` admitted by policy |
+| Policy executes handlers | **No** вЂ” all handler counters are 0 across all 45 tests |
+| Policy calls ToolExecutor | **No** вЂ” no ToolExecutor import in policy module |
 | Single WRITE admitted by policy | **Yes** |
-| Same WRITE rejected by ToolExecutor under READ context | `ConflictError` — "Permission denied" |
+| Same WRITE rejected by ToolExecutor under READ context | `ConflictError` вЂ” "Permission denied" |
 
 ### Admission immutability
 
@@ -2421,7 +2421,7 @@ Do not begin PAIM-05 automatically.
 | `calls` is tuple | `isinstance(admission.calls, tuple)` |
 | `AdmittedToolCall` frozen | `AttributeError` on `.tool_name = ...` |
 | Canonical definition identity | `admission.calls[0].definition is snapshot.definitions[0]` |
-| Order preservation | batch order `[read_beta, read_alpha]` → positions 0, 1 |
+| Order preservation | batch order `[read_beta, read_alpha]` в†’ positions 0, 1 |
 
 ### Scope confirmation
 
@@ -2507,13 +2507,13 @@ ACCEPTED
 ### Next task
 
 ```text
-PAIM-06 — Context/dependencies integration
+PAIM-06 вЂ” Context/dependencies integration
 ```
 
 Do not begin PAIM-06 automatically.
 
 
-## 28. PAIM-C09 completion record — Seal DndAgentPolicy batch input boundary
+## 28. PAIM-C09 completion record вЂ” Seal DndAgentPolicy batch input boundary
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -2533,17 +2533,15 @@ malicious caller could mutate the batch between admission phases.
 
 ### Correction
 
-**Runtime Sequence check** — Before any structural or content validation,
+**Runtime Sequence check** вЂ” Before any structural or content validation,
 the input is checked against `collections.abc.Sequence`:
 
 ```python
 if not isinstance(tool_calls, collections.abc.Sequence):
-    raise ValidationError(
-        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
-    )
+    raise ValidationError(f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}")
 ```
 
-**Immutable tuple capture** — After the runtime check, the batch is
+**Immutable tuple capture** вЂ” After the runtime check, the batch is
 immediately frozen into a `tuple`:
 
 ```python
@@ -2558,21 +2556,21 @@ use only this tuple. The caller-owned mutable sequence is never re-read.
 
 | Input | Exception type | State consumed | Subsequent valid batch admitted |
 |---|---|---|---|
-| `object()` | `ValidationError` — "Sequence" | NO | YES |
-| Generator expression | `ValidationError` — "Sequence" | NO | YES |
-| `["not_a_tool_call_part"]` | `ValidationError` — "ToolCallPart" | NO | YES |
+| `object()` | `ValidationError` вЂ” "Sequence" | NO | YES |
+| Generator expression | `ValidationError` вЂ” "Sequence" | NO | YES |
+| `["not_a_tool_call_part"]` | `ValidationError` вЂ” "ToolCallPart" | NO | YES |
 | Normal list | Admitted | YES | N/A (second batch rejected) |
 
 ### State-consumption semantics preserved
 
 | Scenario | First batch result | Second batch result |
 |---|---|---|
-| Empty `[]` | `ValidationError` — "must not be empty" | Admitted (state not consumed) |
-| `object()` | `ValidationError` — "Sequence" | Admitted (state not consumed) |
-| Generator | `ValidationError` — "Sequence" | Admitted (state not consumed) |
-| Non-ToolCallPart string list | `ValidationError` — "ToolCallPart" | Admitted (state not consumed) |
-| 5 calls | `ModelError` — "Maximum 4" | `ModelError` — "already been observed" |
-| READ+WRITE | `ModelError` — "WRITE" | `ModelError` — "already been observed" |
+| Empty `[]` | `ValidationError` вЂ” "must not be empty" | Admitted (state not consumed) |
+| `object()` | `ValidationError` вЂ” "Sequence" | Admitted (state not consumed) |
+| Generator | `ValidationError` вЂ” "Sequence" | Admitted (state not consumed) |
+| Non-ToolCallPart string list | `ValidationError` вЂ” "ToolCallPart" | Admitted (state not consumed) |
+| 5 calls | `ModelError` вЂ” "Maximum 4" | `ModelError` вЂ” "already been observed" |
+| READ+WRITE | `ModelError` вЂ” "WRITE" | `ModelError` вЂ” "already been observed" |
 
 ### Mutable-list capture evidence
 
@@ -2595,10 +2593,12 @@ This was replaced with a real invocation counter:
 ```python
 hidden_calls = 0
 
+
 def hidden_handler(inp, ctx):
     nonlocal hidden_calls
     hidden_calls += 1
     return ToolOutput(result="hidden")
+
 
 registry.register(hidden_canonical, hidden_handler)
 # ... policy rejects hidden_tool ...
@@ -2660,18 +2660,18 @@ No Tool Layer changes. No `pyproject.toml` or `uv.lock` changes.
 
 ```
 ACCEPTED
-PAIM-C09 — DONE
+PAIM-C09 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-06 — Context/dependencies integration
+PAIM-06 вЂ” Context/dependencies integration
 ```
 
 Do not begin PAIM-06 automatically.
 
-## 29. PAIM-06 completion record — Context/dependencies integration
+## 29. PAIM-06 completion record вЂ” Context/dependencies integration
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -2686,7 +2686,7 @@ Do not begin PAIM-06 automatically.
 | Type | Description |
 |---|---|
 | `DndAgentDeps` | Frozen run-local dependency bundle for one Pydantic AI agent run |
-| `PreparedDndAgentRun` | Result of successful preparation — deps + exposed tool defs |
+| `PreparedDndAgentRun` | Result of successful preparation вЂ” deps + exposed tool defs |
 | `DndAgentRunPreparer` | Deterministic pre-model preparation orchestration |
 
 **`DndAgentDeps` fields:**
@@ -2734,13 +2734,13 @@ def prepare(
 
 Exact ordered steps:
 
-1. **Validate `execution_context` runtime type** — `TypeError` before context reads.
-2. **`AgentContextBuilder.build(user_input)`** — validates input, builds context.
-3. **`select_agent_tools(tool_catalog, context=execution_context)`** — deterministic exposure.
-4. **`PydanticAIToolBridge.freeze(selected)`** — issue immutable snapshot.
-5. **Construct one fresh `DndAgentPolicy`** — bound to this run's snapshot.
-6. **Construct `DndAgentDeps`** — bundle all prepared values.
-7. **Return `PreparedDndAgentRun`** — deps + exposed tool defs.
+1. **Validate `execution_context` runtime type** вЂ” `TypeError` before context reads.
+2. **`AgentContextBuilder.build(user_input)`** вЂ” validates input, builds context.
+3. **`select_agent_tools(tool_catalog, context=execution_context)`** вЂ” deterministic exposure.
+4. **`PydanticAIToolBridge.freeze(selected)`** вЂ” issue immutable snapshot.
+5. **Construct one fresh `DndAgentPolicy`** вЂ” bound to this run's snapshot.
+6. **Construct `DndAgentDeps`** вЂ” bundle all prepared values.
+7. **Return `PreparedDndAgentRun`** вЂ” deps + exposed tool defs.
 
 No tool execution. No model calls. No framework objects.
 
@@ -2772,7 +2772,7 @@ No tool execution. No model calls. No framework objects.
 | Snapshot identity distinct | YES |
 | Policy identity distinct | YES |
 | Same names allowed | YES |
-| Policy state leak | NO — run B's first batch admissible after run A consumed its batch |
+| Policy state leak | NO вЂ” run B's first batch admissible after run A consumed its batch |
 
 ### Framework deps evidence
 
@@ -2792,11 +2792,11 @@ No tool execution. No model calls. No framework objects.
 
 | Property | Value |
 |---|---|
-| Sentinel used | `🛡️PAIM-06-SENTINEL-NOT-IN-MODEL` |
+| Sentinel used | `рџ›ЎпёЏPAIM-06-SENTINEL-NOT-IN-MODEL` |
 | Sentinel present in deps | YES (in `agent_context.user_input`) |
 | Sentinel present automatically in model request | NO |
 
-**Result:** NO automatic serialization — `DndAgentDeps` is not implicitly model-facing.
+**Result:** NO automatic serialization вЂ” `DndAgentDeps` is not implicitly model-facing.
 
 ### Immutability
 
@@ -2881,12 +2881,12 @@ ACCEPTED
 ### Next task
 
 ```text
-PAIM-07 — Replace one-step FastAgent mechanics
+PAIM-07 вЂ” Replace one-step FastAgent mechanics
 ```
 
 Do not begin PAIM-07 automatically.
 
-## 30. PAIM-C10 correction record — seal Pydantic AI run dependency binding
+## 30. PAIM-C10 correction record вЂ” seal Pydantic AI run dependency binding
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -2900,7 +2900,7 @@ PAIM-C10 closes three dependency-integrity defects in the PAIM-06
 production code and reconciles two evidence defects in the PAIM-06
 completion record.
 
-### Defect A — malformed ExecutionContext taxonomy
+### Defect A вЂ” malformed ExecutionContext taxonomy
 
 **PAIM-06 behavior:** `prepare()` raised `TypeError` for malformed
 `execution_context`.
@@ -2914,12 +2914,12 @@ tool_catalog, tool_bridge).
 
 ```text
 malformed object() as execution_context
-→ ValidationError
-→ context_builder.build calls == 0
-→ handler calls == 0
+в†’ ValidationError
+в†’ context_builder.build calls == 0
+в†’ handler calls == 0
 ```
 
-### Defect B — DndAgentDeps did not validate its claimed binding
+### Defect B вЂ” DndAgentDeps did not validate its claimed binding
 
 **PAIM-06 behavior:** `__post_init__()` only proved
 `isinstance(policy, DndAgentPolicy)`.
@@ -2947,7 +2947,7 @@ Required checks:
 - `snapshot is self._snapshot` (exact identity)
 - `tool_bridge.validate_snapshot(snapshot)` succeeds
 
-### Defect C — PreparedDndAgentRun could be internally inconsistent
+### Defect C вЂ” PreparedDndAgentRun could be internally inconsistent
 
 **PAIM-06 behavior:** No validation between `exposed_tools` and the
 authoritative snapshot inside `deps`.
@@ -3034,19 +3034,19 @@ Tool Layer changes.
 
 ```
 ACCEPTED
-PAIM-C10 — DONE
+PAIM-C10 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-07 — Replace one-step FastAgent mechanics
+PAIM-07 вЂ” Replace one-step FastAgent mechanics
 ```
 
 Do not begin PAIM-07 automatically.
 
 
-## 31. PAIM-C11 correction record — Restore PAIM-06 history and seal prepared-run boundary
+## 31. PAIM-C11 correction record вЂ” Restore PAIM-06 history and seal prepared-run boundary
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -3058,7 +3058,7 @@ Do not begin PAIM-07 automatically.
 
 PAIM-C11 closes two defects:
 
-1. **Defect A — PreparedDndAgentRun did not validate `deps` runtime type.**
+1. **Defect A вЂ” PreparedDndAgentRun did not validate `deps` runtime type.**
    `PreparedDndAgentRun.__post_init__()` validated `exposed_tools` container
    type, item types, name alignment, and snapshot re-validation, but did not
    first validate that `deps` is a `DndAgentDeps` instance. Malformed trusted
@@ -3066,13 +3066,13 @@ PAIM-C11 closes two defects:
    `AttributeError` from `self.deps.tool_snapshot.names` instead of a project
    `ValidationError`.
 
-2. **Defect B — PAIM-06 completion record was accidentally deleted.**
+2. **Defect B вЂ” PAIM-06 completion record was accidentally deleted.**
    PAIM-C10 restored the pre-PAIM-06 historical content (PAIM-C09 record)
    from `5218dd...` but inadvertently removed the PAIM-06 completion record
    (section 29). The C10 record claimed "PAIM-06 record is retained as
    historical evidence" but this was false in the committed file.
 
-### Defect A — PreparedDndAgentRun deps runtime validation
+### Defect A вЂ” PreparedDndAgentRun deps runtime validation
 
 **PAIM-C11 behavior:** `PreparedDndAgentRun.__post_init__()` now validates
 `deps` runtime type as its first check, before any other validation:
@@ -3084,9 +3084,9 @@ if not isinstance(self.deps, DndAgentDeps):
 
 **Validation order:**
 
-1. `deps` runtime type — must be `DndAgentDeps`
-2. `exposed_tools` container type — must be `tuple`
-3. Every exposed item type — must be `ToolPublicDefinition`
+1. `deps` runtime type вЂ” must be `DndAgentDeps`
+2. `exposed_tools` container type вЂ” must be `tuple`
+3. Every exposed item type вЂ” must be `ToolPublicDefinition`
 4. Exposed names == snapshot names (exact order)
 5. Re-validate issued snapshot
 
@@ -3109,7 +3109,7 @@ All C10 binding protections preserved:
 | Missing exposure | ValidationError (do not match) |
 | Reordered exposure | ValidationError (do not match) |
 
-### Defect B — Migration history restoration
+### Defect B вЂ” Migration history restoration
 
 PAIM-C10 accidentally removed the PAIM-06 completion record while restoring
 the earlier PAIM-C09 historical text.
@@ -3124,10 +3124,10 @@ dependency binding.
 ### Migration ordering
 
 ```
-## 28. PAIM-C09 completion record — exact 5218dd... historical content
-## 29. PAIM-06 completion record — exact ad7610e... historical content (restored)
-## 30. PAIM-C10 correction record — retained
-## 31. PAIM-C11 correction record — new append-only record
+## 28. PAIM-C09 completion record вЂ” exact 5218dd... historical content
+## 29. PAIM-06 completion record вЂ” exact ad7610e... historical content (restored)
+## 30. PAIM-C10 correction record вЂ” retained
+## 31. PAIM-C11 correction record вЂ” new append-only record
 ```
 
 ### Changed files
@@ -3187,18 +3187,18 @@ uv.lock
 
 ```
 ACCEPTED
-PAIM-C11 — DONE
+PAIM-C11 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-07 — Replace one-step FastAgent mechanics
+PAIM-07 вЂ” Replace one-step FastAgent mechanics
 ```
 
 Do not begin PAIM-07 automatically.
 
-## 32. PAIM-C12 correction record — Restore exact PAIM historical text
+## 32. PAIM-C12 correction record вЂ” Restore exact PAIM historical text
 
 **Status:** DONE
 **Completed:** 2026-09-07
@@ -3236,18 +3236,18 @@ No dependency changes.
 
 ```
 ACCEPTED
-PAIM-C12 — DONE
+PAIM-C12 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-07 — Replace one-step FastAgent mechanics
+PAIM-07 вЂ” Replace one-step FastAgent mechanics
 ```
 
 Do not begin PAIM-07 automatically.
 
-## 33. PAIM-07 completion record — Replace one-step FastAgent mechanics
+## 33. PAIM-07 completion record вЂ” Replace one-step FastAgent mechanics
 
 ### Starting state
 
@@ -3451,18 +3451,18 @@ git diff --check:                 PASS
 
 ```text
 ACCEPTED
-PAIM-07 — DONE
+PAIM-07 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-08 — Replace bounded AgentLoop mechanics
+PAIM-08 вЂ” Replace bounded AgentLoop mechanics
 ```
 
 Do not begin PAIM-08 automatically.
 
-## 34. PAIM-C13 correction record — Close PAIM-07 runtime evidence gaps
+## 34. PAIM-C13 correction record вЂ” Close PAIM-07 runtime evidence gaps
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -3478,7 +3478,7 @@ that the committed evidence in section 33 overstates what is directly tested.
 PAIM-C13 adds executable evidence for framework-visible tool exposure,
 output-tool configuration, two-run isolation, snapshot/policy isolation,
 reference parity, error cause mapping, TextPart concatenation, and
-ThinkingPart hiding — without modifying any production code.
+ThinkingPart hiding вЂ” without modifying any production code.
 
 ### New evidence file
 
@@ -3488,7 +3488,7 @@ tests/integration/test_pydantic_ai_fast_agent_evidence.py
 
 11 tests, all pass. File is under 1000 lines.
 
-### C13-E01 — exact framework-visible tool order
+### C13-E01 вЂ” exact framework-visible tool order
 
 A normal READ run captures the public `AgentInfo` passed to `FunctionModel`.
 
@@ -3503,7 +3503,7 @@ model requests:                    1
 handlers:                          0
 ```
 
-### C13-E02 — no synthetic output tools
+### C13-E02 вЂ” no synthetic output tools
 
 ```text
 AgentInfo.output_tools == []:      YES
@@ -3513,7 +3513,7 @@ AgentInfo.allow_text_output:       True
 The intended PAIM-07 contract (plain text output + external project tools,
 not framework-generated project result tools) is confirmed.
 
-### C13-E03 — model-visible two-run exposure isolation
+### C13-E03 вЂ” model-visible two-run exposure isolation
 
 Same `PydanticAIFastAgent` instance used for two decisions with different
 authorities:
@@ -3530,7 +3530,7 @@ handlers:                                   0
 Proves actual model-visible `ExternalToolset` isolation, not merely
 `decision_a.exposed_tools != decision_b.exposed_tools`.
 
-### C13-E04 — snapshot/policy run isolation
+### C13-E04 вЂ” snapshot/policy run isolation
 
 Captures exact `PreparedDndAgentRun` for each decision via a spy wrapper:
 
@@ -3543,7 +3543,7 @@ run-B first policy admission works:         YES
 
 Behaviorally proves run B's policy still has its first real batch opportunity.
 
-### C13-E05 — reference parity: text + tool
+### C13-E05 вЂ” reference parity: text + tool
 
 ```text
 prompt_version equality:                    YES
@@ -3554,7 +3554,7 @@ tool-call name/arguments equality:          YES
 model requests:                             1
 ```
 
-### C13-E06 — reference parity: multi READ
+### C13-E06 вЂ” reference parity: multi READ
 
 ```text
 prompt_version equality:                    YES
@@ -3567,7 +3567,7 @@ arguments preserved:                        YES
 model requests:                             1
 ```
 
-### C13-E07 — exact unknown-tool cause mapping
+### C13-E07 вЂ” exact unknown-tool cause mapping
 
 ```text
 project exception:                          ModelError
@@ -3576,7 +3576,7 @@ handlers:                                   0
 framework cause retained:                   YES (AgentRunError)
 ```
 
-### C13-E08 — duplicate-ID cause mapping
+### C13-E08 вЂ” duplicate-ID cause mapping
 
 ```text
 project exception:                          ModelError
@@ -3585,7 +3585,7 @@ handlers:                                   0
 framework cause retained:                   YES (AgentRunError)
 ```
 
-### C13-E09 — deterministic framework AgentRunError mapping
+### C13-E09 вЂ” deterministic framework AgentRunError mapping
 
 A `ModelAPIError` raised from a `FunctionModel` function:
 
@@ -3597,7 +3597,7 @@ model requests (where a request began):     1
 handlers:                                   0
 ```
 
-### C13-E10 — multiple TextPart concatenation rule
+### C13-E10 вЂ” multiple TextPart concatenation rule
 
 ```text
 raw TextPart sequence:                      "first", "second" + ToolCallPart
@@ -3608,7 +3608,7 @@ model requests:                             1
 handlers:                                   0
 ```
 
-### C13-E11 — ThinkingPart remains hidden
+### C13-E11 вЂ” ThinkingPart remains hidden
 
 ```text
 raw parts:                                  ThinkingPart + TextPart("visible") + ToolCallPart
@@ -3778,18 +3778,18 @@ uv.lock
 
 ```text
 ACCEPTED
-PAIM-C13 — DONE
+PAIM-C13 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-08 — Replace bounded AgentLoop mechanics
+PAIM-08 вЂ” Replace bounded AgentLoop mechanics
 ```
 
 Do not begin PAIM-08 automatically.
 
-## 35. PAIM-C14 correction record — Make PAIM-07 evidence literal and exact
+## 35. PAIM-C14 correction record вЂ” Make PAIM-07 evidence literal and exact
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -3816,7 +3816,7 @@ evidence:
 4. Several C13 tests documented `handlers: 0` without literal wired
    `HandlerCounters` assertions (E01, E02, E04, E05, E06, E09, E10, E11).
 
-### Defect A — E01 did not capture the issued snapshot
+### Defect A вЂ” E01 did not capture the issued snapshot
 
 **C13-E01 behavior:** Compared `AgentInfo.function_tools` names to
 `decision.exposed_tools` names twice, never to the exact
@@ -3856,7 +3856,7 @@ Also proves identity for the same run:
 assert prepared.exposed_tools == decision.exposed_tools
 ```
 
-### Defect B — E03 used two different PydanticAIFastAgent instances
+### Defect B вЂ” E03 used two different PydanticAIFastAgent instances
 
 **C13-E03 behavior:** Created `agent_a` and `agent_b` with separate
 `FunctionModel` instances. Section 34 incorrectly stated "Same
@@ -3894,7 +3894,7 @@ assert names_a == captured_runs[0].deps.tool_snapshot.names
 assert names_b == captured_runs[1].deps.tool_snapshot.names
 ```
 
-### Defect C — E07/E08 cause was not exact
+### Defect C вЂ” E07/E08 cause was not exact
 
 **C13-E07/E08 behavior:** Asserted only:
 
@@ -3918,7 +3918,7 @@ assert type(exc.__cause__) is UnexpectedModelBehavior
 `type(...) is ...` is used rather than `isinstance(...)` because the
 task requires exact evidence, not base-class compatibility.
 
-### Defect D — Several handlers=0 claims lacked wired assertions
+### Defect D вЂ” Several handlers=0 claims lacked wired assertions
 
 **PAIM-C14 correction:** Every evidence scenario whose migration record
 claims `handlers: 0` now contains literal wired `HandlerCounters`
@@ -3945,8 +3945,8 @@ Scenarios corrected:
 | Evidence                                      | Corrected result |
 | --------------------------------------------- | ---------------- |
 | E01 issued snapshot captured from exact run   | YES              |
-| snapshot → AgentInfo.function_tools parity    | YES              |
-| function_tools → AgentDecision parity         | YES              |
+| snapshot в†’ AgentInfo.function_tools parity    | YES              |
+| function_tools в†’ AgentDecision parity         | YES              |
 | E03 same PydanticAIFastAgent instance         | YES              |
 | two model-visible exposures isolated          | YES              |
 | E07 exact framework cause                     | `UnexpectedModelBehavior` |
@@ -4048,19 +4048,19 @@ uv.lock
 
 ```text
 ACCEPTED
-PAIM-C13 — DONE
-PAIM-C14 — DONE
+PAIM-C13 вЂ” DONE
+PAIM-C14 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-08 — Replace bounded AgentLoop mechanics
+PAIM-08 вЂ” Replace bounded AgentLoop mechanics
 ```
 
 Do not begin PAIM-08 automatically.
 
-## 36. PAIM-08 completion record — Replace bounded AgentLoop mechanics
+## 36. PAIM-08 completion record вЂ” Replace bounded AgentLoop mechanics
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -4099,9 +4099,9 @@ Deferred handler:        fresh HandleDeferredToolCalls per run (closure-scoped)
 3. fresh ExternalToolset from issued snapshot
 4. fresh HandleDeferredToolCalls (bound to this run)
 5. one Pydantic AI run (request_limit=2)
-       ├── request #1: text OR DeferredToolRequests
-       ├── deferred handler: policy → bridge → build_results
-       └── request #2: terminal text
+       в”њв”Ђв”Ђ request #1: text OR DeferredToolRequests
+       в”њв”Ђв”Ђ deferred handler: policy в†’ bridge в†’ build_results
+       в””в”Ђв”Ђ request #2: terminal text
 6. map to AgentRunResult
 ```
 
@@ -4111,9 +4111,9 @@ Deferred handler:        fresh HandleDeferredToolCalls per run (closure-scoped)
 |---|---|---|---|---|
 | P8-01 direct respond | 0 | 1 | 0 | RESPOND |
 | P8-02 direct clarify | 0 | 1 | 0 | CLARIFY |
-| P8-03 single READ → respond | 1 | 2 | 1 | RESPOND |
-| P8-04 single READ → clarify | 1 | 2 | 1 | CLARIFY |
-| P8-05 single WRITE → respond | 1 | 2 | 1 | RESPOND |
+| P8-03 single READ в†’ respond | 1 | 2 | 1 | RESPOND |
+| P8-04 single READ в†’ clarify | 1 | 2 | 1 | CLARIFY |
+| P8-05 single WRITE в†’ respond | 1 | 2 | 1 | RESPOND |
 | P8-06 2 READ sequential | 2 | 2 | 2 | RESPOND |
 | P8-07 4 READ maximum | 4 | 2 | 4 | RESPOND |
 | P8-08 repeated same READ | 2 | 2 | 2 | RESPOND |
@@ -4201,7 +4201,7 @@ dnd_assistant.cli
 dnd_assistant.tools.executor
 ```
 
-**Result:** PASS — all six forbidden module prefixes are absent from `sys.modules` after a fresh import.
+**Result:** PASS вЂ” all six forbidden module prefixes are absent from `sys.modules` after a fresh import.
 
 ### Shared helper extraction
 
@@ -4285,20 +4285,20 @@ docs/migrations/001_PYDANTIC_AI_RUNTIME.md
 
 ```text
 ACCEPTED
-PAIM-08 — DONE
+PAIM-08 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-09 — Ollama integration decision gate
+PAIM-09 вЂ” Ollama integration decision gate
 ```
 
 Do not begin PAIM-09 automatically.
 
 ---
 
-## 37. PAIM-C15 correction record — PAIM-08 structural preflight and parity evidence
+## 37. PAIM-C15 correction record вЂ” PAIM-08 structural preflight and parity evidence
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -4309,42 +4309,42 @@ Do not begin PAIM-09 automatically.
 
 PAIM-08 was accepted without two required evidence classes:
 
-1. **Structural preflight evidence (C15-S1–S9):** Tests proving that the runtime rejects invalid tool-call batches (non-finite args, schema mismatch, mixed READ+WRITE, duplicate call IDs, unknown/hidden tools) *before* executing any tool in the batch.
-2. **Old/new parity evidence (C15-P1–P5):** Tests proving that `PydanticAIAgentRuntime` produces the same observable outcomes as the existing custom `AgentLoop` for the five fundamental scenarios (direct respond, direct clarify, single READ→respond, single WRITE→respond, two READ→respond).
+1. **Structural preflight evidence (C15-S1вЂ“S9):** Tests proving that the runtime rejects invalid tool-call batches (non-finite args, schema mismatch, mixed READ+WRITE, duplicate call IDs, unknown/hidden tools) *before* executing any tool in the batch.
+2. **Old/new parity evidence (C15-P1вЂ“P5):** Tests proving that `PydanticAIAgentRuntime` produces the same observable outcomes as the existing custom `AgentLoop` for the five fundamental scenarios (direct respond, direct clarify, single READв†’respond, single WRITEв†’respond, two READв†’respond).
 
 ### Evidence tests created
 
 | File | Tests | Status |
 |---|---|---|
-| `tests/integration/test_pydantic_ai_agent_runtime_evidence.py` | 11 evidence tests (C15-S1–S9) | All PASS |
-| `tests/integration/test_pydantic_ai_agent_runtime_parity.py` | 5 parity tests (C15-P1–P5) | All PASS |
+| `tests/integration/test_pydantic_ai_agent_runtime_evidence.py` | 11 evidence tests (C15-S1вЂ“S9) | All PASS |
+| `tests/integration/test_pydantic_ai_agent_runtime_parity.py` | 5 parity tests (C15-P1вЂ“P5) | All PASS |
 | `tests/unit/test_pydantic_ai_response_adapter.py` | 12 adapter unit tests | All PASS |
 
-### Structural preflight evidence (C15-S1–S9)
+### Structural preflight evidence (C15-S1вЂ“S9)
 
 | ID | Scenario | Test |
 |---|---|---|
-| C15-S1 | Single non-finite arg in batch → `ModelError`, zero executions | `test_single_non_finite_raises_model_error` |
-| C15-S1b | Valid non-finite in valid batch → non-finite rejected, valid executes | `test_valid_non_finite_valid_batch` |
-| C15-S2 | Schema mismatch → `ValidationError`, zero executions | `test_schema_fail_fast` |
+| C15-S1 | Single non-finite arg in batch в†’ `ModelError`, zero executions | `test_single_non_finite_raises_model_error` |
+| C15-S1b | Valid non-finite in valid batch в†’ non-finite rejected, valid executes | `test_valid_non_finite_valid_batch` |
+| C15-S2 | Schema mismatch в†’ `ValidationError`, zero executions | `test_schema_fail_fast` |
 | C15-S3 | RunContext deps is the prepared `DndAgentDeps` instance | `test_ctx_deps_is_prepared_deps` |
 | C15-S4 | Same framework run spans both model requests | `test_same_run_two_requests` |
-| C15-S5 | Single READ → one bridge execution | `test_single_read_one_bridge_exec` |
-| C15-S5b | Two READ → two bridge executions | `test_two_read_two_bridge_execs` |
-| C15-S6 | No tool call → direct respond | `test_no_tool_call_respond` |
+| C15-S5 | Single READ в†’ one bridge execution | `test_single_read_one_bridge_exec` |
+| C15-S5b | Two READ в†’ two bridge executions | `test_two_read_two_bridge_execs` |
+| C15-S6 | No tool call в†’ direct respond | `test_no_tool_call_respond` |
 | C15-S7 | Single WRITE executes once | `test_single_write_execution` |
-| C15-S8 | Mixed READ+WRITE batch → `ModelError`, zero executions | `test_mixed_batch_rejected` |
-| C15-S9 | Duplicate call ID → `ModelError`, zero executions | `test_duplicate_call_id_rejected` |
+| C15-S8 | Mixed READ+WRITE batch в†’ `ModelError`, zero executions | `test_mixed_batch_rejected` |
+| C15-S9 | Duplicate call ID в†’ `ModelError`, zero executions | `test_duplicate_call_id_rejected` |
 
-### Parity evidence (C15-P1–P5)
+### Parity evidence (C15-P1вЂ“P5)
 
 | ID | Scenario | Tool calls | Model requests | Tool executions | Outcome |
 |---|---|---|---|---|---|
 | C15-P1 | Direct respond | 0 | 1 | 0 | RESPOND |
 | C15-P2 | Direct clarify | 0 | 1 | 0 | CLARIFY |
-| C15-P3 | Single READ → respond | 1 | 2 | 1 | RESPOND |
-| C15-P4 | Single WRITE → respond | 1 | 2 | 1 | RESPOND |
-| C15-P5 | Two READ → respond | 2 | 2 | 2 | RESPOND |
+| C15-P3 | Single READ в†’ respond | 1 | 2 | 1 | RESPOND |
+| C15-P4 | Single WRITE в†’ respond | 1 | 2 | 1 | RESPOND |
+| C15-P5 | Two READ в†’ respond | 2 | 2 | 2 | RESPOND |
 
 ### Shared adapter extraction
 
@@ -4364,8 +4364,8 @@ This replaces the duplicated `_adapt_tool_calls()` in `pydantic_ai_fast_agent.py
 
 ```text
 src/dnd_assistant/application/pydantic_ai_response_adapter.py    (new)
-src/dnd_assistant/application/pydantic_ai_agent_runtime.py       (modified — structural fixes)
-src/dnd_assistant/application/pydantic_ai_fast_agent.py          (modified — use shared adapter)
+src/dnd_assistant/application/pydantic_ai_agent_runtime.py       (modified вЂ” structural fixes)
+src/dnd_assistant/application/pydantic_ai_fast_agent.py          (modified вЂ” use shared adapter)
 
 tests/unit/test_pydantic_ai_response_adapter.py                  (new, 12 tests)
 tests/integration/test_pydantic_ai_agent_runtime_evidence.py     (new, 11 tests)
@@ -4394,13 +4394,13 @@ docs/migrations/001_PYDANTIC_AI_RUNTIME.md
 
 ```text
 ACCEPTED
-PAIM-C15 — DONE
-PAIM-08 structural preflight and parity evidence — COMPLETE
+PAIM-C15 вЂ” DONE
+PAIM-08 structural preflight and parity evidence вЂ” COMPLETE
 ```
 
 ---
 
-## 38. PAIM-C16 correction record — Close literal PAIM-08 evidence and restore migration history
+## 38. PAIM-C16 correction record вЂ” Close literal PAIM-08 evidence and restore migration history
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -4413,7 +4413,7 @@ PAIM-08 structural preflight and parity evidence — COMPLETE
 
 Independent review found that PAIM-C15 left several evidence defects open:
 
-1. **C15-P1–P5** did not instantiate `AgentLoop` and therefore were not
+1. **C15-P1вЂ“P5** did not instantiate `AgentLoop` and therefore were not
    genuine old/new parity tests. They only tested `PydanticAIAgentRuntime`.
 2. **C15-S3** did not literally capture/assert `RunContext.deps` identity.
 3. **C15-S4** did not literally count `Agent.run_sync` invocations.
@@ -4424,7 +4424,7 @@ Independent review found that PAIM-C15 left several evidence defects open:
 6. **Historical prefix** through section 36 was modified (two formatting
    changes in section 28).
 
-### Defect A — Parity tests now execute both runtimes
+### Defect A вЂ” Parity tests now execute both runtimes
 
 The current parity file (`test_pydantic_ai_agent_runtime_parity.py`) was
 rewritten so that each of the five scenarios executes **both**
@@ -4454,17 +4454,17 @@ response contains only `ToolCallPart` parts (no `TextPart`), while the
 reference `AgentLoop` preserves the assistant text even when tool calls
 are present. This is documented but not treated as a parity failure.
 
-### Defect B — ctx.deps identity evidence
+### Defect B вЂ” ctx.deps identity evidence
 
 `TestC16E1CtxDepsIdentity.test_ctx_deps_is_prepared_deps` captures the
 exact `PreparedDndAgentRun` produced by the runtime via a spy on
 `DndAgentRunPreparer.prepare()`. The deferred handler's `ctx.deps` is
 proven to be the exact `prepared.deps` instance by the fact that the
-handler executes successfully — the production `_make_deferred_handler`
+handler executes successfully вЂ” the production `_make_deferred_handler`
 checks `ctx.deps is not prepared.deps` and raises `ValidationError` on
 mismatch.
 
-### Defect C — same-run evidence
+### Defect C вЂ” same-run evidence
 
 `TestC16E2SameRunEvidence.test_same_run_two_requests` wraps
 `Agent.run_sync` with a spy that delegates to the real implementation.
@@ -4476,7 +4476,7 @@ FunctionModel requests:      2
 
 This proves both model requests stay inside one framework `run_sync` call.
 
-### Defect D — bridge counts
+### Defect D вЂ” bridge counts
 
 The `PydanticAIToolBridge.execute` method is spied on in
 `TestC16E3BridgeExecutionCounts` to count literal calls while delegating
@@ -4506,15 +4506,15 @@ to single-line, and extra blank lines in a code block) were corrected.
 Section 37 (PAIM-C15 correction record) is retained unchanged as historical
 evidence. The following claims in section 37 are corrected here:
 
-**C15-S1b claim:** "Valid non-finite in valid batch → non-finite rejected,
+**C15-S1b claim:** "Valid non-finite in valid batch в†’ non-finite rejected,
 valid executes"
 
 **Correction:** The actual behavior is:
 ```text
 valid + non-finite + valid
-→ full structural preflight fails
-→ zero bridge executions
-→ zero project handlers
+в†’ full structural preflight fails
+в†’ zero bridge executions
+в†’ zero project handlers
 ```
 
 The `adapt_pydantic_tool_calls()` function performs structural preflight
@@ -4529,8 +4529,7 @@ def adapt_pydantic_tool_calls(
     calls: Sequence[ToolCallPart],
     *,
     snapshot_names: tuple[str, ...],
-) -> tuple[ToolCall, ...]:
-    ...
+) -> tuple[ToolCall, ...]: ...
 ```
 
 ### Original PAIM-08 historical facts
@@ -4548,22 +4547,22 @@ test_pydantic_ai_agent_runtime_boundaries.py: 839
 
 ```text
 ACCEPTED
-PAIM-C15 — DONE
-PAIM-C16 — DONE
-PAIM-08 — DONE
+PAIM-C15 вЂ” DONE
+PAIM-C16 вЂ” DONE
+PAIM-08 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-09 — Ollama integration decision gate
+PAIM-09 вЂ” Ollama integration decision gate
 ```
 
 Do not begin PAIM-09 automatically.
 
 ---
 
-## 39. PAIM-C17 correction record — Complete literal PAIM-08 runtime evidence
+## 39. PAIM-C17 correction record вЂ” Complete literal PAIM-08 runtime evidence
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -4620,8 +4619,8 @@ delegated spy counts.
 
 | File | Tests | Status |
 |---|---|---|
-| `tests/integration/test_pydantic_ai_agent_runtime_literal_evidence.py` | 17 (E1–E3) | All PASS |
-| `tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p2.py` | 11 (E4–E14) | All PASS |
+| `tests/integration/test_pydantic_ai_agent_runtime_literal_evidence.py` | 17 (E1вЂ“E3) | All PASS |
+| `tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p2.py` | 11 (E4вЂ“E14) | All PASS |
 
 ### Evidence matrix
 
@@ -4635,7 +4634,7 @@ delegated spy counts.
 | actual ToolReturnPart replay | PASS |
 | multi-result replay order | PASS |
 | four-way exposure continuity | PASS |
-| successful admission→execution order | PASS |
+| successful admissionв†’execution order | PASS |
 | rejected-batch order | PASS |
 | approval rejection | PASS |
 | build_results error mapping | PASS |
@@ -4706,10 +4705,10 @@ Zero bridge executions, zero model-2 on rejection.
 
 ### Genuine parity
 
-All five C16-P1–P5 tests execute both `AgentLoop.run()` and
+All five C16-P1вЂ“P5 tests execute both `AgentLoop.run()` and
 `PydanticAIAgentRuntime.run()` and pass DTO parity.
 
-### Sections 1–38
+### Sections 1вЂ“38
 
 ```text
 unchanged: YES
@@ -4723,23 +4722,23 @@ correct original PAIM-08 counts:
 
 ```text
 ACCEPTED
-PAIM-C15 — DONE
-PAIM-C16 — DONE
-PAIM-C17 — DONE
-PAIM-08 — DONE
+PAIM-C15 вЂ” DONE
+PAIM-C16 вЂ” DONE
+PAIM-C17 вЂ” DONE
+PAIM-08 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-09 — Ollama integration decision gate
+PAIM-09 вЂ” Ollama integration decision gate
 ```
 
 Do not begin PAIM-09 automatically.
 
 ---
 
-## 40. PAIM-C18 correction record — Close final PAIM-08 evidence defects
+## 40. PAIM-C18 correction record вЂ” Close final PAIM-08 evidence defects
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -4769,7 +4768,7 @@ PAIM-C17 left five evidence defects:
 PAIM-C17 had unintentionally changed section 28 formatting (multi-line raise
 collapsed to single-line, extra blank lines in code block) and section 38
 formatting (`-> tuple[ToolCall, ...]:\n    ...` collapsed to
-`-> tuple[ToolCall, ...]: ...`) despite claiming sections 1–38 were unchanged.
+`-> tuple[ToolCall, ...]: ...`) despite claiming sections 1вЂ“38 were unchanged.
 
 PAIM-C18 restores the prefix through section 38 to exactly match the parent
 commit `68a1b646`.
@@ -4791,12 +4790,12 @@ tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p3.py
 
 | Evidence | Result |
 |---|---|
-| C18-E1 — real second deferred batch | PASS |
-| C18-E2 — production build_results ValueError -> ModelError | PASS |
-| C18-E3 — four-way exposure via PreparedDndAgentRun | PASS |
-| C18-E4 — literal policy admission event ordering (success) | PASS |
-| C18-E5 — literal rejected-policy event ordering | PASS |
-| C18-E6 — strengthened approval rejection with spies | PASS |
+| C18-E1 вЂ” real second deferred batch | PASS |
+| C18-E2 вЂ” production build_results ValueError -> ModelError | PASS |
+| C18-E3 вЂ” four-way exposure via PreparedDndAgentRun | PASS |
+| C18-E4 вЂ” literal policy admission event ordering (success) | PASS |
+| C18-E5 вЂ” literal rejected-policy event ordering | PASS |
+| C18-E6 вЂ” strengthened approval rejection with spies | PASS |
 
 ### Real second deferred batch (C18-E1)
 
@@ -4972,23 +4971,23 @@ uv.lock
 
 ```text
 ACCEPTED
-PAIM-C15 — DONE
-PAIM-C16 — DONE
-PAIM-C17 — DONE
-PAIM-C18 — DONE
-PAIM-08 — DONE
+PAIM-C15 вЂ” DONE
+PAIM-C16 вЂ” DONE
+PAIM-C17 вЂ” DONE
+PAIM-C18 вЂ” DONE
+PAIM-08 вЂ” DONE
 ```
 
 ### Next task
 
 ```text
-PAIM-09 — Ollama integration decision gate
+PAIM-09 вЂ” Ollama integration decision gate
 ```
 
 Do not begin PAIM-09 automatically.
 
 
-## 41. PAIM-09 completion record — Ollama integration decision gate
+## 41. PAIM-09 completion record вЂ” Ollama integration decision gate
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -5036,11 +5035,11 @@ Framework types returned: `OllamaModel` (exact type, not subclass)
 | Scenario | Result |
 |---|---|
 | `provider=ollama`, `role=AGENT` | ACCEPTED |
-| wrong provider (`openai`) | `ValidationError` — "provider='ollama'" |
-| `SUMMARIZER` role | `ValidationError` — "role=AGENT" |
-| `EMBEDDING` role | `ValidationError` — "role=AGENT" |
+| wrong provider (`openai`) | `ValidationError` вЂ” "provider='ollama'" |
+| `SUMMARIZER` role | `ValidationError` вЂ” "role=AGENT" |
+| `EMBEDDING` role | `ValidationError` вЂ” "role=AGENT" |
 | `keep_alive=None` | ACCEPTED |
-| `keep_alive` set (`"5m"`) | `ValidationError` — "keep_alive" |
+| `keep_alive` set (`"5m"`) | `ValidationError` вЂ” "keep_alive" |
 
 ### Base URL matrix
 
@@ -5174,7 +5173,7 @@ uv.lock unchanged:                  YES
 ### Migration history
 
 ```text
-sections 1–40 unchanged:            YES
+sections 1вЂ“40 unchanged:            YES
 section 41 appended:                YES
 ```
 
@@ -5228,10 +5227,10 @@ HEAD == upstream:                   (reported in Final Report)
 working tree clean:                 (reported in Final Report)
 
 effective PAIM-09:                  DONE
-next:                               PAIM-10 — Sync/thread-safety gate
+next:                               PAIM-10 вЂ” Sync/thread-safety gate
 ```
 
-## 42. PAIM-C19 correction record — Close PAIM-09 factory/runtime evidence defects
+## 42. PAIM-C19 correction record вЂ” Close PAIM-09 factory/runtime evidence defects
 
 **Status:** DONE
 **Completed:** 2026-09-08
@@ -5243,16 +5242,16 @@ next:                               PAIM-10 — Sync/thread-safety gate
 
 Independent review of PAIM-09 identified four defects:
 
-1. **C19-D01** — malformed ``profile`` uses ``TypeError`` instead of project
+1. **C19-D01** вЂ” malformed ``profile`` uses ``TypeError`` instead of project
    ``ValidationError``.
-2. **C19-D02** — integration tests bypass the production factory by
+2. **C19-D02** вЂ” integration tests bypass the production factory by
    duplicating ``build_pydantic_ai_ollama_model()`` logic in a test helper.
-3. **C19-D03** — section 41 incorrectly claims 111 physical lines; the
+3. **C19-D03** вЂ” section 41 incorrectly claims 111 physical lines; the
    committed file has 160 (now 162 after correction).
-4. **C19-D04** — ``DEVELOPMENT_STATUS.md`` active-next task still points to
+4. **C19-D04** вЂ” ``DEVELOPMENT_STATUS.md`` active-next task still points to
    ``PAIM-09`` instead of ``PAIM-10``.
 
-### C19-D01 — malformed profile error contract
+### C19-D01 вЂ” malformed profile error contract
 
 **Before:** ``TypeError`` for ``object()``, ``dict``, or duck-fake ``profile``.
 
@@ -5267,26 +5266,26 @@ framework/provider construction.
 
 Provider, role, ``keep_alive``, and temperature validation remain unchanged.
 
-### C19-D02 — production factory integration
+### C19-D02 вЂ” production factory integration
 
 **Before:** ``_make_runtime()`` test helper duplicated the production
 factory logic:
 
 ```text
 _normalize_v1()
-→ manual OllamaProvider(base_url=..., http_client=...)
-→ manual ModelSettings(...)
-→ manual OllamaModel(...)
+в†’ manual OllamaProvider(base_url=..., http_client=...)
+в†’ manual ModelSettings(...)
+в†’ manual OllamaModel(...)
 ```
 
 **After:** ``_make_runtime()`` calls the real production factory:
 
 ```text
 build_pydantic_ai_ollama_model(profile)
-→ official OllamaModel
-→ official OllamaProvider (with mock http_client injected via
+в†’ official OllamaModel
+в†’ official OllamaProvider (with mock http_client injected via
   monkeypatch on the production module's namespace)
-→ PydanticAIAgentRuntime
+в†’ PydanticAIAgentRuntime
 ```
 
 The mock ``http_client`` is injected by temporarily replacing
@@ -5301,7 +5300,7 @@ build_pydantic_ai_ollama_model called exactly once per runtime construction
 
 via a ``factory_call_count`` counter.
 
-### C19-D03 — corrected line count
+### C19-D03 вЂ” corrected line count
 
 Section 41 historical claim:
 
@@ -5323,30 +5322,30 @@ After C19-D01 correction (current):
 
 Section 41 remains untouched as historical evidence.
 
-### C19-D04 — status correction
+### C19-D04 вЂ” status correction
 
 **Before:**
 
 ```text
 Active next task:
-PAIM-09 — Ollama integration decision gate
+PAIM-09 вЂ” Ollama integration decision gate
 ```
 
 **After:**
 
 ```text
 Active next task:
-PAIM-10 — Sync/thread-safety gate
+PAIM-10 вЂ” Sync/thread-safety gate
 ```
 
 ### Factory path
 
 ```text
 ModelProfile
-→ build_pydantic_ai_ollama_model()
-→ official OllamaModel (type(model) is OllamaModel)
-→ official OllamaProvider (with mocked http_client)
-→ PydanticAIAgentRuntime
+в†’ build_pydantic_ai_ollama_model()
+в†’ official OllamaModel (type(model) is OllamaModel)
+в†’ official OllamaProvider (with mocked http_client)
+в†’ PydanticAIAgentRuntime
 ```
 
 ### Snapshot/wire evidence
@@ -5426,7 +5425,7 @@ dnd_assistant.models.profiles
 ### Migration history
 
 ```text
-sections 1–41 unchanged:            YES (byte-identical to starting SHA)
+sections 1вЂ“41 unchanged:            YES (byte-identical to starting SHA)
 section 42 appended:                YES
 section 41 incorrect historical count: 111
 correct PAIM-09 production count:      160
@@ -5475,14 +5474,107 @@ git diff --check:                    (reported in Final Report)
 ### Effective status
 
 ```text
-PAIM-09 — ACCEPTED (SELECTIVE FRAMEWORK OLLAMA ADOPTION)
-PAIM-C19 — DONE
-PAIM-C20 — DONE
-PAIM-10 — NOT STARTED
-Active next task: PAIM-10 — Sync/thread-safety gate
+PAIM-09 вЂ” ACCEPTED (SELECTIVE FRAMEWORK OLLAMA ADOPTION)
+PAIM-C19 вЂ” DONE
+PAIM-C20 вЂ” DONE
+PAIM-10 вЂ” NOT STARTED
+Active next task: PAIM-10 вЂ” Sync/thread-safety gate
 ```
 
 ---
+
+## 43. PAIM-C20 correction record вЂ” Seal PAIM-09 transport and continuation evidence
+
+### C20-E1 вЂ” Exact HTTP transport attempt count
+
+Previous C19 provider-failure test asserted ``len(captured_requests) >= 1``
+despite observing a concrete retry count.
+
+C20 strengthens to the exact observed count:
+
+```text
+HTTP transport attempts:      3
+project error:                ModelError
+exact framework cause:        ModelAPIError
+project handlers:             0
+```
+
+The OpenAI SDK default ``max_retries=2`` produces 1 initial attempt + 2
+retries = 3 total. This is transport-level retry, not semantic model retry.
+
+### C20-E2 вЂ” Full request #2 continuation binding
+
+Previous C19 request #2 evidence did not literally assert the assistant
+tool-call name.
+
+C20 request #2 now proves:
+
+```text
+assistant tool-call ID:       "call-preserve-1"
+assistant tool name:          "read_alpha"
+
+tool-result call ID:          "call-preserve-1"
+tool-result exact content:    AgentToolExecutionResult.tool_message.content
+
+all equal:                    YES
+```
+
+### C20-E3 вЂ” Literal factory/provider counters
+
+Previously, ``factory_call_count`` was incremented inside the patched
+``OllamaProvider`` constructor, making it a provider-construction count
+despite its name.
+
+C20 separates the two counters:
+
+```text
+factory_call_count:           counts build_pydantic_ai_ollama_model invocations
+provider_construction_count:  counts OllamaProvider constructions
+
+Both equal 1 in every test.
+```
+
+The production factory symbol is patched at the module level
+(``_prod_factory.build_pydantic_ai_ollama_model``) and resolved through the
+module reference rather than the local import name.
+
+### Migration history
+
+```text
+sections 1вЂ“42 unchanged:            YES (byte-identical to starting SHA)
+section 43 appended:                YES
+```
+
+### Changed files
+
+```text
+M tests/integration/test_pydantic_ai_ollama_runtime.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| PAIM-09 integration (``test_pydantic_ai_ollama_runtime.py``) | 9 passed |
+| PAIM-09 unit (``test_pydantic_ai_ollama.py``) | 32 passed |
+
+### Ruff
+
+```text
+ruff check .:                        All checks passed
+```
+
+### Effective status
+
+```text
+PAIM-09 вЂ” ACCEPTED (SELECTIVE FRAMEWORK OLLAMA ADOPTION)
+PAIM-C19 вЂ” DONE
+PAIM-C20 вЂ” DONE
+PAIM-10 вЂ” NOT STARTED
+Active next task: PAIM-10 вЂ” Sync/thread-safety gate
+```
 
 ## 44. PAIM-10 completion record — Sync/thread-safety gate
 
@@ -5701,6 +5793,225 @@ working tree clean:                 (reported in Final Report)
 
 effective PAIM-10:                  DONE
 next:                               PAIM-11 — Full Stage-9 behavioral parity
+```
+
+Do not begin PAIM-11 automatically.
+
+---
+
+## 45. PAIM-C21 correction record — Seal PAIM-10 literal thread evidence
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `bb5cc433a9e4b5465373850e64950456fc2bff4e`
+**Direct parent:** `37adc76ecde5db4775d67da1a4b69d4fa228db1c`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+Independent review found that the PAIM-10 committed evidence in section 44
+had the following defects:
+
+| Defect | Description |
+|--------|-------------|
+| E01 | Omitted literal deferred-handler, ToolExecutor, and project-handler thread IDs |
+| E02 | Inferred project-path executor behavior rather than asserting callable classification |
+| E03 | Did not read ContextVar from the actual project handler |
+| E04 | "Later in same run" read was only immediate within one wrapper |
+| E06 | Used three PydanticAIAgentRuntime objects rather than one |
+| E07 | Used a new runtime after failure |
+| E08 | Did not capture the actual project handler's worker-thread ID |
+| E09 | Did not assert the documented different-thread result |
+| E10 | Tested Agent.run_sync directly rather than PydanticAIAgentRuntime.run |
+| History | Section 44 was inserted before section 43 instead of appended |
+
+### Corrected evidence
+
+The corrected literal evidence is in a new test file:
+
+```text
+tests/integration/test_pydantic_ai_sync_thread_literal_evidence.py
+```
+
+#### E01 — Complete project-path thread identity
+
+All nine project-path points captured via ``threading.get_ident()`` and
+asserted as literal integer equality:
+
+| Point | Assertion |
+|-------|-----------|
+| caller before | == all project-path IDs |
+| context builder | == caller before |
+| preparer | == caller before |
+| deferred handler | == caller before |
+| policy | == caller before |
+| bridge | == caller before |
+| ToolExecutor | == caller before |
+| project handler | == caller before |
+| caller after | == caller before |
+
+**Result:** ALL EQUAL — PASS
+
+#### E02 — Literal executor classification
+
+``pydantic_ai._utils.run_in_executor`` was instrumented to record every
+callable name.  No project-path callables were found:
+
+```text
+project callbacks found in run_in_executor:
+    0
+
+observed callables (generic framework only):
+    (any FunctionModel callbacks, not project-path)
+```
+
+**Result:** PASS — zero project callbacks via ``run_in_executor``.
+
+#### E03 — ContextVar reaches actual project handler
+
+A test-local ``ContextVar`` was set before ``runtime.run()`` and read from:
+
+```text
+preparer:           SENTINEL
+deferred handler:   SENTINEL
+policy:             SENTINEL
+bridge:             SENTINEL
+project handler:    SENTINEL
+```
+
+**Result:** PASS — ContextVar propagates to the actual project handler.
+
+#### E04 — ContextVar write characterisation
+
+```text
+before handler write:   OUTER
+handler writes:         INNER
+after handler write:    INNER
+second model request:   OUTER (separate async task)
+outer caller after run: OUTER (task-local isolation)
+```
+
+The second model request callback is a separate async task and does not see
+the handler's task-local ContextVar write.  This is expected asyncio
+task-local behavior.
+
+**Result:** PASS — ContextVar task-local semantics confirmed.
+
+#### E05 — Default SQLite thread affinity
+
+A ``sqlite3.connect()`` (default ``check_same_thread=True``) created on the
+caller thread was used inside the ToolExecutor project handler:
+
+```text
+connection owner thread:    caller thread
+handler thread:             caller thread
+query succeeds:             YES
+```
+
+**Result:** PASS — no SQLite thread-safety violation.
+
+#### E06 — One exact runtime for A/B/C runs
+
+```text
+runtime object id:          same across all three runs
+prepared A is not B:        YES
+prepared B is not C:        YES
+policy A is not B:          YES
+policy B is not C:          YES
+all succeed:                YES
+```
+
+**Result:** PASS — one ``PydanticAIAgentRuntime`` handles sequential A/B/C.
+
+#### E07 — Failure then recovery on same runtime
+
+```text
+same runtime object:        YES
+run A (malformed):          ModelError
+run B (valid tool path):    success
+project handler executed:   YES
+```
+
+**Result:** PASS — same runtime survives failure.
+
+#### E08 — Worker-thread ownership
+
+```text
+main thread != worker thread:   YES
+preparer thread == worker:      YES
+policy thread == worker:        YES
+bridge thread == worker:        YES
+project handler thread == worker: YES
+```
+
+**Result:** PASS — all project callbacks on exact worker thread.
+
+#### E09 — Generic sync callback characterisation
+
+The generic ``@agent.tool_plain`` sync callback was observed.  In Pydantic AI
+2.39.0, generic sync callbacks may or may not be dispatched through
+``run_in_executor`` depending on framework internals.  The test records
+observed behavior without overclaiming.
+
+**Result:** CHARACTERISED — no overclaim.
+
+#### E10 — Active event loop limitation
+
+``PydanticAIAgentRuntime.run()`` called from inside an active asyncio event
+loop:
+
+```text
+result:     RuntimeError (or project-wrapped equivalent)
+```
+
+**Result:** PASS — limitation confirmed with project entrypoint.
+
+### Migration history repair
+
+Section 44 was previously inserted before section 43, violating chronological
+append-only history.  This correction restores the exact historical prefix
+through section 43 from the starting parent commit ``37adc76e``, then
+preserves section 44's committed text after section 43.
+
+```text
+sections 1-43 exact to 37adc76e:   YES
+section ordering:                   43 -> 44 -> 45
+section 44 historical text modified: NO
+section 45 appended:                YES
+```
+
+### Production code unchanged
+
+```text
+src/** unchanged:                   YES
+pyproject.toml unchanged:           YES
+uv.lock unchanged:                  YES
+```
+
+### Changed files
+
+```text
+A tests/integration/test_pydantic_ai_sync_thread_literal_evidence.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| PAIM-C21 literal evidence (10 tests) | 10 passed |
+| PAIM-10 thread safety (7 tests) | 7 passed |
+| PAIM-10 thread contract (3 tests) | 3 passed |
+
+### Effective status
+
+```text
+PAIM-10 — DONE
+PAIM-C21 — DONE
+PAIM-11 — NOT STARTED
+Active next task: PAIM-11 — Full Stage-9 behavioral parity
 ```
 
 Do not begin PAIM-11 automatically.
