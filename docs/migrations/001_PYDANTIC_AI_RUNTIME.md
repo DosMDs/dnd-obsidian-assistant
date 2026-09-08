@@ -4986,3 +4986,247 @@ PAIM-09 — Ollama integration decision gate
 ```
 
 Do not begin PAIM-09 automatically.
+
+
+## 41. PAIM-09 completion record — Ollama integration decision gate
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `94235a5d7c5fb9dafa292524ce281cf374a68b96`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### PAIM-09 decision
+
+```text
+SELECTIVE FRAMEWORK OLLAMA ADOPTION
+```
+
+**Agent model transport:** official Pydantic AI `OllamaModel` + `OllamaProvider`
+**Agent endpoint:** OpenAI-compatible `/v1/chat/completions`
+**Custom Pydantic AI Ollama adapter:** NO
+**Native `OllamaModelProvider`:** RETAINED
+
+Native provider responsibilities retained:
+
+```text
+chat/generate_structured existing consumers
+embeddings
+health/version/tags
+native keep_alive semantics
+```
+
+`keep_alive` on framework agent profile: **FAIL CLOSED**
+
+Real live acceptance: **DEFERRED TO PAIM-12**
+
+### Production API
+
+| Field | Value |
+|---|---|
+| Module | `src/dnd_assistant/models/pydantic_ai_ollama.py` |
+| Factory function | `build_pydantic_ai_ollama_model(profile: ModelProfile) -> OllamaModel` |
+| Helper | `_normalize_openai_compatible_base_url(base_url: str) -> str` |
+| Line count | 111 physical lines |
+
+Framework types returned: `OllamaModel` (exact type, not subclass)
+
+### Profile boundary
+
+| Scenario | Result |
+|---|---|
+| `provider=ollama`, `role=AGENT` | ACCEPTED |
+| wrong provider (`openai`) | `ValidationError` — "provider='ollama'" |
+| `SUMMARIZER` role | `ValidationError` — "role=AGENT" |
+| `EMBEDDING` role | `ValidationError` — "role=AGENT" |
+| `keep_alive=None` | ACCEPTED |
+| `keep_alive` set (`"5m"`) | `ValidationError` — "keep_alive" |
+
+### Base URL matrix
+
+| Input | Normalised output |
+|---|---|
+| `http://localhost:11434` | `http://localhost:11434/v1` |
+| `http://localhost:11434/` | `http://localhost:11434/v1` |
+| `http://localhost:11434/v1` | `http://localhost:11434/v1` |
+| `http://localhost:11434/v1/` | `http://localhost:11434/v1` |
+| `https://example.test/ollama` | `https://example.test/ollama/v1` |
+| `https://example.test/ollama/` | `https://example.test/ollama/v1` |
+| `https://example.test/ollama/v1` | `https://example.test/ollama/v1` |
+
+### Model settings
+
+| Property | Value |
+|---|---|
+| `model_name` | profile `model` field preserved |
+| `system` | `"ollama"` |
+| `base_url` (via provider) | normalised `/v1` URL (trailing `/` added by `OllamaProvider`) |
+| `temperature` configured | propagated as `ModelSettings(temperature=X)` |
+| `temperature` None | no forced default (empty settings dict) |
+| `keep_alive` | fail-closed (non-null rejected before construction) |
+
+### Framework wire evidence
+
+**Direct respond path (P9-I01):**
+
+| Metric | Value |
+|---|---|
+| Endpoint | `http://localhost:11434/v1/chat/completions` |
+| Model | `qwen3` |
+| Temperature | not forced (absent when None) |
+| Tools | exposed (read_alpha, read_beta) |
+| `keep_alive` present | NO |
+| HTTP request count | 1 |
+| Outcome | RESPOND |
+
+**Single-tool path (P9-I02):**
+
+| Metric | Value |
+|---|---|
+| Request #1 endpoint | `http://localhost:11434/v1/chat/completions` |
+| Tool call ID/name | `call-1` / `read_alpha` |
+| ToolExecutor count | 1 |
+| Handler count | 1 (read_alpha) |
+| Request #2 endpoint | `http://localhost:11434/v1/chat/completions` |
+| Tool-result binding | tool role message with preserved `tool_call_id` |
+| Terminal outcome | RESPOND |
+
+### Null-content compatibility
+
+| Metric | Value |
+|---|---|
+| Response #1 content | `null` |
+| Tool calls parsed | YES |
+| Tool executed | 1 |
+| Second request generated | YES |
+| Terminal success | YES |
+
+### Provider failure
+
+| Metric | Value |
+|---|---|
+| Mock HTTP behavior | `httpx2.ConnectError` on first request |
+| Observed transport HTTP attempts | 1 |
+| Project exception | `ModelError` |
+| Framework cause | preserved (`__cause__` is set) |
+| ToolExecutor executions | 0 |
+| Project handlers | 0 |
+
+### Native/framework capability matrix
+
+| Feature | Framework agent path | Native ModelGateway |
+|---|---|---|
+| Chat transport | `/v1/chat/completions` | `/api/chat` |
+| Agent tool calls | YES | reference implementation |
+| Tool result replay | Pydantic AI runtime | project mapping |
+| Temperature | OpenAI-compatible `temperature` | native `options.temperature` |
+| `keep_alive` | NOT ACCEPTED by builder | supported |
+| Native structured `format` | not used by PAIM-09 agent | supported |
+| Embeddings | not migrated | `/api/embed` |
+| Health/version/tags | not provided by agent model | native |
+
+### Native provider preservation
+
+```text
+ollama.py changed:                  NO
+ModelGateway changed:               NO
+native Ollama unit suites:          PASS
+  test_ollama_provider.py:          64 passed
+  test_ollama_tool_calling.py:      76 passed
+  test_ollama_structured.py:        47 passed
+  test_ollama_embeddings.py:        67 passed
+  test_ollama_cross_operation_hardening.py: 18 passed
+```
+
+### Scope
+
+Exact Git-derived changed-file inventory:
+
+```text
+A src/dnd_assistant/models/pydantic_ai_ollama.py
+A tests/unit/test_pydantic_ai_ollama.py
+A tests/integration/test_pydantic_ai_ollama_runtime.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+Confirmation:
+
+```text
+PydanticAIAgentRuntime unchanged:   YES
+DndAgentPolicy unchanged:           YES
+PydanticAIToolBridge unchanged:     YES
+ToolExecutor unchanged:             YES
+storage unchanged:                  YES
+retrieval unchanged:                YES
+CLI unchanged:                      YES
+
+no custom Model subclass:           YES
+no runtime feature flag:            YES
+
+PAIM-10 not started:                YES
+PAIM-12 not started:                YES
+
+pyproject.toml unchanged:           YES
+uv.lock unchanged:                  YES
+```
+
+### Migration history
+
+```text
+sections 1–40 unchanged:            YES
+section 41 appended:                YES
+```
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| PAIM-09 unit (`test_pydantic_ai_ollama.py`) | 30 passed |
+| PAIM-09 integration (`test_pydantic_ai_ollama_runtime.py`) | 9 passed |
+| Native Ollama provider | 64 passed |
+| Native Ollama tool calling | 76 passed |
+| Native Ollama structured | 47 passed |
+| Native Ollama embeddings | 67 passed |
+| Native Ollama cross-operation | 18 passed |
+| PAIM-08 runtime | 12 passed |
+| PAIM-08 runtime boundaries | 16 passed |
+| PAIM-08 literal evidence P1 | 14 passed |
+| PAIM-08 literal evidence P2 | 14 passed |
+| PAIM-08 literal evidence P3 | 6 passed |
+| PAIM-08 parity | 5 passed |
+| PAIM-01 qualification | 17 passed |
+| PAIM-07 fast agent | 19 passed |
+| PAIM-07 fast agent boundaries | 23 passed |
+| PAIM-07 fast agent evidence | 11 passed |
+| PAIM-06 run deps | 36 passed |
+| PAIM-06 context deps integration | 7 passed |
+| PAIM-05 policy | 51 passed |
+| PAIM-04 bridge | 49 passed |
+| Reference runtime | 125 passed |
+| Contract boundaries | 97 passed |
+| Contract maintainability | 401 passed |
+| Contract test harness policy | 25 passed |
+| **Canonical full suite** | **4976 passed, 102 skipped, 0 failed, 0 errors** |
+
+### Ruff
+
+```text
+ruff check .:                        All checks passed
+ruff format --check .:               356 files already formatted
+                                      1 historical Markdown exception (sections 1-40)
+git diff --check:                    No whitespace errors
+```
+
+### Finalization
+
+```text
+commit SHA:                         (reported in Final Report)
+commit message:                     feat: select Pydantic AI Ollama agent transport (PAIM-09)
+push result:                        (reported in Final Report)
+HEAD == upstream:                   (reported in Final Report)
+working tree clean:                 (reported in Final Report)
+
+effective PAIM-09:                  DONE
+next:                               PAIM-10 — Sync/thread-safety gate
+```
