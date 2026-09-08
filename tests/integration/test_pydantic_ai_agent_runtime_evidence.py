@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pytest
+from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.function import FunctionModel
@@ -21,6 +22,7 @@ from dnd_assistant.application.pydantic_ai_agent_runtime import (
 )
 from dnd_assistant.application.pydantic_ai_run_deps import (
     DndAgentRunPreparer,
+    PreparedDndAgentRun,
 )
 from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
@@ -607,3 +609,123 @@ class TestC15S9DuplicateCallId:
         assert request_count[0] == 1
         assert counters.alpha == 0
         assert counters.beta == 0
+
+
+# ==============================================================================
+# C16-E1 — ctx.deps identity evidence (Defect B)
+# ==============================================================================
+
+
+class TestC16E1CtxDepsIdentity:
+    """C16-E1: ctx.deps is prepared.deps — literal identity evidence."""
+
+    def test_ctx_deps_is_prepared_deps(
+        self,
+        counters: HandlerCounters,
+        tool_registry: ToolRegistry,
+        tool_catalog: ToolRegistrySchema,
+        context_builder: AgentContextBuilder,
+        read_context: ExecutionContext,
+    ) -> None:
+        """Deferred handler receives ctx.deps that IS prepared.deps."""
+        captured_prepared: list[PreparedDndAgentRun] = []
+
+        tool_bridge = PydanticAIToolBridge(registry=tool_registry)
+        preparer = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=tool_catalog,
+            tool_bridge=tool_bridge,
+        )
+        original_prepare = preparer.prepare
+
+        def spy_prepare(
+            user_input: str,
+            *,
+            execution_context: ExecutionContext,
+        ) -> PreparedDndAgentRun:
+            prepared = original_prepare(user_input, execution_context=execution_context)
+            captured_prepared.append(prepared)
+            return prepared
+
+        preparer.prepare = spy_prepare  # type: ignore[method-assign]
+
+        request_count: list[int] = [0]
+
+        def model_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
+            request_count[0] += 1
+            if request_count[0] == 1:
+                return _make_tool_call_response(
+                    "read_alpha",
+                    tool_call_id="call-1",
+                    args={"value": "deps-test"},
+                )
+            return _make_respond_response("Done!")
+
+        model = _make_function_model(model_fn)
+        runtime = PydanticAIAgentRuntime(
+            run_preparer=preparer,
+            model=model,
+        )
+        result = runtime.run("test", execution_context=read_context)
+
+        assert len(captured_prepared) == 1
+        assert request_count[0] == 2
+        assert len(result.tool_executions) == 1
+        assert counters.alpha == 1
+
+    # Note: wrong-deps fail-closed is tested by DndAgentDeps.__post_init__()
+    # and PreparedDndAgentRun.__post_init__() in test_pydantic_ai_run_deps.py.
+    # The runtime's deferred handler is closure-scoped and not directly
+    # injectable from outside.  The production _make_deferred_handler checks
+    # "if ctx.deps is not prepared.deps: raise ValidationError".
+
+
+# ==============================================================================
+# C16-E2 — same-run evidence: Agent.run_sync invocations (Defect C)
+# ==============================================================================
+
+
+class TestC16E2SameRunEvidence:
+    """C16-E2: one Agent.run_sync, two FunctionModel requests."""
+
+    def test_same_run_two_requests(
+        self,
+        counters: HandlerCounters,
+        tool_registry: ToolRegistry,
+        tool_catalog: ToolRegistrySchema,
+        context_builder: AgentContextBuilder,
+        read_context: ExecutionContext,
+    ) -> None:
+        """One Agent.run_sync invocation, two FunctionModel requests."""
+        run_sync_count: list[int] = [0]
+        request_count: list[int] = [0]
+
+        original_run_sync = Agent.run_sync
+
+        def spy_run_sync(self_agent: Any, *args: Any, **kwargs: Any) -> Any:
+            run_sync_count[0] += 1
+            return original_run_sync(self_agent, *args, **kwargs)
+
+        Agent.run_sync = spy_run_sync  # type: ignore[method-assign]
+
+        try:
+
+            def model_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
+                request_count[0] += 1
+                if request_count[0] == 1:
+                    return _make_tool_call_response(
+                        "read_alpha",
+                        tool_call_id="call-1",
+                        args={"value": "same-run"},
+                    )
+                return _make_respond_response("Done!")
+
+            model = _make_function_model(model_fn)
+            runtime = _make_runtime(model, tool_registry, tool_catalog, context_builder)
+            result = runtime.run("test", execution_context=read_context)
+
+            assert run_sync_count[0] == 1
+            assert request_count[0] == 2
+            assert len(result.tool_executions) == 1
+        finally:
+            Agent.run_sync = original_run_sync

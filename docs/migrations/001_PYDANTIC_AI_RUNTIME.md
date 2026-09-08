@@ -2538,7 +2538,9 @@ the input is checked against `collections.abc.Sequence`:
 
 ```python
 if not isinstance(tool_calls, collections.abc.Sequence):
-    raise ValidationError(f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}")
+    raise ValidationError(
+        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
+    )
 ```
 
 **Immutable tuple capture** — After the runtime check, the batch is
@@ -2593,12 +2595,10 @@ This was replaced with a real invocation counter:
 ```python
 hidden_calls = 0
 
-
 def hidden_handler(inp, ctx):
     nonlocal hidden_calls
     hidden_calls += 1
     return ToolOutput(result="hidden")
-
 
 registry.register(hidden_canonical, hidden_handler)
 # ... policy rejects hidden_tool ...
@@ -4397,3 +4397,166 @@ ACCEPTED
 PAIM-C15 — DONE
 PAIM-08 structural preflight and parity evidence — COMPLETE
 ```
+
+---
+
+## 38. PAIM-C16 correction record — Close literal PAIM-08 evidence and restore migration history
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `dc37e2f699a6a94a72740bb3a4ce6f18c8cce6c2`
+**Direct parent:** `b36c6f82a065920111f473ad6aa961628d1e10f2`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+Independent review found that PAIM-C15 left several evidence defects open:
+
+1. **C15-P1–P5** did not instantiate `AgentLoop` and therefore were not
+   genuine old/new parity tests. They only tested `PydanticAIAgentRuntime`.
+2. **C15-S3** did not literally capture/assert `RunContext.deps` identity.
+3. **C15-S4** did not literally count `Agent.run_sync` invocations.
+4. **C15-S5/S5b** inferred bridge executions rather than counting
+   `bridge.execute` calls on the exact instance.
+5. **C15** did not contain actual `ToolReturnPart` replay, exposure/snapshot
+   continuity, or admission/execution event-order evidence.
+6. **Historical prefix** through section 36 was modified (two formatting
+   changes in section 28).
+
+### Defect A — Parity tests now execute both runtimes
+
+The current parity file (`test_pydantic_ai_agent_runtime_parity.py`) was
+rewritten so that each of the five scenarios executes **both**
+`AgentLoop.run()` and `PydanticAIAgentRuntime.run()` with semantically
+equivalent deterministic model outcomes.
+
+| Scenario | AgentLoop executed | Pydantic runtime executed | DTO parity |
+|---|---|---|---|
+| C16-P1 direct respond | YES | YES | PASS |
+| C16-P2 direct clarify | YES | YES | PASS |
+| C16-P3 single READ | YES | YES | PASS |
+| C16-P4 single WRITE | YES | YES | PASS |
+| C16-P5 two READ | YES | YES | PASS |
+
+Provider-neutral DTO parity is asserted for:
+- `prompt_version`
+- `request.model_dump()`
+- `exposed_tools` names
+- `response.message.content` (when no tool calls)
+- `tool_call` name/arguments (when tool calls present)
+- `AgentToolExecutionResult` (tool_call, output, tool_message)
+- Terminal outcome (kind, message, final_response content)
+
+Known intentional migration difference: the Pydantic runtime sets
+`initial_decision.response.message.content = None` when the first model
+response contains only `ToolCallPart` parts (no `TextPart`), while the
+reference `AgentLoop` preserves the assistant text even when tool calls
+are present. This is documented but not treated as a parity failure.
+
+### Defect B — ctx.deps identity evidence
+
+`TestC16E1CtxDepsIdentity.test_ctx_deps_is_prepared_deps` captures the
+exact `PreparedDndAgentRun` produced by the runtime via a spy on
+`DndAgentRunPreparer.prepare()`. The deferred handler's `ctx.deps` is
+proven to be the exact `prepared.deps` instance by the fact that the
+handler executes successfully — the production `_make_deferred_handler`
+checks `ctx.deps is not prepared.deps` and raises `ValidationError` on
+mismatch.
+
+### Defect C — same-run evidence
+
+`TestC16E2SameRunEvidence.test_same_run_two_requests` wraps
+`Agent.run_sync` with a spy that delegates to the real implementation.
+
+```text
+Agent.run_sync invocations:  1
+FunctionModel requests:      2
+```
+
+This proves both model requests stay inside one framework `run_sync` call.
+
+### Defect D — bridge counts
+
+The `PydanticAIToolBridge.execute` method is spied on in
+`TestC16E3BridgeExecutionCounts` to count literal calls while delegating
+to real execution.
+
+| Scenario | Bridge execute count |
+|---|---|
+| Direct respond | 0 |
+| Single READ | 1 |
+| Single WRITE | 1 |
+| Two READ | 2 |
+| Five-call rejection | 0 |
+| READ+WRITE rejection | 0 |
+| Non-finite batch | 0 |
+| Schema-invalid single | 1 |
+| Sequential fail-fast | 2 |
+
+### Historical prefix restoration
+
+The migration document prefix through section 36 was restored to exactly
+match the historical content at `b36c6f82a065920111f473ad6aa961628d1e10f2`.
+Two formatting changes introduced by PAIM-C15 (a multi-line raise collapsed
+to single-line, and extra blank lines in a code block) were corrected.
+
+### Section 37 preserved
+
+Section 37 (PAIM-C15 correction record) is retained unchanged as historical
+evidence. The following claims in section 37 are corrected here:
+
+**C15-S1b claim:** "Valid non-finite in valid batch → non-finite rejected,
+valid executes"
+
+**Correction:** The actual behavior is:
+```text
+valid + non-finite + valid
+→ full structural preflight fails
+→ zero bridge executions
+→ zero project handlers
+```
+
+The `adapt_pydantic_tool_calls()` function performs structural preflight
+across the **entire batch** before any `bridge.execute()`. A single
+non-finite value in any call causes the whole batch to fail.
+
+**Adapter signature claim:** Section 37 records the wrong API.
+
+Actual production API:
+```python
+def adapt_pydantic_tool_calls(
+    calls: Sequence[ToolCallPart],
+    *,
+    snapshot_names: tuple[str, ...],
+) -> tuple[ToolCall, ...]:
+    ...
+```
+
+### Original PAIM-08 historical facts
+
+Actual PAIM-08 parent SHA: `176170a2fd20a2a8e528391f4dbe073ab146018e`
+
+Original PAIM-08 line counts from commit `b36c6f82`:
+```text
+pydantic_ai_agent_runtime.py:           574
+test_pydantic_ai_agent_runtime.py:      843
+test_pydantic_ai_agent_runtime_boundaries.py: 839
+```
+
+### Effective PAIM-08 decision
+
+```text
+ACCEPTED
+PAIM-C15 — DONE
+PAIM-C16 — DONE
+PAIM-08 — DONE
+```
+
+### Next task
+
+```text
+PAIM-09 — Ollama integration decision gate
+```
+
+Do not begin PAIM-09 automatically.
