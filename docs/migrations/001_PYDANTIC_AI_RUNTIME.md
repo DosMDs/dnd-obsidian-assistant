@@ -2538,9 +2538,7 @@ the input is checked against `collections.abc.Sequence`:
 
 ```python
 if not isinstance(tool_calls, collections.abc.Sequence):
-    raise ValidationError(
-        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
-    )
+    raise ValidationError(f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}")
 ```
 
 **Immutable tuple capture** — After the runtime check, the batch is
@@ -2595,10 +2593,12 @@ This was replaced with a real invocation counter:
 ```python
 hidden_calls = 0
 
+
 def hidden_handler(inp, ctx):
     nonlocal hidden_calls
     hidden_calls += 1
     return ToolOutput(result="hidden")
+
 
 registry.register(hidden_canonical, hidden_handler)
 # ... policy rejects hidden_tool ...
@@ -4529,8 +4529,7 @@ def adapt_pydantic_tool_calls(
     calls: Sequence[ToolCallPart],
     *,
     snapshot_names: tuple[str, ...],
-) -> tuple[ToolCall, ...]:
-    ...
+) -> tuple[ToolCall, ...]: ...
 ```
 
 ### Original PAIM-08 historical facts
@@ -4550,6 +4549,182 @@ test_pydantic_ai_agent_runtime_boundaries.py: 839
 ACCEPTED
 PAIM-C15 — DONE
 PAIM-C16 — DONE
+PAIM-08 — DONE
+```
+
+### Next task
+
+```text
+PAIM-09 — Ollama integration decision gate
+```
+
+Do not begin PAIM-09 automatically.
+
+---
+
+## 39. PAIM-C17 correction record — Complete literal PAIM-08 runtime evidence
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `68a1b646765aba45939c9c06dba4de71dafe190e`
+**Direct parent:** `dc37e2f699a6a94a72740bb3a4ce6f18c8cce6c2`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C16 left several evidence defects that required literal capture rather than
+behavioral inference:
+
+1. **C16-E1** inferred `ctx.deps` identity from successful execution rather than
+   literal capture.
+2. **C16-E2** did not instrument the actual deferred-handler callback.
+3. **C16 bridge matrix** was reported but not spied on the exact
+   `PydanticAIToolBridge.execute` instance.
+4. Missing evidence: `ToolReturnPart` replay, multi-result order, exposure
+   continuity, event ordering, approval rejection, `build_results` error mapping.
+5. Section 38 recorded the wrong PAIM-08 runtime line count (574 instead of 576).
+
+### Corrected original PAIM-08 line counts
+
+```text
+pydantic_ai_agent_runtime.py:
+576
+
+test_pydantic_ai_agent_runtime.py:
+843
+
+test_pydantic_ai_agent_runtime_boundaries.py:
+839
+```
+
+### C16-E1 historical claim correction
+
+Section 38 stated C16-E1 proved exact deps identity because successful execution
+implies the production check passed.
+
+```text
+This was behavioral/inferred evidence, not literal capture.
+PAIM-C17 adds literal capture:
+captured_ctx_deps is captured_prepared.deps.
+```
+
+### C16 bridge-matrix claim correction
+
+Section 38 reported a bridge matrix but C16 tests did not spy
+`PydanticAIToolBridge.execute` directly. PAIM-C17 replaces this with literal
+delegated spy counts.
+
+### Evidence files
+
+| File | Tests | Status |
+|---|---|---|
+| `tests/integration/test_pydantic_ai_agent_runtime_literal_evidence.py` | 17 (E1–E3) | All PASS |
+| `tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p2.py` | 11 (E4–E14) | All PASS |
+
+### Evidence matrix
+
+| Evidence | Result |
+|---|---|
+| literal ctx.deps identity | PASS |
+| wrong-deps fail-closed | PASS |
+| Agent.run_sync == 1 | PASS |
+| literal deferred-handler counts | PASS |
+| literal bridge.execute matrix | PASS |
+| actual ToolReturnPart replay | PASS |
+| multi-result replay order | PASS |
+| four-way exposure continuity | PASS |
+| successful admission→execution order | PASS |
+| rejected-batch order | PASS |
+| approval rejection | PASS |
+| build_results error mapping | PASS |
+| structural preflight with bridge spy | PASS |
+| schema fail-fast with bridge spy | PASS |
+| genuine old/new parity retained | PASS |
+
+### Literal bridge matrix
+
+Actual `PydanticAIToolBridge.execute` delegated spy counts:
+
+| Scenario | Bridge calls |
+|---|---|
+| Direct respond | 0 |
+| Single READ | 1 |
+| Single WRITE | 1 |
+| Two READ | 2 |
+| Four READ | 4 |
+| Five calls rejected | 0 |
+| READ + WRITE rejected | 0 |
+| WRITE + WRITE rejected | 0 |
+| Non-finite structural batch | 0 |
+| Schema-invalid single | 1 |
+| Sequential fail-fast | 2 |
+| Second deferred batch | first batch only |
+
+### Deferred callback counts
+
+| Path | Deferred callback invocations |
+|---|---|
+| Direct respond | 0 |
+| Successful single batch | 1 |
+| First-batch policy rejection | 1 |
+| Successful single batch (second test) | 1 |
+
+### Tool replay
+
+Request #2 `ToolReturnPart` values match `AgentToolExecutionResult.tool_message`
+exactly for both single and multi-call scenarios.
+
+### Exposure continuity
+
+```text
+snapshot names
+== request #1 AgentInfo function_tools names
+== request #2 AgentInfo function_tools names
+== AgentDecision exposed_tools names
+```
+
+Exact order preserved. No sorting.
+
+### Event order
+
+Successful two-READ sequence:
+
+```text
+model-1 < deferred-handler < policy-admission-success
+< bridge-read_alpha < bridge-read_beta < model-2
+```
+
+READ+WRITE rejection sequence:
+
+```text
+model-1 < deferred-handler < policy-reject
+```
+
+Zero bridge executions, zero model-2 on rejection.
+
+### Genuine parity
+
+All five C16-P1–P5 tests execute both `AgentLoop.run()` and
+`PydanticAIAgentRuntime.run()` and pass DTO parity.
+
+### Sections 1–38
+
+```text
+unchanged: YES
+section 39 appended: YES
+
+correct original PAIM-08 counts:
+576 / 843 / 839
+```
+
+### Effective PAIM-08 decision
+
+```text
+ACCEPTED
+PAIM-C15 — DONE
+PAIM-C16 — DONE
+PAIM-C17 — DONE
 PAIM-08 — DONE
 ```
 
