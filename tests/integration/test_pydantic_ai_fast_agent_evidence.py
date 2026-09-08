@@ -23,7 +23,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
-from pydantic_ai.exceptions import AgentRunError, ModelAPIError
+from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
 from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
@@ -79,6 +79,13 @@ def _make_function_model(
 
     model = FunctionModel(function=_respond)
     return model, request_counter
+
+
+def _assert_zero_handlers(counters: HandlerCounters) -> None:
+    """Assert no project tool handlers have been called."""
+    assert counters.alpha == 0
+    assert counters.beta == 0
+    assert counters.write_alpha == 0
 
 
 # ==============================================================================
@@ -199,9 +206,20 @@ class TestC13E01ExactFrameworkVisibleToolOrder:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """AgentInfo.function_tools order matches snapshot names and decision exposure."""
         captured_agent_info: list[AgentInfo] = []
+        captured_runs: list[object] = []
+
+        original_prepare = preparer.prepare
+
+        def spy_prepare(user_input: str, *, execution_context: object) -> object:
+            result = original_prepare(user_input, execution_context=execution_context)
+            captured_runs.append(result)
+            return result
+
+        preparer.prepare = spy_prepare  # type: ignore[method-assign]
 
         def _capture_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
             assert isinstance(info, AgentInfo)
@@ -213,20 +231,29 @@ class TestC13E01ExactFrameworkVisibleToolOrder:
         decision = agent.decide("test", execution_context=read_context)
 
         assert len(captured_agent_info) == 1
+        assert len(captured_runs) == 1
         agent_info = captured_agent_info[0]
+        prepared = captured_runs[0]
+
+        # Snapshot names from the exact captured PreparedDndAgentRun
+        snapshot_names = prepared.deps.tool_snapshot.names
 
         # Framework-visible tool names
         framework_names = tuple(t.name for t in agent_info.function_tools)
 
-        # Snapshot names from prepared deps
-        snapshot_names = tuple(t.name for t in decision.exposed_tools)
-
         # Decision exposure names
         decision_names = tuple(t.name for t in decision.exposed_tools)
 
+        # Three-way exact parity
         assert framework_names == snapshot_names
         assert framework_names == decision_names
+
+        # Also prove identities for the same run
+        assert prepared.exposed_tools == decision.exposed_tools
+
+        # 1 request, 0 handlers
         assert req_counter[0] == 1
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -241,6 +268,7 @@ class TestC13E02NoSyntheticOutputTools:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """AgentInfo has no output_tools and allow_text_output is True."""
         captured_agent_info: list[AgentInfo] = []
@@ -250,7 +278,7 @@ class TestC13E02NoSyntheticOutputTools:
             captured_agent_info.append(info)
             return ModelResponse(parts=[TextPart(content="ok")])
 
-        model, _ = _make_function_model(_capture_response)
+        model, req_counter = _make_function_model(_capture_response)
         agent = _make_pyd_agent(model, preparer)
         agent.decide("test", execution_context=read_context)
 
@@ -262,6 +290,10 @@ class TestC13E02NoSyntheticOutputTools:
 
         # Plain text output is allowed (str | DeferredToolRequests)
         assert agent_info.allow_text_output is True
+
+        # 1 request, 0 handlers
+        assert req_counter[0] == 1
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -277,42 +309,50 @@ class TestC13E03TwoRunExposureIsolation:
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
         write_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
-        """Run A (READ) and run B (WRITE+audit) have different model-visible tools."""
-        captured_info_a: list[AgentInfo] = []
-        captured_info_b: list[AgentInfo] = []
+        """Run A (READ) and run B (WRITE+audit) have different model-visible tools.
 
-        def _make_capturer(
-            storage: list[AgentInfo],
-        ) -> object:
-            def _capture(messages: list, info: object, counter: list[int]) -> ModelResponse:
-                assert isinstance(info, AgentInfo)
-                storage.append(info)
-                return ModelResponse(parts=[TextPart(content="ok")])
+        Uses one PydanticAIFastAgent instance and one FunctionModel for both
+        decide() calls. Captures preparer spy for exact snapshot parity.
+        """
+        captured_infos: list[AgentInfo] = []
+        captured_runs: list[object] = []
 
-            return _capture
+        original_prepare = preparer.prepare
 
-        model_a, counter_a = _make_function_model(_make_capturer(captured_info_a))
-        model_b, counter_b = _make_function_model(_make_capturer(captured_info_b))
+        def spy_prepare(user_input: str, *, execution_context: object) -> object:
+            result = original_prepare(user_input, execution_context=execution_context)
+            captured_runs.append(result)
+            return result
 
-        agent_a = _make_pyd_agent(model_a, preparer)
-        agent_b = _make_pyd_agent(model_b, preparer)
+        preparer.prepare = spy_prepare  # type: ignore[method-assign]
+
+        def _capture_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
+            assert isinstance(info, AgentInfo)
+            captured_infos.append(info)
+            return ModelResponse(parts=[TextPart(content="ok")])
+
+        # One FunctionModel, one PydanticAIFastAgent
+        model, req_counter = _make_function_model(_capture_response)
+        agent = _make_pyd_agent(model, preparer)
 
         # Run A: READ authority
-        decision_a = agent_a.decide("test a", execution_context=read_context)
+        decision_a = agent.decide("test a", execution_context=read_context)
 
         # Run B: WRITE + audit authority
-        decision_b = agent_b.decide("test b", execution_context=write_context)
+        decision_b = agent.decide("test b", execution_context=write_context)
 
-        # Both runs made exactly 1 model request
-        assert counter_a[0] == 1
-        assert counter_b[0] == 1
+        # Total model requests == 2
+        assert req_counter[0] == 2
 
         # Capture AgentInfo for both runs
-        assert len(captured_info_a) == 1
-        assert len(captured_info_b) == 1
-        info_a = captured_info_a[0]
-        info_b = captured_info_b[0]
+        assert len(captured_infos) == 2
+        assert len(captured_runs) == 2
+        info_a = captured_infos[0]
+        info_b = captured_infos[1]
+        prepared_a = captured_runs[0]
+        prepared_b = captured_runs[1]
 
         # Run A model-visible tools: read_alpha, read_beta
         names_a = tuple(t.name for t in info_a.function_tools)
@@ -322,12 +362,23 @@ class TestC13E03TwoRunExposureIsolation:
         names_b = tuple(t.name for t in info_b.function_tools)
         assert names_b == ("read_alpha", "read_beta", "write_alpha")
 
-        # Run A data unchanged after run B
+        # Run A data unchanged after run B (immutable copy captured before run B)
         assert names_a == ("read_alpha", "read_beta")
 
         # Decision exposure matches
         assert tuple(t.name for t in decision_a.exposed_tools) == names_a
         assert tuple(t.name for t in decision_b.exposed_tools) == names_b
+
+        # Exact snapshot parity for both runs
+        assert names_a == prepared_a.deps.tool_snapshot.names
+        assert names_b == prepared_b.deps.tool_snapshot.names
+
+        # Exposed tools identity for same run
+        assert prepared_a.exposed_tools == decision_a.exposed_tools
+        assert prepared_b.exposed_tools == decision_b.exposed_tools
+
+        # 0 handlers
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -343,6 +394,7 @@ class TestC13E04SnapshotPolicyRunIsolation:
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
         write_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """Each decide() produces distinct deps, snapshots, and policies."""
         from pydantic_ai.messages import ToolCallPart as TCP
@@ -360,7 +412,7 @@ class TestC13E04SnapshotPolicyRunIsolation:
         def _text_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
             return ModelResponse(parts=[TextPart(content="ok")])
 
-        model, _ = _make_function_model(_text_response)
+        model, req_counter = _make_function_model(_text_response)
         agent = _make_pyd_agent(model, preparer)
 
         # Run A
@@ -391,6 +443,10 @@ class TestC13E04SnapshotPolicyRunIsolation:
         assert len(admission.calls) == 1
         assert admission.calls[0].tool_name == "read_alpha"
 
+        # 2 requests, 0 handlers
+        assert req_counter[0] == 2
+        _assert_zero_handlers(counters)
+
 
 # ==============================================================================
 # C13-E05 — reference parity: text + tool
@@ -404,6 +460,7 @@ class TestC13E05ReferenceParityTextAndTool:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """Compare AgentDecision DTOs between old FastAgent and PydanticAIFastAgent."""
         from dnd_assistant.application.fast_agent import FastAgent
@@ -485,6 +542,7 @@ class TestC13E05ReferenceParityTextAndTool:
 
         # 1 request, 0 handlers
         assert req_counter[0] == 1
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -499,6 +557,7 @@ class TestC13E06ReferenceParityMultiRead:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """Compare AgentDecision DTOs for multi-READ between old and new."""
         from dnd_assistant.application.fast_agent import FastAgent
@@ -593,6 +652,7 @@ class TestC13E06ReferenceParityMultiRead:
 
         # 1 request, 0 handlers
         assert req_counter[0] == 1
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -609,7 +669,7 @@ class TestC13E07UnknownToolCauseMapping:
         read_context: ExecutionContext,
         counters: HandlerCounters,
     ) -> None:
-        """Unknown tool produces ModelError with AgentRunError as cause."""
+        """Unknown tool produces ModelError with UnexpectedModelBehavior as exact cause."""
 
         def _unknown_tool_response(
             messages: list, info: object, counter: list[int]
@@ -635,15 +695,13 @@ class TestC13E07UnknownToolCauseMapping:
         # Project error type
         assert isinstance(exc, ModelError)
 
-        # Framework cause retained
+        # Exact public framework cause subtype
         assert exc.__cause__ is not None
-        assert isinstance(exc.__cause__, AgentRunError)
+        assert type(exc.__cause__) is UnexpectedModelBehavior
 
         # 1 request, 0 handlers
         assert req_counter[0] == 1
-        assert counters.alpha == 0
-        assert counters.beta == 0
-        assert counters.write_alpha == 0
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -660,7 +718,7 @@ class TestC13E08DuplicateIdCauseMapping:
         read_context: ExecutionContext,
         counters: HandlerCounters,
     ) -> None:
-        """Duplicate non-null tool_call_id produces ModelError with framework cause."""
+        """Duplicate non-null tool_call_id produces ModelError with UnexpectedModelBehavior as exact cause."""
 
         def _dup_id_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
             return ModelResponse(
@@ -689,14 +747,13 @@ class TestC13E08DuplicateIdCauseMapping:
         # Project error type
         assert isinstance(exc, ModelError)
 
-        # Framework cause retained
+        # Exact public framework cause subtype
         assert exc.__cause__ is not None
-        assert isinstance(exc.__cause__, AgentRunError)
+        assert type(exc.__cause__) is UnexpectedModelBehavior
 
         # 1 request, 0 handlers
         assert req_counter[0] == 1
-        assert counters.alpha == 0
-        assert counters.beta == 0
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -711,6 +768,7 @@ class TestC13E09FrameworkRunErrorMapping:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """A ModelAPIError from the model maps to ModelError with cause."""
         from pydantic_ai.models.function import FunctionModel as FM
@@ -739,6 +797,7 @@ class TestC13E09FrameworkRunErrorMapping:
 
         # 1 request where a request actually began, 0 handlers
         assert call_count[0] == 1
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -753,6 +812,7 @@ class TestC13E10MultipleTextPartConcatenation:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """Multiple TextParts + ToolCallPart produce joined text + tool call."""
 
@@ -786,6 +846,7 @@ class TestC13E10MultipleTextPartConcatenation:
 
         # 1 request, 0 handlers
         assert req_counter[0] == 1
+        _assert_zero_handlers(counters)
 
 
 # ==============================================================================
@@ -800,6 +861,7 @@ class TestC13E11ThinkingPartRemainsHidden:
         self,
         preparer: DndAgentRunPreparer,
         read_context: ExecutionContext,
+        counters: HandlerCounters,
     ) -> None:
         """ThinkingPart before TextPart + ToolCallPart is not surfaced."""
 
@@ -829,3 +891,4 @@ class TestC13E11ThinkingPartRemainsHidden:
 
         # 1 request, 0 handlers
         assert req_counter[0] == 1
+        _assert_zero_handlers(counters)

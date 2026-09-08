@@ -3788,3 +3788,274 @@ PAIM-08 — Replace bounded AgentLoop mechanics
 ```
 
 Do not begin PAIM-08 automatically.
+
+## 35. PAIM-C14 correction record — Make PAIM-07 evidence literal and exact
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `6aa4b66d0ac4d54d51e3219022c77cec4806f2eb`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+Independent review identified four defects in the PAIM-C13 executable
+evidence:
+
+1. **C13-E01** compared `AgentInfo.function_tools` to `AgentDecision`
+   exposure twice, not to the exact captured issued snapshot
+   (`PreparedDndAgentRun.deps.tool_snapshot.names`).
+
+2. **C13-E03** used two different `PydanticAIFastAgent` instances (and
+   two different `FunctionModel` instances) even though section 34 claimed
+   "Same `PydanticAIFastAgent` instance used for two decisions".
+
+3. **C13-E07/E08** asserted only `isinstance(exc.__cause__, AgentRunError)`
+   base-class compatibility, not the exact public framework subtype.
+
+4. Several C13 tests documented `handlers: 0` without literal wired
+   `HandlerCounters` assertions (E01, E02, E04, E05, E06, E09, E10, E11).
+
+### Defect A — E01 did not capture the issued snapshot
+
+**C13-E01 behavior:** Compared `AgentInfo.function_tools` names to
+`decision.exposed_tools` names twice, never to the exact
+`PreparedDndAgentRun.deps.tool_snapshot.names`.
+
+**PAIM-C14 correction:** A local spy wrapper around `preparer.prepare()`
+captures the exact `PreparedDndAgentRun` produced by the `decide()` call:
+
+```python
+captured_runs = []
+original_prepare = preparer.prepare
+
+def spy_prepare(...):
+    prepared = original_prepare(...)
+    captured_runs.append(prepared)
+    return prepared
+```
+
+Required:
+
+```python
+assert len(captured_runs) == 1
+
+prepared = captured_runs[0]
+
+snapshot_names = prepared.deps.tool_snapshot.names
+framework_names = tuple(t.name for t in captured_agent_info[0].function_tools)
+decision_names = tuple(t.name for t in decision.exposed_tools)
+
+assert framework_names == snapshot_names
+assert framework_names == decision_names
+```
+
+Also proves identity for the same run:
+
+```python
+assert prepared.exposed_tools == decision.exposed_tools
+```
+
+### Defect B — E03 used two different PydanticAIFastAgent instances
+
+**C13-E03 behavior:** Created `agent_a` and `agent_b` with separate
+`FunctionModel` instances. Section 34 incorrectly stated "Same
+PydanticAIFastAgent instance".
+
+**PAIM-C14 correction:** One `FunctionModel`, one `PydanticAIFastAgent`,
+two `decide()` calls. The single `FunctionModel` callback appends each
+`AgentInfo` in request order:
+
+```python
+captured_infos: list[AgentInfo] = []
+captured_runs: list[object] = []
+
+# spy on preparer.prepare() to capture both runs
+
+model, req_counter = _make_function_model(_capture_response)
+agent = _make_pyd_agent(model, preparer)
+
+decision_a = agent.decide("test a", execution_context=read_context)
+decision_b = agent.decide("test b", execution_context=write_context)
+
+assert req_counter[0] == 2
+
+names_a = tuple(t.name for t in captured_infos[0].function_tools)
+names_b = tuple(t.name for t in captured_infos[1].function_tools)
+
+assert names_a == ("read_alpha", "read_beta")
+assert names_b == ("read_alpha", "read_beta", "write_alpha")
+```
+
+Also proves exact snapshot parity for both runs:
+
+```python
+assert names_a == captured_runs[0].deps.tool_snapshot.names
+assert names_b == captured_runs[1].deps.tool_snapshot.names
+```
+
+### Defect C — E07/E08 cause was not exact
+
+**C13-E07/E08 behavior:** Asserted only:
+
+```python
+assert isinstance(exc.__cause__, AgentRunError)
+```
+
+`AgentRunError` is the base class. The actual framework subtype was not
+locked into executable evidence.
+
+**PAIM-C14 correction:** Executable observation of Pydantic AI 2.39.0
+confirmed that both unknown-tool and duplicate-ID scenarios produce
+`UnexpectedModelBehavior` (a public subclass of `AgentRunError`):
+
+```python
+from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+assert type(exc.__cause__) is UnexpectedModelBehavior
+```
+
+`type(...) is ...` is used rather than `isinstance(...)` because the
+task requires exact evidence, not base-class compatibility.
+
+### Defect D — Several handlers=0 claims lacked wired assertions
+
+**PAIM-C14 correction:** Every evidence scenario whose migration record
+claims `handlers: 0` now contains literal wired `HandlerCounters`
+assertions via the shared `_assert_zero_handlers()` helper.
+
+Scenarios corrected:
+
+| Scenario | Before | After |
+|---|---|---|
+| E01 | no counters | `_assert_zero_handlers(counters)` |
+| E02 | no counters | `_assert_zero_handlers(counters)` |
+| E03 | no counters | `_assert_zero_handlers(counters)` |
+| E04 | no counters | `_assert_zero_handlers(counters)` |
+| E05 | no counters | `_assert_zero_handlers(counters)` |
+| E06 | no counters | `_assert_zero_handlers(counters)` |
+| E07 | already wired | retained |
+| E08 | already wired | retained |
+| E09 | no counters | `_assert_zero_handlers(counters)` |
+| E10 | no counters | `_assert_zero_handlers(counters)` |
+| E11 | no counters | `_assert_zero_handlers(counters)` |
+
+### Corrected evidence matrix
+
+| Evidence                                      | Corrected result |
+| --------------------------------------------- | ---------------- |
+| E01 issued snapshot captured from exact run   | YES              |
+| snapshot → AgentInfo.function_tools parity    | YES              |
+| function_tools → AgentDecision parity         | YES              |
+| E03 same PydanticAIFastAgent instance         | YES              |
+| two model-visible exposures isolated          | YES              |
+| E07 exact framework cause                     | `UnexpectedModelBehavior` |
+| E08 exact framework cause                     | `UnexpectedModelBehavior` |
+| all C13 scenarios with handlers=0 now literal | YES              |
+| production changed                            | NO               |
+
+### Exact framework causes
+
+| Scenario                 | Project error | Exact framework cause type | Requests | Handlers |
+| ------------------------ | ------------- | -------------------------- | -------: | -------: |
+| unknown tool (E07)       | ModelError    | `UnexpectedModelBehavior`  |        1 |        0 |
+| duplicate ID (E08)       | ModelError    | `UnexpectedModelBehavior`  |        1 |        0 |
+| injected model API error | ModelError    | `ModelAPIError`            |        1 |        0 |
+
+### Production scope
+
+```text
+production files changed:
+NONE
+
+AgentLoop changed:
+NO
+
+ToolExecutor changed:
+NO
+
+PAIM-08 started:
+NO
+
+dependencies changed:
+NO
+```
+
+### Migration history
+
+```text
+section 33 modified: NO
+section 34 modified: NO
+section 35 appended: YES
+```
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_fast_agent_evidence.py
+
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+Expected unchanged:
+
+```text
+src/dnd_assistant/application/pydantic_ai_fast_agent.py
+src/dnd_assistant/application/fast_agent.py
+src/dnd_assistant/application/agent_loop.py
+src/dnd_assistant/application/agent_tool_execution.py
+src/dnd_assistant/application/pydantic_ai_run_deps.py
+src/dnd_assistant/application/dnd_agent_policy.py
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py
+
+src/dnd_assistant/tools/**
+src/dnd_assistant/models/**
+src/dnd_assistant/prompts/**
+src/dnd_assistant/cli/**
+
+pyproject.toml
+uv.lock
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Focused evidence tests | `uv run pytest tests/integration/test_pydantic_ai_fast_agent_evidence.py -v` | 11 passed |
+| Original PAIM-07 main | `uv run pytest tests/integration/test_pydantic_ai_fast_agent.py -v` | (reported in Final Report) |
+| Original PAIM-07 boundaries | `uv run pytest tests/integration/test_pydantic_ai_fast_agent_boundaries.py -v` | (reported in Final Report) |
+| Reference FastAgent | `uv run pytest tests/unit/test_fast_agent.py -v` | (reported in Final Report) |
+| Reference FastAgent boundaries | `uv run pytest tests/unit/test_fast_agent_boundaries.py -v` | (reported in Final Report) |
+| PAIM-06 deps | `uv run pytest tests/unit/test_pydantic_ai_run_deps.py -v` | (reported in Final Report) |
+| PAIM-06 context deps | `uv run pytest tests/integration/test_pydantic_ai_context_deps.py -v` | (reported in Final Report) |
+| DndAgentPolicy | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | (reported in Final Report) |
+| Tool bridge | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge.py -v` | (reported in Final Report) |
+| Tool bridge authority | `uv run pytest tests/unit/test_pydantic_ai_tool_bridge_authority.py -v` | (reported in Final Report) |
+| Blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | (reported in Final Report) |
+| Blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | (reported in Final Report) |
+| Blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | (reported in Final Report) |
+| Qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | (reported in Final Report) |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | (reported in Final Report) |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | (reported in Final Report) |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | (reported in Final Report) |
+| Canonical full suite | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Effective PAIM-07 decision
+
+```text
+ACCEPTED
+PAIM-C13 — DONE
+PAIM-C14 — DONE
+```
+
+### Next task
+
+```text
+PAIM-08 — Replace bounded AgentLoop mechanics
+```
+
+Do not begin PAIM-08 automatically.
