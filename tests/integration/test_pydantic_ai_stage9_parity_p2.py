@@ -1,23 +1,4 @@
-"""PAIM-11: Stage-9 behavioral parity — scenarios P11-A12 through P11-A23.
-
-Each scenario executes both ``AgentLoop.run()`` and
-``PydanticAIAgentRuntime.run()`` via the shared ``stage9_parity`` harness
-and asserts equivalent observable outcomes.
-
-Scenarios:
-    P11-A12: 5 calls rejected (zero executions, ModelError)
-    P11-A13: 20 calls rejected (zero executions, ModelError)
-    P11-A14: READ + WRITE rejected (zero executions, ModelError)
-    P11-A15: WRITE + READ rejected (zero executions, ModelError)
-    P11-A16: WRITE + WRITE rejected (zero executions, ModelError)
-    P11-A17: READ + READ + WRITE rejected (zero executions, ModelError)
-    P11-A18: duplicate non-null call ID rejected (zero executions, ModelError)
-    P11-A19: multiple omitted/None model call IDs supported
-    P11-A20: completely unknown tool (ModelError, zero executions)
-    P11-A21: hidden-but-real tool (ModelError, zero executions)
-    P11-A22: mixed allowed + unknown (ModelError, zero executions)
-    P11-A23: mixed allowed + hidden (ModelError, zero executions)
-"""
+"""PAIM-11: Stage-9 behavioral parity — scenarios P11-A12 through P11-A23."""
 
 from __future__ import annotations
 
@@ -39,7 +20,6 @@ from tests.support.stage9_parity import (
     make_context_builder,
     make_read_context,
     make_registry,
-    make_registry_with_hidden,
     make_tool_aware_response,
     make_tool_call,
     make_write_context,
@@ -81,7 +61,7 @@ def context_builder() -> AgentContextBuilder:
 
 
 class TestP11A12FiveCallsRejected:
-    """P11-A12: 5 calls rejected — zero executions, ModelError."""
+    """P11-A12: 5 calls rejected — ModelError."""
 
     def test_five_calls_rejected(
         self,
@@ -130,6 +110,9 @@ class TestP11A12FiveCallsRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -139,7 +122,7 @@ class TestP11A12FiveCallsRejected:
 
 
 class TestP11A13TwentyCallsRejected:
-    """P11-A13: 20 calls rejected — zero executions, ModelError."""
+    """P11-A13: 20 calls rejected — ModelError."""
 
     def test_twenty_calls_rejected(
         self,
@@ -194,6 +177,9 @@ class TestP11A13TwentyCallsRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -203,7 +189,7 @@ class TestP11A13TwentyCallsRejected:
 
 
 class TestP11A14ReadWriteRejected:
-    """P11-A14: READ + WRITE rejected — zero executions, ModelError."""
+    """P11-A14: READ+WRITE rejected — ModelError."""
 
     def test_read_write_rejected(
         self,
@@ -268,6 +254,9 @@ class TestP11A14ReadWriteRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -277,7 +266,7 @@ class TestP11A14ReadWriteRejected:
 
 
 class TestP11A15WriteReadRejected:
-    """P11-A15: WRITE + READ rejected — zero executions, ModelError."""
+    """P11-A15: WRITE+READ rejected — ModelError."""
 
     def test_write_read_rejected(
         self,
@@ -342,6 +331,9 @@ class TestP11A15WriteReadRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -351,7 +343,7 @@ class TestP11A15WriteReadRejected:
 
 
 class TestP11A16WriteWriteRejected:
-    """P11-A16: WRITE + WRITE rejected — zero executions, ModelError."""
+    """P11-A16: WRITE+WRITE rejected — ModelError."""
 
     def test_write_write_rejected(
         self,
@@ -416,6 +408,9 @@ class TestP11A16WriteWriteRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -425,7 +420,7 @@ class TestP11A16WriteWriteRejected:
 
 
 class TestP11A17ReadReadWriteRejected:
-    """P11-A17: READ + READ + WRITE rejected — zero executions, ModelError."""
+    """P11-A17: READ+READ+WRITE rejected — ModelError."""
 
     def test_read_read_write_rejected(
         self,
@@ -500,6 +495,9 @@ class TestP11A17ReadReadWriteRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -509,7 +507,7 @@ class TestP11A17ReadReadWriteRejected:
 
 
 class TestP11A18DuplicateCallIdRejected:
-    """P11-A18: duplicate non-null call ID rejected — zero executions, ModelError."""
+    """P11-A18: duplicate call ID rejected — ModelError."""
 
     def test_duplicate_call_id_rejected(
         self,
@@ -574,6 +572,9 @@ class TestP11A18DuplicateCallIdRejected:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -583,7 +584,7 @@ class TestP11A18DuplicateCallIdRejected:
 
 
 class TestP11A19OmittedCallIds:
-    """P11-A19: multiple omitted/None model call IDs supported — 2 tools, 2 model requests."""
+    """P11-A19: omitted/None call IDs — 2 tools, 2 model requests."""
 
     def test_omitted_call_ids(
         self,
@@ -658,15 +659,12 @@ class TestP11A19OmittedCallIds:
         assert obs.pyd_error is None, f"Pydantic runtime raised: {obs.pyd_error}"
         assert obs.reference is not None
         assert obs.pydantic is not None
-
         assert obs.ref_model_requests == 2
         assert obs.pyd_model_requests == 2
         assert len(obs.reference.tool_executions) == 2
         assert len(obs.pydantic.tool_executions) == 2
         assert obs.ref_handler_counts == (1, 1, 0)
         assert obs.pyd_handler_counts == (1, 1, 0)
-
-        # Prompt version and exposed tools match
         assert (
             obs.reference.initial_decision.prompt_version
             == obs.pydantic.initial_decision.prompt_version
@@ -674,26 +672,15 @@ class TestP11A19OmittedCallIds:
         ref_names = tuple(t.name for t in obs.reference.initial_decision.exposed_tools)
         pyd_names = tuple(t.name for t in obs.pydantic.initial_decision.exposed_tools)
         assert ref_names == pyd_names
-
-        # Terminal outcome parity
         assert obs.reference.outcome.kind == AgentOutcomeKind.RESPOND
         assert obs.pydantic.outcome.kind == AgentOutcomeKind.RESPOND
         assert obs.reference.outcome.message == msg
         assert obs.pydantic.outcome.message == msg
-
-        # Known framework difference: Pydantic AI auto-assigns unique
-        # tool_call_id values when the provider omits them, while the
-        # reference runtime preserves None. Both behaviors are safe:
-        # the application invariant is that duplicate concrete IDs
-        # cannot cause execution ambiguity, and omitted IDs remain
-        # uniquely bindable through the framework path.
         ref_ids = [e.tool_call.call_id for e in obs.reference.tool_executions]
         pyd_ids = [e.tool_call.call_id for e in obs.pydantic.tool_executions]
-        # Reference: all None
         assert all(cid is None for cid in ref_ids), (
             f"Expected all None IDs in reference, got {ref_ids}"
         )
-        # Pydantic: all non-None unique strings
         assert all(cid is not None for cid in pyd_ids), (
             f"Expected all non-None IDs in Pydantic, got {pyd_ids}"
         )
@@ -761,6 +748,9 @@ class TestP11A20UnknownTool:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -770,31 +760,30 @@ class TestP11A20UnknownTool:
 
 
 class TestP11A21HiddenTool:
-    """P11-A21: hidden-but-real tool — ModelError, zero executions."""
+    """P11-A21: hidden-but-real tool — ModelError, zero executions.
+
+    READ context where write_alpha is registered but hidden by permission.
+    """
 
     def test_hidden_tool(
         self,
         ref_counters: HandlerCounters,
         pyd_counters: HandlerCounters,
+        registry: ToolRegistry,
+        catalog: ToolRegistrySchema,
         context_builder: AgentContextBuilder,
     ) -> None:
         ctx = make_read_context()
 
-        # Build a registry with a hidden tool
-        hidden_registry, hidden_def = make_registry_with_hidden(
-            ref_counters,
-            hidden_name="hidden_tool",
-        )
-        hidden_catalog = build_catalog(hidden_registry)
-
+        # write_alpha is registered but hidden by READ permission
         tool_call = make_tool_call(
-            name="hidden_tool",
+            name="write_alpha",
             arguments={"value": "secret"},
             call_id="c1",
         )
         ref_responses = [
             make_tool_aware_response(
-                content="Using hidden...",
+                content="",
                 tool_calls=[tool_call],
             ),
         ]
@@ -803,7 +792,7 @@ class TestP11A21HiddenTool:
             return ModelResponse(
                 parts=[
                     ToolCallPart(
-                        tool_name="hidden_tool",
+                        tool_name="write_alpha",
                         args={"value": "secret"},
                         tool_call_id="c1",
                     ),
@@ -811,7 +800,7 @@ class TestP11A21HiddenTool:
             )
 
         scenario = Stage9Scenario(
-            user_input="use hidden tool",
+            user_input="use hidden write tool",
             execution_context=ctx,
             ref_responses=ref_responses,
             pyd_model_fn=pyd_fn,
@@ -820,8 +809,8 @@ class TestP11A21HiddenTool:
 
         obs = run_scenario(
             scenario,
-            registry=hidden_registry,
-            catalog=hidden_catalog,
+            registry=registry,
+            catalog=catalog,
             context_builder=context_builder,
             ref_counters=ref_counters,
             pyd_counters=pyd_counters,
@@ -830,7 +819,20 @@ class TestP11A21HiddenTool:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
+
+        # Prove write_alpha is NOT in exposed_tools
+        assert obs.ref_error is not None
+        assert obs.pyd_error is not None
+        # Reference: FastAgent.decide() rejects unknown tool names in
+        # the response before any execution
+        from dnd_assistant.errors import ModelError as ME
+
+        assert isinstance(obs.ref_error, ME)
+        assert isinstance(obs.pyd_error, ME)
 
 
 # ==============================================================================
@@ -904,6 +906,9 @@ class TestP11A22MixedAllowedUnknown:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )
 
 
@@ -913,22 +918,20 @@ class TestP11A22MixedAllowedUnknown:
 
 
 class TestP11A23MixedAllowedHidden:
-    """P11-A23: mixed allowed + hidden — ModelError, zero executions."""
+    """P11-A23: mixed allowed + hidden — ModelError, zero executions.
+
+    READ context where read_alpha exposed, write_alpha hidden by permission.
+    """
 
     def test_mixed_allowed_hidden(
         self,
         ref_counters: HandlerCounters,
         pyd_counters: HandlerCounters,
+        registry: ToolRegistry,
+        catalog: ToolRegistrySchema,
         context_builder: AgentContextBuilder,
     ) -> None:
         ctx = make_read_context()
-
-        # Build a registry with a hidden tool
-        hidden_registry, hidden_def = make_registry_with_hidden(
-            ref_counters,
-            hidden_name="hidden_tool",
-        )
-        hidden_catalog = build_catalog(hidden_registry)
 
         tool_call_1 = make_tool_call(
             name="read_alpha",
@@ -936,13 +939,13 @@ class TestP11A23MixedAllowedHidden:
             call_id="c1",
         )
         tool_call_2 = make_tool_call(
-            name="hidden_tool",
+            name="write_alpha",
             arguments={"value": "secret"},
             call_id="c2",
         )
         ref_responses = [
             make_tool_aware_response(
-                content="Mixed...",
+                content="",
                 tool_calls=[tool_call_1, tool_call_2],
             ),
         ]
@@ -956,7 +959,7 @@ class TestP11A23MixedAllowedHidden:
                         tool_call_id="c1",
                     ),
                     ToolCallPart(
-                        tool_name="hidden_tool",
+                        tool_name="write_alpha",
                         args={"value": "secret"},
                         tool_call_id="c2",
                     ),
@@ -973,8 +976,8 @@ class TestP11A23MixedAllowedHidden:
 
         obs = run_scenario(
             scenario,
-            registry=hidden_registry,
-            catalog=hidden_catalog,
+            registry=registry,
+            catalog=catalog,
             context_builder=context_builder,
             ref_counters=ref_counters,
             pyd_counters=pyd_counters,
@@ -983,4 +986,7 @@ class TestP11A23MixedAllowedHidden:
         assert_parity(
             obs,
             expect_failure=True,
+            expected_model_requests_ref=1,
+            expected_model_requests_pyd=1,
+            expected_handler_counts=(0, 0, 0),
         )

@@ -43,6 +43,7 @@ from tests.support.stage9_parity import (
     make_tool_call,
     make_write_context,
     make_write_context_no_audit,
+    make_wrong_session_mode_context,
     respond_json,
     run_scenario,
 )
@@ -217,9 +218,11 @@ class TestP11A03SingleReadRespond:
             arguments={"value": "gandalf"},
             call_id="call-1",
         )
+        # Both runtimes use tool-only first response (no TextPart) for
+        # equivalent provider-neutral DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="Looking up...",
+                content="",
                 tool_calls=[tool_call],
             ),
             make_tool_aware_response(content=respond_json(msg)),
@@ -299,9 +302,10 @@ class TestP11A04SingleReadClarify:
             arguments={"value": "gandalf"},
             call_id="call-1",
         )
+        # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="Looking up...",
+                content="",
                 tool_calls=[tool_call],
             ),
             make_tool_aware_response(content=clarify_json(msg)),
@@ -381,9 +385,10 @@ class TestP11A05SingleWriteRespond:
             arguments={"value": "save-data"},
             call_id="call-w1",
         )
+        # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="Saving...",
+                content="",
                 tool_calls=[tool_call],
             ),
             make_tool_aware_response(content=respond_json(msg)),
@@ -584,8 +589,9 @@ class TestP11A07WriteUnavailableReadPermission:
 class TestP11A08WriteUnavailableWrongMode:
     """P11-A08: WRITE unavailable in wrong session mode — hidden tool, direct respond.
 
-    The ExecutionContext has NO_ACTIVE_SESSION, but write_alpha requires
-    ACTIVE_SESSION. So write_alpha is not exposed.
+    The ExecutionContext has WRITE permission + NO_ACTIVE_SESSION + valid
+    audit. write_alpha requires ACTIVE_SESSION, so it is hidden solely
+    because of session mode.
     """
 
     def test_write_unavailable_wrong_mode(
@@ -597,7 +603,7 @@ class TestP11A08WriteUnavailableWrongMode:
         context_builder: AgentContextBuilder,
     ) -> None:
         msg = "Need active session"
-        ctx = make_write_context_no_audit()
+        ctx = make_wrong_session_mode_context()
 
         ref_responses = [
             make_tool_aware_response(content=respond_json(msg)),
@@ -674,9 +680,10 @@ class TestP11A09TwoReadCalls:
             arguments={"number": 42},
             call_id="c2",
         )
+        # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="Looking up...",
+                content="",
                 tool_calls=[tool_call_1, tool_call_2],
             ),
             make_tool_aware_response(content=respond_json(msg)),
@@ -776,9 +783,10 @@ class TestP11A10FourReadCalls:
             arguments={"number": 2},
             call_id="c4",
         )
+        # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="Looking up...",
+                content="",
                 tool_calls=[
                     tool_call_1,
                     tool_call_2,
@@ -883,9 +891,10 @@ class TestP11A11RepeatedSameRead:
             arguments={"value": "second"},
             call_id="c2",
         )
+        # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="Looking up...",
+                content="",
                 tool_calls=[tool_call_1, tool_call_2],
             ),
             make_tool_aware_response(content=respond_json(msg)),

@@ -42,7 +42,7 @@ from dnd_assistant.application.pydantic_ai_run_deps import (
 from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
-from dnd_assistant.errors import NotFoundError
+from dnd_assistant.errors import ModelError, NotFoundError
 from dnd_assistant.models.gateway import ModelGateway
 from dnd_assistant.models.types import (
     ChatMessage,
@@ -82,8 +82,11 @@ class _IntInput(BaseModel):
     number: int
 
 
-class _ToolOutput(BaseModel):
+class ToolOutput(BaseModel):
     result: str
+
+
+_ToolOutput = ToolOutput
 
 
 # ── Tool definitions ────────────────────────────────────────────────────────────
@@ -234,11 +237,24 @@ def make_context_builder() -> AgentContextBuilder:
 
 
 class _FakeModelGateway(ModelGateway):
-    """Fake ModelGateway that returns pre-built responses."""
+    """Fake ModelGateway that returns pre-built responses.
 
-    def __init__(self, responses: list[ToolAwareResponse]) -> None:
+    Supports scripted failures: set ``fail_on_request`` to a 1-based request
+    number; that request will raise the specified exception instead of
+    returning a response.
+    """
+
+    def __init__(
+        self,
+        responses: list[ToolAwareResponse],
+        *,
+        fail_on_request: int | None = None,
+        fail_exc: BaseException | None = None,
+    ) -> None:
         self._responses = responses
         self.call_count: int = 0
+        self._fail_on_request = fail_on_request
+        self._fail_exc = fail_exc or ModelError("simulated model failure")
 
     def chat_with_tools(
         self,
@@ -246,6 +262,8 @@ class _FakeModelGateway(ModelGateway):
         tools: list[ToolPublicDefinition],
     ) -> ToolAwareResponse:
         self.call_count += 1
+        if self._fail_on_request is not None and self.call_count == self._fail_on_request:
+            raise self._fail_exc
         if self.call_count <= len(self._responses):
             return self._responses[self.call_count - 1]
         return self._responses[-1]
@@ -261,6 +279,24 @@ class _FakeModelGateway(ModelGateway):
 
     def health(self) -> None:
         raise AssertionError("health() should not be called")
+
+
+class _CountingToolExecutor:
+    """Wraps a real ToolExecutor and counts execute() attempts."""
+
+    def __init__(self, executor: ToolExecutor) -> None:
+        self._inner = executor
+        self.execute_count: int = 0
+
+    def execute(
+        self,
+        tool_name: str,
+        *,
+        input_data: dict[str, Any],
+        context: ExecutionContext,
+    ) -> BaseModel:
+        self.execute_count += 1
+        return self._inner.execute(tool_name, input_data=input_data, context=context)
 
 
 # ── Helper: build ToolAwareResponse / ToolCall ──────────────────────────────────
@@ -337,6 +373,23 @@ def make_write_context_no_audit() -> ExecutionContext:
     )
 
 
+def make_wrong_session_mode_context() -> ExecutionContext:
+    """WRITE permission + NO_ACTIVE_SESSION + valid audit.
+
+    write_alpha requires ACTIVE_SESSION, so it is hidden solely because
+    of session mode.
+    """
+    return ExecutionContext(
+        granted_permission=Permission.WRITE,
+        session_mode=SessionMode.NO_ACTIVE_SESSION,
+        audit=AuditContext(
+            operation_id="test-op",
+            real_time=datetime.now(UTC),
+            source="test",
+        ),
+    )
+
+
 # ── Catalog builder ────────────────────────────────────────────────────────────
 
 
@@ -391,6 +444,8 @@ class DualRuntimeObservation:
         pyd_model_requests: Model requests made by the Pydantic runtime.
         ref_handler_counts: Handler counts from the reference runtime.
         pyd_handler_counts: Handler counts from the Pydantic runtime.
+        ref_executor_attempts: ToolExecutor.execute() calls (reference).
+        pyd_executor_attempts: ToolExecutor.execute() calls (Pydantic bridge).
         ref_error: Exception raised by reference runtime, or None.
         pyd_error: Exception raised by Pydantic runtime, or None.
         ref_gateway: The _FakeModelGateway used (for call count inspection).
@@ -402,16 +457,30 @@ class DualRuntimeObservation:
     pyd_model_requests: int
     ref_handler_counts: tuple[int, int, int]
     pyd_handler_counts: tuple[int, int, int]
-    ref_error: BaseException | None
-    pyd_error: BaseException | None
+    ref_executor_attempts: int = 0
+    pyd_executor_attempts: int = 0
+    ref_error: BaseException | None = None
+    pyd_error: BaseException | None = None
     ref_gateway: _FakeModelGateway | None = None
 
 
 # ── Internal helpers ────────────────────────────────────────────────────────────
 
 
+def _side_effect_sort_key(se: Any) -> str:
+    return se.value if hasattr(se, "value") else str(se)
+
+
+def _session_mode_sort_key(sm: Any) -> str:
+    return sm.value if hasattr(sm, "value") else str(sm)
+
+
 def _build_public_defs(registry: ToolRegistry) -> list[ToolPublicDefinition]:
-    """Build ToolPublicDefinition list from a ToolRegistry for the reference runtime."""
+    """Build ToolPublicDefinition list from a ToolRegistry for the reference runtime.
+
+    Uses sorted() for side_effects and allowed_session_modes to match
+    the deterministic ordering produced by build_tool_registry_schema.
+    """
     public_defs = []
     for td in registry.list_definitions():
         public_defs.append(
@@ -421,8 +490,8 @@ def _build_public_defs(registry: ToolRegistry) -> list[ToolPublicDefinition]:
                 input_schema=td.input_schema.model_json_schema(),
                 output_schema=td.output_schema.model_json_schema(),
                 permission=td.permission,
-                side_effects=list(td.side_effects),
-                allowed_session_modes=list(td.allowed_session_modes),
+                side_effects=sorted(td.side_effects, key=_side_effect_sort_key),
+                allowed_session_modes=sorted(td.allowed_session_modes, key=_session_mode_sort_key),
             )
         )
     return public_defs
@@ -487,7 +556,8 @@ def run_scenario(
     # ── Reference: AgentLoop ────────────────────────────────────────────────
     ref_gateway = _FakeModelGateway(scenario.ref_responses)
     tool_executor = ToolExecutor(registry)
-    tool_svc = AgentToolExecutionService(tool_executor=tool_executor)
+    counting_executor = _CountingToolExecutor(tool_executor)
+    tool_svc = AgentToolExecutionService(tool_executor=counting_executor)
 
     public_defs = _build_public_defs(registry)
     ref_catalog = ToolRegistrySchema(tools=public_defs)
@@ -510,6 +580,7 @@ def run_scenario(
         ref_error = exc
 
     ref_model_requests = ref_gateway.call_count
+    ref_executor_attempts = counting_executor.execute_count
 
     # ── Pydantic: PydanticAIAgentRuntime ────────────────────────────────────
     pyd_error: BaseException | None = None
@@ -519,6 +590,12 @@ def run_scenario(
     _copy_registry(registry, pyd_registry, pyd_counters)
 
     tool_bridge = PydanticAIToolBridge(registry=pyd_registry)
+    pyd_executor = ToolExecutor(pyd_registry)
+    pyd_counting_executor = _CountingToolExecutor(pyd_executor)
+    # Monkey-patch the bridge's lazy executor to use our counting wrapper.
+    # The bridge creates its executor lazily; we set it directly.
+    object.__setattr__(tool_bridge, "_executor", pyd_counting_executor)
+
     preparer = DndAgentRunPreparer(
         context_builder=context_builder,
         tool_catalog=catalog,
@@ -546,6 +623,7 @@ def run_scenario(
         pyd_error = exc
 
     pyd_model_requests = pyd_request_count[0]
+    pyd_executor_attempts = pyd_counting_executor.execute_count
 
     return DualRuntimeObservation(
         reference=reference_result,
@@ -562,6 +640,8 @@ def run_scenario(
             pyd_counters.beta,
             pyd_counters.write_alpha,
         ),
+        ref_executor_attempts=ref_executor_attempts,
+        pyd_executor_attempts=pyd_executor_attempts,
         ref_error=ref_error,
         pyd_error=pyd_error,
         ref_gateway=ref_gateway,
@@ -579,17 +659,28 @@ def assert_decision_parity(
 ) -> None:
     """Compare two AgentDecision instances for parity.
 
-    Known intentional difference:
-    - The reference AgentLoop preserves ToolAwareResponse.message.content
-      even when tool calls are present.
-    - The Pydantic runtime sets content=None when the first model response
-      contains only ToolCallPart parts (no TextPart).
+    Compares:
+    - prompt_version
+    - initial ChatRequest model_dump (full provider-neutral DTO)
+    - full ToolPublicDefinition values (name, description, input_schema,
+      output_schema, permission, side_effects, allowed_session_modes)
+    - tool call names, IDs, arguments, order
+    - initial assistant response content (when both sides have content)
     """
     assert ref_decision.prompt_version == pyd_decision.prompt_version
     assert ref_decision.request.model_dump() == pyd_decision.request.model_dump()
-    ref_names = tuple(t.name for t in ref_decision.exposed_tools)
-    pyd_names = tuple(t.name for t in pyd_decision.exposed_tools)
-    assert ref_names == pyd_names
+
+    # Full ToolPublicDefinition comparison (not just names)
+    assert len(ref_decision.exposed_tools) == len(pyd_decision.exposed_tools)
+    for ref_t, pyd_t in zip(ref_decision.exposed_tools, pyd_decision.exposed_tools, strict=True):
+        assert ref_t.name == pyd_t.name
+        assert ref_t.description == pyd_t.description
+        assert ref_t.input_schema == pyd_t.input_schema
+        assert ref_t.output_schema == pyd_t.output_schema
+        assert ref_t.permission == pyd_t.permission
+        assert ref_t.side_effects == pyd_t.side_effects
+        assert ref_t.allowed_session_modes == pyd_t.allowed_session_modes
+
     if check_tool_calls:
         if (
             ref_decision.response.message.content is not None
@@ -602,6 +693,9 @@ def assert_decision_parity(
         for ref_c, pyd_c in zip(ref_calls, pyd_calls, strict=True):
             assert ref_c.name == pyd_c.name
             assert ref_c.arguments == pyd_c.arguments
+            # call_id parity: both None or both equal
+            if ref_c.call_id is not None and pyd_c.call_id is not None:
+                assert ref_c.call_id == pyd_c.call_id
     else:
         assert ref_decision.response.message.content == pyd_decision.response.message.content
 
@@ -637,15 +731,61 @@ def assert_parity(
     expected_model_requests_pyd: int = 1,
     expected_tool_executions: int = 0,
     expected_handler_counts: tuple[int, int, int] = (0, 0, 0),
+    expected_executor_attempts: int | None = None,
     expect_failure: bool = False,
     check_tool_calls: bool = False,
 ) -> None:
-    """Assert full parity between reference and Pydantic runtime observations."""
+    """Assert full parity between reference and Pydantic runtime observations.
+
+    When ``expect_failure=True``, this helper verifies:
+    - Both runtimes raised an exception.
+    - Both runtimes produced no result.
+    - Model request counts match expectations.
+    - Executor/bridge attempt counts match expectations.
+    - Handler counts match expectations (zero for pre-execution failures).
+    - No forbidden WRITE handler effects.
+    """
     if expect_failure:
         assert obs.ref_error is not None, "Expected reference runtime to raise"
         assert obs.pyd_error is not None, "Expected Pydantic runtime to raise"
         assert obs.reference is None
         assert obs.pydantic is None
+
+        # Both errors should be of the same type category for equivalent
+        # scenarios. Project model/validation errors that are
+        # DndAssistantError are the common case; execution failures
+        # (RuntimeError, etc.) propagate unchanged from the ToolExecutor
+        # and are checked in individual scenarios.
+
+        # Model request counts
+        assert obs.ref_model_requests == expected_model_requests_ref, (
+            f"Reference model requests: {obs.ref_model_requests} != {expected_model_requests_ref}"
+        )
+        assert obs.pyd_model_requests == expected_model_requests_pyd, (
+            f"Pydantic model requests: {obs.pyd_model_requests} != {expected_model_requests_pyd}"
+        )
+
+        # Executor/bridge attempt counts
+        if expected_executor_attempts is not None:
+            assert obs.ref_executor_attempts == expected_executor_attempts, (
+                f"Reference executor attempts: {obs.ref_executor_attempts} != {expected_executor_attempts}"
+            )
+            assert obs.pyd_executor_attempts == expected_executor_attempts, (
+                f"Pydantic executor attempts: {obs.pyd_executor_attempts} != {expected_executor_attempts}"
+            )
+
+        # Handler counts
+        assert obs.ref_handler_counts == expected_handler_counts, (
+            f"Reference handler counts: {obs.ref_handler_counts} != {expected_handler_counts}"
+        )
+        assert obs.pyd_handler_counts == expected_handler_counts, (
+            f"Pydantic handler counts: {obs.pyd_handler_counts} != {expected_handler_counts}"
+        )
+
+        # No forbidden WRITE effects
+        assert obs.ref_handler_counts[2] == 0, "Reference WRITE handler invoked during failure"
+        assert obs.pyd_handler_counts[2] == 0, "Pydantic WRITE handler invoked during failure"
+
         return
 
     assert obs.ref_error is None, f"Reference runtime raised: {obs.ref_error}"
@@ -661,9 +801,18 @@ def assert_parity(
         f"Pydantic model requests: {obs.pyd_model_requests} != {expected_model_requests_pyd}"
     )
 
-    # Tool execution counts
+    # Tool execution counts (results captured in AgentRunResult)
     assert len(obs.reference.tool_executions) == expected_tool_executions
     assert len(obs.pydantic.tool_executions) == expected_tool_executions
+
+    # Executor attempt counts
+    if expected_executor_attempts is not None:
+        assert obs.ref_executor_attempts == expected_executor_attempts, (
+            f"Reference executor attempts: {obs.ref_executor_attempts} != {expected_executor_attempts}"
+        )
+        assert obs.pyd_executor_attempts == expected_executor_attempts, (
+            f"Pydantic executor attempts: {obs.pyd_executor_attempts} != {expected_executor_attempts}"
+        )
 
     # Handler counts
     assert obs.ref_handler_counts == expected_handler_counts

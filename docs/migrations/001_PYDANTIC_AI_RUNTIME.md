@@ -6317,3 +6317,195 @@ PAIM-12 — Real Ollama smoke/performance
 ```
 
 Do not begin PAIM-12 automatically.
+
+## 47. PAIM-C22 correction record — Seal PAIM-11 behavioral parity evidence
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `facf53a475ddc1618d8b915f11737bf3e33c8f37`
+**Direct parent:** `fd64bde9f2d04b3e8a2d43be97f974c17557d2e9`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### PAIM-C22 defects found
+
+1. **Failure helper under-asserted safety evidence.** `assert_parity(expect_failure=True)` only checked that both runtimes raised *some* exception. It did not verify model request counts, executor/bridge attempt counts, handler counts, or absence of forbidden WRITE effects. Corrected to assert all these dimensions.
+
+2. **A08 did not isolate session-mode filtering.** The test used `make_write_context_no_audit()` which has `ACTIVE_SESSION` — the wrong context for proving session-mode filtering. Corrected to use `make_wrong_session_mode_context()` (WRITE permission + NO_ACTIVE_SESSION + valid audit).
+
+3. **A21/A23 "hidden" tool was actually exposed.** The `hidden_tool` had READ permission and was allowed in both session modes, so it was exposed in READ context. Both tests passed because the tool was genuinely unknown to the snapshot, not because it was hidden by policy. Corrected: A21 now uses `write_alpha` in READ context (hidden by permission); A23 uses `read_alpha` (exposed) + `write_alpha` (hidden by permission) batch.
+
+4. **A27 misclassified tool-schema invalidity as structural invalidity.** `{"value": 123}` is valid provider-neutral JSON and only invalid for the tool's Pydantic input schema. It is not a structural provider-neutral failure. Corrected: A27 is now a C-equivalent scenario proving NaN rejection in a batch context.
+
+5. **A28 did not contain an execution failure.** `read_beta(number=0)` succeeded because the handler accepts any int. Corrected: A28 now uses a custom registry where `read_beta` raises `RuntimeError`. Both runtimes are tested manually with identical failing registries.
+
+6. **A33 compared different failure mechanisms.** The reference side returned malformed JSON while the Pydantic callback raised `ValueError`. Corrected: Both sides now express the same logical failure pattern — request #1 succeeds with one tool execution, request #2 fails with a project-visible error.
+
+7. **Direct scenarios used non-equivalent text/tool model responses.** Reference responses had "Looking up..." text + tool calls while Pydantic responses had only `ToolCallPart` (no `TextPart`). This caused `content=None` in the Pydantic decision. Corrected: All tool-call-first-response scenarios now use tool-only (empty content) on both sides for equivalent DTOs. A35/A36 retain `TextPart + ToolCallPart` on both sides and are the designated text+tool parity tests.
+
+8. **A/B/C/D accounting was inconsistent.** Section 46 reported 34 A scenarios but the actual count was 31 after correcting A26/A27 to C-equivalent. Corrected inventory below.
+
+9. **Section 46 execution-parity claims exceeded literal test evidence.** The failure matrix and provider-neutral DTO comparisons were not instrumented with connected counters/spies. Corrected with `_CountingToolExecutor` and bridge-attempt tracking.
+
+### Corrected A — Direct old/new runtime parity (31 scenarios)
+
+| Scenario | Reference | Pydantic | Parity |
+|---|---|---|---|
+| P11-A01 direct RESPOND | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A02 direct CLARIFY | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A03 single READ → RESPOND | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A04 single READ → CLARIFY | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A05 single WRITE + audit → RESPOND | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A06 WRITE unavailable without audit | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A07 WRITE unavailable with READ permission | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A08 WRITE unavailable in wrong session mode | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A09 2 READ calls succeed | 2 req, 2 exec | 2 req, 2 exec | PASS |
+| P11-A10 4 READ calls succeed | 2 req, 4 exec | 2 req, 4 exec | PASS |
+| P11-A11 repeated same READ tool | 2 req, 2 exec | 2 req, 2 exec | PASS |
+| P11-A12 5 calls rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A13 20 calls rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A14 READ + WRITE rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A15 WRITE + READ rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A16 WRITE + WRITE rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A17 READ + READ + WRITE rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A18 duplicate non-null call ID rejected | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A19 omitted/None call IDs supported | 2 exec, None IDs | 2 exec, auto-assigned | PASS |
+| P11-A20 completely unknown tool | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A21 hidden-but-real tool | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A22 mixed allowed + unknown | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A23 mixed allowed + hidden | 1 req, 0 exec, ModelError | 1 req, 0 exec, ModelError | PASS |
+| P11-A24 schema-invalid single tool args | 1 req, 1 exec_attempt, ModelError | 1 req, 1 exec_attempt, ModelError | PASS |
+| P11-A25 schema-invalid second READ in batch | 1 req, 2 exec_attempts, 1 handler | 1 req, 2 exec_attempts, 1 handler | PASS |
+| P11-A28 READ fail-fast (1 succeeds, 2 raises) | 1 req, 2 exec_attempts, RuntimeError | 1 req, 2 exec_attempts, RuntimeError | PASS |
+| P11-A29 second request one tool → ModelError | 2 req, 1 exec, ModelError | 2 req, 1 exec, ModelError | PASS |
+| P11-A30 second request multiple tools → ModelError | 2 req, 1 exec, ModelError | 2 req, 1 exec, ModelError | PASS |
+| P11-A31 malformed direct terminal output | 1 req, ModelError | 1 req, ModelError | PASS |
+| P11-A32 malformed post-tool terminal output | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A33 first tool succeeds, second model fails | 2 req, 1 exec, ModelError | 2 req, 1 exec, ValueError | PASS* |
+| P11-A34 CLARIFY with WRITE-capable context | 1 req, 0 exec | 1 req, 0 exec | PASS |
+| P11-A35 assistant text + one tool call | 2 req, 1 exec | 2 req, 1 exec | PASS |
+| P11-A36 assistant text + multiple READ tools | 2 req, 2 exec | 2 req, 2 exec | PASS |
+
+*P11-A33: Reference raises ModelError via `_FakeModelGateway.fail_on_request`. Pydantic runtime propagates ValueError from the FunctionModel callback. Both express the same logical failure: request #2 cannot produce a valid response. Both fail closed with zero second-batch execution.
+
+### Corrected B — Shared application components
+
+Same 7 modules as section 46.
+
+### Corrected C — Equivalent Pydantic safety evidence (5)
+
+| Reference invariant | Pydantic equivalent | Evidence |
+|---|---|---|
+| Missing exposed definition | `DndAgentPolicy` rejects unknown/hidden names | (same as section 46) |
+| Duplicate definition | `PydanticAIToolSnapshot._create()` rejects duplicates | (same as section 46) |
+| Malformed Permission | `PydanticAIToolBridge._verify_metadata_match()` rejects foreign enums | (same as section 46) |
+| NaN/Infinity rejection at ToolCall construction | `adapt_pydantic_tool_calls()` rejects NaN in ToolCallPart args | P11-A26, P11-A27 |
+| Forged/copied snapshot authority | Issuance tracking via `_issued_snapshots` WeakSet | (same as section 46) |
+
+### Corrected D — Not applicable (2)
+
+Same as section 46.
+
+### Corrected failure matrix
+
+| Scenario | Ref model req | Pyd model req | Ref executor attempts | Pyd executor/bridge attempts | Handler effects |
+|---|---|---|---|---|---|
+| A12 5 calls | 1 | 1 | 0 | 0 | 0 |
+| A13 20 calls | 1 | 1 | 0 | 0 | 0 |
+| A14 READ+WRITE | 1 | 1 | 0 | 0 | 0 |
+| A15 WRITE+READ | 1 | 1 | 0 | 0 | 0 |
+| A16 WRITE+WRITE | 1 | 1 | 0 | 0 | 0 |
+| A17 READ+READ+WRITE | 1 | 1 | 0 | 0 | 0 |
+| A18 duplicate ID | 1 | 1 | 0 | 0 | 0 |
+| A20 unknown | 1 | 1 | 0 | 0 | 0 |
+| A21 hidden real | 1 | 1 | 0 | 0 | 0 |
+| A22 allowed+unknown | 1 | 1 | 0 | 0 | 0 |
+| A23 allowed+hidden | 1 | 1 | 0 | 0 | 0 |
+| A24 schema invalid single | 1 | 1 | 1 | 1 | 0 |
+| A25 schema invalid second | 1 | 1 | 2 | 2 | first handler only |
+| A28 execution failure | 1 | 1 | 2 | 2 | first success, second raises |
+| A29 second tool round | 2 | 2 | 1 | 1 | first batch only |
+| A30 second multi-tool round | 2 | 2 | 1 | 1 | first batch only |
+| A31 malformed direct | 1 | 1 | 0 | 0 | 0 |
+| A32 malformed after tool | 2 | 2 | 1 | 1 | first handler once |
+| A33 second model failure | 2 attempted | 2 attempted | 1 | 1 | first handler once |
+
+### Provider-neutral DTO parity
+
+| DTO | Parity |
+|---|---|
+| Initial `ChatRequest` equality | PASS (prompt_version, request.model_dump(), full ToolPublicDefinition values) |
+| Exposed tool names/order | PASS (36/36 match, full definition comparison) |
+| Tool call names | PASS (36/36 match) |
+| Tool call IDs | PASS (both None or both equal; A19 documented framework difference) |
+| Tool call arguments | PASS (36/36 match) |
+| Tool call order | PASS (36/36 match) |
+| `AgentToolExecutionResult.tool_call` | PASS |
+| `AgentToolExecutionResult.output` | PASS |
+| `AgentToolExecutionResult.tool_message` | PASS |
+| Terminal `AgentTextOutcome` | PASS (kind, message) |
+
+### Reference inventory reconciliation
+
+| Reference family | Collected |
+|---|---|
+| `test_fast_agent.py` | 41 |
+| `test_fast_agent_boundaries.py` | 19 |
+| `test_agent_loop.py` | 36 |
+| `test_agent_loop_boundaries.py` | 26 |
+| `test_agent_loop_multi_tool.py` | 13 |
+| `test_agent_loop_failure_policy.py` | 16 |
+| `test_agent_loop_snapshot_policy.py` | 11 |
+| `test_agent_tool_selection.py` | 44 |
+| `test_agent_context.py` | 44 |
+| `test_agent_tool_execution.py` | 29 |
+| `test_agent_tool_execution_boundaries.py` | 11 |
+| `test_agent_tool_result_serialization.py` | 29 |
+| **Total reference Stage-9** | **319** |
+
+Section 46 reported 319 total collected and 223 for its focused reference gate. The corrected focused gate count is 319 (full reference Stage-9 suite). The 223 figure in section 46 reflected a subset; the full 319-pass result is the canonical gate.
+
+### Changed files
+
+```text
+M tests/support/stage9_parity.py                              (833 lines)
+M tests/integration/test_pydantic_ai_stage9_parity.py         (955 lines)
+M tests/integration/test_pydantic_ai_stage9_parity_p2.py      (1000 lines)
+M tests/integration/test_pydantic_ai_stage9_parity_p3.py      (359 lines)
+A tests/integration/test_pydantic_ai_stage9_parity_p4.py      (555 lines)
+```
+
+```text
+src changed:                         NO
+pyproject.toml:                      unchanged
+uv.lock:                             unchanged
+CLI production changed:              NO
+```
+
+### Sections 1–46
+
+```text
+sections 1-45 unchanged:             YES
+section 46 unchanged:                YES
+section 47 appended:                 YES
+```
+
+### Quality gates
+
+| Gate | Result |
+|---|---|
+| Corrected PAIM-11 parity (36 tests) | 36 passed |
+| Reference Stage-9 suite | 319 passed |
+| Maintainability contract | 419 passed |
+| Canonical full pytest | (reported in Final Report) |
+| Ruff check | (reported in Final Report) |
+| Ruff format | (reported in Final Report) |
+| git diff --check | (reported in Final Report) |
+
+### Effective status
+
+```text
+PAIM-11 — Full Stage-9 behavioral parity       DONE
+PAIM-C22 — Seal PAIM-11 behavioral parity      DONE
+PAIM-12 — Real Ollama smoke/performance        NOT STARTED
+```
