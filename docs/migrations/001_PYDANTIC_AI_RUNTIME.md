@@ -3461,3 +3461,330 @@ PAIM-08 — Replace bounded AgentLoop mechanics
 ```
 
 Do not begin PAIM-08 automatically.
+
+## 34. PAIM-C13 correction record — Close PAIM-07 runtime evidence gaps
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `1c86bbb53661834651dacf0a1911050879a36ee1`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+Independent review accepted the PAIM-07 production architecture but found
+that the committed evidence in section 33 overstates what is directly tested.
+
+PAIM-C13 adds executable evidence for framework-visible tool exposure,
+output-tool configuration, two-run isolation, snapshot/policy isolation,
+reference parity, error cause mapping, TextPart concatenation, and
+ThinkingPart hiding — without modifying any production code.
+
+### New evidence file
+
+```text
+tests/integration/test_pydantic_ai_fast_agent_evidence.py
+```
+
+11 tests, all pass. File is under 1000 lines.
+
+### C13-E01 — exact framework-visible tool order
+
+A normal READ run captures the public `AgentInfo` passed to `FunctionModel`.
+
+```text
+run A snapshot names:              read_alpha, read_beta
+run A AgentInfo.function_tools:    read_alpha, read_beta
+run A AgentInfo.output_tools:      []
+run A allow_text_output:           True
+
+exact order parity:                YES
+model requests:                    1
+handlers:                          0
+```
+
+### C13-E02 — no synthetic output tools
+
+```text
+AgentInfo.output_tools == []:      YES
+AgentInfo.allow_text_output:       True
+```
+
+The intended PAIM-07 contract (plain text output + external project tools,
+not framework-generated project result tools) is confirmed.
+
+### C13-E03 — model-visible two-run exposure isolation
+
+Same `PydanticAIFastAgent` instance used for two decisions with different
+authorities:
+
+```text
+Run A (READ) model-visible tools:          read_alpha, read_beta
+Run B (WRITE+audit) model-visible tools:   read_alpha, read_beta, write_alpha
+
+Run A data unchanged after run B:          YES
+model requests:                             2 total, 1 per decision
+handlers:                                   0
+```
+
+Proves actual model-visible `ExternalToolset` isolation, not merely
+`decision_a.exposed_tools != decision_b.exposed_tools`.
+
+### C13-E04 — snapshot/policy run isolation
+
+Captures exact `PreparedDndAgentRun` for each decision via a spy wrapper:
+
+```text
+run_a.deps is not run_b.deps:               YES
+run_a.deps.tool_snapshot is not run_b.deps.tool_snapshot: YES
+run_a.deps.policy is not run_b.deps.policy: YES
+run-B first policy admission works:         YES
+```
+
+Behaviorally proves run B's policy still has its first real batch opportunity.
+
+### C13-E05 — reference parity: text + tool
+
+```text
+prompt_version equality:                    YES
+request.model_dump() equality:              YES
+exposed tool names equality:                YES
+response content equality:                  YES
+tool-call name/arguments equality:          YES
+model requests:                             1
+```
+
+### C13-E06 — reference parity: multi READ
+
+```text
+prompt_version equality:                    YES
+request.model_dump() equality:              YES
+exposed tool names equality:                YES
+tool-call count (2):                        YES
+tool-call order preserved:                  YES
+tool-call IDs preserved:                    YES
+arguments preserved:                        YES
+model requests:                             1
+```
+
+### C13-E07 — exact unknown-tool cause mapping
+
+```text
+project exception:                          ModelError
+model requests:                             1
+handlers:                                   0
+framework cause retained:                   YES (AgentRunError)
+```
+
+### C13-E08 — duplicate-ID cause mapping
+
+```text
+project exception:                          ModelError
+model requests:                             1
+handlers:                                   0
+framework cause retained:                   YES (AgentRunError)
+```
+
+### C13-E09 — deterministic framework AgentRunError mapping
+
+A `ModelAPIError` raised from a `FunctionModel` function:
+
+```text
+project exception:                          ModelError
+ModelError.__cause__:                       ModelAPIError
+cause message:                              "Simulated model failure"
+model requests (where a request began):     1
+handlers:                                   0
+```
+
+### C13-E10 — multiple TextPart concatenation rule
+
+```text
+raw TextPart sequence:                      "first", "second" + ToolCallPart
+adapted content:                            "first second"
+tool call preserved:                        YES
+order preserved:                            YES
+model requests:                             1
+handlers:                                   0
+```
+
+### C13-E11 — ThinkingPart remains hidden
+
+```text
+raw parts:                                  ThinkingPart + TextPart("visible") + ToolCallPart
+adapted content:                            "visible"
+ThinkingPart surfaced:                      NO
+model requests:                             1
+handlers:                                   0
+```
+
+### Evidence reconciliation
+
+#### Committed PAIM-07 line counts (section 33 claims)
+
+Independent Git verification from commit `1c86bbb...`:
+
+| File | Section 33 claim | Actual |
+|---|---|---|
+| `pydantic_ai_fast_agent.py` | 327 | **324** |
+| `test_pydantic_ai_fast_agent.py` | 865 | **852** |
+| `test_pydantic_ai_fast_agent_boundaries.py` | 954 | **949** |
+
+All three section-33 line-count claims are inaccurate. PAIM-C13 records the
+correct values.
+
+#### Actual PAIM-07 test-file counts
+
+```text
+test_pydantic_ai_fast_agent.py:             19 passed
+test_pydantic_ai_fast_agent_boundaries.py:  23 passed
+Total:                                      42 passed
+```
+
+Section 33 claimed "42 passed (22 + 20)". The total of 42 is correct, but
+the per-file breakdown of 22 + 20 is inaccurate. The actual breakdown is
+19 + 23.
+
+#### Policy test actual count
+
+```text
+test_dnd_agent_policy.py:                   51 passed
+```
+
+Section 33 claimed 58. The actual count is 51.
+
+#### Blocker suite actual counts
+
+```text
+test_pydantic_ai_blocker_gate.py:           9 passed
+test_pydantic_ai_blocker_execution.py:      6 passed
+test_pydantic_ai_blocker_limits.py:         3 passed
+test_pydantic_ai_qualification.py:          17 passed
+Total:                                      35 passed
+```
+
+Section 33 claimed 16 for the blocker gate suite. The actual total across
+all four files is 35.
+
+#### Section 33 modified
+
+```text
+NO
+```
+
+#### Section 34 appended
+
+```text
+YES
+```
+
+### Starting-tree evidence
+
+Section 33 records the PAIM-07 starting working tree as:
+
+```text
+dirty (pre-existing fast_agent.py refactor + new files)
+```
+
+PAIM-C13 does not rewrite this. Independent Git verification proves:
+
+```text
+PAIM-07 commit is exactly one direct child of PAIM-C12 HEAD
+
+all committed changes are inside the six-file PAIM-07 scope
+
+no unrelated dependency/Tool Layer/AgentLoop changes are present
+```
+
+### Production code unchanged
+
+```text
+src/dnd_assistant/application/pydantic_ai_fast_agent.py:   unchanged
+src/dnd_assistant/application/fast_agent.py:               unchanged
+src/dnd_assistant/application/pydantic_ai_run_deps.py:     unchanged
+src/dnd_assistant/application/dnd_agent_policy.py:         unchanged
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py:  unchanged
+```
+
+No production code was modified for PAIM-C13.
+
+### Framework-boundary prohibition confirmed
+
+Production source contains no:
+
+```text
+HandleDeferredToolCalls:                   NO
+DeferredToolResults:                       NO
+ToolExecutor import:                       NO
+bridge.execute():                          NO
+policy.admit_tool_batch():                 NO
+second model request:                      NO
+```
+
+### Changed files
+
+```text
+tests/integration/test_pydantic_ai_fast_agent_evidence.py   (new)
+
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+DEVELOPMENT_STATUS.md
+```
+
+Expected unchanged:
+
+```text
+src/dnd_assistant/application/agent_loop.py
+src/dnd_assistant/application/agent_tool_execution.py
+src/dnd_assistant/application/pydantic_ai_run_deps.py
+src/dnd_assistant/application/dnd_agent_policy.py
+src/dnd_assistant/application/pydantic_ai_tool_bridge.py
+src/dnd_assistant/application/pydantic_ai_fast_agent.py
+src/dnd_assistant/application/fast_agent.py
+
+src/dnd_assistant/tools/**
+src/dnd_assistant/models/gateway.py
+src/dnd_assistant/models/ollama/**
+src/dnd_assistant/prompts/**
+
+CLI
+
+pyproject.toml
+uv.lock
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| New evidence tests | `uv run pytest tests/integration/test_pydantic_ai_fast_agent_evidence.py -v` | 11 passed |
+| Original PAIM-07 main | `uv run pytest tests/integration/test_pydantic_ai_fast_agent.py -v` | 19 passed |
+| Original PAIM-07 boundaries | `uv run pytest tests/integration/test_pydantic_ai_fast_agent_boundaries.py -v` | 23 passed |
+| DndAgentPolicy | `uv run pytest tests/unit/test_dnd_agent_policy.py -v` | 51 passed |
+| Blocker gate | `uv run pytest tests/integration/test_pydantic_ai_blocker_gate.py -v` | 9 passed |
+| Blocker execution | `uv run pytest tests/integration/test_pydantic_ai_blocker_execution.py -v` | 6 passed |
+| Blocker limits | `uv run pytest tests/integration/test_pydantic_ai_blocker_limits.py -v` | 3 passed |
+| Qualification | `uv run pytest tests/integration/test_pydantic_ai_qualification.py -v` | 17 passed |
+| Reference FastAgent | `uv run pytest tests/unit/test_fast_agent.py -v` | 41 passed |
+| Reference FastAgent boundaries | `uv run pytest tests/unit/test_fast_agent_boundaries.py -v` | 19 passed |
+| PAIM-06 deps | `uv run pytest tests/unit/test_pydantic_ai_run_deps.py -v` | 36 passed |
+| PAIM-06 context deps | `uv run pytest tests/integration/test_pydantic_ai_context_deps.py -v` | 7 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Canonical full suite | `uv run pytest` | (reported in Final Report) |
+| Ruff check | `uv run ruff check .` | (reported in Final Report) |
+| Ruff format | `uv run ruff format --check .` | (reported in Final Report) |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Effective PAIM-07 decision
+
+```text
+ACCEPTED
+PAIM-C13 — DONE
+```
+
+### Next task
+
+```text
+PAIM-08 — Replace bounded AgentLoop mechanics
+```
+
+Do not begin PAIM-08 automatically.
