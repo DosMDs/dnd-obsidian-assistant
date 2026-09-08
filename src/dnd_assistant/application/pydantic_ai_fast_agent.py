@@ -273,6 +273,9 @@ def _adapt_tool_calls(
 ) -> list[ToolCall]:
     """Adapt framework ``ToolCallPart`` values to project ``ToolCall`` DTOs.
 
+    Delegates to the shared ``adapt_pydantic_tool_calls()`` helper used by
+    both PAIM-07 and PAIM-08.
+
     Args:
         calls: The framework tool call parts from ``DeferredToolRequests.calls``.
         prepared: The prepared run (for snapshot name validation).
@@ -284,41 +287,12 @@ def _adapt_tool_calls(
         ModelError: If any tool name is not in the frozen snapshot, or if
             the arguments cannot be represented as a JSON object.
     """
-    from dnd_assistant.models.types import ToolCall as ProjectToolCall
+    from dnd_assistant.application.pydantic_ai_response_adapter import (
+        adapt_pydantic_tool_calls,
+    )
 
-    snapshot_names = prepared.deps.tool_snapshot.names
-    adapted: list[ProjectToolCall] = []
-
-    for call in calls:
-        # Validate tool name against snapshot
-        if call.tool_name not in snapshot_names:
-            raise ModelError(
-                f"Tool call '{call.tool_name}' is not in the frozen exposure "
-                "snapshot. Unknown or hidden tools are not allowed."
-            )
-
-        # Convert arguments — fail closed on malformed/non-object JSON
-        try:
-            args = call.args_as_dict(raise_if_invalid=True)
-        except (ValueError, AssertionError) as exc:
-            raise ModelError(
-                f"Failed to parse arguments for tool '{call.tool_name}': {exc}",
-                cause=exc,
-            ) from exc
-
-        # Build project ToolCall (validates non-finite JSON values)
-        try:
-            project_call = ProjectToolCall(
-                name=call.tool_name,
-                arguments=args,
-                call_id=call.tool_call_id,
-            )
-        except (ValueError, AssertionError) as exc:
-            raise ModelError(
-                f"Failed to construct ToolCall for '{call.tool_name}': {exc}",
-                cause=exc,
-            ) from exc
-
-        adapted.append(project_call)
-
-    return adapted
+    result = adapt_pydantic_tool_calls(
+        calls,
+        snapshot_names=prepared.deps.tool_snapshot.names,
+    )
+    return list(result)

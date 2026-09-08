@@ -2538,9 +2538,7 @@ the input is checked against `collections.abc.Sequence`:
 
 ```python
 if not isinstance(tool_calls, collections.abc.Sequence):
-    raise ValidationError(
-        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
-    )
+    raise ValidationError(f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}")
 ```
 
 **Immutable tuple capture** — After the runtime check, the batch is
@@ -2595,10 +2593,12 @@ This was replaced with a real invocation counter:
 ```python
 hidden_calls = 0
 
+
 def hidden_handler(inp, ctx):
     nonlocal hidden_calls
     hidden_calls += 1
     return ToolOutput(result="hidden")
+
 
 registry.register(hidden_canonical, hidden_handler)
 # ... policy rejects hidden_tool ...
@@ -4295,3 +4295,105 @@ PAIM-09 — Ollama integration decision gate
 ```
 
 Do not begin PAIM-09 automatically.
+
+---
+
+## 37. PAIM-C15 correction record — PAIM-08 structural preflight and parity evidence
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `b36c6f82a065920111f473ad6aa961628d1e10f2`
+
+### Root cause
+
+PAIM-08 was accepted without two required evidence classes:
+
+1. **Structural preflight evidence (C15-S1–S9):** Tests proving that the runtime rejects invalid tool-call batches (non-finite args, schema mismatch, mixed READ+WRITE, duplicate call IDs, unknown/hidden tools) *before* executing any tool in the batch.
+2. **Old/new parity evidence (C15-P1–P5):** Tests proving that `PydanticAIAgentRuntime` produces the same observable outcomes as the existing custom `AgentLoop` for the five fundamental scenarios (direct respond, direct clarify, single READ→respond, single WRITE→respond, two READ→respond).
+
+### Evidence tests created
+
+| File | Tests | Status |
+|---|---|---|
+| `tests/integration/test_pydantic_ai_agent_runtime_evidence.py` | 11 evidence tests (C15-S1–S9) | All PASS |
+| `tests/integration/test_pydantic_ai_agent_runtime_parity.py` | 5 parity tests (C15-P1–P5) | All PASS |
+| `tests/unit/test_pydantic_ai_response_adapter.py` | 12 adapter unit tests | All PASS |
+
+### Structural preflight evidence (C15-S1–S9)
+
+| ID | Scenario | Test |
+|---|---|---|
+| C15-S1 | Single non-finite arg in batch → `ModelError`, zero executions | `test_single_non_finite_raises_model_error` |
+| C15-S1b | Valid non-finite in valid batch → non-finite rejected, valid executes | `test_valid_non_finite_valid_batch` |
+| C15-S2 | Schema mismatch → `ValidationError`, zero executions | `test_schema_fail_fast` |
+| C15-S3 | RunContext deps is the prepared `DndAgentDeps` instance | `test_ctx_deps_is_prepared_deps` |
+| C15-S4 | Same framework run spans both model requests | `test_same_run_two_requests` |
+| C15-S5 | Single READ → one bridge execution | `test_single_read_one_bridge_exec` |
+| C15-S5b | Two READ → two bridge executions | `test_two_read_two_bridge_execs` |
+| C15-S6 | No tool call → direct respond | `test_no_tool_call_respond` |
+| C15-S7 | Single WRITE executes once | `test_single_write_execution` |
+| C15-S8 | Mixed READ+WRITE batch → `ModelError`, zero executions | `test_mixed_batch_rejected` |
+| C15-S9 | Duplicate call ID → `ModelError`, zero executions | `test_duplicate_call_id_rejected` |
+
+### Parity evidence (C15-P1–P5)
+
+| ID | Scenario | Tool calls | Model requests | Tool executions | Outcome |
+|---|---|---|---|---|---|
+| C15-P1 | Direct respond | 0 | 1 | 0 | RESPOND |
+| C15-P2 | Direct clarify | 0 | 1 | 0 | CLARIFY |
+| C15-P3 | Single READ → respond | 1 | 2 | 1 | RESPOND |
+| C15-P4 | Single WRITE → respond | 1 | 2 | 1 | RESPOND |
+| C15-P5 | Two READ → respond | 2 | 2 | 2 | RESPOND |
+
+### Shared adapter extraction
+
+`pydantic_ai_response_adapter.py` was created with one public function:
+
+```python
+def adapt_pydantic_tool_calls(
+    tool_calls: Sequence[ToolCallPart],
+    *,
+    allowed_tool_names: frozenset[str],
+) -> tuple[ToolCallPart, ...]:
+```
+
+This replaces the duplicated `_adapt_tool_calls()` in `pydantic_ai_fast_agent.py` (PAIM-07) and is now used by both runtimes.
+
+### Changed files
+
+```text
+src/dnd_assistant/application/pydantic_ai_response_adapter.py    (new)
+src/dnd_assistant/application/pydantic_ai_agent_runtime.py       (modified — structural fixes)
+src/dnd_assistant/application/pydantic_ai_fast_agent.py          (modified — use shared adapter)
+
+tests/unit/test_pydantic_ai_response_adapter.py                  (new, 12 tests)
+tests/integration/test_pydantic_ai_agent_runtime_evidence.py     (new, 11 tests)
+tests/integration/test_pydantic_ai_agent_runtime_parity.py       (new, 5 tests)
+
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|---|---|---|
+| Adapter unit tests | `uv run pytest tests/unit/test_pydantic_ai_response_adapter.py -v` | 12 passed |
+| Evidence tests | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime_evidence.py -v` | 11 passed |
+| Parity tests | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime_parity.py -v` | 5 passed |
+| PAIM-08 core+boundary | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime.py tests/integration/test_pydantic_ai_agent_runtime_boundaries.py -v` | 28 passed |
+| PAIM-07 regression | `uv run pytest tests/unit/test_fast_agent.py tests/unit/test_fast_agent_boundaries.py -v` | 53 passed |
+| Reference AgentLoop | `uv run pytest tests/unit/test_agent_loop.py -v` | (reported in Final Report) |
+| All PAIM-08+PAIM-C15 | `uv run pytest tests/unit/test_pydantic_ai_response_adapter.py tests/integration/test_pydantic_ai_agent_runtime_evidence.py tests/integration/test_pydantic_ai_agent_runtime_parity.py tests/integration/test_pydantic_ai_agent_runtime.py tests/integration/test_pydantic_ai_agent_runtime_boundaries.py -v` | 56 passed |
+| Ruff check | `uv run ruff check .` | 0 errors |
+| Ruff format | `uv run ruff format --check .` | 0 unformatted |
+| git diff --check | `git diff --check` | (reported in Final Report) |
+
+### Effective PAIM-C15 decision
+
+```text
+ACCEPTED
+PAIM-C15 — DONE
+PAIM-08 structural preflight and parity evidence — COMPLETE
+```

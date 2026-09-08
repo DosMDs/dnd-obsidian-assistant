@@ -60,12 +60,19 @@ from pydantic_ai.messages import TextPart, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults
 
-from dnd_assistant.errors import ModelError
+from dnd_assistant.application.dnd_agent_policy import MAX_MODEL_REQUESTS_PER_RUN
+from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
 
 if TYPE_CHECKING:
+    from pydantic_ai import RunContext
+
     from dnd_assistant.application.agent_loop import AgentRunResult
+    from dnd_assistant.application.agent_tool_execution import (
+        AgentToolExecutionResult,
+    )
     from dnd_assistant.application.pydantic_ai_run_deps import (
+        DndAgentDeps,
         DndAgentRunPreparer,
         PreparedDndAgentRun,
     )
@@ -181,7 +188,7 @@ class PydanticAIAgentRuntime:
                 deps=prepared.deps,
                 toolsets=[external_toolset],
                 capabilities=[deferred_handler],
-                usage_limits=UsageLimits(request_limit=2),
+                usage_limits=UsageLimits(request_limit=MAX_MODEL_REQUESTS_PER_RUN),
             )
         except AgentRunError as exc:
             raise ModelError(
@@ -198,57 +205,80 @@ class PydanticAIAgentRuntime:
 
 def _make_deferred_handler(
     prepared: PreparedDndAgentRun,
-) -> HandleDeferredToolCalls:
+) -> tuple[
+    HandleDeferredToolCalls,
+    list[AgentToolExecutionResult],
+]:
     """Create a fresh ``HandleDeferredToolCalls`` bound to this run.
 
     The handler:
-    1. Freezes the complete batch.
-    2. Runs ``DndAgentPolicy.admit_tool_batch()`` (full-batch admission
+    1. Validates ``ctx.deps is prepared.deps`` (exact identity).
+    2. Rejects approval requests.
+    3. Freezes the complete batch.
+    4. Runs ``DndAgentPolicy.admit_tool_batch()`` (full-batch admission
        before any execution).
-    3. Executes each admitted call through ``PydanticAIToolBridge.execute()``
+    5. Converts every admitted call to a provider-neutral project ``ToolCall``
+       **before** any ``bridge.execute()``.
+    6. Executes each admitted call through ``PydanticAIToolBridge.execute()``
        sequentially.
-    4. Returns ``DeferredToolResults`` via ``build_results(calls=...)``.
+    7. Returns ``DeferredToolResults`` via ``build_results(calls=...)``.
 
     Args:
         prepared: The prepared run (carries deps with policy, bridge, snapshot).
 
     Returns:
-        A ``HandleDeferredToolCalls`` capability.
+        A tuple of ``(HandleDeferredToolCalls, list[AgentToolExecutionResult])``.
     """
     from dnd_assistant.application.agent_tool_execution import (
-        AgentToolExecutionResult,
         build_agent_tool_execution_result,
     )
-    from dnd_assistant.models.types import ToolCall as ProjectToolCall
+    from dnd_assistant.application.pydantic_ai_response_adapter import (
+        adapt_pydantic_tool_calls,
+    )
 
     # Closure-scoped mutable state for capturing execution results
     captured_executions: list[AgentToolExecutionResult] = []
 
     def _handler(
-        ctx: object,
+        ctx: RunContext[DndAgentDeps],
         requests: DeferredToolRequests,
     ) -> DeferredToolResults | None:
-        deps = prepared.deps
+        # 1. Validate ctx.deps is prepared.deps (exact identity).
+        if ctx.deps is not prepared.deps:
+            raise ValidationError(
+                "Deferred handler received a RunContext bound to a different DndAgentDeps instance"
+            )
 
-        # Reject approval requests (this project uses external tools only)
+        deps = ctx.deps
+
+        # 2. Reject approval requests (this project uses external tools only)
         if requests.approvals:
             raise ModelError(
                 "Unexpected approval requests in DeferredToolRequests. "
                 "This project exposes external tools, not approval tools."
             )
 
-        # Freeze the complete batch once
+        # 3. Freeze the complete batch once
         calls = tuple(requests.calls)
         if not calls:
             return None
 
-        # Full-batch admission before any execution
+        # 4. Full-batch admission before any execution
         admission = deps.policy.admit_tool_batch(calls)
 
-        # Sequential execution through bridge
+        # 5. Convert EVERY admitted call to project ToolCall DTOs BEFORE
+        #    any bridge.execute().  This is the structural preflight that
+        #    rejects non-finite/malformed JSON across the entire batch.
+        snapshot_names = deps.tool_snapshot.names
+        project_calls = adapt_pydantic_tool_calls(
+            tuple(calls[admitted.position] for admitted in admission.calls),
+            snapshot_names=snapshot_names,
+        )
+
+        # 6. Sequential execution through bridge
         results_by_id: dict[str, str] = {}
 
-        for admitted in admission.calls:
+        for i, admitted in enumerate(admission.calls):
             # Select the exact original call by position
             call = calls[admitted.position]
 
@@ -271,20 +301,8 @@ def _make_deferred_handler(
                 execution_context=deps.execution_context,
             )
 
-            # Build project ToolCall for result recording
-            try:
-                args = call.args_as_dict(raise_if_invalid=True)
-            except (ValueError, AssertionError) as exc:
-                raise ModelError(
-                    f"Failed to parse arguments for tool '{call.tool_name}': {exc}",
-                    cause=exc,
-                ) from exc
-
-            project_call = ProjectToolCall(
-                name=call.tool_name,
-                arguments=args,
-                call_id=call.tool_call_id,
-            )
+            # Build project ToolCall for result recording (use pre-adapted)
+            project_call = project_calls[i]
 
             execution = build_agent_tool_execution_result(project_call, output)
             captured_executions.append(execution)
@@ -292,8 +310,14 @@ def _make_deferred_handler(
             # Deterministic TOOL JSON for framework replay
             results_by_id[call.tool_call_id] = execution.tool_message.content
 
-        # Build deferred results using exact call IDs
-        return requests.build_results(calls=results_by_id)
+        # 7. Build deferred results using exact call IDs
+        try:
+            return requests.build_results(calls=results_by_id)
+        except ValueError as exc:
+            raise ModelError(
+                "Failed to bind deferred tool results to the pending tool-call batch",
+                cause=exc,
+            ) from exc
 
     return HandleDeferredToolCalls(handler=_handler), captured_executions
 
@@ -491,6 +515,9 @@ def _adapt_tool_calls_from_parts(
 ) -> list[ToolCall]:
     """Adapt framework ``ToolCallPart`` values to project ``ToolCall`` DTOs.
 
+    Delegates to the shared ``adapt_pydantic_tool_calls()`` helper used by
+    both PAIM-07 and PAIM-08.
+
     Args:
         parts: The framework tool call parts.
         prepared: The prepared run (for snapshot name validation).
@@ -502,44 +529,15 @@ def _adapt_tool_calls_from_parts(
         ModelError: If any tool name is not in the frozen snapshot, or if
             the arguments cannot be represented as a JSON object.
     """
-    from dnd_assistant.models.types import ToolCall as ProjectToolCall
+    from dnd_assistant.application.pydantic_ai_response_adapter import (
+        adapt_pydantic_tool_calls,
+    )
 
-    snapshot_names = prepared.deps.tool_snapshot.names
-    adapted: list[ProjectToolCall] = []
-
-    for call in parts:
-        # Validate tool name against snapshot
-        if call.tool_name not in snapshot_names:
-            raise ModelError(
-                f"Tool call '{call.tool_name}' is not in the frozen exposure "
-                "snapshot. Unknown or hidden tools are not allowed."
-            )
-
-        # Convert arguments — fail closed on malformed/non-object JSON
-        try:
-            args = call.args_as_dict(raise_if_invalid=True)
-        except (ValueError, AssertionError) as exc:
-            raise ModelError(
-                f"Failed to parse arguments for tool '{call.tool_name}': {exc}",
-                cause=exc,
-            ) from exc
-
-        # Build project ToolCall (validates non-finite JSON values)
-        try:
-            project_call = ProjectToolCall(
-                name=call.tool_name,
-                arguments=args,
-                call_id=call.tool_call_id,
-            )
-        except (ValueError, AssertionError) as exc:
-            raise ModelError(
-                f"Failed to construct ToolCall for '{call.tool_name}': {exc}",
-                cause=exc,
-            ) from exc
-
-        adapted.append(project_call)
-
-    return adapted
+    result = adapt_pydantic_tool_calls(
+        parts,
+        snapshot_names=prepared.deps.tool_snapshot.names,
+    )
+    return list(result)
 
 
 def _find_first_model_response(
