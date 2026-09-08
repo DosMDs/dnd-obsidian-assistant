@@ -5477,6 +5477,102 @@ git diff --check:                    (reported in Final Report)
 ```text
 PAIM-09 — ACCEPTED (SELECTIVE FRAMEWORK OLLAMA ADOPTION)
 PAIM-C19 — DONE
+PAIM-C20 — DONE
+PAIM-10 — NOT STARTED
+Active next task: PAIM-10 — Sync/thread-safety gate
+```
+
+---
+
+## 43. PAIM-C20 correction record — Seal PAIM-09 transport and continuation evidence
+
+### C20-E1 — Exact HTTP transport attempt count
+
+Previous C19 provider-failure test asserted ``len(captured_requests) >= 1``
+despite observing a concrete retry count.
+
+C20 strengthens to the exact observed count:
+
+```text
+HTTP transport attempts:      3
+project error:                ModelError
+exact framework cause:        ModelAPIError
+project handlers:             0
+```
+
+The OpenAI SDK default ``max_retries=2`` produces 1 initial attempt + 2
+retries = 3 total. This is transport-level retry, not semantic model retry.
+
+### C20-E2 — Full request #2 continuation binding
+
+Previous C19 request #2 evidence did not literally assert the assistant
+tool-call name.
+
+C20 request #2 now proves:
+
+```text
+assistant tool-call ID:       "call-preserve-1"
+assistant tool name:          "read_alpha"
+
+tool-result call ID:          "call-preserve-1"
+tool-result exact content:    AgentToolExecutionResult.tool_message.content
+
+all equal:                    YES
+```
+
+### C20-E3 — Literal factory/provider counters
+
+Previously, ``factory_call_count`` was incremented inside the patched
+``OllamaProvider`` constructor, making it a provider-construction count
+despite its name.
+
+C20 separates the two counters:
+
+```text
+factory_call_count:           counts build_pydantic_ai_ollama_model invocations
+provider_construction_count:  counts OllamaProvider constructions
+
+Both equal 1 in every test.
+```
+
+The production factory symbol is patched at the module level
+(``_prod_factory.build_pydantic_ai_ollama_model``) and resolved through the
+module reference rather than the local import name.
+
+### Migration history
+
+```text
+sections 1–42 unchanged:            YES (byte-identical to starting SHA)
+section 43 appended:                YES
+```
+
+### Changed files
+
+```text
+M tests/integration/test_pydantic_ai_ollama_runtime.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+### Tests
+
+| Suite | Result |
+|---|---|
+| PAIM-09 integration (``test_pydantic_ai_ollama_runtime.py``) | 9 passed |
+| PAIM-09 unit (``test_pydantic_ai_ollama.py``) | 32 passed |
+
+### Ruff
+
+```text
+ruff check .:                        All checks passed
+```
+
+### Effective status
+
+```text
+PAIM-09 — ACCEPTED (SELECTIVE FRAMEWORK OLLAMA ADOPTION)
+PAIM-C19 — DONE
+PAIM-C20 — DONE
 PAIM-10 — NOT STARTED
 Active next task: PAIM-10 — Sync/thread-safety gate
 ```

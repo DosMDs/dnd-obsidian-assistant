@@ -17,6 +17,9 @@ import pytest
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentOutcomeKind
+from dnd_assistant.application.agent_tool_execution import (
+    AgentToolExecutionResult,
+)
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
     PydanticAIAgentRuntime,
 )
@@ -28,9 +31,6 @@ from dnd_assistant.application.pydantic_ai_tool_bridge import (
 )
 from dnd_assistant.errors import ModelError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
-from dnd_assistant.models.pydantic_ai_ollama import (
-    build_pydantic_ai_ollama_model,
-)
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import (
     ToolPublicDefinition,
@@ -196,6 +196,7 @@ def _make_runtime(
     http_client: httpx2.AsyncClient,
     *,
     factory_call_count: list[int] | None = None,
+    provider_construction_count: list[int] | None = None,
 ) -> PydanticAIAgentRuntime:
     """Create a ``PydanticAIAgentRuntime`` using the **production factory**.
 
@@ -204,24 +205,39 @@ def _make_runtime(
     by monkeypatching ``OllamaProvider`` in the production module's
     namespace so that the real provider constructor receives the mock
     transport.
+
+    Two separate counters are available:
+    - ``factory_call_count``: counts invocations of the production
+      ``build_pydantic_ai_ollama_model`` function itself.
+    - ``provider_construction_count``: counts ``OllamaProvider``
+      constructions inside the factory.
     """
     from pydantic_ai.providers.ollama import OllamaProvider
 
     import dnd_assistant.models.pydantic_ai_ollama as _prod_factory
 
     _original_provider = _prod_factory.OllamaProvider
+    _original_factory = _prod_factory.build_pydantic_ai_ollama_model
 
     def _mocked_provider(*, base_url: str, **kwargs: Any) -> OllamaProvider:
-        if factory_call_count is not None:
-            factory_call_count[0] += 1
+        if provider_construction_count is not None:
+            provider_construction_count[0] += 1
         return _original_provider(base_url=base_url, http_client=http_client, **kwargs)
 
+    def _counted_factory(prof: ModelProfile) -> object:
+        if factory_call_count is not None:
+            factory_call_count[0] += 1
+        return _original_factory(prof)
+
     _prod_factory.OllamaProvider = _mocked_provider  # type: ignore[assignment]
+    _prod_factory.build_pydantic_ai_ollama_model = _counted_factory  # type: ignore[assignment]
 
     try:
-        model = build_pydantic_ai_ollama_model(profile)
+        # Use the module reference so the patched symbol is resolved
+        model = _prod_factory.build_pydantic_ai_ollama_model(profile)
     finally:
         _prod_factory.OllamaProvider = _original_provider
+        _prod_factory.build_pydantic_ai_ollama_model = _original_factory
 
     assert type(model).__name__ == "OllamaModel", (
         f"expected OllamaModel, got {type(model).__name__}"
@@ -314,6 +330,11 @@ def factory_call_count() -> list[int]:
     return [0]
 
 
+@pytest.fixture
+def provider_construction_count() -> list[int]:
+    return [0]
+
+
 # ==============================================================================
 # P9-I01 — mocked direct respond through real OllamaModel
 # ==============================================================================
@@ -326,6 +347,7 @@ def test_p9_i01_mocked_direct_respond(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Direct respond through real ``OllamaModel`` with mocked HTTP."""
     captured: list[httpx2.Request] = []
@@ -341,6 +363,7 @@ def test_p9_i01_mocked_direct_respond(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
@@ -348,6 +371,9 @@ def test_p9_i01_mocked_direct_respond(
 
     # Production factory was called exactly once
     assert factory_call_count[0] == 1, f"expected 1 factory call, got {factory_call_count[0]}"
+    assert provider_construction_count[0] == 1, (
+        f"expected 1 provider construction, got {provider_construction_count[0]}"
+    )
 
     # Terminal outcome
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
@@ -385,6 +411,7 @@ def test_p9_i02_mocked_single_read(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Single READ tool call through real ``OllamaModel`` with mocked HTTP."""
     tool_call = _make_tool_call_dict(
@@ -405,6 +432,7 @@ def test_p9_i02_mocked_single_read(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
@@ -412,6 +440,7 @@ def test_p9_i02_mocked_single_read(
 
     # Production factory was called exactly once
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
 
     # Terminal outcome
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
@@ -459,6 +488,7 @@ def test_p9_i03_null_content_tool_calls(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Null content + tool_calls response is parsed correctly."""
     tool_call = _make_tool_call_dict(
@@ -479,6 +509,7 @@ def test_p9_i03_null_content_tool_calls(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
@@ -486,6 +517,7 @@ def test_p9_i03_null_content_tool_calls(
 
     # Production factory called once
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
 
     # Tool executed
     assert counters.alpha == 1
@@ -510,6 +542,7 @@ def test_p9_i04_second_request_preserves_tool_result(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Second provider request contains tool-result continuation."""
     tool_call = _make_tool_call_dict(
@@ -530,12 +563,14 @@ def test_p9_i04_second_request_preserves_tool_result(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
     result = runtime.run("read with preservation", execution_context=ctx)
 
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
     assert counters.alpha == 1
     assert len(result.tool_executions) == 1
     assert result.outcome.kind == AgentOutcomeKind.RESPOND
@@ -545,19 +580,36 @@ def test_p9_i04_second_request_preserves_tool_result(
     req2_body = json.loads(captured[1].content)
     messages = req2_body.get("messages", [])
 
+    # Find the assistant message with tool_calls (request #1 replay)
+    assistant_msgs = [m for m in messages if m.get("role") == "assistant" and "tool_calls" in m]
+    assert len(assistant_msgs) >= 1, "expected at least 1 assistant message with tool_calls"
+    assistant_call = assistant_msgs[0]["tool_calls"][0]
+
+    # Assistant tool-call ID is exact
+    assert assistant_call["id"] == "call-preserve-1", (
+        f"expected assistant tool_call id='call-preserve-1', got {assistant_call['id']}"
+    )
+
+    # Assistant tool name is exact
+    assert assistant_call["function"]["name"] == "read_alpha", (
+        f"expected assistant tool name 'read_alpha', got {assistant_call['function']['name']}"
+    )
+
     # Find the tool result message
     tool_results = [m for m in messages if m.get("role") == "tool"]
     assert len(tool_results) == 1, f"expected 1 tool result message, got {len(tool_results)}"
 
-    # Verify tool call ID is preserved
+    # Tool-result call ID is exact
     tool_result = tool_results[0]
     assert tool_result.get("tool_call_id") == "call-preserve-1", (
         f"expected tool_call_id='call-preserve-1', got {tool_result.get('tool_call_id')}"
     )
 
-    # Verify deterministic project tool-result content is present
-    assert "preserve" in tool_result.get("content", ""), (
-        f"expected tool result content to contain 'preserve', got {tool_result.get('content')}"
+    # Tool-result content exactly equals AgentToolExecutionResult.tool_message.content
+    execution = result.tool_executions[0]
+    assert isinstance(execution, AgentToolExecutionResult)
+    assert tool_result["content"] == execution.tool_message.content, (
+        f"tool result content mismatch:\n  wire:  {tool_result['content']!r}\n  local: {execution.tool_message.content!r}"
     )
 
 
@@ -573,6 +625,7 @@ def test_p9_i05_outbound_tools_match_snapshot(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Outbound request tools match the issued snapshot names and order."""
     captured: list[httpx2.Request] = []
@@ -602,6 +655,7 @@ def test_p9_i05_outbound_tools_match_snapshot(
             context_builder=context_builder,
             http_client=http_client,
             factory_call_count=factory_call_count,
+            provider_construction_count=provider_construction_count,
         )
 
         ctx = _make_context()
@@ -610,6 +664,7 @@ def test_p9_i05_outbound_tools_match_snapshot(
         DndAgentRunPreparer.prepare = original_prepare
 
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
     assert len(captured_prepared) == 1
 
     prepared = captured_prepared[0]
@@ -650,6 +705,7 @@ def test_p9_i06_temperature_reaches_wire(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Configured temperature reaches the HTTP request body."""
     profile = ModelProfile(
@@ -673,12 +729,14 @@ def test_p9_i06_temperature_reaches_wire(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
     runtime.run("hello", execution_context=ctx)
 
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
     assert len(captured) >= 1
     body = json.loads(captured[0].content)
     assert body.get("temperature") == 0.25, (
@@ -698,6 +756,7 @@ def test_p9_i07_keep_alive_absent_from_wire(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """No ``keep_alive`` field appears in valid wire payloads."""
     captured: list[httpx2.Request] = []
@@ -713,12 +772,14 @@ def test_p9_i07_keep_alive_absent_from_wire(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
     runtime.run("hello", execution_context=ctx)
 
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
     assert len(captured) >= 1
     body = json.loads(captured[0].content)
     assert "keep_alive" not in body, (
@@ -738,6 +799,7 @@ def test_p9_i08_provider_failure_returns_model_error(
     context_builder: AgentContextBuilder,
     agent_profile: ModelProfile,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """HTTP provider failure surfaces as ``ModelError`` with no tool execution."""
     captured_requests: list[httpx2.Request] = []
@@ -750,6 +812,7 @@ def test_p9_i08_provider_failure_returns_model_error(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
@@ -758,6 +821,7 @@ def test_p9_i08_provider_failure_returns_model_error(
         runtime.run("hello", execution_context=ctx)
 
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
 
     # No tool execution occurred
     assert counters.alpha == 0
@@ -765,10 +829,11 @@ def test_p9_i08_provider_failure_returns_model_error(
     assert counters.write_alpha == 0
 
     # Literal HTTP transport attempts — the OpenAI SDK performs
-    # automatic transport retries (observed: 3 attempts for a connection
-    # failure). This is transport-level retry, not semantic model retry.
-    assert len(captured_requests) >= 1, (
-        f"expected at least 1 HTTP transport attempt, got {len(captured_requests)}"
+    # automatic transport retries (max_retries=2 by default, so 1 initial
+    # attempt + 2 retries = 3 total). This is transport-level retry,
+    # not semantic model retry.
+    assert len(captured_requests) == 3, (
+        f"expected 3 HTTP transport attempts, got {len(captured_requests)}"
     )
 
     # Exception preserves cause — exact framework type under Pydantic AI 2.39.0
@@ -791,6 +856,7 @@ def test_p9_i09_reverse_proxy_v1_endpoint(
     tool_catalog: ToolRegistrySchema,
     context_builder: AgentContextBuilder,
     factory_call_count: list[int],
+    provider_construction_count: list[int],
 ) -> None:
     """Reverse-proxy base URL results in requests to the exact /v1 endpoint."""
     profile = ModelProfile(
@@ -813,12 +879,14 @@ def test_p9_i09_reverse_proxy_v1_endpoint(
         context_builder=context_builder,
         http_client=http_client,
         factory_call_count=factory_call_count,
+        provider_construction_count=provider_construction_count,
     )
 
     ctx = _make_context()
     runtime.run("hello", execution_context=ctx)
 
     assert factory_call_count[0] == 1
+    assert provider_construction_count[0] == 1
     assert len(captured) >= 1
     req = captured[0]
     # The full URL should include the reverse-proxy prefix + /v1 + /chat/completions
