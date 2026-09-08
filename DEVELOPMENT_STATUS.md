@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-08 (PAIM-C17)
+**Last updated:** 2026-09-08 (PAIM-C18)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -122,6 +122,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C15 — PAIM-08 structural preflight and parity evidence | DONE |
 | PAIM-C16 — Close literal PAIM-08 evidence and restore migration history | DONE |
 | PAIM-C17 — Complete literal PAIM-08 runtime evidence | DONE |
+| PAIM-C18 — Close final PAIM-08 evidence defects | DONE |
 | PAIM-09 — Ollama integration decision gate | NOT STARTED |
 | PAIM-10 — Sync/thread-safety gate | NOT STARTED |
 | PAIM-11 — Full Stage-9 behavioral parity | NOT STARTED |

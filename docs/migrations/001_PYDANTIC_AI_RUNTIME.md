@@ -2538,7 +2538,9 @@ the input is checked against `collections.abc.Sequence`:
 
 ```python
 if not isinstance(tool_calls, collections.abc.Sequence):
-    raise ValidationError(f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}")
+    raise ValidationError(
+        f"Tool-call batch must be a Sequence, got {type(tool_calls).__name__}"
+    )
 ```
 
 **Immutable tuple capture** — After the runtime check, the batch is
@@ -2593,12 +2595,10 @@ This was replaced with a real invocation counter:
 ```python
 hidden_calls = 0
 
-
 def hidden_handler(inp, ctx):
     nonlocal hidden_calls
     hidden_calls += 1
     return ToolOutput(result="hidden")
-
 
 registry.register(hidden_canonical, hidden_handler)
 # ... policy rejects hidden_tool ...
@@ -4529,7 +4529,8 @@ def adapt_pydantic_tool_calls(
     calls: Sequence[ToolCallPart],
     *,
     snapshot_names: tuple[str, ...],
-) -> tuple[ToolCall, ...]: ...
+) -> tuple[ToolCall, ...]:
+    ...
 ```
 
 ### Original PAIM-08 historical facts
@@ -4725,6 +4726,256 @@ ACCEPTED
 PAIM-C15 — DONE
 PAIM-C16 — DONE
 PAIM-C17 — DONE
+PAIM-08 — DONE
+```
+
+### Next task
+
+```text
+PAIM-09 — Ollama integration decision gate
+```
+
+Do not begin PAIM-09 automatically.
+
+---
+
+## 40. PAIM-C18 correction record — Close final PAIM-08 evidence defects
+
+**Status:** DONE
+**Completed:** 2026-09-08
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `a85a2385c75e28fed4fb9df8287fda13206835d7`
+**Direct parent:** `68a1b646765aba45939c9c06dba4de71dafe190e`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Correction reason
+
+PAIM-C17 left five evidence defects:
+
+1. **C17-E4** claimed a second deferred batch but request #2 returned terminal
+   text, not another external tool request.
+2. **C17-E11** called `requests.build_results()` separately after the production
+   handler succeeded, not exercising the `try/except ValueError` inside the
+   actual `_make_deferred_handler`.
+3. **C17-E7** derived `snapshot_names` from `AgentDecision` rather than from the
+   exact `PreparedDndAgentRun.deps.tool_snapshot.names`.
+4. **C17-E8** appended `"policy-admission-success"` before invoking the production
+   deferred handler, not instrumenting the real `DndAgentPolicy.admit_tool_batch()`.
+5. **C17-E10** did not prove zero `policy.admit_tool_batch` and zero
+   `bridge.execute` calls via delegated spies.
+
+### C17 unintended historical changes
+
+PAIM-C17 had unintentionally changed section 28 formatting (multi-line raise
+collapsed to single-line, extra blank lines in code block) and section 38
+formatting (`-> tuple[ToolCall, ...]:\n    ...` collapsed to
+`-> tuple[ToolCall, ...]: ...`) despite claiming sections 1–38 were unchanged.
+
+PAIM-C18 restores the prefix through section 38 to exactly match the parent
+commit `68a1b646`.
+
+### C17-E4 second-batch claim correction
+
+Section 39 stated C17-E4 tested a second deferred batch. The actual test
+returned terminal text on request #2, not another external tool request.
+
+PAIM-C18 adds a real second-deferred-batch scenario (C18-E1).
+
+### Evidence file
+
+```text
+tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p3.py
+```
+
+### Evidence matrix
+
+| Evidence | Result |
+|---|---|
+| C18-E1 — real second deferred batch | PASS |
+| C18-E2 — production build_results ValueError -> ModelError | PASS |
+| C18-E3 — four-way exposure via PreparedDndAgentRun | PASS |
+| C18-E4 — literal policy admission event ordering (success) | PASS |
+| C18-E5 — literal rejected-policy event ordering | PASS |
+| C18-E6 — strengthened approval rejection with spies | PASS |
+
+### Real second deferred batch (C18-E1)
+
+Model behavior:
+
+```text
+request #1: read_alpha(call_id="first")
+request #2: read_beta(call_id="second")
+```
+
+The second response is another external tool request, not terminal text.
+
+```text
+model requests == 2
+deferred callback invocations == 2
+
+first batch:
+  policy admission succeeds
+  bridge.execute == 1
+  read_alpha handler == 1
+
+second batch:
+  same DndAgentPolicy instance observes second batch
+  ModelError (bridge.execute == 0 for second batch)
+  read_beta handler == 0
+
+request #3: never occurs
+
+literal total bridge count: 1
+literal deferred callback count: 2
+```
+
+### build_results error mapping (C18-E2)
+
+Exercises the production `_make_deferred_handler`:
+
+```python
+try:
+    return requests.build_results(calls=results_by_id)
+except ValueError as exc:
+    raise ModelError(...) from exc
+```
+
+Monkeypatches `DeferredToolRequests.build_results` on the exact request
+instance to raise `ValueError`.
+
+```text
+project exception: ModelError
+type(exc.__cause__): ValueError
+cause message: "simulated build_results failure"
+
+bridge executions before result-binding failure == 1
+project handler == 1
+
+FunctionModel requests == 1
+no second model request
+```
+
+### Exposure continuity (C18-E3)
+
+Captures the exact `PreparedDndAgentRun` returned by the runtime preparer.
+
+```text
+prepared.deps.tool_snapshot.names
+== request #1 AgentInfo.function_tools names
+== request #2 AgentInfo.function_tools names
+== result.initial_decision.exposed_tools names
+```
+
+Exact order preserved. No sorting.
+
+### Policy admission event ordering (C18-E4)
+
+Spies the exact `DndAgentPolicy.admit_tool_batch()` used by the captured
+prepared run, while delegating to the real method.
+
+For successful two-READ batch:
+
+```text
+model-1 < deferred-handler < policy-admit-start < policy-admit-success
+< bridge-read_alpha < bridge-read_beta < model-2
+```
+
+The `policy-admission-success` marker is emitted only after real
+`admit_tool_batch` returns successfully.
+
+### Rejected-policy event ordering (C18-E5)
+
+For READ + WRITE batch:
+
+```text
+model-1 < deferred-handler < policy-admit-start < policy-reject
+```
+
+Absent:
+
+```text
+policy-admit-success
+bridge-*
+model-2
+```
+
+```text
+model requests == 1
+bridge executions == 0
+read handler == 0
+write handler == 0
+```
+
+The `policy-reject` marker is emitted specifically from the real
+`admit_tool_batch()` exception, not from a catch around the whole
+deferred handler.
+
+### Approval rejection (C18-E6)
+
+Retains approval-request rejection.
+
+Literal delegated spies prove:
+
+```text
+policy.admit_tool_batch calls == 0
+bridge.execute calls == 0
+project handlers == 0
+```
+
+Expected error:
+
+```text
+ModelError
+```
+
+### Already valid C17 evidence preserved
+
+The following C17 evidence is not weakened:
+
+```text
+literal ctx.deps identity
+wrong-deps rejection
+bridge matrix
+ToolReturnPart replay
+multi-result order
+structural non-finite preflight
+schema fail-fast
+Agent.run_sync == 1
+genuine C16 old/new parity
+```
+
+### Historical prefix restoration
+
+```text
+prefix through section 38 exact to 68a1b646: YES
+section 39 unchanged: YES
+section 40 appended: YES
+```
+
+### Changed files
+
+```text
+M   docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M   DEVELOPMENT_STATUS.md
+A   tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p3.py
+```
+
+### Production unchanged
+
+```text
+src/**
+pyproject.toml
+uv.lock
+```
+
+### Effective PAIM-08 decision
+
+```text
+ACCEPTED
+PAIM-C15 — DONE
+PAIM-C16 — DONE
+PAIM-C17 — DONE
+PAIM-C18 — DONE
 PAIM-08 — DONE
 ```
 
