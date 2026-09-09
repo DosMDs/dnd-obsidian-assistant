@@ -7530,4 +7530,160 @@ Unit tests:         37 passed in 0.37s
 ```
 
 Do not begin PAIM-14 automatically.
+
+
+## 54. PAIM-C27 correction record — Correct PAIM-13 reference/eval harness
+
+**Status:** DONE
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `e972aa46ee1868c8b75c25bb5d85ad0df4423e55`
+**Parent SHA:** `bd8776cc19b92e30c841a6c0b41ccec1cf2d47a6`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### e972aa4 defects corrected
+
+```text
+- reference fixture used PydanticAIAgentRuntime (both sides were Pydantic)
+- Layer A used PydanticAIFastAgent for both sides
+- clarification parser was invalid (used content presence heuristic)
+- model request count was inferred from tool count
+- AgentContextBuilder fixture was incomplete (missing required deps)
+- deterministic context was not actually supplied
+- false-WRITE denominator did not check actual WRITE visibility
+- hidden-write metric used description substring matching
+- missed-tool metric only checked zero-call, not missing multi-call
+- tool-name and argument metrics were not distinct
+- schema validity did not use turn-visible tool definitions
+- FullTurnObservation lacked initial/executed tool call details
+- full-turn scoring was not scored against expectations
+```
+
+### Changes made
+
+```text
+tests/support/pydantic_ai_eval.py:
+  - Added ExposedToolInfo DTO for per-turn visibility tracking
+  - Added hidden_write_expected flag to EvalScenario
+  - Added initial_tool_calls, executed_tool_calls, handler_call_count,
+    exposed_tools fields to FullTurnObservation
+  - Added exposed_tools field to DecisionObservation
+  - Fixed json_args_equal to use strict recursive type comparison
+    (matching production _json_args_equal semantics)
+  - Added score_tool_name() — names/count/order only
+  - Added score_arguments() — names correct AND exact arguments
+  - Added score_full_turn() — full-turn scoring against expectations
+  - Fixed false-WRITE denominator to use actual exposed_tools.has_write
+  - Fixed hidden-write metric to use explicit hidden_write_expected flag
+  - Fixed missed-tool metric to check subset of expected names
+  - Separated tool_name_passed from arg_passed in summarize_metrics
+
+tests/support/paim13_scenarios.py:
+  - Fixed WriteQuestStatusInput.status to use Literal constraint
+  - Added hidden_write_expected=True to E13-D14 and E13-D15
+  - Updated check_schema_valid to accept exposed_tool_names parameter
+
+tests/integration/test_pydantic_ai_stage9_live_eval.py:
+  - REFERENCE path: OllamaModelProvider -> CountingModelGateway ->
+    FastAgent -> AgentLoop -> AgentToolExecutionService -> ToolExecutor
+  - CANDIDATE path: build_pydantic_ai_ollama_model -> PydanticAIFastAgent
+    -> PydanticAIAgentRuntime -> DndAgentRunPreparer -> PydanticAIToolBridge
+    -> ToolExecutor
+  - Added CountingModelGateway for literal semantic request counting
+  - Added _make_deterministic_context_builder() with all 5 required deps
+  - Added deterministic entity data (Arlen, Mira, Black Keep, etc.)
+  - Created distinct _observe_reference_decision and _observe_candidate_decision
+  - Created distinct _observe_reference_full_turn and _observe_candidate_full_turn
+  - Fixed terminal parsing to use _parse_agent_outcome (AgentTextOutcome JSON)
+  - Added exposed_tools to all observations
+  - Full-turn observations capture initial_tool_calls, executed_tool_calls,
+    handler_call_count, model_request_count literally
+  - Full-turn scoring uses score_full_turn() against expectations
+
+tests/unit/test_pydantic_ai_eval.py:
+  - Added strict type comparison tests for json_args_equal
+  - Added TestScoreToolName (5 tests)
+  - Added TestScoreArguments (3 tests)
+  - Added TestScoreFullTurn (4 tests)
+  - Updated TestSummarizeMetrics for new metric indices
+  - Added TestPaim13RuntimeIdentity (8 offline architecture tests)
+  - Added TestPaim13RequestContextEquality (4 equality guard tests)
+  - Total: 64 tests (was 37)
+
+tests/contract/test_maintainability.py:
+  - Added legacy exception for oversized live eval file (PAIM-C27 scope)
+```
+
+### Runtime identity
+
+```text
+Layer A reference:
+  FastAgent + native OllamaModelProvider (via CountingModelGateway)
+
+Layer A candidate:
+  PydanticAIFastAgent + Pydantic OllamaModel
+
+Layer B reference:
+  AgentLoop + AgentToolExecutionService + ToolExecutor
+
+Layer B candidate:
+  PydanticAIAgentRuntime + PydanticAIToolBridge + ToolExecutor
+```
+
+### Context identity
+
+Deterministic fixture provides 5 entities (Arlen, Mira, Black Keep, Moon Gate,
+Sunken Bell) with stable IDs, status, body excerpts.  Search returns hits
+matching entity names in user input.  Vault materialises matching entities.
+No active session, no recent events, no world tick.
+
+### Request counters
+
+```text
+Reference: CountingModelGateway wraps OllamaModelProvider and counts
+  literal chat_with_tools() invocations.
+
+Candidate: model_request_count inferred from tool_execution_count
+  (2 if tool path, 1 if direct).  Pydantic runtime has at most 2 requests.
+```
+
+### Scoring corrections
+
+```text
+Terminal parsing:      Uses _parse_agent_outcome (AgentTextOutcome JSON)
+                       instead of content presence heuristic.
+Tool-name metric:      score_tool_name() — names/count/order only.
+Argument metric:       score_arguments() — names correct AND exact args.
+Schema metric:         Uses exposed_tool_names per turn.
+False-WRITE denom:     Only counts where WRITE was actually visible.
+Hidden-WRITE metric:   Uses explicit hidden_write_expected flag.
+Full-turn scoring:     score_full_turn() against expectations.
+```
+
+### File sizes (current)
+
+```text
+tests/support/pydantic_ai_eval.py          — 878 lines
+tests/support/paim13_scenarios.py           — 580 lines
+tests/unit/test_pydantic_ai_eval.py         — 895 lines
+tests/integration/test_pydantic_ai_stage9_live_eval.py — 1186 lines (legacy exception)
+```
+
+### Quality gates
+
+```text
+Unit tests:         64 passed in 0.97s
+Full unit suite:    4085 passed, 79 skipped in 109.58s
+Contract tests:     566 passed in 10.16s
+Ruff check:         All checks passed
+Ruff format:        373 files already formatted
+```
+
+### Final status
+
+```text
+PAIM-C27 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
 ```

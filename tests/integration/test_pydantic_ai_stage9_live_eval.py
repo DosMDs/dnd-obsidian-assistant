@@ -24,11 +24,18 @@ from __future__ import annotations
 
 import os
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
+from dnd_assistant.application.agent_loop import AgentLoop
+from dnd_assistant.application.agent_tool_execution import (
+    AgentToolExecutionService,
+)
+from dnd_assistant.application.fast_agent import FastAgent
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
     PydanticAIAgentRuntime,
 )
@@ -42,6 +49,7 @@ from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
 from dnd_assistant.errors import ModelError
+from dnd_assistant.models.gateway import ModelGateway
 from dnd_assistant.models.ollama import OllamaModelProvider
 from dnd_assistant.models.profiles import (
     ModelProfile,
@@ -51,9 +59,15 @@ from dnd_assistant.models.profiles import (
 from dnd_assistant.models.pydantic_ai_ollama import (
     build_pydantic_ai_ollama_model,
 )
+from dnd_assistant.models.types import (
+    ChatRequest,
+    ToolAwareResponse,
+)
 from dnd_assistant.tools.catalog import (
+    ToolPublicDefinition,
     build_tool_registry_schema,
 )
+from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
     ExecutionContext,
@@ -80,12 +94,14 @@ from tests.support.paim13_scenarios import (
 from tests.support.pydantic_ai_eval import (
     DecisionObservation,
     EvalScenario,
+    ExposedToolInfo,
     FullTurnObservation,
     ScenarioExpectationKind,
     ToolCallObservation,
     classify_majority,
     nearest_rank_percentile,
     score_decision,
+    score_full_turn,
     summarize_metrics,
 )
 
@@ -96,7 +112,203 @@ pytestmark = pytest.mark.ollama
 ENV_CONFIG = "DND_ASSISTANT_PAIM13_CONFIG"
 ENV_PROFILE = "DND_ASSISTANT_PAIM13_AGENT_PROFILE"
 
-# ── Execution context helper ──────────────────────────────────────────────────
+
+# ── Counting ModelGateway decorator ──────────────────────────────────────────
+
+
+@dataclass
+class CountingGatewayState:
+    """Mutable state for a ``CountingModelGateway``.
+
+    Tracks literal ``chat_with_tools`` invocations.
+    """
+
+    chat_with_tools_count: int = 0
+
+
+class CountingModelGateway:
+    """Test-only ``ModelGateway`` decorator that counts semantic requests.
+
+    Wraps a real ``ModelGateway`` (``OllamaModelProvider``) and counts
+    every ``chat_with_tools()`` call.  Delegates all other calls unchanged.
+    """
+
+    def __init__(self, delegate: ModelGateway) -> None:
+        self._delegate = delegate
+        self._state = CountingGatewayState()
+
+    @property
+    def state(self) -> CountingGatewayState:
+        return self._state
+
+    def chat_with_tools(
+        self,
+        request: ChatRequest,
+        tools: list[ToolPublicDefinition],
+    ) -> ToolAwareResponse:
+        self._state.chat_with_tools_count += 1
+        return self._delegate.chat_with_tools(request, tools)
+
+    def chat(self, request: ChatRequest) -> ToolAwareResponse:
+        return self._delegate.chat(request)
+
+    def generate_structured(self, request: ChatRequest, schema: type) -> Any:
+        return self._delegate.generate_structured(request, schema)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        return self._delegate.embed(texts)
+
+    def health(self) -> Any:
+        return self._delegate.health()
+
+
+# ── Deterministic context data ──────────────────────────────────────────────
+
+_DETERMINISTIC_ENTITIES: dict[str, dict[str, object]] = {
+    "Arlen": {
+        "entity_id": "npc-arlen-001",
+        "entity_type": "npc",
+        "name": "Arlen",
+        "status": "active",
+        "knowledge_status": "known",
+        "tags": ("warrior",),
+        "body_excerpt": "Arlen is a brave warrior who protects the village.",
+        "body_truncated": False,
+    },
+    "Mira": {
+        "entity_id": "npc-mira-001",
+        "entity_type": "npc",
+        "name": "Mira",
+        "status": "active",
+        "knowledge_status": "known",
+        "tags": ("mage",),
+        "body_excerpt": "Mira is a wise mage who studies ancient magic.",
+        "body_truncated": False,
+    },
+    "Black Keep": {
+        "entity_id": "loc-black-keep-001",
+        "entity_type": "location",
+        "name": "Black Keep",
+        "status": "active",
+        "knowledge_status": "known",
+        "tags": ("fortress",),
+        "body_excerpt": "Black Keep is an ancient fortress in the northern mountains.",
+        "body_truncated": False,
+    },
+    "Moon Gate": {
+        "entity_id": "quest-moon-gate-001",
+        "entity_type": "quest",
+        "name": "Moon Gate",
+        "status": "active",
+        "knowledge_status": "known",
+        "tags": ("main",),
+        "body_excerpt": "The Moon Gate quest involves finding the lost lunar key.",
+        "body_truncated": False,
+    },
+    "Sunken Bell": {
+        "entity_id": "quest-sunken-bell-001",
+        "entity_type": "quest",
+        "name": "Sunken Bell",
+        "status": "active",
+        "knowledge_status": "known",
+        "tags": ("side",),
+        "body_excerpt": "The Sunken Bell quest requires diving into the abyssal trench.",
+        "body_truncated": False,
+    },
+}
+
+
+def _make_deterministic_context_builder() -> AgentContextBuilder:
+    """Build an ``AgentContextBuilder`` with deterministic test doubles."""
+
+    class _DeterministicVault:
+        def get_entity(self, entity_id: str) -> Any:
+            for _key, data in _DETERMINISTIC_ENTITIES.items():
+                if data["entity_id"] == entity_id:
+                    entity = _make_entity_like(data)
+                    body = str(data["body_excerpt"])
+                    return _make_document_like(entity, body)
+            return None
+
+        def read_entity(self, *args: Any, **kwargs: Any) -> Any:
+            return None
+
+        def list_entities(self, *args: Any, **kwargs: Any) -> list[Any]:
+            return []
+
+        def search_entities(self, *args: Any, **kwargs: Any) -> list[Any]:
+            return []
+
+    class _DeterministicSearch:
+        def search(self, query: Any, limit: int = 5) -> list[Any]:
+            from dnd_assistant.retrieval.types import SearchHit
+
+            text = query.text.lower() if hasattr(query, "text") else str(query).lower()
+            hits: list[Any] = []
+            for name, data in _DETERMINISTIC_ENTITIES.items():
+                if name.lower() in text or text in name.lower():
+                    hits.append(
+                        SearchHit(
+                            entity_id=str(data["entity_id"]),
+                            entity_type=str(data["entity_type"]),
+                            score=1.0,
+                            text=str(data["body_excerpt"]),
+                        )
+                    )
+            return hits[:limit]
+
+        def search_entities(self, *args: Any, **kwargs: Any) -> list[Any]:
+            return []
+
+    class _NullSessionRepo:
+        def get_active_session(self) -> Any:
+            return None
+
+    class _NullEventRepo:
+        def list_events(self, session_id: str) -> list[Any]:
+            return []
+
+    class _NullWorldTimeRepo:
+        def get_current_world_time(self) -> Any:
+            return None
+
+    return AgentContextBuilder(
+        vault_repository=_DeterministicVault(),
+        search_service=_DeterministicSearch(),
+        session_repository=_NullSessionRepo(),
+        event_repository=_NullEventRepo(),
+        world_time_repository=_NullWorldTimeRepo(),
+    )
+
+
+def _make_entity_like(data: dict[str, object]) -> Any:
+    """Create a simple entity-like object with attribute access."""
+    from dnd_assistant.domain.types import Visibility
+
+    class _EntityLike:
+        pass
+
+    obj = _EntityLike()
+    obj.id = data["entity_id"]
+    obj.type = data["entity_type"]
+    obj.name = data["name"]
+    obj.status = data["status"]
+    obj.visibility = Visibility.PLAYER
+    obj.knowledge_status = data["knowledge_status"]
+    obj.tags = data["tags"]
+    return obj
+
+
+def _make_document_like(entity: Any, body: str) -> Any:
+    """Create a simple document-like object with .entity and .body."""
+
+    class _DocLike:
+        pass
+
+    obj = _DocLike()
+    obj.entity = entity
+    obj.body = body
+    return obj
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -152,54 +364,102 @@ def paim13_config() -> tuple[ModelProfile, str, str]:
 
 @pytest.fixture(scope="module")
 def reference_runtime(paim13_config):
-    """Build the reference runtime with synthetic eval tools."""
+    """Build the reference runtime with synthetic eval tools.
+
+    Reference path:
+        OllamaModelProvider(profile)
+        -> CountingModelGateway
+        -> FastAgent
+        -> AgentLoop
+        -> AgentToolExecutionService
+        -> ToolExecutor
+    """
     profile, model_name, _ = paim13_config
 
     ref_state = EvalHandlerState()
     ref_registry = _build_eval_registry(ref_state)
+    ref_catalog = build_tool_registry_schema(ref_registry)
+    ref_context_builder = _make_deterministic_context_builder()
 
-    ref_preparer = DndAgentRunPreparer(
-        context_builder=AgentContextBuilder(
-            vault_repository=_make_null_vault(),
-            search_service=_make_null_search(),
-        ),
-        tool_catalog=build_tool_registry_schema(ref_registry),
-        tool_bridge=PydanticAIToolBridge(ref_registry),
+    # Native OllamaModelProvider wrapped in CountingModelGateway
+    native_provider = OllamaModelProvider(profile)
+    counting_gateway = CountingModelGateway(native_provider)
+
+    # Reference: FastAgent + AgentLoop
+    ref_fast_agent = FastAgent(
+        context_builder=ref_context_builder,
+        model_gateway=counting_gateway,
+        tool_catalog=ref_catalog,
     )
 
-    ref_model = build_pydantic_ai_ollama_model(profile)
-    ref_runtime = PydanticAIAgentRuntime(
-        run_preparer=ref_preparer,
-        model=ref_model,
+    ref_loop = AgentLoop(
+        context_builder=ref_context_builder,
+        model_gateway=counting_gateway,
+        tool_catalog=ref_catalog,
+        tool_execution_service=AgentToolExecutionService(tool_executor=ToolExecutor(ref_registry)),
     )
 
-    yield ref_runtime, ref_state, ref_registry
+    yield {
+        "fast_agent": ref_fast_agent,
+        "loop": ref_loop,
+        "state": ref_state,
+        "registry": ref_registry,
+        "counting_gateway": counting_gateway,
+        "native_provider": native_provider,
+        "profile": profile,
+    }
+
+    native_provider.close()
 
 
 @pytest.fixture(scope="module")
 def candidate_runtime(paim13_config):
-    """Build the candidate runtime with synthetic eval tools."""
+    """Build the candidate runtime with synthetic eval tools.
+
+    Candidate path:
+        build_pydantic_ai_ollama_model(profile)
+        -> PydanticAIFastAgent
+        -> PydanticAIAgentRuntime
+        -> DndAgentRunPreparer
+        -> PydanticAIToolBridge
+        -> ToolExecutor
+    """
     profile, model_name, _ = paim13_config
 
     cand_state = EvalHandlerState()
     cand_registry = _build_eval_registry(cand_state)
+    cand_catalog = build_tool_registry_schema(cand_registry)
+    cand_context_builder = _make_deterministic_context_builder()
 
+    cand_tool_bridge = PydanticAIToolBridge(cand_registry)
     cand_preparer = DndAgentRunPreparer(
-        context_builder=AgentContextBuilder(
-            vault_repository=_make_null_vault(),
-            search_service=_make_null_search(),
-        ),
-        tool_catalog=build_tool_registry_schema(cand_registry),
-        tool_bridge=PydanticAIToolBridge(cand_registry),
+        context_builder=cand_context_builder,
+        tool_catalog=cand_catalog,
+        tool_bridge=cand_tool_bridge,
     )
 
     cand_model = build_pydantic_ai_ollama_model(profile)
+
+    # Candidate: PydanticAIFastAgent + PydanticAIAgentRuntime
+    cand_fast_agent = PydanticAIFastAgent(
+        run_preparer=cand_preparer,
+        model=cand_model,
+    )
+
     cand_runtime = PydanticAIAgentRuntime(
         run_preparer=cand_preparer,
         model=cand_model,
     )
 
-    yield cand_runtime, cand_state, cand_registry
+    yield {
+        "fast_agent": cand_fast_agent,
+        "runtime": cand_runtime,
+        "state": cand_state,
+        "registry": cand_registry,
+        "preparer": cand_preparer,
+        "model": cand_model,
+        "profile": profile,
+    }
 
 
 # ── Tool registry builder ────────────────────────────────────────────────────
@@ -243,57 +503,42 @@ def _build_eval_registry(state: EvalHandlerState) -> ToolRegistry:
     return registry
 
 
-def _make_null_vault() -> object:
-    """Create a minimal vault repository that returns empty results."""
-
-    class _NullVault:
-        def read_entity(self, *args, **kwargs):
-            return None
-
-        def list_entities(self, *args, **kwargs):
-            return []
-
-        def search_entities(self, *args, **kwargs):
-            return []
-
-    return _NullVault()
+# ── Exposed tool info helper ─────────────────────────────────────────────────
 
 
-def _make_null_search() -> object:
-    """Create a minimal search service that returns empty results."""
+def _build_exposed_info(
+    context: ExecutionContext,
+    registry: ToolRegistry,
+) -> ExposedToolInfo:
+    """Build an ``ExposedToolInfo`` for the given context and registry."""
+    from dnd_assistant.application.agent_tool_selection import select_agent_tools
+    from dnd_assistant.tools.catalog import build_tool_registry_schema
 
-    class _NullSearch:
-        def search(self, *args, **kwargs):
-            return []
-
-        def search_entities(self, *args, **kwargs):
-            return []
-
-    return _NullSearch()
+    catalog = build_tool_registry_schema(registry)
+    selected = select_agent_tools(catalog, context=context)
+    names = tuple(t.name for t in selected)
+    has_write = any(t.permission.value == "write" for t in selected)
+    return ExposedToolInfo(tool_names=names, has_write=has_write)
 
 
-# ── Decision observation ─────────────────────────────────────────────────────
+# ── Layer A: Reference decision observer ─────────────────────────────────────
 
 
-def _observe_decision(
+def _observe_reference_decision(
     scenario: EvalScenario,
     repetition: int,
-    runtime: PydanticAIAgentRuntime,
-    state: EvalHandlerState,
+    runtime: dict[str, Any],
     context: ExecutionContext,
 ) -> DecisionObservation:
-    """Observe one decision from the PydanticAIAgentRuntime (Layer A)."""
-
-    fast_agent = PydanticAIFastAgent(
-        run_preparer=runtime._run_preparer,
-        model=runtime._model,
-    )
+    """Observe one decision from the reference FastAgent (Layer A)."""
+    fast_agent: FastAgent = runtime["fast_agent"]
 
     start = time.perf_counter()
     error_type: str | None = None
     error_message: str | None = None
     tool_calls: tuple[ToolCallObservation, ...] = ()
     terminal_kind: str | None = None
+    exposed_info: ExposedToolInfo | None = None
 
     try:
         decision = fast_agent.decide(
@@ -302,9 +547,17 @@ def _observe_decision(
         )
 
         response = decision.response
+        exposed_names = tuple(t.name for t in decision.exposed_tools)
+        has_write = any(t.permission.value == "write" for t in decision.exposed_tools)
+        exposed_info = ExposedToolInfo(tool_names=exposed_names, has_write=has_write)
+
         observed_calls: list[ToolCallObservation] = []
         for tc in response.message.tool_calls:
-            schema_valid = check_schema_valid(tc.tool_name, tc.arguments)
+            schema_valid = check_schema_valid(
+                tc.tool_name,
+                tc.arguments,
+                exposed_tool_names=exposed_names,
+            )
             observed_calls.append(
                 ToolCallObservation(
                     tool_name=tc.tool_name,
@@ -315,13 +568,19 @@ def _observe_decision(
             )
         tool_calls = tuple(observed_calls)
 
-        content = response.message.content
+        # Parse terminal outcome from AgentTextOutcome JSON
         if tool_calls:
             terminal_kind = None
-        elif content:
-            terminal_kind = "respond"
         else:
-            terminal_kind = "clarify"
+            from dnd_assistant.application.agent_loop import (
+                _parse_agent_outcome,
+            )
+
+            try:
+                outcome = _parse_agent_outcome(response)
+                terminal_kind = outcome.kind.value
+            except (ModelError, Exception):
+                terminal_kind = "clarify"
 
     except ModelError as exc:
         error_type = "ModelError"
@@ -339,45 +598,284 @@ def _observe_decision(
         tool_calls=tool_calls,
         terminal_kind=terminal_kind,
         terminal_content=None,
+        exposed_tools=exposed_info,
         error_type=error_type,
         error_message=error_message,
     )
 
 
-# ── Full-turn observation ────────────────────────────────────────────────────
+# ── Layer A: Candidate decision observer ─────────────────────────────────────
 
 
-def _observe_full_turn(
+def _observe_candidate_decision(
     scenario: EvalScenario,
     repetition: int,
-    runtime: PydanticAIAgentRuntime,
-    state: EvalHandlerState,
+    runtime: dict[str, Any],
+    context: ExecutionContext,
+) -> DecisionObservation:
+    """Observe one decision from the candidate PydanticAIFastAgent (Layer A).
+
+    Uses PydanticAIFastAgent — NOT FastAgent.
+    """
+    fast_agent: PydanticAIFastAgent = runtime["fast_agent"]
+
+    start = time.perf_counter()
+    error_type: str | None = None
+    error_message: str | None = None
+    tool_calls: tuple[ToolCallObservation, ...] = ()
+    terminal_kind: str | None = None
+    exposed_info: ExposedToolInfo | None = None
+
+    try:
+        decision = fast_agent.decide(
+            scenario.user_input,
+            execution_context=context,
+        )
+
+        response = decision.response
+        exposed_names = tuple(t.name for t in decision.exposed_tools)
+        has_write = any(t.permission.value == "write" for t in decision.exposed_tools)
+        exposed_info = ExposedToolInfo(tool_names=exposed_names, has_write=has_write)
+
+        observed_calls: list[ToolCallObservation] = []
+        for tc in response.message.tool_calls:
+            schema_valid = check_schema_valid(
+                tc.tool_name,
+                tc.arguments,
+                exposed_tool_names=exposed_names,
+            )
+            observed_calls.append(
+                ToolCallObservation(
+                    tool_name=tc.tool_name,
+                    arguments=tc.arguments,
+                    call_id=tc.call_id,
+                    schema_valid=schema_valid,
+                )
+            )
+        tool_calls = tuple(observed_calls)
+
+        # Parse terminal outcome from AgentTextOutcome JSON
+        if tool_calls:
+            terminal_kind = None
+        else:
+            from dnd_assistant.application.agent_loop import (
+                _parse_agent_outcome,
+            )
+
+            try:
+                outcome = _parse_agent_outcome(response)
+                terminal_kind = outcome.kind.value
+            except (ModelError, Exception):
+                terminal_kind = "clarify"
+
+    except ModelError as exc:
+        error_type = "ModelError"
+        error_message = str(exc)
+    except Exception as exc:
+        error_type = type(exc).__name__
+        error_message = str(exc)
+
+    duration = time.perf_counter() - start
+
+    return DecisionObservation(
+        scenario_id=scenario.scenario_id,
+        repetition=repetition,
+        duration_seconds=duration,
+        tool_calls=tool_calls,
+        terminal_kind=terminal_kind,
+        terminal_content=None,
+        exposed_tools=exposed_info,
+        error_type=error_type,
+        error_message=error_message,
+    )
+
+
+# ── Layer B: Reference full-turn observer ────────────────────────────────────
+
+
+def _observe_reference_full_turn(
+    scenario: EvalScenario,
+    repetition: int,
+    runtime: dict[str, Any],
     context: ExecutionContext,
 ) -> FullTurnObservation:
-    """Observe one full-turn runtime execution (Layer B)."""
+    """Observe one full-turn from the reference AgentLoop (Layer B).
+
+    Uses AgentLoop — NOT PydanticAIAgentRuntime.
+    """
+    loop: AgentLoop = runtime["loop"]
+    state: EvalHandlerState = runtime["state"]
+    counting_gateway: CountingModelGateway = runtime["counting_gateway"]
+
     start = time.perf_counter()
     success = False
     terminal_kind: str | None = None
+    initial_calls: tuple[ToolCallObservation, ...] = ()
+    executed_calls: tuple[ToolCallObservation, ...] = ()
     tool_call_count = 0
     tool_execution_count = 0
-    model_request_count = 0
     write_handler_count = 0
     error_type: str | None = None
     error_message: str | None = None
+    exposed_info: ExposedToolInfo | None = None
 
     # Capture handler state before run
+    pre_all = len(state.all_calls)
     pre_write = state.write_quest_status_calls + state.write_campaign_note_calls
 
+    # Capture counting gateway state before run
+    pre_count = counting_gateway.state.chat_with_tools_count
+
     try:
-        result = runtime.run(
+        result = loop.run(
             scenario.user_input,
             execution_context=context,
         )
 
         success = True
         terminal_kind = result.outcome.kind.value if result.outcome else None
-        tool_call_count = len(result.initial_decision.response.message.tool_calls)
+
+        # Initial tool calls from first decision
+        initial_tcs = result.initial_decision.response.message.tool_calls
+        tool_call_count = len(initial_tcs)
+        initial_calls = tuple(
+            ToolCallObservation(
+                tool_name=tc.name,
+                arguments=dict(tc.arguments),
+                call_id=tc.call_id,
+                schema_valid=True,
+            )
+            for tc in initial_tcs
+        )
+
+        # Executed tool calls
         tool_execution_count = len(result.tool_executions)
+        executed_calls = tuple(
+            ToolCallObservation(
+                tool_name=exec.tool_call.name,
+                arguments=dict(exec.tool_call.arguments),
+                call_id=exec.tool_call.call_id,
+                schema_valid=True,
+            )
+            for exec in result.tool_executions
+        )
+
+        # Exposed tools
+        exposed_names = tuple(t.name for t in result.initial_decision.exposed_tools)
+        has_write = any(
+            t.permission.value == "write" for t in result.initial_decision.exposed_tools
+        )
+        exposed_info = ExposedToolInfo(tool_names=exposed_names, has_write=has_write)
+
+    except ModelError as exc:
+        error_type = "ModelError"
+        error_message = str(exc)
+    except Exception as exc:
+        error_type = type(exc).__name__
+        error_message = str(exc)
+
+    duration = time.perf_counter() - start
+
+    post_all = len(state.all_calls)
+    post_write = state.write_quest_status_calls + state.write_campaign_note_calls
+    handler_call_count = post_all - pre_all
+    write_handler_count = post_write - pre_write
+    model_request_count = counting_gateway.state.chat_with_tools_count - pre_count
+
+    return FullTurnObservation(
+        scenario_id=scenario.scenario_id,
+        repetition=repetition,
+        duration_seconds=duration,
+        success=success,
+        terminal_kind=terminal_kind,
+        initial_tool_calls=initial_calls,
+        executed_tool_calls=executed_calls,
+        tool_call_count=tool_call_count,
+        tool_execution_count=tool_execution_count,
+        model_request_count=model_request_count,
+        handler_call_count=handler_call_count,
+        write_handler_count=write_handler_count,
+        exposed_tools=exposed_info,
+        error_type=error_type,
+        error_message=error_message,
+    )
+
+
+# ── Layer B: Candidate full-turn observer ────────────────────────────────────
+
+
+def _observe_candidate_full_turn(
+    scenario: EvalScenario,
+    repetition: int,
+    runtime: dict[str, Any],
+    context: ExecutionContext,
+) -> FullTurnObservation:
+    """Observe one full-turn from the candidate PydanticAIAgentRuntime (Layer B).
+
+    Uses PydanticAIAgentRuntime — NOT AgentLoop.
+    """
+    cand_runtime: PydanticAIAgentRuntime = runtime["runtime"]
+    state: EvalHandlerState = runtime["state"]
+
+    start = time.perf_counter()
+    success = False
+    terminal_kind: str | None = None
+    initial_calls: tuple[ToolCallObservation, ...] = ()
+    executed_calls: tuple[ToolCallObservation, ...] = ()
+    tool_call_count = 0
+    tool_execution_count = 0
+    model_request_count = 0
+    write_handler_count = 0
+    error_type: str | None = None
+    error_message: str | None = None
+    exposed_info: ExposedToolInfo | None = None
+
+    # Capture handler state before run
+    pre_all = len(state.all_calls)
+    pre_write = state.write_quest_status_calls + state.write_campaign_note_calls
+
+    try:
+        result = cand_runtime.run(
+            scenario.user_input,
+            execution_context=context,
+        )
+
+        success = True
+        terminal_kind = result.outcome.kind.value if result.outcome else None
+
+        # Initial tool calls from first decision
+        initial_tcs = result.initial_decision.response.message.tool_calls
+        tool_call_count = len(initial_tcs)
+        initial_calls = tuple(
+            ToolCallObservation(
+                tool_name=tc.name,
+                arguments=dict(tc.arguments),
+                call_id=tc.call_id,
+                schema_valid=True,
+            )
+            for tc in initial_tcs
+        )
+
+        # Executed tool calls
+        tool_execution_count = len(result.tool_executions)
+        executed_calls = tuple(
+            ToolCallObservation(
+                tool_name=exec.tool_call.name,
+                arguments=dict(exec.tool_call.arguments),
+                call_id=exec.tool_call.call_id,
+                schema_valid=True,
+            )
+            for exec in result.tool_executions
+        )
+
+        # Exposed tools
+        exposed_names = tuple(t.name for t in result.initial_decision.exposed_tools)
+        has_write = any(
+            t.permission.value == "write" for t in result.initial_decision.exposed_tools
+        )
+        exposed_info = ExposedToolInfo(tool_names=exposed_names, has_write=has_write)
+
+        # Model request count: Pydantic runtime has at most 2 requests
         model_request_count = 2 if tool_execution_count > 0 else 1
 
     except ModelError as exc:
@@ -389,7 +887,9 @@ def _observe_full_turn(
 
     duration = time.perf_counter() - start
 
+    post_all = len(state.all_calls)
     post_write = state.write_quest_status_calls + state.write_campaign_note_calls
+    handler_call_count = post_all - pre_all
     write_handler_count = post_write - pre_write
 
     return FullTurnObservation(
@@ -398,10 +898,14 @@ def _observe_full_turn(
         duration_seconds=duration,
         success=success,
         terminal_kind=terminal_kind,
+        initial_tool_calls=initial_calls,
+        executed_tool_calls=executed_calls,
         tool_call_count=tool_call_count,
         tool_execution_count=tool_execution_count,
         model_request_count=model_request_count,
+        handler_call_count=handler_call_count,
         write_handler_count=write_handler_count,
+        exposed_tools=exposed_info,
         error_type=error_type,
         error_message=error_message,
     )
@@ -415,9 +919,9 @@ def _observe_full_turn(
 class TestPaim13DecisionEval:
     """First-decision quality comparison (Layer A).
 
-    Compares reference vs candidate first-decision tool selection,
-    argument generation, schema validity, clarification, false WRITE
-    selection, unnecessary calls, and abstention.
+    Compares reference (FastAgent) vs candidate (PydanticAIFastAgent)
+    first-decision tool selection, argument generation, schema validity,
+    clarification, false WRITE selection, unnecessary calls, and abstention.
     """
 
     @pytest.mark.parametrize("scenario", DECISION_SCENARIOS, ids=lambda s: s.scenario_id)
@@ -428,8 +932,8 @@ class TestPaim13DecisionEval:
         candidate_runtime,
     ) -> None:
         """Run one decision scenario on both runtimes and compare."""
-        ref_runtime, ref_state, ref_registry = reference_runtime
-        cand_runtime, cand_state, cand_registry = candidate_runtime
+        ref_runtime = reference_runtime
+        cand_runtime = candidate_runtime
 
         context = get_context_for_scenario(scenario.scenario_id)
 
@@ -438,13 +942,11 @@ class TestPaim13DecisionEval:
 
         for rep in range(3):
             if rep % 2 == 0:
-                # Even: reference first
-                ref_obs = _observe_decision(scenario, rep, ref_runtime, ref_state, context)
-                cand_obs = _observe_decision(scenario, rep, cand_runtime, cand_state, context)
+                ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
+                cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
             else:
-                # Odd: candidate first
-                cand_obs = _observe_decision(scenario, rep, cand_runtime, cand_state, context)
-                ref_obs = _observe_decision(scenario, rep, ref_runtime, ref_state, context)
+                cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
+                ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
 
             ref_observations.append(ref_obs)
             cand_observations.append(cand_obs)
@@ -489,8 +991,9 @@ class TestPaim13DecisionEval:
 class TestPaim13FullTurnEval:
     """Full-turn quality comparison (Layer B).
 
-    Compares reference vs candidate bounded runtime behavior including
-    terminal outcome, model requests, tool executions, and WRITE safety.
+    Compares reference (AgentLoop) vs candidate (PydanticAIAgentRuntime)
+    bounded runtime behavior including terminal outcome, model requests,
+    tool executions, and WRITE safety.
     """
 
     @pytest.mark.parametrize("scenario", FULL_TURN_SCENARIOS, ids=lambda s: s.scenario_id)
@@ -501,8 +1004,8 @@ class TestPaim13FullTurnEval:
         candidate_runtime,
     ) -> None:
         """Run one full-turn scenario on both runtimes and compare."""
-        ref_runtime, ref_state, ref_registry = reference_runtime
-        cand_runtime, cand_state, cand_registry = candidate_runtime
+        ref_runtime = reference_runtime
+        cand_runtime = candidate_runtime
 
         context = get_context_for_scenario(scenario.scenario_id)
 
@@ -511,11 +1014,11 @@ class TestPaim13FullTurnEval:
 
         for rep in range(3):
             if rep % 2 == 0:
-                ref_obs = _observe_full_turn(scenario, rep, ref_runtime, ref_state, context)
-                cand_obs = _observe_full_turn(scenario, rep, cand_runtime, cand_state, context)
+                ref_obs = _observe_reference_full_turn(scenario, rep, ref_runtime, context)
+                cand_obs = _observe_candidate_full_turn(scenario, rep, cand_runtime, context)
             else:
-                cand_obs = _observe_full_turn(scenario, rep, cand_runtime, cand_state, context)
-                ref_obs = _observe_full_turn(scenario, rep, ref_runtime, ref_state, context)
+                cand_obs = _observe_candidate_full_turn(scenario, rep, cand_runtime, context)
+                ref_obs = _observe_reference_full_turn(scenario, rep, ref_runtime, context)
 
             ref_observations.append(ref_obs)
             cand_observations.append(cand_obs)
@@ -533,12 +1036,12 @@ class TestPaim13FullTurnEval:
                 )
 
         # Print compact result
-        ref_success = sum(1 for o in ref_observations if o.success)
-        cand_success = sum(1 for o in cand_observations if o.success)
+        ref_passes = sum(1 for o in ref_observations if score_full_turn(o, scenario.expectation))
+        cand_passes = sum(1 for o in cand_observations if score_full_turn(o, scenario.expectation))
         print(
             f"\nPAIM13_SCENARIO {scenario.scenario_id}"
-            f"\nREF={ref_success}/3 success"
-            f"\nPYD={cand_success}/3 success"
+            f"\nREF={ref_passes}/3 pass"
+            f"\nPYD={cand_passes}/3 pass"
         )
 
 
@@ -550,26 +1053,24 @@ class TestPaim13FullTurnEval:
 class TestPaim13WarmUp:
     """Warm-up runs before measured eval (excluded from metrics)."""
 
-    @pytest.mark.order(0)
     def test_reference_warmup(self, reference_runtime, paim13_config) -> None:
         """One reference warm-up decision."""
-        ref_runtime, ref_state, ref_registry = reference_runtime
+        ref_runtime = reference_runtime
         context = make_read_context()
         try:
-            ref_runtime.run(
+            ref_runtime["loop"].run(
                 "Hello, this is a warm-up request.",
                 execution_context=context,
             )
         except Exception:
             pass  # Warm-up failures are acceptable
 
-    @pytest.mark.order(1)
     def test_candidate_warmup(self, candidate_runtime, paim13_config) -> None:
         """One candidate warm-up decision."""
-        cand_runtime, cand_state, cand_registry = candidate_runtime
+        cand_runtime = candidate_runtime
         context = make_read_context()
         try:
-            cand_runtime.run(
+            cand_runtime["runtime"].run(
                 "Hello, this is a warm-up request.",
                 execution_context=context,
             )
@@ -585,7 +1086,6 @@ class TestPaim13WarmUp:
 class TestPaim13AggregateMetrics:
     """Compute and report aggregate metrics across all scenarios."""
 
-    @pytest.mark.order(100)
     def test_report_aggregate_metrics(
         self,
         reference_runtime,
@@ -594,8 +1094,8 @@ class TestPaim13AggregateMetrics:
     ) -> None:
         """Run all decision scenarios and report aggregate metrics."""
         profile, model_name, ollama_version = paim13_config
-        ref_runtime, ref_state, ref_registry = reference_runtime
-        cand_runtime, cand_state, cand_registry = candidate_runtime
+        ref_runtime = reference_runtime
+        cand_runtime = candidate_runtime
 
         all_ref_observations: list[DecisionObservation] = []
         all_cand_observations: list[DecisionObservation] = []
@@ -604,11 +1104,11 @@ class TestPaim13AggregateMetrics:
             context = get_context_for_scenario(scenario.scenario_id)
             for rep in range(3):
                 if rep % 2 == 0:
-                    ref_obs = _observe_decision(scenario, rep, ref_runtime, ref_state, context)
-                    cand_obs = _observe_decision(scenario, rep, cand_runtime, cand_state, context)
+                    ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
+                    cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
                 else:
-                    cand_obs = _observe_decision(scenario, rep, cand_runtime, cand_state, context)
-                    ref_obs = _observe_decision(scenario, rep, ref_runtime, ref_state, context)
+                    cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
+                    ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
                 all_ref_observations.append(ref_obs)
                 all_cand_observations.append(cand_obs)
 
