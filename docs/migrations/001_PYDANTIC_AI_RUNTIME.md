@@ -8466,3 +8466,115 @@ PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 59. PAIM-C32 correction record — Seal PAIM-13 warm-up preflight
+
+### Classification
+
+```text
+TEST_HARNESS
+```
+
+### Exact defect
+
+Layer-B `_warmup()` required `runtime["loop"]`.
+
+Reference fixture exposed `"loop"`.
+Candidate fixture exposed `"runtime"` (not `"loop"`).
+
+Therefore candidate full-turn fixture would fail with `KeyError("loop")`
+before measured collection.
+
+Offline PAIM-13 integration tests skipped before fixture execution, so the
+defect was not exercised by C31's reported offline gates.
+
+### Root cause
+
+`_warmup()` in `test_pydantic_ai_stage9_live_eval_full_turn.py` used
+`runtime["loop"].run(...)`. The candidate runtime dict had key `"runtime"`
+instead of `"loop"`. Both sides already exposed `"fast_agent"`, making the
+warm-up unnecessarily dependent on dict-key shape.
+
+### Correction
+
+Changed `_warmup()` to accept a `FastAgent | PydanticAIFastAgent` directly
+and use `fast_agent.decide(...)` — symmetric for both reference and candidate.
+No dict-key branching.
+
+Added warm-up validation:
+- zero tool calls → fail with `RuntimeError`
+- valid terminal outcome → fail with `RuntimeError` if unparseable
+
+### Offline preflight tests
+
+Added `TestWarmupPreflight` class with 5 tests:
+
+| Test | Expected |
+|------|----------|
+| `test_reference_warmup_succeeds` | PASS |
+| `test_candidate_warmup_succeeds` | PASS |
+| `test_warmup_raises_on_model_exception` | Exception propagates |
+| `test_warmup_raises_on_tool_call_response` | `RuntimeError("Warm-up produced...")` |
+| `test_warmup_raises_on_malformed_terminal` | `RuntimeError("no valid terminal outcome")` |
+
+All run offline — no network, no Ollama, no env variables.
+
+### Test doubles
+
+Added `WarmupFakeModel` and `WarmupFakeModelGateway` to
+`tests/support/test_doubles.py` — return valid `AgentTextOutcome` JSON.
+
+### Frozen datasets unchanged
+
+```text
+Layer A: 18 × 3 = 54 reference + 54 candidate
+Layer B:  9 × 3 = 27 reference + 27 candidate
+```
+
+Warm-up occurs before each dataset collection and remains excluded from all
+metrics.
+
+### Preserved behavior
+
+- `CountingPydanticModel(WrapperModel)` — unchanged
+- literal semantic request counting — unchanged
+- critical `REFERENCE_ONLY_PASS` enforcement — unchanged
+- false-WRITE enforcement — unchanged
+- unauthorized WRITE enforcement — unchanged
+- >2 semantic-request enforcement — unchanged
+- frozen Layer A dataset — unchanged
+- frozen Layer B dataset — unchanged
+- one measured collection per layer — unchanged
+- portable paths — unchanged
+- all PAIM-13 files < 1000 — unchanged
+- no maintainability exception — unchanged
+
+### Gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Warm-up preflight | `pytest tests/unit/test_pydantic_ai_eval_live_harness.py::TestWarmupPreflight -v` | 5 passed |
+| PAIM-13 eval unit | `pytest tests/unit/test_pydantic_ai_eval.py tests/unit/test_pydantic_ai_eval_live_harness.py` | 100 passed |
+| PAIM-11 regression | `pytest tests/integration/test_pydantic_ai_stage9_parity*.py` | 44 passed |
+| PAIM-13 live (offline) | `pytest tests/integration/test_pydantic_ai_stage9_live_eval_*.py` | 29 skipped (expected) |
+| Canonical full suite | `uv run pytest` | 5184 passed, 143 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 3 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Historical prefix
+
+```text
+sections 1-58 unchanged:   YES
+section 59 appended:       YES
+```
+
+### Final status
+
+```text
+PAIM-C31 — DONE
+PAIM-C32 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```

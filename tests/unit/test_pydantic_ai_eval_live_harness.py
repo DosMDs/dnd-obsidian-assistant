@@ -6,10 +6,16 @@ All offline — no network, no model, no Ollama.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from tests.support.paim13_live_harness import CountingPydanticModel
 from tests.support.test_doubles import FakeModel, RaisingFakeModel
+
+if TYPE_CHECKING:
+    from dnd_assistant.application.fast_agent import FastAgent
+    from dnd_assistant.application.pydantic_ai_fast_agent import (
+        PydanticAIFastAgent,
+    )
 
 # ==============================================================================
 # CountingPydanticModel — literal request counting (C29-M01 through C29-M05)
@@ -590,3 +596,279 @@ class TestPaim13RequestContextEquality:
         cand = self._build_candidate_decision("Tell me about the NPC", ctx)
         assert ref.request == cand.request
         assert ref.exposed_tools == cand.exposed_tools
+
+
+# ==============================================================================
+# PAIM-C32 — Offline warm-up preflight tests
+# ==============================================================================
+
+
+class TestWarmupPreflight:
+    """Offline warm-up preflight tests (PAIM-C32).
+
+    These tests verify that the shared ``_warmup()`` function works correctly
+    with deterministic fakes before any live Ollama run.  All tests run
+    without network, without Ollama, without env variables.
+
+    Positive tests:
+        reference warm-up succeeds
+        candidate warm-up succeeds
+        zero tool calls
+        valid direct terminal
+
+    Negative tests:
+        model/runtime exception propagates (warm-up fails)
+        tool-calling warm-up response fails
+        malformed terminal response fails
+    """
+
+    # ── Helpers ──────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _build_reference_fast_agent() -> FastAgent:
+        """Build a reference FastAgent with WarmupFakeModelGateway."""
+        from dnd_assistant.application.fast_agent import FastAgent
+        from dnd_assistant.tools.catalog import build_tool_registry_schema
+        from tests.support.paim13_live_harness import (
+            build_eval_registry,
+            make_deterministic_context_builder,
+        )
+        from tests.support.paim13_scenarios import EvalHandlerState
+        from tests.support.test_doubles import WarmupFakeModelGateway
+
+        state = EvalHandlerState()
+        registry = build_eval_registry(state)
+        catalog = build_tool_registry_schema(registry)
+        context_builder = make_deterministic_context_builder()
+        agent = FastAgent(
+            context_builder=context_builder,
+            model_gateway=WarmupFakeModelGateway(),
+            tool_catalog=catalog,
+        )
+        return agent
+
+    @staticmethod
+    def _build_candidate_fast_agent() -> PydanticAIFastAgent:
+        """Build a candidate PydanticAIFastAgent with WarmupFakeModel."""
+        from dnd_assistant.application.pydantic_ai_fast_agent import (
+            PydanticAIFastAgent,
+        )
+        from dnd_assistant.application.pydantic_ai_run_deps import (
+            DndAgentRunPreparer,
+        )
+        from dnd_assistant.application.pydantic_ai_tool_bridge import (
+            PydanticAIToolBridge,
+        )
+        from dnd_assistant.tools.catalog import build_tool_registry_schema
+        from tests.support.paim13_live_harness import (
+            build_eval_registry,
+            make_deterministic_context_builder,
+        )
+        from tests.support.paim13_scenarios import EvalHandlerState
+        from tests.support.test_doubles import WarmupFakeModel
+
+        state = EvalHandlerState()
+        registry = build_eval_registry(state)
+        catalog = build_tool_registry_schema(registry)
+        context_builder = make_deterministic_context_builder()
+        tool_bridge = PydanticAIToolBridge(registry=registry)
+        preparer = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=catalog,
+            tool_bridge=tool_bridge,
+        )
+        model = WarmupFakeModel()
+        agent = PydanticAIFastAgent(run_preparer=preparer, model=model)
+        return agent
+
+    @staticmethod
+    def _build_candidate_with_raising_model() -> PydanticAIFastAgent:
+        """Build a candidate agent with a RaisingFakeModel."""
+        from dnd_assistant.application.pydantic_ai_fast_agent import (
+            PydanticAIFastAgent,
+        )
+        from dnd_assistant.application.pydantic_ai_run_deps import (
+            DndAgentRunPreparer,
+        )
+        from dnd_assistant.application.pydantic_ai_tool_bridge import (
+            PydanticAIToolBridge,
+        )
+        from dnd_assistant.tools.catalog import build_tool_registry_schema
+        from tests.support.paim13_live_harness import (
+            build_eval_registry,
+            make_deterministic_context_builder,
+        )
+        from tests.support.paim13_scenarios import EvalHandlerState
+        from tests.support.test_doubles import RaisingFakeModel
+
+        state = EvalHandlerState()
+        registry = build_eval_registry(state)
+        catalog = build_tool_registry_schema(registry)
+        context_builder = make_deterministic_context_builder()
+        tool_bridge = PydanticAIToolBridge(registry=registry)
+        preparer = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=catalog,
+            tool_bridge=tool_bridge,
+        )
+        model = RaisingFakeModel()
+        return PydanticAIFastAgent(run_preparer=preparer, model=model)
+
+    @staticmethod
+    def _build_reference_with_tool_calling_gateway() -> FastAgent:
+        """Build a reference agent with a gateway that returns tool calls."""
+        from dnd_assistant.application.fast_agent import FastAgent
+        from dnd_assistant.models.types import ChatMessage, MessageRole, ToolAwareResponse, ToolCall
+        from dnd_assistant.tools.catalog import build_tool_registry_schema
+        from tests.support.paim13_live_harness import (
+            build_eval_registry,
+            make_deterministic_context_builder,
+        )
+        from tests.support.paim13_scenarios import EvalHandlerState
+
+        class _ToolCallingGateway:
+            """Gateway that returns a tool call instead of terminal text."""
+
+            def chat_with_tools(self, request: object, tools: object) -> ToolAwareResponse:
+                return ToolAwareResponse(
+                    message=ChatMessage(
+                        role=MessageRole.ASSISTANT,
+                        content=None,
+                        tool_calls=(
+                            ToolCall(
+                                name="read_npc",
+                                arguments={"name": "Arlen"},
+                                call_id="warmup-tool-call",
+                            ),
+                        ),
+                    ),
+                )
+
+            def chat(self, request: object) -> object:
+                return None
+
+            def generate_structured(self, request: object, schema: type) -> object:
+                return schema()
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 4 for _ in texts]
+
+            def health(self) -> object:
+                return {"status": "ok"}
+
+        state = EvalHandlerState()
+        registry = build_eval_registry(state)
+        catalog = build_tool_registry_schema(registry)
+        context_builder = make_deterministic_context_builder()
+        return FastAgent(
+            context_builder=context_builder,
+            model_gateway=_ToolCallingGateway(),  # type: ignore[arg-type]
+            tool_catalog=catalog,
+        )
+
+    @staticmethod
+    def _build_reference_with_malformed_gateway() -> FastAgent:
+        """Build a reference agent with a gateway that returns unparseable text."""
+        from dnd_assistant.application.fast_agent import FastAgent
+        from dnd_assistant.models.types import ChatMessage, MessageRole, ToolAwareResponse
+        from dnd_assistant.tools.catalog import build_tool_registry_schema
+        from tests.support.paim13_live_harness import (
+            build_eval_registry,
+            make_deterministic_context_builder,
+        )
+        from tests.support.paim13_scenarios import EvalHandlerState
+
+        class _MalformedGateway:
+            """Gateway that returns unparseable text content."""
+
+            def chat_with_tools(self, request: object, tools: object) -> ToolAwareResponse:
+                return ToolAwareResponse(
+                    message=ChatMessage(
+                        role=MessageRole.ASSISTANT,
+                        content="not valid json",
+                        tool_calls=(),
+                    ),
+                )
+
+            def chat(self, request: object) -> object:
+                return None
+
+            def generate_structured(self, request: object, schema: type) -> object:
+                return schema()
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                return [[0.0] * 4 for _ in texts]
+
+            def health(self) -> object:
+                return {"status": "ok"}
+
+        state = EvalHandlerState()
+        registry = build_eval_registry(state)
+        catalog = build_tool_registry_schema(registry)
+        context_builder = make_deterministic_context_builder()
+        return FastAgent(
+            context_builder=context_builder,
+            model_gateway=_MalformedGateway(),  # type: ignore[arg-type]
+            tool_catalog=catalog,
+        )
+
+    # ── Positive tests ───────────────────────────────────────────────────
+
+    def test_reference_warmup_succeeds(self) -> None:
+        """Reference warm-up: PASS, zero tool calls, valid terminal."""
+        from tests.integration.test_pydantic_ai_stage9_live_eval_full_turn import (
+            _warmup,
+        )
+
+        agent = self._build_reference_fast_agent()
+        # Must not raise
+        _warmup(agent)
+
+    def test_candidate_warmup_succeeds(self) -> None:
+        """Candidate warm-up: PASS, zero tool calls, valid terminal."""
+        from tests.integration.test_pydantic_ai_stage9_live_eval_full_turn import (
+            _warmup,
+        )
+
+        agent = self._build_candidate_fast_agent()
+        # Must not raise
+        _warmup(agent)
+
+    # ── Negative tests ───────────────────────────────────────────────────
+
+    def test_warmup_raises_on_model_exception(self) -> None:
+        """Warm-up exception propagates (warm-up fails)."""
+        from dnd_assistant.errors import ModelError
+        from tests.integration.test_pydantic_ai_stage9_live_eval_full_turn import (
+            _warmup,
+        )
+
+        agent = self._build_candidate_with_raising_model()
+        import pytest
+
+        with pytest.raises((ModelError, RuntimeError)):
+            _warmup(agent)
+
+    def test_warmup_raises_on_tool_call_response(self) -> None:
+        """Warm-up fails when the model returns a tool call."""
+        from tests.integration.test_pydantic_ai_stage9_live_eval_full_turn import (
+            _warmup,
+        )
+
+        agent = self._build_reference_with_tool_calling_gateway()
+        import pytest
+
+        with pytest.raises(RuntimeError, match="Warm-up produced"):
+            _warmup(agent)
+
+    def test_warmup_raises_on_malformed_terminal(self) -> None:
+        """Warm-up fails when terminal response is malformed."""
+        from tests.integration.test_pydantic_ai_stage9_live_eval_full_turn import (
+            _warmup,
+        )
+
+        agent = self._build_reference_with_malformed_gateway()
+        import pytest
+
+        with pytest.raises(RuntimeError, match="no valid terminal outcome"):
+            _warmup(agent)

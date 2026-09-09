@@ -59,6 +59,7 @@ from tests.support.paim13_live_harness import (
     CountingPydanticModel,
     build_eval_registry,
     make_deterministic_context_builder,
+    parse_terminal_observation,
 )
 from tests.support.paim13_scenarios import (
     FULL_TURN_SCENARIOS,
@@ -240,14 +241,25 @@ def candidate_runtime(paim13_config):
 # ── Frozen dataset fixture (warm-up + collection exactly once) ────────────────
 
 
-def _warmup(runtime: dict[str, Any]) -> None:
-    """Perform one warm-up full-turn on each runtime (excluded from metrics).
+def _warmup(fast_agent: FastAgent | PydanticAIFastAgent) -> None:
+    """Perform one warm-up decision on each FastAgent (excluded from metrics).
 
+    Uses the direct FastAgent ``decide()`` path — symmetric for both reference
+    and candidate.  Validates zero tool calls and a valid terminal outcome.
     Warm-up failure must fail fixture construction — exceptions are not
     swallowed.
     """
     context = make_read_context()
-    runtime["loop"].run("Hello, this is a warm-up request.", execution_context=context)
+    decision = fast_agent.decide(
+        "Hello, this is a warm-up request.",
+        execution_context=context,
+    )
+    tool_calls = decision.response.message.tool_calls
+    if tool_calls:
+        raise RuntimeError(f"Warm-up produced {len(tool_calls)} tool call(s); expected zero.")
+    terminal_kind = parse_terminal_observation(decision.response, tool_calls)
+    if terminal_kind is None:
+        raise RuntimeError("Warm-up produced no valid terminal outcome.")
 
 
 @pytest.fixture(scope="module")
@@ -265,8 +277,9 @@ def frozen_full_turn_dataset(
     cand_runtime = candidate_runtime
 
     # Warm-up before measurement (excluded from all metrics)
-    _warmup(ref_runtime)
-    _warmup(cand_runtime)
+    # Uses direct FastAgent decide() — symmetric for both sides.
+    _warmup(ref_runtime["fast_agent"])
+    _warmup(cand_runtime["fast_agent"])
 
     ref_observations: list[FullTurnObservation] = []
     cand_observations: list[FullTurnObservation] = []

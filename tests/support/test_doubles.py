@@ -157,3 +157,47 @@ class FakeModelGateway:
 
     def health(self) -> Any:
         return {"status": "ok"}
+
+
+# ── Warm-up deterministic fakes (PAIM-C32) ──────────────────────────────────────
+
+
+_WARMUP_OUTCOME_JSON = '{"kind": "respond", "message": "warm-up ok"}'
+
+
+class WarmupFakeModel(FakeModel):
+    """FakeModel variant that returns valid AgentTextOutcome JSON.
+
+    Used for offline warm-up preflight tests where the model response
+    must be parseable by ``_parse_agent_outcome``.
+    """
+
+    async def request(
+        self,
+        messages: list[ModelMessage],
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> ModelResponse:
+        self._invocation_count += 1
+        return ModelResponse(parts=[TextPart(content=_WARMUP_OUTCOME_JSON)])
+
+
+class WarmupFakeModelGateway(FakeModelGateway):
+    """FakeModelGateway variant that returns valid AgentTextOutcome JSON.
+
+    Used for offline warm-up preflight tests where the model response
+    must be parseable by ``_parse_agent_outcome``.
+    """
+
+    def chat_with_tools(
+        self,
+        request: ChatRequest,
+        tools: list[ToolPublicDefinition],
+    ) -> ToolAwareResponse:
+        return ToolAwareResponse(
+            message=ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=_WARMUP_OUTCOME_JSON,
+                tool_calls=(),
+            ),
+        )
