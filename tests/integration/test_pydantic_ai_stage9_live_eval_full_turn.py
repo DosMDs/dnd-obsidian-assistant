@@ -57,9 +57,11 @@ from dnd_assistant.tools.types import (
 from tests.support.paim13_live_harness import (
     CountingModelGateway,
     CountingPydanticModel,
+    Paim13OllamaEnvironment,
     build_eval_registry,
     make_deterministic_context_builder,
     parse_terminal_observation,
+    probe_ollama_environment,
 )
 from tests.support.paim13_scenarios import (
     FULL_TURN_SCENARIOS,
@@ -127,16 +129,9 @@ def paim13_config() -> tuple[ModelProfile, str, str]:
     if profile.keep_alive is not None:
         pytest.fail(f"PAIM-13 requires keep_alive=None, got {profile.keep_alive!r}")
 
-    native = OllamaModelProvider(profile)
-    try:
-        version = native.version()
-        model_name = profile.model
-    except Exception as exc:
-        pytest.fail(f"Failed to connect to Ollama at {profile.base_url}: {exc}")
-    finally:
-        native.close()
+    env: Paim13OllamaEnvironment = probe_ollama_environment(profile)
 
-    return profile, model_name, version
+    return profile, env.model_name, env.server_version
 
 
 @pytest.fixture(scope="module")

@@ -8270,6 +8270,7 @@ class CountingPydanticModel(Model):
         super().__init__(settings=delegate.settings, profile=delegate.profile)
         self._delegate = delegate
         self._state = CountingPydanticModelState()
+
     # manual delegation of model_name, system, request_stream, etc.
 ```
 
@@ -8280,6 +8281,7 @@ class CountingPydanticModel(WrapperModel):
     def __init__(self, delegate: Model) -> None:
         super().__init__(wrapped=delegate)
         self._state = CountingPydanticModelState()
+
     # WrapperModel inherits all delegation: model_name, system, settings,
     # profile, base_url, model_id, request_stream, prepare_request,
     # customize_request_parameters, etc.
@@ -8574,6 +8576,88 @@ section 59 appended:       YES
 ```text
 PAIM-C31 — DONE
 PAIM-C32 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+## 60. PAIM-C33 correction record — Seal PAIM-13 live environment preflight
+
+### Defect
+
+Both PAIM-13 live fixtures (`test_pydantic_ai_stage9_live_eval_decision.py`
+and `test_pydantic_ai_stage9_live_eval_full_turn.py`) called a nonexistent
+`OllamaModelProvider.version()` method during fixture construction.  The
+offline env-skip (`DND_ASSISTANT_PAIM13_CONFIG` absent) prevented fixture
+construction from ever being exercised, so the defect was never exposed.
+
+### Correction
+
+- Added a test-owned shared live-probe function
+  ``probe_ollama_environment()`` in
+  ``tests/support/paim13_live_harness.py``.
+- The probe uses the public ``OllamaModelProvider.health()`` for
+  reachability and model-availability checks.
+- Server version is obtained through a test-owned ``GET /api/version``
+  request via ``_fetch_ollama_server_version()`` — no production API was
+  widened.
+- Both live ``paim13_config`` fixtures now call the shared probe instead
+  of ``native.version()``.
+- Added ``Paim13OllamaEnvironment`` frozen DTO for probe results.
+- Added 10 offline tests (2 positive, 7 negative, 1 architecture) in
+  ``tests/unit/test_pydantic_ai_eval_live_probe.py``.
+
+### Changed files
+
+```
+tests/support/paim13_live_harness.py          + shared probe + httpx import
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py    — fixture updated
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py   — fixture updated
+tests/unit/test_pydantic_ai_eval_live_probe.py                     — new file
+```
+
+### Preserved behavior
+
+- `CountingPydanticModel(WrapperModel)` — unchanged
+- literal semantic request counting — unchanged
+- critical `REFERENCE_ONLY_PASS` enforcement — unchanged
+- false-WRITE enforcement — unchanged
+- unauthorized WRITE enforcement — unchanged
+- >2 semantic-request enforcement — unchanged
+- frozen Layer A dataset — unchanged
+- frozen Layer B dataset — unchanged
+- one measured collection per layer — unchanged
+- portable paths — unchanged
+- all PAIM-13 files < 1000 — unchanged
+- no maintainability exception — unchanged
+- no scenario/prompt/tool/metric definition was changed
+- no `src/` file was changed
+
+### Gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Live-probe unit | `pytest tests/unit/test_pydantic_ai_eval_live_probe.py -v` | 10 passed |
+| PAIM-13 eval unit | `pytest tests/unit/test_pydantic_ai_eval.py tests/unit/test_pydantic_ai_eval_live_harness.py` | 110 passed |
+| PAIM-11 regression | `pytest tests/integration/test_pydantic_ai_stage9_parity*.py` | 44 passed |
+| PAIM-13 live (offline) | `pytest tests/integration/test_pydantic_ai_stage9_live_eval_*.py` | 29 skipped (expected) |
+| Canonical full suite | `uv run pytest` | 5196 passed, 143 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 381 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Historical prefix
+
+```text
+sections 1-59 unchanged:   YES
+section 60 appended:       YES
+```
+
+### Final status
+
+```text
+PAIM-C32 — DONE
+PAIM-C33 — DONE
 PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED

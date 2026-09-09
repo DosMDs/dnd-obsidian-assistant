@@ -23,6 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.wrapper import WrapperModel
@@ -401,3 +402,111 @@ def parse_terminal_observation(
     except (ModelError, Exception):
         # Malformed terminal — caller must set error_type
         return None
+
+
+# ── PAIM-13 Ollama live environment probe ──────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class Paim13OllamaEnvironment:
+    """Test-owned DTO for PAIM-13 live environment preflight results.
+
+    Attributes:
+        model_name: The configured Ollama model name.
+        server_version: Ollama server version string from /api/version.
+        reachable: Whether the Ollama server is reachable.
+        model_available: Whether the configured model is available.
+    """
+
+    model_name: str
+    server_version: str
+    reachable: bool
+    model_available: bool
+
+
+def probe_ollama_environment(
+    profile: Any,
+) -> Paim13OllamaEnvironment:
+    """Probe the real Ollama server for PAIM-13 live environment preflight.
+
+    Uses the public ``OllamaModelProvider.health()`` for reachability and
+    model availability, then obtains the server version from a test-owned
+    ``GET /api/version`` request.
+
+    Args:
+        profile: A ``ModelProfile`` with ``provider == "ollama"``,
+            ``role == AGENT``, and ``keep_alive is None``.
+
+    Returns:
+        A ``Paim13OllamaEnvironment`` with probe results.
+
+    Raises:
+        AssertionError: If any preflight check fails (reachability,
+            model availability, or server version).
+    """
+    from dnd_assistant.models.ollama import OllamaModelProvider
+
+    provider = OllamaModelProvider(profile)
+    try:
+        health = provider.health()
+        if not health.reachable:
+            raise AssertionError(f"Ollama not reachable at {profile.base_url}: {health.detail}")
+        if not health.model_available:
+            raise AssertionError(
+                f"Configured model {profile.model!r} not available: {health.detail}"
+            )
+
+        # Test-owned server version probe (not exposed by production API)
+        server_version = _fetch_ollama_server_version(profile.base_url)
+
+        return Paim13OllamaEnvironment(
+            model_name=profile.model,
+            server_version=server_version,
+            reachable=True,
+            model_available=True,
+        )
+    finally:
+        provider.close()
+
+
+def _fetch_ollama_server_version(base_url: str) -> str:
+    """Fetch the Ollama server version from ``GET /api/version``.
+
+    This is test-owned infrastructure — the production ``OllamaModelProvider``
+    does not expose a public ``version()`` method.
+
+    Args:
+        base_url: The Ollama server base URL (e.g. ``http://localhost:11434``).
+
+    Returns:
+        The server version string.
+
+    Raises:
+        AssertionError: If the version endpoint fails or returns an invalid
+            response.
+    """
+    import json
+
+    url = f"{base_url.rstrip('/')}/api/version"
+    try:
+        with httpx.Client() as client:
+            resp = client.get(url)
+    except httpx.RequestError as exc:
+        raise AssertionError(f"Failed to reach Ollama /api/version at {url}: {exc}") from exc
+
+    if not resp.is_success:
+        raise AssertionError(f"Ollama /api/version returned HTTP {resp.status_code} at {url}")
+
+    try:
+        data = resp.json()
+    except json.JSONDecodeError as exc:
+        raise AssertionError(f"Ollama /api/version returned non-JSON body: {resp.text!r}") from exc
+
+    if not isinstance(data, dict):
+        raise AssertionError(f"Ollama /api/version returned non-object: {type(data).__name__}")
+
+    version = data.get("version")
+    if not isinstance(version, str) or not version.strip():
+        raise AssertionError(f"Ollama /api/version missing or invalid 'version' field: {data!r}")
+
+    return version.strip()
