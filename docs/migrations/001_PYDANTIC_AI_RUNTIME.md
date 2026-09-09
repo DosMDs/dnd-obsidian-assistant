@@ -6978,3 +6978,246 @@ PAIM-C24 — Close final PAIM-11 evidence        ACCEPTED
 PAIM-C25 — Correct final PAIM-11 audit metadata DONE
 PAIM-12 — Real Ollama smoke/performance        NOT STARTED
 ```
+
+---
+
+## 51. PAIM-12 completion record — Real Ollama smoke/performance
+
+**Status:** DONE
+**Completed:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `e69c4e304e85e96cd0b658a815574b1344eb6807`
+**Direct parent:** `cc3120f325f7b3eab0aabe59b2b69afae251bb1e`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### PAIM-12 decision
+
+```text
+PASS — REAL OLLAMA OPERATIONAL GATE
+```
+
+### Current environment evidence
+
+```text
+Ollama version:
+0.33.3
+
+Pydantic AI version:
+2.39.0
+
+Python:
+3.12.11
+
+OS family:
+Windows
+
+profile name:
+paim12-agent
+
+provider:
+ollama
+
+role:
+AGENT
+
+model:
+qwen3.5:9b
+
+base URL:
+http://localhost:11434
+
+temperature:
+0.0
+
+keep_alive:
+None
+
+selected model present in /api/tags:
+YES
+
+native health reachable:
+YES
+
+native health model_available:
+YES
+```
+
+### Production-path evidence
+
+```text
+load_model_profiles:
+USED
+
+build_pydantic_ai_ollama_model:
+USED
+
+type(model) is OllamaModel:
+YES
+
+PydanticAIAgentRuntime:
+USED
+
+FunctionModel/TestModel/mock HTTP:
+NOT USED in live gate
+```
+
+### Direct samples
+
+| Sample | Duration | Outcome | Tools |
+| ------ | -------: | ------- | ----: |
+| 1      | 14.254s  | RESPOND |     0 |
+| 2      |  1.329s  | RESPOND |     0 |
+| 3      |  1.327s  | RESPOND |     0 |
+
+```text
+success:
+3/3
+
+min:
+1.327s
+
+median:
+1.329s
+
+max:
+14.254s
+```
+
+Note: Sample 1 duration includes initial model loading into memory.
+
+### Tool samples
+
+| Sample | Duration | Handler calls | Executions | Outcome |
+| ------ | -------: | ------------: | ---------: | ------- |
+| 1      |  2.593s  |             1 |          1 | RESPOND |
+| 2      |  2.353s  |             1 |          1 | RESPOND |
+| 3      |  2.338s  |             1 |          1 | RESPOND |
+
+```text
+tool:
+read_paim12_probe
+
+tool argument marker:
+"live"
+
+typed output marker:
+PAIM12-PROBE:live
+
+tool result replay:
+PASS
+
+final marker:
+PASS
+
+success:
+3/3
+
+min:
+2.338s
+
+median:
+2.353s
+
+max:
+2.593s
+```
+
+### Performance note
+
+On the tested local installation/profile, observed direct runtime
+latency was 1.327s/1.329s/14.254s (min/median/max) and tool-round-trip
+latency was 2.338s/2.353s/2.593s (min/median/max).
+
+No hard PAIM-12 latency threshold is defined.
+
+These measurements become input to PAIM-13 evaluation.
+
+### Supplemental real native smoke
+
+```text
+existing native test_ollama_smoke.py:
+NOT RUN
+
+reason:
+No compatible embedding profile configured on this machine.
+```
+
+### Offline behavior
+
+```text
+PAIM-12 env unset
+
+new live suite:
+12 skipped
+0 network-required failures
+```
+
+### Scope
+
+Exact Git-derived changed-file inventory:
+
+```text
+A tests/integration/test_pydantic_ai_ollama_live_runtime.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+Confirmation:
+
+```text
+src changed:
+NO
+
+CLI changed:
+NO
+
+pyproject.toml:
+unchanged
+
+uv.lock:
+unchanged
+```
+
+### History
+
+```text
+sections 1–50 unchanged:
+YES
+
+section 51 appended:
+YES
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Explicit PAIM-12 live suite | `uv run pytest tests/integration/test_pydantic_ai_ollama_live_runtime.py -v -s` | 12 passed, 0 skipped |
+| PAIM-09 builder/provider | `uv run pytest tests/unit/test_pydantic_ai_ollama.py tests/integration/test_pydantic_ai_ollama_runtime.py` | 41 passed |
+| PAIM-08 runtime | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime*.py` | 80 passed |
+| PAIM-10 thread | `uv run pytest tests/integration/test_pydantic_ai_sync_thread*.py` | 20 passed |
+| PAIM-11 parity | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity*.py` | 44 passed |
+| Native Ollama deterministic | `uv run pytest tests/unit/test_ollama_provider.py tests/unit/test_ollama_tool_calling.py tests/unit/test_ollama_structured.py tests/unit/test_ollama_embeddings.py tests/unit/test_ollama_cross_operation_hardening.py` | 272 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py` | 97 passed |
+| Contract maintainability | `uv run pytest tests/contract/test_maintainability.py` | 425 passed |
+| Contract test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py` | 25 passed |
+| Canonical offline pytest | `uv run pytest` | 5066 passed, 114 skipped, 0 failed, 0 errors |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 369 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Finalization
+
+```text
+commit SHA:                         (reported in Final Report)
+commit message:                     test: prove real Ollama Pydantic runtime operation (PAIM-12)
+push result:                        (reported in Final Report)
+HEAD == upstream:                   (reported in Final Report)
+working tree clean:                 (reported in Final Report)
+
+effective PAIM-12:                  DONE
+next:                               PAIM-13 — Eval comparison against reference
+```
+
+Do not begin PAIM-13 automatically.
+```

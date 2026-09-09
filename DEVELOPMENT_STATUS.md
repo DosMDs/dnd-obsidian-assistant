@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-09 (PAIM-C25)
+**Last updated:** 2026-09-09 (PAIM-12)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -133,7 +133,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C23 — Finalize exact Stage-9 parity contracts | DONE |
 | PAIM-C24 — Close final PAIM-11 evidence bookkeeping | DONE |
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
-| PAIM-12 — Real Ollama smoke/performance | NOT STARTED |
+| PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-13 — Eval comparison against reference | NOT STARTED |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
@@ -161,7 +161,7 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-12 — Real Ollama smoke/performance
+PAIM-13 — Eval comparison against reference
 ```
 
 ## Current blockers
