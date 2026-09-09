@@ -7220,4 +7220,235 @@ next:                               PAIM-13 — Eval comparison against referenc
 ```
 
 Do not begin PAIM-13 automatically.
+
+## 52. PAIM-C26 correction record — Seal PAIM-12 live runtime evidence
+
+**Status:** DONE
+**Completed:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `c6a78155bdc2885bfdc9860f200b326e895e4b13`
+**Direct parent:** `c6a78155bdc2885bfdc9860f200b326e895e4b13`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### C26 defects found
+
+```text
+- PAIM-12 direct smoke used a runtime that had read_paim12_probe exposed
+- direct marker was not asserted
+- handler count was reported but not literally measured
+- project TOOL-message content was not asserted
+- first-sample model-loading attribution was stronger than measured evidence
+```
+
+### C26 corrections
+
+```text
+- split single paim12_runtime into paim12_direct_runtime (zero tools)
+  and paim12_tool_runtime (read_paim12_probe only)
+- extracted shared _build_paim12_runtime helper
+- added Paim12ProbeState dataclass for literal handler counting
+- direct smoke now asserts marker in outcome.message and () tool_executions
+- tool runtime asserts handler delta (+1 per sample), tool-call ID binding,
+  and project TOOL message content
+- cold-start wording corrected: not proven to be model loading
+```
+
+### Current environment evidence
+
+```text
+Ollama version:
+0.33.3
+
+Pydantic AI version:
+2.39.0
+
+Python:
+3.12.11
+
+OS family:
+Windows
+
+profile name:
+paim12-agent
+
+provider:
+ollama
+
+role:
+AGENT
+
+model:
+qwen3.5:9b
+
+base URL:
+http://localhost:11434
+
+temperature:
+0.0
+
+keep_alive:
+None
+
+selected model present in /api/tags:
+YES
+
+native health reachable:
+YES
+
+native health model_available:
+YES
+```
+
+### Direct runtime evidence
+
+```text
+direct runtime registry:
+empty
+
+exposed tools:
+()
+
+sample 1:
+13.721s / RESPOND / PAIM12-DIRECT-OK in message / 0 tools
+
+sample 2:
+1.505s / RESPOND / PAIM12-DIRECT-OK in message / 0 tools
+
+sample 3:
+1.543s / RESPOND / PAIM12-DIRECT-OK in message / 0 tools
+
+reliability:
+3/3
+
+min/median/max:
+1.505s / 1.543s / 13.721s
+```
+
+### Tool runtime evidence
+
+```text
+tool runtime exposure:
+read_paim12_probe only
+
+handler delta sample 1:
++1
+
+handler delta sample 2:
++1
+
+handler delta sample 3:
++1
+
+total handler calls:
+3
+
+AgentToolExecutionResult per sample:
+1 / 1 / 1
+
+typed output:
+PAIM12-PROBE:live per sample — verified
+
+deterministic TOOL message:
+tool_name=read_paim12_probe, call_id bound, content contains PAIM12-PROBE:live — verified
+
+terminal marker:
+PAIM12-PROBE:live in outcome.message — 3/3
+
+reliability:
+3/3
+
+new timing samples:
+2.932s / 2.424s / 2.374s
+
+min/median/max:
+2.374s / 2.424s / 2.932s
+```
+
+### Corrected performance evidence
+
+The PAIM-12 test measured end-to-end duration only. It did not instrument
+Ollama model-load time separately. The longer first sample was consistent
+with a cold/warm-up effect, but its precise cause was not proven by PAIM-12.
+
+New corrected timings are reported in the Final Report. Original section-51
+timings are historical PAIM-12 measurements.
+
+### Offline behavior
+
+```text
+PAIM-C26 env unset
+
+live suite:
+12 skipped, 0 network-required failures
+```
+
+### Scope
+
+Exact Git-derived changed-file inventory:
+
+```text
+M tests/integration/test_pydantic_ai_ollama_live_runtime.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+Confirmation:
+
+```text
+src changed:
+NO
+
+CLI changed:
+NO
+
+pyproject.toml:
+unchanged
+
+uv.lock:
+unchanged
+```
+
+### History
+
+```text
+sections 1–51 unchanged:
+YES
+
+section 52 appended:
+YES
+```
+
+### Quality gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Explicit PAIM-C26 live suite | `uv run pytest tests/integration/test_pydantic_ai_ollama_live_runtime.py -v -s` | 12 passed, 0 skipped |
+| PAIM-09 builder/provider | `uv run pytest tests/unit/test_pydantic_ai_ollama.py tests/integration/test_pydantic_ai_ollama_runtime.py` | 41 passed |
+| PAIM-08 runtime | `uv run pytest tests/integration/test_pydantic_ai_agent_runtime.py tests/integration/test_pydantic_ai_agent_runtime_evidence.py tests/integration/test_pydantic_ai_agent_runtime_parity.py tests/integration/test_pydantic_ai_agent_runtime_boundaries.py tests/integration/test_pydantic_ai_agent_runtime_literal_evidence.py tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p2.py tests/integration/test_pydantic_ai_agent_runtime_literal_evidence_p3.py` | 80 passed |
+| PAIM-10 thread | `uv run pytest tests/integration/test_pydantic_ai_sync_thread_safety.py tests/integration/test_pydantic_ai_sync_thread_contract.py tests/integration/test_pydantic_ai_sync_thread_literal_evidence.py tests/integration/test_pydantic_ai_sync_thread_literal_evidence_p2.py` | 20 passed |
+| PAIM-11 parity | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity.py tests/integration/test_pydantic_ai_stage9_parity_p2.py tests/integration/test_pydantic_ai_stage9_parity_p3.py tests/integration/test_pydantic_ai_stage9_parity_p4.py tests/integration/test_pydantic_ai_stage9_parity_p5.py tests/integration/test_pydantic_ai_stage9_parity_exposure.py` | 44 passed |
+| Native Ollama deterministic | `uv run pytest tests/unit/test_ollama_provider.py tests/unit/test_ollama_tool_calling.py tests/unit/test_ollama_structured.py tests/unit/test_ollama_embeddings.py tests/unit/test_ollama_cross_operation_hardening.py` | 272 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py` | 97 passed |
+| Contract maintainability | `uv run pytest tests/contract/test_maintainability.py` | 425 passed |
+| Contract test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py` | 25 passed |
+| Canonical offline pytest | `uv run pytest` | 5066 passed, 114 skipped, 0 failed, 0 errors |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 369 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Finalization
+
+```text
+commit SHA:                         (reported in Final Report)
+commit message:                     test: seal PAIM-12 live runtime evidence (PAIM-C26)
+push result:                        (reported in Final Report)
+HEAD == upstream:                   (reported in Final Report)
+working tree clean:                 (reported in Final Report)
+
+effective PAIM-12:                  ACCEPTED / STILL BLOCKED
+effective PAIM-C26:                 DONE
+next:                               PAIM-13 — NOT STARTED
+```
+
+Do not begin PAIM-13 automatically.
 ```

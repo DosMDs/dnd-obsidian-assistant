@@ -28,12 +28,15 @@ from __future__ import annotations
 import os
 import statistics
 import time
+from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import pytest
 from pydantic import BaseModel
 
+from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentOutcomeKind
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
     PydanticAIAgentRuntime,
@@ -44,9 +47,26 @@ from dnd_assistant.application.pydantic_ai_run_deps import (
 from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
+from dnd_assistant.errors import NotFoundError
 from dnd_assistant.models.ollama import OllamaModelProvider
 from dnd_assistant.models.pydantic_ai_ollama import (
     build_pydantic_ai_ollama_model,
+)
+from dnd_assistant.retrieval.service import SearchService
+from dnd_assistant.retrieval.types import SearchHit, SearchQuery
+from dnd_assistant.storage.session_events import RawSessionEvent
+from dnd_assistant.storage.session_metadata import RawSessionMetadata
+from dnd_assistant.storage.types import VaultDocument, VaultRepository
+from dnd_assistant.tools.catalog import (
+    build_tool_registry_schema,
+)
+from dnd_assistant.tools.registry import ToolRegistry
+from dnd_assistant.tools.types import (
+    Permission,
+    SessionMode,
+)
+from dnd_assistant.tools.types import (
+    ToolDefinition as ProjectToolDefinition,
 )
 from tests.support.pydantic_ai_runtime import (
     make_read_context,
@@ -68,6 +88,20 @@ class Paim12ProbeInput(BaseModel):
 
 class Paim12ProbeOutput(BaseModel):
     result: str
+
+
+# ── Probe handler counter ────────────────────────────────────────────────────
+
+
+@dataclass
+class Paim12ProbeState:
+    """Mutable counter owned by the tool-runtime fixture.
+
+    Fresh instance per module scope — tracks handler invocations
+    across all tool samples within one module run.
+    """
+
+    calls: int = 0
 
 
 # ── Fixtures ─────────────────────────────────────────────────────────────────
@@ -133,6 +167,104 @@ def paim12_profile(paim12_config: Any, paim12_profile_name: str) -> Any:
             f"provider={profile.provider!r}, expected 'ollama'"
         )
     return profile
+
+
+# ── Shared runtime builder ───────────────────────────────────────────────────
+
+
+def _build_paim12_runtime(
+    paim12_profile: Any,
+    registry: ToolRegistry,
+) -> PydanticAIAgentRuntime:
+    """Build a PydanticAIAgentRuntime from profile and pre-configured registry.
+
+    All stubs are identical across direct and tool variants — only the
+    registry contents differ.
+    """
+
+    class _StubSearchService(SearchService):
+        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
+            return []
+
+    class _StubVaultRepository(VaultRepository):
+        def get_entity(self, entity_id: str) -> VaultDocument:
+            raise ValueError("unexpected call")
+
+    class _StubSessionRepo:
+        def get_active_session(self) -> RawSessionMetadata | None:
+            return None
+
+    class _StubEventRepo:
+        def list_events(self, session_id: str) -> list[RawSessionEvent]:
+            return []
+
+    class _StubWorldTimeRepo:
+        def get_current_world_time(self) -> None:
+            raise NotFoundError("no world time")
+
+    catalog = build_tool_registry_schema(registry)
+    bridge = PydanticAIToolBridge(registry=registry)
+    context_builder = AgentContextBuilder(
+        search_service=_StubSearchService(),
+        vault_repository=_StubVaultRepository(),
+        session_repository=_StubSessionRepo(),
+        event_repository=_StubEventRepo(),
+        world_time_repository=_StubWorldTimeRepo(),
+    )
+    preparer = DndAgentRunPreparer(
+        context_builder=context_builder,
+        tool_catalog=catalog,
+        tool_bridge=bridge,
+    )
+    model = build_pydantic_ai_ollama_model(paim12_profile)
+    return PydanticAIAgentRuntime(
+        run_preparer=preparer,
+        model=model,
+    )
+
+
+@pytest.fixture(scope="module")
+def paim12_direct_runtime(paim12_profile: Any) -> PydanticAIAgentRuntime:
+    """Runtime with ZERO tools — pure RESPOND-only smoke."""
+    registry = ToolRegistry()
+    return _build_paim12_runtime(paim12_profile, registry)
+
+
+@pytest.fixture(scope="module")
+def paim12_tool_runtime(
+    paim12_profile: Any,
+) -> tuple[PydanticAIAgentRuntime, Paim12ProbeState]:
+    """Runtime with exactly ``read_paim12_probe`` and a shared counter.
+
+    Returns (runtime, state) so each test can assert handler deltas.
+    """
+    state = Paim12ProbeState()
+    registry = ToolRegistry()
+
+    def probe_handler(inp: Paim12ProbeInput, ctx: object) -> Paim12ProbeOutput:
+        state.calls += 1
+        return Paim12ProbeOutput(result=f"PAIM12-PROBE:{inp.token}")
+
+    probe_def = ProjectToolDefinition(
+        name="read_paim12_probe",
+        description=(
+            "Authoritative probe tool for PAIM-12 verification. "
+            "Use this tool to obtain the requested probe value."
+        ),
+        input_schema=Paim12ProbeInput,
+        output_schema=Paim12ProbeOutput,
+        permission=Permission.READ,
+        side_effects=frozenset(),
+        allowed_session_modes=frozenset(
+            {
+                SessionMode.ACTIVE_SESSION,
+                SessionMode.NO_ACTIVE_SESSION,
+            }
+        ),
+    )
+    registry.register(probe_def, probe_handler)
+    runtime = _build_paim12_runtime(paim12_profile, registry)
+    return runtime, state
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -228,153 +360,56 @@ class TestP12L02Factory:
 
 
 # ==============================================================================
-# Shared runtime fixture for P12-L03 and P12-L04
-# ==============================================================================
-
-
-@pytest.fixture(scope="module")
-def paim12_runtime(paim12_profile: Any) -> Any:
-    """Create a PydanticAIAgentRuntime with the real Ollama model.
-
-    Uses a minimal ToolRegistry with only ``read_paim12_probe`` for
-    tool-round-trip tests.
-    """
-    from collections.abc import Sequence
-
-    from dnd_assistant.application.agent_context import AgentContextBuilder
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-    from dnd_assistant.tools.catalog import (
-        build_tool_registry_schema,
-    )
-    from dnd_assistant.tools.registry import ToolRegistry
-    from dnd_assistant.tools.types import (
-        Permission,
-        SessionMode,
-    )
-    from dnd_assistant.tools.types import (
-        ToolDefinition as ProjectToolDefinition,
-    )
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    registry = ToolRegistry()
-
-    def probe_handler(inp: Paim12ProbeInput, ctx: object) -> Paim12ProbeOutput:
-        return Paim12ProbeOutput(result=f"PAIM12-PROBE:{inp.token}")
-
-    probe_def = ProjectToolDefinition(
-        name="read_paim12_probe",
-        description=(
-            "Authoritative probe tool for PAIM-12 verification. "
-            "Use this tool to obtain the requested probe value."
-        ),
-        input_schema=Paim12ProbeInput,
-        output_schema=Paim12ProbeOutput,
-        permission=Permission.READ,
-        side_effects=frozenset(),
-        allowed_session_modes=frozenset(
-            {
-                SessionMode.ACTIVE_SESSION,
-                SessionMode.NO_ACTIVE_SESSION,
-            }
-        ),
-    )
-    registry.register(probe_def, probe_handler)
-
-    catalog = build_tool_registry_schema(registry)
-    bridge = PydanticAIToolBridge(registry=registry)
-    context_builder = AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
-    preparer = DndAgentRunPreparer(
-        context_builder=context_builder,
-        tool_catalog=catalog,
-        tool_bridge=bridge,
-    )
-
-    model = build_pydantic_ai_ollama_model(paim12_profile)
-    runtime = PydanticAIAgentRuntime(
-        run_preparer=preparer,
-        model=model,
-    )
-    return runtime
-
-
-# ==============================================================================
 # P12-L03: 3x direct production-runtime terminal smoke + latency
 # ==============================================================================
 
 
 class TestP12L03DirectSmoke:
-    """Direct terminal smoke -- no tools, pure RESPOND."""
+    """Direct terminal smoke — zero tools, pure RESPOND."""
 
     _durations: list[float] = []
 
-    def _run_direct(self, paim12_runtime: Any, marker: str) -> Any:
+    def _run_direct(self, runtime: PydanticAIAgentRuntime, marker: str) -> Any:
         """Run a direct terminal smoke and return the result."""
         context = make_read_context()
         user_input = (
             f"Return a RESPOND terminal answer whose message contains "
             f"{marker}. No tools are available."
         )
-        return paim12_runtime.run(
+        return runtime.run(
             user_input,
             execution_context=context,
         )
 
-    def test_direct_sample_1(self, paim12_runtime: Any) -> None:
+    def _assert_direct_result(self, result: Any, marker: str) -> None:
+        """Assert direct-smoke invariants."""
+        assert result.outcome.kind is AgentOutcomeKind.RESPOND
+        assert marker in result.outcome.message
+        assert result.tool_executions == ()
+
+    def test_direct_sample_1(self, paim12_direct_runtime: PydanticAIAgentRuntime) -> None:
         t0 = time.perf_counter()
-        result = self._run_direct(paim12_runtime, "PAIM12-DIRECT-OK")
+        result = self._run_direct(paim12_direct_runtime, "PAIM12-DIRECT-OK")
         duration = time.perf_counter() - t0
         TestP12L03DirectSmoke._durations.append(duration)
         print(f"\nPAIM12_DIRECT_1={duration:.3f}s")
-        assert result.outcome.kind is AgentOutcomeKind.RESPOND
-        assert len(result.tool_executions) == 0
+        self._assert_direct_result(result, "PAIM12-DIRECT-OK")
 
-    def test_direct_sample_2(self, paim12_runtime: Any) -> None:
+    def test_direct_sample_2(self, paim12_direct_runtime: PydanticAIAgentRuntime) -> None:
         t0 = time.perf_counter()
-        result = self._run_direct(paim12_runtime, "PAIM12-DIRECT-OK")
+        result = self._run_direct(paim12_direct_runtime, "PAIM12-DIRECT-OK")
         duration = time.perf_counter() - t0
         TestP12L03DirectSmoke._durations.append(duration)
         print(f"\nPAIM12_DIRECT_2={duration:.3f}s")
-        assert result.outcome.kind is AgentOutcomeKind.RESPOND
-        assert len(result.tool_executions) == 0
+        self._assert_direct_result(result, "PAIM12-DIRECT-OK")
 
-    def test_direct_sample_3(self, paim12_runtime: Any) -> None:
+    def test_direct_sample_3(self, paim12_direct_runtime: PydanticAIAgentRuntime) -> None:
         t0 = time.perf_counter()
-        result = self._run_direct(paim12_runtime, "PAIM12-DIRECT-OK")
+        result = self._run_direct(paim12_direct_runtime, "PAIM12-DIRECT-OK")
         duration = time.perf_counter() - t0
         TestP12L03DirectSmoke._durations.append(duration)
         print(f"\nPAIM12_DIRECT_3={duration:.3f}s")
-        assert result.outcome.kind is AgentOutcomeKind.RESPOND
-        assert len(result.tool_executions) == 0
+        self._assert_direct_result(result, "PAIM12-DIRECT-OK")
 
     @classmethod
     def teardown_class(cls) -> None:
@@ -397,7 +432,11 @@ class TestP12L04ToolSmoke:
 
     _durations: list[float] = []
 
-    def _run_tool(self, paim12_runtime: Any, token: str) -> Any:
+    def _run_tool(
+        self,
+        runtime: PydanticAIAgentRuntime,
+        token: str,
+    ) -> Any:
         """Run a single-tool round-trip and return the result."""
         context = make_read_context()
         user_input = (
@@ -406,52 +445,79 @@ class TestP12L04ToolSmoke:
             f"After the tool returns, finish with a RESPOND terminal "
             f"answer whose message includes the exact probe marker."
         )
-        return paim12_runtime.run(
+        return runtime.run(
             user_input,
             execution_context=context,
         )
 
-    def test_tool_sample_1(self, paim12_runtime: Any) -> None:
+    def _assert_tool_result(
+        self,
+        result: Any,
+        token: str,
+        *,
+        before: int,
+        state: Paim12ProbeState,
+    ) -> None:
+        """Assert tool-round-trip invariants including handler delta."""
+        # Handler delta
+        assert state.calls == before + 1, (
+            f"Expected handler call delta +1 (before={before}, after={state.calls})"
+        )
+        # Execution count
+        assert len(result.tool_executions) == 1
+        exec0 = result.tool_executions[0]
+        # Tool name
+        assert exec0.tool_call.name == "read_paim12_probe"
+        # Tool arguments
+        assert exec0.tool_call.arguments == {"token": token}
+        # Typed output
+        assert exec0.output.result == f"PAIM12-PROBE:{token}"
+        # Tool-call ID binding
+        assert exec0.tool_message.tool_name == "read_paim12_probe"
+        assert exec0.tool_message.tool_call_id == exec0.tool_call.call_id
+        assert f"PAIM12-PROBE:{token}" in exec0.tool_message.content
+        # Terminal RESPOND
+        assert result.outcome.kind is AgentOutcomeKind.RESPOND
+        assert f"PAIM12-PROBE:{token}" in result.outcome.message
+
+    def test_tool_sample_1(
+        self,
+        paim12_tool_runtime: tuple[PydanticAIAgentRuntime, Paim12ProbeState],
+    ) -> None:
+        runtime, state = paim12_tool_runtime
+        before = state.calls
         t0 = time.perf_counter()
-        result = self._run_tool(paim12_runtime, "live")
+        result = self._run_tool(runtime, "live")
         duration = time.perf_counter() - t0
         TestP12L04ToolSmoke._durations.append(duration)
         print(f"\nPAIM12_TOOL_1={duration:.3f}s")
-        assert len(result.tool_executions) == 1
-        exec0 = result.tool_executions[0]
-        assert exec0.tool_call.name == "read_paim12_probe"
-        assert exec0.tool_call.arguments["token"] == "live"
-        assert exec0.output.result == "PAIM12-PROBE:live"
-        assert result.outcome.kind is AgentOutcomeKind.RESPOND
-        assert "PAIM12-PROBE:live" in result.outcome.message
+        self._assert_tool_result(result, "live", before=before, state=state)
 
-    def test_tool_sample_2(self, paim12_runtime: Any) -> None:
+    def test_tool_sample_2(
+        self,
+        paim12_tool_runtime: tuple[PydanticAIAgentRuntime, Paim12ProbeState],
+    ) -> None:
+        runtime, state = paim12_tool_runtime
+        before = state.calls
         t0 = time.perf_counter()
-        result = self._run_tool(paim12_runtime, "live")
+        result = self._run_tool(runtime, "live")
         duration = time.perf_counter() - t0
         TestP12L04ToolSmoke._durations.append(duration)
         print(f"\nPAIM12_TOOL_2={duration:.3f}s")
-        assert len(result.tool_executions) == 1
-        exec0 = result.tool_executions[0]
-        assert exec0.tool_call.name == "read_paim12_probe"
-        assert exec0.tool_call.arguments["token"] == "live"
-        assert exec0.output.result == "PAIM12-PROBE:live"
-        assert result.outcome.kind is AgentOutcomeKind.RESPOND
-        assert "PAIM12-PROBE:live" in result.outcome.message
+        self._assert_tool_result(result, "live", before=before, state=state)
 
-    def test_tool_sample_3(self, paim12_runtime: Any) -> None:
+    def test_tool_sample_3(
+        self,
+        paim12_tool_runtime: tuple[PydanticAIAgentRuntime, Paim12ProbeState],
+    ) -> None:
+        runtime, state = paim12_tool_runtime
+        before = state.calls
         t0 = time.perf_counter()
-        result = self._run_tool(paim12_runtime, "live")
+        result = self._run_tool(runtime, "live")
         duration = time.perf_counter() - t0
         TestP12L04ToolSmoke._durations.append(duration)
         print(f"\nPAIM12_TOOL_3={duration:.3f}s")
-        assert len(result.tool_executions) == 1
-        exec0 = result.tool_executions[0]
-        assert exec0.tool_call.name == "read_paim12_probe"
-        assert exec0.tool_call.arguments["token"] == "live"
-        assert exec0.output.result == "PAIM12-PROBE:live"
-        assert result.outcome.kind is AgentOutcomeKind.RESPOND
-        assert "PAIM12-PROBE:live" in result.outcome.message
+        self._assert_tool_result(result, "live", before=before, state=state)
 
     @classmethod
     def teardown_class(cls) -> None:
