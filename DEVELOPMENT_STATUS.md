@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-09 (PAIM-C23)
+**Last updated:** 2026-09-09 (PAIM-C24)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -131,6 +131,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-11 — Full Stage-9 behavioral parity | DONE |
 | PAIM-C22 — Seal PAIM-11 behavioral parity evidence | DONE |
 | PAIM-C23 — Finalize exact Stage-9 parity contracts | DONE |
+| PAIM-C24 — Close final PAIM-11 evidence bookkeeping | DONE |
 | PAIM-12 — Real Ollama smoke/performance | NOT STARTED |
 | PAIM-13 — Eval comparison against reference | NOT STARTED |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |

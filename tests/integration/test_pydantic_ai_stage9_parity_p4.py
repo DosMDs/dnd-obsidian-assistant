@@ -139,7 +139,7 @@ class TestP11A26NonFiniteJsonArg:
     ) -> None:
         ctx = make_read_context()
         pyd_request_count: list[int] = [0]
-        pyd_error: BaseException | None = None
+        pyd_error: Exception | None = None
 
         pyd_registry = ToolRegistry()
         _copy_registry_simple(registry, pyd_registry, pyd_counters)
@@ -167,7 +167,7 @@ class TestP11A26NonFiniteJsonArg:
         pydantic_runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=counting_model)
         try:
             pydantic_runtime.run("read with NaN", execution_context=ctx)
-        except BaseException as exc:
+        except Exception as exc:
             pyd_error = exc
 
         assert isinstance(pyd_error, ModelError)
@@ -203,7 +203,7 @@ class TestP11A27StructurallyInvalidBatch:
     ) -> None:
         ctx = make_read_context()
         pyd_request_count: list[int] = [0]
-        pyd_error: BaseException | None = None
+        pyd_error: Exception | None = None
 
         pyd_registry = ToolRegistry()
         _copy_registry_simple(registry, pyd_registry, pyd_counters)
@@ -235,7 +235,7 @@ class TestP11A27StructurallyInvalidBatch:
         pydantic_runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=counting_model)
         try:
             pydantic_runtime.run("read with NaN in batch", execution_context=ctx)
-        except BaseException as exc:
+        except Exception as exc:
             pyd_error = exc
 
         assert isinstance(pyd_error, ModelError)
@@ -318,10 +318,10 @@ class TestP11A28ReadFailFast:
             tool_catalog=ref_catalog_local,
             tool_execution_service=ref_tool_svc,
         )
-        ref_error: BaseException | None = None
+        ref_error: Exception | None = None
         try:
             ref_loop.run("read three with second failing", execution_context=ctx)
-        except BaseException as exc:
+        except Exception as exc:
             ref_error = exc
         ref_model_requests = ref_gateway.call_count
 
@@ -351,10 +351,10 @@ class TestP11A28ReadFailFast:
 
         counting_model = FunctionModel(pyd_fn)
         pydantic_runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=counting_model)
-        pyd_error: BaseException | None = None
+        pyd_error: Exception | None = None
         try:
             pydantic_runtime.run("read three with second failing", execution_context=ctx)
-        except BaseException as exc:
+        except Exception as exc:
             pyd_error = exc
 
         assert ref_error is not None
@@ -422,15 +422,15 @@ class TestP11A33FirstToolSucceedsSecondFails:
             tool_catalog=ref_catalog_local,
             tool_execution_service=ref_tool_svc,
         )
-        ref_error: BaseException | None = None
+        ref_error: Exception | None = None
         try:
             ref_loop.run("tool then crash", execution_context=ctx)
-        except BaseException as exc:
+        except Exception as exc:
             ref_error = exc
         ref_model_requests = custom_gateway.call_count
 
         # Pydantic
-        pyd_error: BaseException | None = None
+        pyd_error: Exception | None = None
         pyd_registry = ToolRegistry()
         _copy_registry_simple(registry, pyd_registry, pyd_counters)
         tool_bridge = PydanticAIToolBridge(registry=pyd_registry)
@@ -460,7 +460,7 @@ class TestP11A33FirstToolSucceedsSecondFails:
         pydantic_runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=counting_model)
         try:
             pydantic_runtime.run("tool then crash", execution_context=ctx)
-        except BaseException as exc:
+        except Exception as exc:
             pyd_error = exc
 
         assert isinstance(ref_error, ModelError)

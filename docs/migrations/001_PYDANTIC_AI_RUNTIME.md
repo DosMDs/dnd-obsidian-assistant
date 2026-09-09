@@ -6735,3 +6735,145 @@ PAIM-C22 — Seal PAIM-11 behavioral parity      DONE
 PAIM-C23 — Seal PAIM-11 parity contracts       DONE
 PAIM-12 — Real Ollama smoke/performance        NOT STARTED
 ```
+
+## 49. PAIM-C24 correction record — Close final PAIM-11 evidence bookkeeping
+
+**Status:** DONE
+**Completed:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**PAIM-C24 starting SHA:** `3baaa357d4f018c79d6e84010ba9cb2a16a19926`
+**Parent of PAIM-C24 starting SHA:** `1a63e146523e29d5d0c50947736d70b359039e0b`
+**Parent of 1a63e146:** `facf53a475ddc1618d8b915f11737bf3e33c8f37`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Defects corrected from section 48
+
+1. **C23 still caught `BaseException`.** The parity harness `_FakeModelGateway.fail_exc`, `DualRuntimeObservation.ref_error`/`pyd_error`, and both `except BaseException` clauses in `run_scenario()` were still typed/catching `BaseException`. Corrected: all changed to `Exception` in `stage9_parity.py` and `test_pydantic_ai_stage9_parity_p4.py`. Verified zero `BaseException` matches across all parity files.
+
+2. **Model-visible lists were captured but not asserted.** `ref_exposed_tool_lists` and `pyd_exposed_tool_lists` were populated but no test asserted their contents. Corrected: added `assert_model_visible_tool_parity()` helper and 8 dedicated exposure tests (C24-E01 through C24-E08).
+
+3. **`_CountingToolExecutor` was incorrectly classified as B.** It is test-only instrumentation, not a production application component. Corrected: B = 6 (removed `_CountingToolExecutor`).
+
+4. **Duplicate validation was incorrectly attributed to `_create()`.** Section 48 claimed `PydanticAIToolSnapshot._create()` performs structural validation. The actual implementation: `freeze()` validates input and creates the snapshot; `_create()` is the internal factory. Corrected: C rows now reference `freeze()` and `_validate_snapshot()`.
+
+5. **Wrong bridge/snapshot row named nonexistent `_verify_snapshot_ownership()`.** The actual project boundary is `DndAgentPolicy.validate_binding()` + `PydanticAIToolBridge._validate_snapshot()`. Corrected.
+
+6. **Duplicate concrete-ID defense-in-depth was omitted from C.** Both the Pydantic AI framework duplicate-ID rejection and `DndAgentPolicy._reject_duplicate_call_ids()` are active safety invariants. Added to C.
+
+7. **Section 48 defect-history sentence about the previous A count was inaccurate.** Section 47 had reported 31 scenarios, not 34. The corrected A count is 34 (A01–A25, A28–A36, excluding A26/A27 which are C-equivalent).
+
+8. **Model-visible exposure "Single READ" claimed `["read_alpha"]`.** The actual exposure in a READ context with the standard 3-tool registry is `["read_alpha", "read_beta"]` because both READ tools match the permission/session-mode filter. Corrected.
+
+### Corrected B — Shared application components (6)
+
+```text
+AgentContextBuilder
+select_agent_tools
+ToolExecutor
+ToolRegistry
+ToolRegistrySchema
+build_agent_tool_execution_result
+```
+
+`_CountingToolExecutor` removed from B (test-only instrumentation, not a production application component).
+
+**Test harness instrumentation (not application components):**
+
+```text
+_CountingToolExecutor
+```
+
+### Corrected C — Equivalent Pydantic safety evidence (7)
+
+| Reference invariant | Pydantic equivalent | Test node(s) |
+|---|---|---|
+| Missing exposed definition | `DndAgentPolicy` rejects unknown/hidden names via `_resolve_calls()` against frozen snapshot | A20, A21, A22, A23 |
+| Duplicate definition | `PydanticAIToolBridge.freeze()` rejects duplicate names in input | `test_pydantic_ai_tool_bridge.py::TestMalformedSnapshot::test_duplicate_name` |
+| Malformed Permission | `PydanticAIToolBridge._verify_metadata_match()` rejects foreign enums | `test_pydantic_ai_tool_bridge_authority.py::TestExactEnumEvidence::test_foreign_permission`, `test_foreign_session_mode`, `test_foreign_side_effect`, `test_plain_string` |
+| NaN/Infinity rejection at ToolCall construction | `adapt_pydantic_tool_calls()` rejects NaN in ToolCallPart args | A26, A27 |
+| Forged/copied snapshot authority | `PydanticAIToolBridge._validate_snapshot()` verifies ownership token + exact issued instance | `test_pydantic_ai_tool_bridge_authority.py::TestSameRegistryCopy::test_add_hidden_write`, `test_replace_read_a_with_read_b`, `test_reorder_exposed` |
+| Wrong bridge ↔ snapshot binding | `DndAgentPolicy.validate_binding()` + `PydanticAIToolBridge._validate_snapshot()` | `test_pydantic_ai_run_deps.py::TestDepsBinding::test_cross_bridge`, `test_same_bridge_wrong_snapshot`, `test_copied_snapshot` |
+| Duplicate concrete call IDs | Pydantic AI framework duplicate-ID rejection + `DndAgentPolicy._reject_duplicate_call_ids()` | A18 |
+
+### Corrected D — Not applicable (0)
+
+Same as section 48. D = 0.
+
+### Corrected failure matrix
+
+Same as section 48 (unchanged from PAIM-C23).
+
+### Literal model-facing exposure matrix
+
+All 8 tests (C24-E01 through C24-E08) pass with exact name/order/schema parity.
+
+| Context | Reference tools | Candidate tools | Match |
+|---|---|---|---|
+| Single READ | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+| 2 READ | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+| WRITE + active + audit | `["read_alpha", "read_beta", "write_alpha"]` | `["read_alpha", "read_beta", "write_alpha"]` | PASS |
+| WRITE + no audit | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+| READ permission | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+| Wrong session mode | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+| A21 hidden write_alpha | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+| A23 allowed + hidden | `["read_alpha", "read_beta"]` | `["read_alpha", "read_beta"]` | PASS |
+
+For successful two-request runs, candidate request #1 and #2 model-visible tool names/order are unchanged from the same frozen snapshot (verified by C24-E01 through C24-E06, each asserting `expected_requests=2` with identical tool lists on both requests).
+
+### A/B/C/D final corrected counts
+
+```text
+A = 34  (direct old/new runtime parity scenarios)
+B = 6   (shared production application components)
+C = 7   (equivalent Pydantic safety evidence families)
+D = 0   (no applicable items)
+```
+
+### History
+
+```text
+sections 1-48 unchanged:             YES
+section 49 appended:                 YES
+```
+
+### Changed files
+
+```text
+M tests/support/stage9_parity.py                              (882 lines)
+M tests/integration/test_pydantic_ai_stage9_parity_p4.py      (635 lines)
+A tests/integration/test_pydantic_ai_stage9_parity_exposure.py (602 lines)
+```
+
+```text
+src changed:                         NO
+pyproject.toml:                      unchanged
+uv.lock:                             unchanged
+CLI production changed:              NO
+```
+
+### File sizes
+
+All test/support files <1000: YES.
+
+### Quality gates
+
+| Gate | Result |
+|---|---|
+| PAIM-C24 exposure evidence (8 tests) | 8 passed |
+| Corrected PAIM-11 parity (36 tests) | 36 passed |
+| Reference Stage-9 suite | (reported in Final Report) |
+| Maintainability contract | (reported in Final Report) |
+| Canonical full pytest | (reported in Final Report) |
+| Ruff check | (reported in Final Report) |
+| Ruff format | (reported in Final Report) |
+| git diff --check | (reported in Final Report) |
+
+### Effective status
+
+```text
+PAIM-11 — Full Stage-9 behavioral parity       DONE
+PAIM-C22 — Seal PAIM-11 behavioral parity      DONE
+PAIM-C23 — Seal PAIM-11 parity contracts       DONE
+PAIM-C24 — Close final PAIM-11 evidence        DONE
+PAIM-12 — Real Ollama smoke/performance        NOT STARTED
+```

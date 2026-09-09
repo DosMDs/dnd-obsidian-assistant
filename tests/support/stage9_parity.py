@@ -252,7 +252,7 @@ class _FakeModelGateway(ModelGateway):
         responses: list[ToolAwareResponse],
         *,
         fail_on_request: int | None = None,
-        fail_exc: BaseException | None = None,
+        fail_exc: Exception | None = None,
     ) -> None:
         self._responses = responses
         self.call_count: int = 0
@@ -469,8 +469,8 @@ class DualRuntimeObservation:
     pyd_handler_counts: tuple[int, int, int]
     ref_executor_attempts: int = 0
     pyd_executor_attempts: int = 0
-    ref_error: BaseException | None = None
-    pyd_error: BaseException | None = None
+    ref_error: Exception | None = None
+    pyd_error: Exception | None = None
     ref_gateway: _FakeModelGateway | None = None
     ref_exposed_tool_lists: list[list[ToolPublicDefinition]] | None = None
     pyd_exposed_tool_lists: list[list[Any]] | None = None
@@ -581,21 +581,21 @@ def run_scenario(
         tool_execution_service=tool_svc,
     )
 
-    ref_error: BaseException | None = None
+    ref_error: Exception | None = None
     reference_result: AgentRunResult | None = None
     try:
         reference_result = ref_loop.run(
             scenario.user_input,
             execution_context=scenario.execution_context,
         )
-    except BaseException as exc:
+    except Exception as exc:
         ref_error = exc
 
     ref_model_requests = ref_gateway.call_count
     ref_executor_attempts = counting_executor.execute_count
 
     # ── Pydantic: PydanticAIAgentRuntime ────────────────────────────────────
-    pyd_error: BaseException | None = None
+    pyd_error: Exception | None = None
     pydantic_result: AgentRunResult | None = None
 
     pyd_registry = ToolRegistry()
@@ -633,7 +633,7 @@ def run_scenario(
             scenario.user_input,
             execution_context=scenario.execution_context,
         )
-    except BaseException as exc:
+    except Exception as exc:
         pyd_error = exc
 
     pyd_model_requests = pyd_request_count[0]
@@ -862,3 +862,51 @@ def assert_parity(
     if expected_outcome_message is not None:
         assert obs.reference.outcome.message == expected_outcome_message
         assert obs.pydantic.outcome.message == expected_outcome_message
+
+
+def assert_model_visible_tool_parity(
+    obs: DualRuntimeObservation,
+    *,
+    expected_names: tuple[str, ...],
+    expected_requests: int,
+) -> None:
+    """Assert literal model-visible tool exposure parity.
+
+    Inspects the actual tool lists given to the model on each request:
+    - Reference: ``ModelGateway.chat_with_tools(..., tools=...)``
+    - Candidate: ``agent_info.function_tools`` from ``FunctionModel`` callback
+
+    Compares tool count, name, order, description, and input JSON schema
+    for every corresponding model request.
+    """
+    # Reference: _FakeModelGateway.exposed_tool_lists
+    assert obs.ref_exposed_tool_lists is not None
+    assert len(obs.ref_exposed_tool_lists) == expected_requests
+    for req_idx, tools in enumerate(obs.ref_exposed_tool_lists):
+        ref_names = tuple(t.name for t in tools)
+        assert ref_names == expected_names, (
+            f"Reference request #{req_idx + 1} tool names: {ref_names} != {expected_names}"
+        )
+
+    # Candidate: agent_info.function_tools from FunctionModel callback
+    assert obs.pyd_exposed_tool_lists is not None
+    assert len(obs.pyd_exposed_tool_lists) == expected_requests
+    for req_idx, tools in enumerate(obs.pyd_exposed_tool_lists):
+        pyd_names = tuple(t.name for t in tools)
+        assert pyd_names == expected_names, (
+            f"Pydantic request #{req_idx + 1} tool names: {pyd_names} != {expected_names}"
+        )
+
+    # Cross-reference: for each request, compare tool metadata
+    for req_idx in range(expected_requests):
+        ref_tools = obs.ref_exposed_tool_lists[req_idx]
+        pyd_tools = obs.pyd_exposed_tool_lists[req_idx]
+        assert len(ref_tools) == len(pyd_tools)
+        for ref_t, pyd_t in zip(ref_tools, pyd_tools, strict=True):
+            assert ref_t.name == pyd_t.name
+            assert ref_t.description == pyd_t.description
+            # Compare input JSON schema between ToolPublicDefinition and
+            # pydantic_ai ToolDefinition.parameters_json_schema
+            assert ref_t.input_schema == pyd_t.parameters_json_schema, (
+                f"Tool {ref_t.name}: input schema mismatch"
+            )
