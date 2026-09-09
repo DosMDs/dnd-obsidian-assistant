@@ -240,3 +240,104 @@ Never infer these labels from visual position alone.
 
 Prefer `base-only` and `head-only` as primary evidence terms because they
 are directionally self-explanatory.
+
+## 7. Acceptance-to-evidence traceability
+
+For any task with explicit hard acceptance criteria, create an evidence plan
+before finalization and reconcile it after implementation.
+
+Required shape:
+
+```text
+acceptance criterion
+→ exact code/test/assertion/command that proves it
+→ final result
+```
+
+Examples:
+
+```text
+"handler exactly once"
+→ literal handler counter around the real execution path
+
+"zero ToolExecutor execution"
+→ executor/bridge attempt counter, not only handler_count == 0
+
+"tool hidden"
+→ assertion against actual model-visible exposure
+
+"two model requests"
+→ counter at semantic model request boundary
+```
+
+If a hard criterion has no concrete evidence source, the task is not `DONE`.
+Use `IN PROGRESS` or `BLOCKED` and report the missing evidence.
+
+Canonical detailed rule:
+
+```text
+.gigacode/rules/38-behavioral-evidence-integrity.md
+```
+
+## 8. Evidence-strength labels
+
+Distinguish these explicitly:
+
+```text
+literal/measured
+inferred
+documented/historical
+```
+
+A current hard acceptance claim should be literal/measured whenever a stable
+boundary can be observed directly.
+
+Do not promote inferred evidence to literal evidence in a Final Report.
+
+A test passing does not prove a statement that the test never asserts.
+
+## 9. Canonical command identity and provenance
+
+Reserved names such as:
+
+```text
+canonical pytest
+full pytest
+full suite
+```
+
+must refer to the repository-defined canonical command, normally:
+
+```text
+from repository root:
+uv run pytest
+```
+
+A focused subset, unit suite, contract suite, or a command executed from a
+subdirectory must be named precisely and must not be reported as the canonical
+full suite.
+
+When environment state affects collection/network behavior, record the relevant
+state, especially for explicit live gates versus offline canonical runs.
+
+Example:
+
+```text
+PAIM live env set
+→ explicit live gate
+
+PAIM live env unset
+→ canonical offline pytest
+```
+
+## 10. Current-status authority
+
+Current roadmap/task state comes from:
+
+```text
+DEVELOPMENT_STATUS.md
+```
+
+Durable project-context documents, migration history, chat summaries and old
+Final Reports may contain historical snapshots. Do not use them as the current
+status authority when they conflict with `DEVELOPMENT_STATUS.md`.

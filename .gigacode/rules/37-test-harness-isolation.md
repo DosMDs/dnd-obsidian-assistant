@@ -18,7 +18,7 @@ Production behavior must not be weakened or broadened merely to survive:
 
 If a strict production invariant exposes a test-harness issue:
 
-```
+```text
 fix the harness
 not the production contract
 ```
@@ -101,3 +101,75 @@ STOP
 Exception: a task explicitly about test-harness behavior may modify it.
 
 Do not forbid legitimate harness maintenance.
+
+## 9. Live-test skip is not constructor evidence
+
+A live/integration test skipped because an environment variable or external
+service is unavailable does **not** prove that its fixtures/object graph can be
+constructed.
+
+For opt-in live suites, provide offline preflight tests for the test-owned
+infrastructure when constructor/type/fixture failures are plausible.
+
+At minimum validate as applicable:
+
+```text
+fixture constructors
+dependency/test-double contracts
+concrete runtime type requirements
+wrapper/decorator type compatibility
+scenario/scoring helpers
+```
+
+A default offline suite that only skips the live module must not be cited as
+proof that the live harness is ready.
+
+## 10. Framework-wrapper transparency
+
+A test wrapper/decorator around a concrete framework object must preserve the
+public behavior/configuration that can affect execution.
+
+Before using such a wrapper in live or parity evidence:
+
+- confirm it satisfies required concrete/base type checks;
+- inspect the pinned framework version's public contract;
+- preserve/delegate settings/profile/provider/model identity where relevant;
+- preserve exception semantics;
+- preserve lifecycle semantics where the wrapped object owns resources;
+- add offline equivalence tests.
+
+Do not loosen production `isinstance` or validation checks merely to admit a
+weak test double.
+
+## 11. Measurement fixture ownership
+
+Measured eval/benchmark state must not depend on pytest test ordering.
+
+Required pattern:
+
+```text
+fixture/setup owns warm-up
+→ fixture/setup collects measured observations
+→ observations are frozen/reused
+→ reporting/assertion tests consume them without repeating the measured action
+```
+
+Standalone `test_warmup_*` methods that happen to sort before/after measured
+tests are not a reliable warm-up mechanism.
+
+If a module-scoped measured dataset is intended to execute exactly once,
+assert sample counts and uniqueness of scenario/repetition keys.
+
+## 12. Test-double truthfulness
+
+A test double must model the contract required by the test and fail loudly on
+unexpected use.
+
+Examples:
+
+- scripted model gateways should fail on an unexpected extra request;
+- "hidden tool" fixtures must prove the tool is actually absent from exposure;
+- fake repositories must satisfy the real return/error contract used by the
+  production consumer;
+- a null object must not return `None` where the real interface signals absence
+  with a typed exception or state object.

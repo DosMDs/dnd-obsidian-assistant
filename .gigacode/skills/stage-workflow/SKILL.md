@@ -1,9 +1,9 @@
 ---
 name: stage-workflow
-description: Plan, execute, close, reopen or advance a D&D Session Assistant development stage using DEVELOPMENT_STATUS.md, task IDs, quality gates and ADR discipline. Use when asked to move to the next stage, update project progress, plan the current stage or mark work complete.
+description: Plan, execute, close, reopen or advance a D&D Session Assistant development stage using DEVELOPMENT_STATUS.md, task IDs, quality gates, correction escalation and ADR discipline. Use when asked to move to the next stage, update project progress, plan the current stage or mark work complete.
 compatibility: D&D Session Assistant repository, Git, uv, pytest, Ruff.
 metadata:
-  version: "3"
+  version: "4"
 ---
 # Development stage workflow
 
@@ -12,14 +12,19 @@ metadata:
 - `DEVELOPMENT_STATUS.md` = compact canonical **current** roadmap state.
 - `docs/stages/NN_*.md` = detailed plan + implementation history + correction
   records + review evidence + completion records.
+- `docs/migrations/*.md` = migration-specific detailed history/evidence.
 
 Do not copy full Final Reports or detailed correction narratives into the
 compact status file.
 
+Durable project-context documents must not become a competing current-status
+source. Historical snapshots in context/docs remain historical; current state
+is always read from `DEVELOPMENT_STATUS.md`.
+
 ## Start or resume a stage
 
 1. Read `DEVELOPMENT_STATUS.md` for current state.
-2. Read the relevant `docs/stages/NN_*.md` for detailed plan/history.
+2. Read the relevant stage/migration detailed document.
 3. Inspect current code/tests before assuming task state.
 4. Confirm the current stage boundaries and out-of-scope work.
 5. Create/update task IDs in `DEVELOPMENT_STATUS.md` only when necessary.
@@ -28,37 +33,71 @@ compact status file.
 
 1. Pick one coherent current-stage task.
 2. Inspect affected code/tests.
-3. Use Plan Mode for multi-file, architectural or risky work.
-4. Implement the smallest valid slice.
-5. Add/update tests in the same task.
-6. Run targeted checks.
-7. Run broader pytest/Ruff gates when feasible.
-8. Review the diff.
+3. Use Plan Mode for multi-file, architectural, migration, eval or risky work.
+4. Define hard acceptance criteria and their planned evidence sources.
+5. Implement the smallest valid slice.
+6. Add/update tests in the same task.
+7. Run targeted checks.
+8. Run broader pytest/Ruff gates according to actual final diff/risk.
+9. Review the diff.
+10. Perform pre-finalization audit.
+
+For behavioral parity/live/eval tasks, also apply:
+
+```text
+.gigacode/rules/38-behavioral-evidence-integrity.md
+```
+
+For eval/benchmark work use:
+
+```text
+.gigacode/skills/eval-harness/SKILL.md
+```
 
 ## Mark a task complete
 
 A task can be checked off only when:
+
 - required behavior exists;
-- required tests exist;
+- required tests/evidence exist;
+- every hard acceptance criterion maps to concrete evidence;
 - relevant tests pass;
 - relevant lint/format checks pass;
-- diff was reviewed.
+- diff was reviewed;
+- Final Report claims do not exceed the evidence.
 
 Record unresolved risk/blockers explicitly.
 
 **Status update:**
 - `DEVELOPMENT_STATUS.md` → task checkbox/current state only.
-- Stage document (`docs/stages/NN_*.md`) → detailed completion record/evidence.
+- Stage/migration document → detailed completion record/evidence.
 
 ## Correction
 
-- Stage document (`docs/stages/NN_*.md`) → detailed correction record.
+- Stage/migration document → detailed correction record.
 - `DEVELOPMENT_STATUS.md` → keep current task state only.
+- Use `correction-review` to classify the owning defect layer.
+
+### Correction-chain escalation
+
+If the same task reaches two or more corrections for the same problem class
+(evidence, harness, documentation transcription, gate provenance,
+maintainability workaround):
+
+```text
+STOP before another local patch
+→ analyze repeated pattern
+→ check whether an always-on rule/skill is missing the invariant
+→ update shared guidance/helper when appropriate
+→ then continue the correction
+```
+
+Do not allow a long correction chain to become the de facto specification.
 
 ## Complete a stage
 
 1. Verify every Definition of Done item.
-2. Run:
+2. Run required final stage gates, normally including:
    - `uv run pytest`
    - `uv run ruff check .`
    - `uv run ruff format --check .`
@@ -76,6 +115,7 @@ Before completing any task or stage:
 - Test counts — derive from final command output.
 - Line counts — derive from final repository state.
 - Historical actions — verify from commit/diff, not memory.
+- Behavioral claims — map to exact assertions/counters/commands.
 
 Invoke or follow `pre-finalization-audit` before every task commit.
 
@@ -130,6 +170,7 @@ line counts
 test counts
 stage statuses
 Git direction semantics
+behavioral acceptance claims
 ```
 
 Do not consider the review complete merely because the commands themselves
@@ -155,12 +196,15 @@ authorizing the transition:
 1. mark the completed stage `DONE`;
 2. mark the next stage `IN PROGRESS`;
 3. record start/completion dates;
-4. update/create the next `docs/stages/...` plan if needed;
+4. update/create the next stage plan if needed;
 5. keep later stages `NOT STARTED`.
 
 **Status update:**
 - `DEVELOPMENT_STATUS.md` → roadmap transition only.
 - New stage document → detailed stage plan/tasks.
+
+Do not automatically begin the next roadmap task merely because a Final Report
+was produced. A correction/review cycle is complete only after acceptance.
 
 ## Reopen
 
