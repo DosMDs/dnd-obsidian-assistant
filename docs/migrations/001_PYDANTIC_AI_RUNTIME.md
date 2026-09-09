@@ -7450,5 +7450,84 @@ effective PAIM-C26:                 DONE
 next:                               PAIM-13 — NOT STARTED
 ```
 
-Do not begin PAIM-13 automatically.
+## 53. PAIM-13 — Eval comparison against reference
+
+**Status:** IN PROGRESS
+**Started:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `bd8776cef4d6d3c0f5e6a7b8c9d0e1f2a3b4c5d6`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### PAIM-13 scope
+
+```text
+Create deterministic eval infrastructure:
+  - tests/support/pydantic_ai_eval.py — pure scoring DTOs and logic
+  - tests/support/paim13_scenarios.py — synthetic tool catalog, scenarios, contexts
+  - tests/unit/test_pydantic_ai_eval.py — 37 deterministic unit tests
+  - tests/integration/test_pydantic_ai_stage9_live_eval.py — live Ollama eval
+
+Live eval layers:
+  Layer A — 18 decision scenarios × 3 repetitions
+  Layer B — 9 full-turn scenarios × 3 repetitions
+
+Scoring is deterministic:
+  json_args_equal() — strict JSON comparison
+  classify_majority() — BOTH_PASS / REFERENCE_ONLY_PASS / CANDIDATE_ONLY_PASS / BOTH_FAIL
+
+Alternating order: even-indexed runs use reference→candidate,
+odd-indexed runs use candidate→reference.
+```
+
+### Files created
+
+```text
+tests/support/pydantic_ai_eval.py          — 674 lines (pure scoring DTOs and logic)
+tests/support/paim13_scenarios.py           — 536 lines (synthetic tools, scenarios, contexts)
+tests/unit/test_pydantic_ai_eval.py         — 517 lines (37 deterministic unit tests)
+tests/integration/test_pydantic_ai_stage9_live_eval.py — 776 lines (live Ollama eval)
+```
+
+### Deduplication correction
+
+The initial live eval file (1318 lines) contained duplicate definitions that already existed in `paim13_scenarios.py`:
+
+```text
+Removed from live eval file:
+  - ReadNpcInput, ReadLocationInput, ReadQuestInput (Pydantic schemas)
+  - WriteQuestStatusInput, WriteCampaignNoteInput, EvalToolOutput
+  - READ_NPC_DEF, READ_LOCATION_DEF, READ_QUEST_DEF (tool definitions)
+  - WRITE_QUEST_STATUS_DEF, WRITE_CAMPAIGN_NOTE_DEF, ALL_EVAL_DEFS
+  - EvalHandlerState (added to paim13_scenarios.py)
+  - DECISION_SCENARIOS (18 scenarios) — imported from paim13_scenarios
+  - FULL_TURN_SCENARIOS (9 scenarios) — imported from paim13_scenarios
+  - _make_read_context, _make_write_context, _make_read_active_context
+  - _get_context, _check_schema_valid — replaced with imported versions
+
+Added to paim13_scenarios.py:
+  - EvalHandlerState dataclass
+```
+
+After deduplication the live eval file is 776 lines (under the 1000-line hard limit).
+
+### Current quality gates
+
+```text
+Ruff check:         All checks passed
+Ruff format:        4 files already formatted
+Unit tests:         37 passed in 0.37s
+```
+
+### Remaining work
+
+```text
+- Run full canonical pytest suite
+- Run regression gates (PAIM-08 through PAIM-12, Stage-9)
+- Execute live eval (requires Ollama + env vars)
+- Update DEVELOPMENT_STATUS.md on completion
+- Final diff review, commit, push
+- Final Report
+```
+
+Do not begin PAIM-14 automatically.
 ```
