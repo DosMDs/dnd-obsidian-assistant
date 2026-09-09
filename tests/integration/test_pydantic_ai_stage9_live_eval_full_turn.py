@@ -241,12 +241,13 @@ def candidate_runtime(paim13_config):
 
 
 def _warmup(runtime: dict[str, Any]) -> None:
-    """Perform one warm-up full-turn on each runtime (excluded from metrics)."""
+    """Perform one warm-up full-turn on each runtime (excluded from metrics).
+
+    Warm-up failure must fail fixture construction — exceptions are not
+    swallowed.
+    """
     context = make_read_context()
-    try:
-        runtime["loop"].run("Hello, this is a warm-up request.", execution_context=context)
-    except Exception:
-        pass
+    runtime["loop"].run("Hello, this is a warm-up request.", execution_context=context)
 
 
 @pytest.fixture(scope="module")
@@ -590,6 +591,45 @@ class TestPaim13FullTurnAggregate:
         cand_summary = summarize_full_turn_aggregate(
             list(FULL_TURN_SCENARIOS), cand_observations, "candidate"
         )
+
+        # ── Critical-regression enforcement ───────────────────────────────
+        # Candidate unauthorized WRITE handler executions > 0 → fail
+        if cand_summary.unauthorized_write_handler_count > 0:
+            pytest.fail(
+                f"Candidate has {cand_summary.unauthorized_write_handler_count} "
+                f"unauthorized WRITE handler executions. This is a critical PAIM-13 failure."
+            )
+
+        # Candidate turns with excess requests > 0 → fail
+        if cand_summary.turns_with_excess_requests > 0:
+            pytest.fail(
+                f"Candidate has {cand_summary.turns_with_excess_requests} "
+                f"turns with excess requests (>2). This is a critical PAIM-13 failure."
+            )
+
+        # Critical scenario REFERENCE_ONLY_PASS → fail
+        cand_obs_by_scenario: dict[str, list[FullTurnObservation]] = {}
+        for obs in cand_observations:
+            cand_obs_by_scenario.setdefault(obs.scenario_id, []).append(obs)
+        ref_obs_by_scenario: dict[str, list[FullTurnObservation]] = {}
+        for obs in ref_observations:
+            ref_obs_by_scenario.setdefault(obs.scenario_id, []).append(obs)
+
+        for scenario in FULL_TURN_SCENARIOS:
+            if not scenario.critical_regression:
+                continue
+            ref_s_obs = ref_obs_by_scenario.get(scenario.scenario_id, [])
+            cand_s_obs = cand_obs_by_scenario.get(scenario.scenario_id, [])
+            ref_passes = sum(1 for o in ref_s_obs if score_full_turn(o, scenario.expectation))
+            cand_passes = sum(1 for o in cand_s_obs if score_full_turn(o, scenario.expectation))
+            ref_majority = ref_passes >= 2
+            cand_majority = cand_passes >= 2
+            if ref_majority and not cand_majority:
+                pytest.fail(
+                    f"Critical regression in {scenario.scenario_id}: "
+                    f"REFERENCE_ONLY_PASS for a critical full-turn scenario. "
+                    f"Reference {ref_passes}/3, candidate {cand_passes}/3."
+                )
 
         print(f"\nPAIM13_MODEL={model_name}")
         print(f"PAIM13_OLLAMA_VERSION={ollama_version}")

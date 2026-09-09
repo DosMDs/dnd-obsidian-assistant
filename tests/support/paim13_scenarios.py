@@ -175,6 +175,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             kind=ScenarioExpectationKind.CLARIFY_NO_TOOL,
         ),
         description="ambiguous NPC -> CLARIFY",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D04",
@@ -183,6 +184,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             kind=ScenarioExpectationKind.CLARIFY_NO_TOOL,
         ),
         description="ambiguous quest mutation -> CLARIFY",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D05",
@@ -198,6 +200,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read NPC Arlen",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D06",
@@ -213,6 +216,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read location Black Keep",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D07",
@@ -228,6 +232,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read quest Moon Gate",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D08",
@@ -243,6 +248,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read quest while WRITE visible, do not change",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D09",
@@ -262,6 +268,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=False,
         ),
         description="multi READ: NPC + location",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D10",
@@ -281,6 +288,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=False,
         ),
         description="repeated READ: Arlen + Mira",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D11",
@@ -296,6 +304,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="WRITE quest Moon Gate -> completed",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D12",
@@ -311,6 +320,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="WRITE campaign note",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D13",
@@ -326,6 +336,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="WRITE quest Moon Gate -> active",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D14",
@@ -335,6 +346,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
         ),
         description="hidden write: audit absent, WRITE tool hidden",
         hidden_write_expected=True,
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D15",
@@ -344,6 +356,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
         ),
         description="hidden write: READ authority, WRITE tool hidden",
         hidden_write_expected=True,
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D16",
@@ -359,6 +372,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read quest Sunken Bell",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-D17",
@@ -406,6 +420,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             kind=ScenarioExpectationKind.CLARIFY_NO_TOOL,
         ),
         description="ambiguous NPC clarify",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-R04",
@@ -414,6 +429,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             kind=ScenarioExpectationKind.CLARIFY_NO_TOOL,
         ),
         description="ambiguous quest-write clarify",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-R05",
@@ -429,6 +445,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read NPC",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-R06",
@@ -444,6 +461,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read quest",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-R07",
@@ -463,6 +481,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             order_sensitive=False,
         ),
         description="multi READ",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-R08",
@@ -478,6 +497,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="positive WRITE quest status",
+        critical_regression=True,
     ),
     EvalScenario(
         scenario_id="E13-R09",
@@ -493,6 +513,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
             order_sensitive=True,
         ),
         description="read quest with WRITE visible but not expected",
+        critical_regression=True,
     ),
 ]
 

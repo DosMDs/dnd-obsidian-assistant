@@ -8232,3 +8232,237 @@ PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 58. PAIM-C31 correction record — Seal PAIM-13 measured gate enforcement
+
+**Status:** DONE
+**Completed:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `4f8c5134484dfb71ae4d36d4dd3c6ea0629c9b89`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### SHA terminology note
+
+Section 57 (PAIM-C30) recorded `Parent SHA: 699d278ff55668846f62d0c993b4769462b4f621`.
+This label was ambiguous/incorrect:
+
+```text
+C30 starting SHA:         f03a96dcbe0b2115ae9ccfc5f37c493123b87e12
+C30 commit:               4f8c5134484dfb71ae4d36d4dd3c6ea0629c9b89
+C30 commit direct parent: f03a96dcbe0b2115ae9ccfc5f37c493123b87e12
+parent of C30 starting SHA: 699d278ff55668846f62d0c993b4769462b4f621
+```
+
+`699d278...` is NOT the parent of commit `4f8c513...`. The correct direct
+parent of the C30 commit is `f03a96d...`. `699d278...` is the parent of
+the C30 starting SHA (`f03a96d...`).
+
+### WrapperModel migration
+
+`CountingPydanticModel` was refactored from direct `Model` subclass to
+use Pydantic AI's public `WrapperModel` base class.
+
+**Before (PAIM-C30):**
+
+```python
+class CountingPydanticModel(Model):
+    def __init__(self, delegate: Model) -> None:
+        super().__init__(settings=delegate.settings, profile=delegate.profile)
+        self._delegate = delegate
+        self._state = CountingPydanticModelState()
+    # manual delegation of model_name, system, request_stream, etc.
+```
+
+**After (PAIM-C31):**
+
+```python
+class CountingPydanticModel(WrapperModel):
+    def __init__(self, delegate: Model) -> None:
+        super().__init__(wrapped=delegate)
+        self._state = CountingPydanticModelState()
+    # WrapperModel inherits all delegation: model_name, system, settings,
+    # profile, base_url, model_id, request_stream, prepare_request,
+    # customize_request_parameters, etc.
+```
+
+All inherited delegations are preserved without reimplementation:
+
+| Property | Delegated via | Evidence |
+|----------|---------------|----------|
+| `model_name` | `WrapperModel.model_name` → `self.wrapped.model_name` | PASS |
+| `system` | `WrapperModel.system` → `self.wrapped.system` | PASS |
+| `settings` | `WrapperModel.settings` → `self.wrapped.settings` | PASS (default + non-default) |
+| `profile` | `WrapperModel.profile` → `self.wrapped.profile` | PASS |
+| `base_url` | `WrapperModel.base_url` → `self.wrapped.base_url` | PASS (non-None value) |
+| `model_id` | `WrapperModel.model_id` → `self.wrapped.model_id` | PASS |
+| `prepare_request` | `WrapperModel.prepare_request` → `self.wrapped.prepare_request` | PASS |
+| `customize_request_parameters` | `WrapperModel.customize_request_parameters` → `self.wrapped.customize_request_parameters` | PASS |
+| `request_stream` | `WrapperModel.request_stream` → `self.wrapped.request_stream` | PASS (inherited) |
+| `isinstance(wrapper, Model)` | `WrapperModel` is subclass of `Model` | PASS |
+| `isinstance(wrapper, WrapperModel)` | Direct subclass | PASS |
+| `PydanticAIFastAgent` construction | Accepts `CountingPydanticModel` | PASS |
+| `PydanticAIAgentRuntime` construction | Accepts `CountingPydanticModel` | PASS |
+
+### Warm-up hardening
+
+**Before (PAIM-C30):**
+
+```python
+def _warmup(runtime):
+    try:
+        runtime["fast_agent"].decide(...)
+    except Exception:
+        pass
+```
+
+**After (PAIM-C31):**
+
+```python
+def _warmup(runtime):
+    runtime["fast_agent"].decide(...)
+```
+
+Warm-up exceptions are no longer swallowed. A warm-up failure fails
+fixture construction in both Layer A (`frozen_decision_dataset`) and
+Layer B (`frozen_full_turn_dataset`).
+
+### Critical-regression classification
+
+Added `critical_regression: bool = False` field to `EvalScenario`:
+
+| Critical family | Scenarios |
+|----------------|-----------|
+| Tool selection | D05-D10, D16, R05-R07, R09 |
+| Argument correctness | D05-D13, D16, R05-R09 |
+| Clarification | D03, D04, R03, R04 |
+| WRITE selection | D11, D12, D13, R08 |
+| Hidden-WRITE abstention | D14, D15 |
+| Schema validity | All tool-call scenarios |
+
+Non-critical scenarios: D01, D02, D17, D18, R01, R02 (pure RESPOND_NO_TOOL).
+
+### Critical gate enforcement
+
+#### Layer A (decision) — per-scenario test
+
+`TestPaim13DecisionEval.test_decision_scenario` fails pytest when:
+
+```text
+scenario.critical_regression == True
+AND reference majority passes (ref_passes >= 2)
+AND candidate majority fails (cand_passes < 2)
+```
+
+#### Layer A (decision) — aggregate test
+
+`TestPaim13AggregateMetrics.test_report_aggregate_metrics` builds
+`ScenarioComparison` objects once from frozen data and uses the same
+objects for both console output and critical-regression enforcement:
+
+```text
+critical_regression == True AND classification == "REFERENCE_ONLY_PASS"
+→ pytest.fail()
+```
+
+#### Layer B (full-turn) — aggregate test
+
+`TestPaim13FullTurnAggregate.test_report_full_turn_aggregate` enforces:
+
+```text
+candidate unauthorized WRITE handler count > 0   → pytest.fail()
+candidate turns_with_excess_requests > 0         → pytest.fail()
+critical scenario REFERENCE_ONLY_PASS            → pytest.fail()
+```
+
+### Portability
+
+Hard-coded machine path removed from `test_labels_used_by_position_not_numerator`:
+
+```python
+# Before:
+Path(r"E:\Projects\Python\dnd-session-assistant\tests\integration\...")
+
+# After:
+Path(__file__).resolve().parent.parent.parent / "tests" / "integration" / ...
+```
+
+No hard-coded machine paths remain in any PAIM-13 harness or test file.
+
+### Frozen dataset architecture preserved
+
+| Layer | Scenarios | Repetitions | Reference obs | Candidate obs | Total |
+|-------|-----------|-------------|---------------|---------------|-------|
+| A (decision) | 18 | 3 | 54 | 54 | 108 |
+| B (full-turn) | 9 | 3 | 27 | 27 | 54 |
+
+Warm-up before collection: YES
+Warm-up included in metrics: NO
+Collection: exactly once per fixture
+All metrics reuse frozen observations: YES
+
+### File limits
+
+```text
+tests/support/paim13_live_harness.py:               435 lines (unchanged)
+tests/support/paim13_scenarios.py:                  580 lines (unchanged)
+tests/support/pydantic_ai_eval.py:                  919 lines (+11)
+tests/support/pydantic_ai_eval_datasets.py:         188 lines (unchanged)
+tests/support/test_doubles.py:                      143 lines (+11)
+tests/unit/test_pydantic_ai_eval.py:                915 lines (unchanged)
+tests/unit/test_pydantic_ai_eval_live_harness.py:   551 lines (+12)
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py:  582 lines (+20)
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py:  705 lines (+27)
+```
+
+All PAIM-13 Python files < 1000 lines.
+Maintainability exception added/increased: NO
+
+### Changed files
+
+```text
+M tests/support/paim13_live_harness.py
+M tests/support/pydantic_ai_eval.py
+M tests/support/paim13_scenarios.py
+M tests/support/test_doubles.py
+M tests/unit/test_pydantic_ai_eval_live_harness.py
+M tests/integration/test_pydantic_ai_stage9_live_eval_decision.py
+M tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Eval/scorer unit tests | `uv run pytest tests/unit/test_pydantic_ai_eval.py -v` | 69 passed |
+| Live-harness unit tests | `uv run pytest tests/unit/test_pydantic_ai_eval_live_harness.py -v` | 26 passed |
+| PAIM-13 offline skips | `uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py -v` | 29 skipped |
+| PAIM-11 parity regressions | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity*.py -v` | 44 passed |
+| PAIM-12 offline | `uv run pytest tests/integration/test_pydantic_ai_ollama_runtime.py -v` | 9 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 443 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical root pytest | `uv run pytest` | 5179 passed, 143 skipped, 0 failed, 0 errors |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 380 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Historical prefix
+
+```text
+sections 1-57 unchanged:   YES
+section 58 appended:       YES
+```
+
+### Final status
+
+```text
+PAIM-C30 — DONE
+PAIM-C31 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```

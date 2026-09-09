@@ -6,11 +6,12 @@ All offline-safe: no network, no model, no framework imports beyond
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
-from pydantic_ai.models import Model, ModelRequestParameters
+from pydantic_ai.models import CompletedStreamedResponse, Model, ModelRequestParameters
 from pydantic_ai.settings import ModelSettings
 
 from dnd_assistant.models.types import (
@@ -30,9 +31,16 @@ class FakeModel(Model):
     ``request()`` call.  Tracks invocation count for test assertions.
     """
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        base_url: str | None = None,
+        settings: ModelSettings | None = None,
+        profile: Any | None = None,
+    ) -> None:
+        super().__init__(settings=settings, profile=profile)
         self._invocation_count = 0
+        self._base_url = base_url
 
     @property
     def model_name(self) -> str:
@@ -43,8 +51,25 @@ class FakeModel(Model):
         return "test-system"
 
     @property
+    def base_url(self) -> str | None:
+        return self._base_url
+
+    @property
     def invocation_count(self) -> int:
         return self._invocation_count
+
+    def customize_request_parameters(
+        self, model_request_parameters: ModelRequestParameters
+    ) -> ModelRequestParameters:
+        """Customize request parameters (delegates to default behavior)."""
+        return model_request_parameters
+
+    def prepare_request(
+        self,
+        model_settings: ModelSettings | None,
+        model_request_parameters: ModelRequestParameters,
+    ) -> tuple[ModelSettings | None, ModelRequestParameters]:
+        return model_settings, model_request_parameters
 
     async def request(
         self,
@@ -55,15 +80,17 @@ class FakeModel(Model):
         self._invocation_count += 1
         return ModelResponse(parts=[TextPart(content="ok")])
 
+    @asynccontextmanager
     async def request_stream(
         self,
         messages: list[ModelMessage],
         model_settings: ModelSettings | None,
         model_request_parameters: ModelRequestParameters,
         run_context: Any | None = None,
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncIterator[Any]:
         self._invocation_count += 1
-        yield ModelResponse(parts=[TextPart(content="ok")])
+        response = ModelResponse(parts=[TextPart(content="ok")])
+        yield CompletedStreamedResponse(response, model_request_parameters=model_request_parameters)
 
 
 class RaisingFakeModel(Model):

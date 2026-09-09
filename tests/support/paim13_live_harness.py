@@ -20,12 +20,12 @@ level.
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from typing import Any
 
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
+from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
@@ -123,12 +123,12 @@ class CountingPydanticModelState:
     request_count: int = 0
 
 
-class CountingPydanticModel(Model):
+class CountingPydanticModel(WrapperModel):
     """Test-only Pydantic AI ``Model`` decorator that counts semantic requests.
 
     Wraps a real Pydantic AI ``Model`` (e.g. ``OllamaModel``) and counts
-    every ``request()`` call.  Delegates ``request_stream()`` and all other
-    properties/methods unchanged.
+    every ``request()`` call.  All other properties/methods are inherited
+    from ``WrapperModel``, which delegates them to the wrapped model.
 
     Usage::
 
@@ -138,29 +138,12 @@ class CountingPydanticModel(Model):
     """
 
     def __init__(self, delegate: Model) -> None:
-        # Preserve delegate settings and profile through the public
-        # Model constructor so that wrapper.settings/profile match
-        # the delegate's values.
-        super().__init__(
-            settings=delegate.settings,
-            profile=delegate.profile,
-        )
-        self._delegate = delegate
+        super().__init__(wrapped=delegate)
         self._state = CountingPydanticModelState()
 
     @property
     def state(self) -> CountingPydanticModelState:
         return self._state
-
-    # ── Abstract property delegation ─────────────────────────────────────
-
-    @property
-    def model_name(self) -> str:
-        return self._delegate.model_name
-
-    @property
-    def system(self) -> str:
-        return self._delegate.system
 
     # ── Counted semantic request boundary ────────────────────────────────
 
@@ -172,22 +155,7 @@ class CountingPydanticModel(Model):
     ) -> ModelResponse:
         """Count the call, then delegate to the wrapped model."""
         self._state.request_count += 1
-        return await self._delegate.request(messages, model_settings, model_request_parameters)
-
-    # ── Delegated methods ────────────────────────────────────────────────
-
-    async def request_stream(
-        self,
-        messages: list[ModelMessage],
-        model_settings: ModelSettings | None,
-        model_request_parameters: ModelRequestParameters,
-        run_context: Any | None = None,
-    ) -> AsyncGenerator[Any, None]:
-        """Delegate stream request without counting (not used in current eval)."""
-        async for chunk in self._delegate.request_stream(
-            messages, model_settings, model_request_parameters, run_context
-        ):
-            yield chunk
+        return await self.wrapped.request(messages, model_settings, model_request_parameters)
 
 
 # ── Deterministic entity data ─────────────────────────────────────────────────

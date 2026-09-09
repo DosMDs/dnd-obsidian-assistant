@@ -63,6 +63,7 @@ from tests.support.pydantic_ai_eval import (
     DecisionObservation,
     EvalScenario,
     ExposedToolInfo,
+    ScenarioComparison,
     ScenarioExpectationKind,
     ToolCallObservation,
     classify_majority,
@@ -216,15 +217,16 @@ def candidate_runtime(paim13_config):
 
 
 def _warmup(runtime: dict[str, Any]) -> None:
-    """Perform one warm-up decision on each runtime (excluded from metrics)."""
+    """Perform one warm-up decision on each runtime (excluded from metrics).
+
+    Warm-up failure must fail fixture construction — exceptions are not
+    swallowed.
+    """
     context = make_read_context()
-    try:
-        runtime["fast_agent"].decide(
-            "Hello, this is a warm-up request.",
-            execution_context=context,
-        )
-    except Exception:
-        pass
+    runtime["fast_agent"].decide(
+        "Hello, this is a warm-up request.",
+        execution_context=context,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -465,6 +467,15 @@ class TestPaim13DecisionEval:
             f"\nPYD={cand_passes}/3 majority={'PASS' if cand_majority else 'FAIL'}"
         )
 
+        # Critical-regression enforcement:
+        # REFERENCE_ONLY_PASS for a critical scenario must fail pytest
+        if scenario.critical_regression and ref_majority and not cand_majority:
+            pytest.fail(
+                f"Critical regression in {scenario.scenario_id}: "
+                f"reference passes ({ref_passes}/3) but candidate fails ({cand_passes}/3). "
+                f"This is a REFERENCE_ONLY_PASS for a critical scenario."
+            )
+
         # Assert no false WRITE in candidate
         for obs in cand_observations:
             for tc in obs.tool_calls:
@@ -531,6 +542,10 @@ class TestPaim13AggregateMetrics:
         print(f"PAIM13_OLLAMA_VERSION={ollama_version}")
         print(f"PAIM13_SCENARIO_COUNT={len(DECISION_SCENARIOS)}")
         print("PAIM13_REPETITIONS=3")
+
+        # Build scenario comparisons once — used for both console output
+        # and critical-regression enforcement.
+        scenario_comparisons: list[ScenarioComparison] = []
         for scenario in DECISION_SCENARIOS:
             ref_scenario_obs = [
                 o for o in all_ref_observations if o.scenario_id == scenario.scenario_id
@@ -541,9 +556,29 @@ class TestPaim13AggregateMetrics:
             comp = classify_majority(
                 scenario.scenario_id, ref_scenario_obs, cand_scenario_obs, scenario.expectation
             )
+            scenario_comparisons.append(
+                ScenarioComparison(
+                    scenario_id=scenario.scenario_id,
+                    classification=comp.classification,
+                    reference_passes=comp.reference_passes,
+                    candidate_passes=comp.candidate_passes,
+                    critical_regression=scenario.critical_regression,
+                )
+            )
             print(
                 f"PAIM13_SCENARIO {comp.scenario_id} REF={comp.reference_passes}/3 PYD={comp.candidate_passes}/3 class={comp.classification}"
             )
+
+        # Critical-regression enforcement from same comparisons:
+        # REFERENCE_ONLY_PASS for a critical scenario must fail pytest.
+        for sc in scenario_comparisons:
+            if sc.critical_regression and sc.classification == "REFERENCE_ONLY_PASS":
+                pytest.fail(
+                    f"Critical regression in {sc.scenario_id}: "
+                    f"REFERENCE_ONLY_PASS for a critical scenario. "
+                    f"Reference {sc.reference_passes}/3, candidate {sc.candidate_passes}/3."
+                )
+
         for index, (ref_m, cand_m) in enumerate(zip(ref_metrics, cand_metrics, strict=True)):
             label = _METRIC_LABELS[index]
             delta = cand_m.value - ref_m.value

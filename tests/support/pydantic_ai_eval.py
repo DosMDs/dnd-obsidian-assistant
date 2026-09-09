@@ -80,6 +80,12 @@ class EvalScenario:
             hidden/unexposed for this scenario.  When ``True``, WRITE
             tools are not visible to the model.  This is an explicit
             flag, not derived from description text.
+        critical_regression: Whether this scenario is a critical
+            migration regression.  A ``REFERENCE_ONLY_PASS`` for a
+            critical scenario must fail the measured suite.
+            Critical families: tool selection, argument correctness,
+            clarification, WRITE selection, hidden-WRITE abstention,
+            schema validity.
     """
 
     scenario_id: str
@@ -87,6 +93,7 @@ class EvalScenario:
     expectation: EvalExpectation
     description: str = ""
     hidden_write_expected: bool = False
+    critical_regression: bool = False
 
 
 # ── Exposed tool info ──────────────────────────────────────────────────────────
@@ -222,6 +229,9 @@ class ScenarioComparison:
         reference_passes: Number of reference passes (0-3).
         candidate_passes: Number of candidate passes (0-3).
         classification: The majority classification.
+        critical_regression: Whether this scenario is a critical
+            migration regression.  A ``REFERENCE_ONLY_PASS`` for a
+            critical scenario must fail the measured suite.
     """
 
     scenario_id: str
@@ -233,6 +243,7 @@ class ScenarioComparison:
         "CANDIDATE_ONLY_PASS",
         "BOTH_FAIL",
     ]
+    critical_regression: bool = False
 
 
 # ── Deterministic percentile helper ────────────────────────────────────────────
