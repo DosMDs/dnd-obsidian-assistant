@@ -6877,3 +6877,104 @@ PAIM-C23 — Seal PAIM-11 parity contracts       DONE
 PAIM-C24 — Close final PAIM-11 evidence        DONE
 PAIM-12 — Real Ollama smoke/performance        NOT STARTED
 ```
+
+## 50. PAIM-C25 correction record — Correct final PAIM-11 audit metadata
+
+**Status:** DONE
+**Completed:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**PAIM-C25 starting SHA:** `cc3120f325f7b3eab0aabe59b2b69afae251bb1e`
+**Parent of PAIM-C25 starting SHA:** `3baaa357d4f018c79d6e84010ba9cb2a16a19926`
+
+### Corrected physical line counts
+
+Section 49 historically recorded:
+
+```text
+tests/support/stage9_parity.py = 882 lines
+tests/integration/test_pydantic_ai_stage9_parity_exposure.py = 602 lines
+```
+
+Correct Git/file-derived values at commit `cc3120f325f7b3eab0aabe59b2b69afae251bb1e`:
+
+```text
+tests/support/stage9_parity.py = 912 physical lines
+  Line 912 exists: YES
+  Line 913 exists: NO
+
+tests/integration/test_pydantic_ai_stage9_parity_exposure.py = 575 physical lines
+  Line 575 exists: YES
+  Line 576 exists: NO
+```
+
+### Corrected changed-file inventory
+
+Section 49 listed only three test-related files. The exact Git-derived PAIM-C24 commit inventory (parent `3baaa357d4f018c79d6e84010ba9cb2a16a19926` .. commit `cc3120f325f7b3eab0aabe59b2b69afae251bb1e`) is:
+
+```text
+M DEVELOPMENT_STATUS.md
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M tests/support/stage9_parity.py
+M tests/integration/test_pydantic_ai_stage9_parity_p4.py
+A tests/integration/test_pydantic_ai_stage9_parity_exposure.py
+```
+
+Exact count: **5 files**.
+
+Section 49's shorter list was an incomplete audit metadata transcription, not an implementation-scope discrepancy.
+
+### Preserved PAIM-11 result
+
+No executable parity defect was found in PAIM-C24 review.
+
+```text
+PAIM-11 behavioral parity remains ACCEPTED.
+PAIM-C24 executable evidence remains ACCEPTED.
+```
+
+Final classification unchanged:
+
+```text
+A = 34
+B = 6
+C = 7
+D = 0
+```
+
+### History
+
+```text
+sections 1–49 unchanged:             YES
+section 50 appended:                 YES
+```
+
+### Changed files (PAIM-C25)
+
+```text
+M DEVELOPMENT_STATUS.md
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+```text
+src changed:                         NO
+tests changed:                       NO
+dependencies changed:                NO
+```
+
+### Quality gates
+
+Documentation/status-only task. Full pytest and Ruff were intentionally not run because the final diff contains documentation Markdown only.
+
+| Gate | Result |
+|---|---|
+| git diff --check | (reported in Final Report) |
+| Scope verification | (reported in Final Report) |
+
+### Effective status
+
+```text
+PAIM-11 — Full Stage-9 behavioral parity       ACCEPTED
+PAIM-C24 — Close final PAIM-11 evidence        ACCEPTED
+PAIM-C25 — Correct final PAIM-11 audit metadata DONE
+PAIM-12 — Real Ollama smoke/performance        NOT STARTED
+```
