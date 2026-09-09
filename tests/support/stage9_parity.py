@@ -242,6 +242,9 @@ class _FakeModelGateway(ModelGateway):
     Supports scripted failures: set ``fail_on_request`` to a 1-based request
     number; that request will raise the specified exception instead of
     returning a response.
+
+    Records every ``tools`` argument in ``exposed_tool_lists`` for
+    model-visible exposure verification.
     """
 
     def __init__(
@@ -255,6 +258,7 @@ class _FakeModelGateway(ModelGateway):
         self.call_count: int = 0
         self._fail_on_request = fail_on_request
         self._fail_exc = fail_exc or ModelError("simulated model failure")
+        self.exposed_tool_lists: list[list[ToolPublicDefinition]] = []
 
     def chat_with_tools(
         self,
@@ -262,6 +266,7 @@ class _FakeModelGateway(ModelGateway):
         tools: list[ToolPublicDefinition],
     ) -> ToolAwareResponse:
         self.call_count += 1
+        self.exposed_tool_lists.append(tools)
         if self._fail_on_request is not None and self.call_count == self._fail_on_request:
             raise self._fail_exc
         if self.call_count <= len(self._responses):
@@ -303,9 +308,14 @@ class _CountingToolExecutor:
 
 
 def make_tool_aware_response(
-    content: str,
+    content: str | None = None,
     tool_calls: list[ToolCall] | None = None,
 ) -> ToolAwareResponse:
+    """Build a ToolAwareResponse.
+
+    For tool-only responses (no assistant text), pass ``content=None``.
+    For responses with assistant text, pass the text string.
+    """
     return ToolAwareResponse(
         message=ChatMessage(
             role=MessageRole.ASSISTANT,
@@ -462,6 +472,8 @@ class DualRuntimeObservation:
     ref_error: BaseException | None = None
     pyd_error: BaseException | None = None
     ref_gateway: _FakeModelGateway | None = None
+    ref_exposed_tool_lists: list[list[ToolPublicDefinition]] | None = None
+    pyd_exposed_tool_lists: list[list[Any]] | None = None
 
 
 # ── Internal helpers ────────────────────────────────────────────────────────────
@@ -603,9 +615,11 @@ def run_scenario(
     )
 
     pyd_request_count: list[int] = [0]
+    pyd_exposed_tool_lists: list[list[Any]] = []
 
     def counting_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
         pyd_request_count[0] += 1
+        pyd_exposed_tool_lists.append(list(getattr(agent_info, "function_tools", [])))
         return scenario.pyd_model_fn(messages, agent_info)
 
     counting_model = FunctionModel(counting_fn)
@@ -645,6 +659,8 @@ def run_scenario(
         ref_error=ref_error,
         pyd_error=pyd_error,
         ref_gateway=ref_gateway,
+        ref_exposed_tool_lists=ref_gateway.exposed_tool_lists,
+        pyd_exposed_tool_lists=pyd_exposed_tool_lists,
     )
 
 
@@ -682,11 +698,10 @@ def assert_decision_parity(
         assert ref_t.allowed_session_modes == pyd_t.allowed_session_modes
 
     if check_tool_calls:
-        if (
-            ref_decision.response.message.content is not None
-            and pyd_decision.response.message.content is not None
-        ):
-            assert ref_decision.response.message.content == pyd_decision.response.message.content
+        assert ref_decision.response.message.content == pyd_decision.response.message.content, (
+            f"Content mismatch: ref={ref_decision.response.message.content!r} "
+            f"pyd={pyd_decision.response.message.content!r}"
+        )
         ref_calls = ref_decision.response.message.tool_calls
         pyd_calls = pyd_decision.response.message.tool_calls
         assert len(ref_calls) == len(pyd_calls)
@@ -734,12 +749,15 @@ def assert_parity(
     expected_executor_attempts: int | None = None,
     expect_failure: bool = False,
     check_tool_calls: bool = False,
+    expected_ref_error_type: type[Exception] | tuple[type[Exception], ...] | None = None,
+    expected_pyd_error_type: type[Exception] | tuple[type[Exception], ...] | None = None,
 ) -> None:
     """Assert full parity between reference and Pydantic runtime observations.
 
     When ``expect_failure=True``, this helper verifies:
     - Both runtimes raised an exception.
     - Both runtimes produced no result.
+    - Error types match expectations (when specified).
     - Model request counts match expectations.
     - Executor/bridge attempt counts match expectations.
     - Handler counts match expectations (zero for pre-execution failures).
@@ -751,11 +769,17 @@ def assert_parity(
         assert obs.reference is None
         assert obs.pydantic is None
 
-        # Both errors should be of the same type category for equivalent
-        # scenarios. Project model/validation errors that are
-        # DndAssistantError are the common case; execution failures
-        # (RuntimeError, etc.) propagate unchanged from the ToolExecutor
-        # and are checked in individual scenarios.
+        # Error type assertions
+        if expected_ref_error_type is not None:
+            assert isinstance(obs.ref_error, expected_ref_error_type), (
+                f"Reference error type: {type(obs.ref_error).__name__} "
+                f"not in {expected_ref_error_type}"
+            )
+        if expected_pyd_error_type is not None:
+            assert isinstance(obs.pyd_error, expected_pyd_error_type), (
+                f"Pydantic error type: {type(obs.pyd_error).__name__} "
+                f"not in {expected_pyd_error_type}"
+            )
 
         # Model request counts
         assert obs.ref_model_requests == expected_model_requests_ref, (

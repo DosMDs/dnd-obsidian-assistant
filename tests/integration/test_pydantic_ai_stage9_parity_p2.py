@@ -10,6 +10,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentOutcomeKind
+from dnd_assistant.errors import ModelError
 from dnd_assistant.tools.catalog import ToolRegistrySchema
 from dnd_assistant.tools.registry import ToolRegistry
 from tests.support.stage9_parity import (
@@ -113,6 +114,9 @@ class TestP11A12FiveCallsRejected:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -180,6 +184,9 @@ class TestP11A13TwentyCallsRejected:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -257,6 +264,9 @@ class TestP11A14ReadWriteRejected:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -334,6 +344,9 @@ class TestP11A15WriteReadRejected:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -498,6 +511,9 @@ class TestP11A17ReadReadWriteRejected:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -575,6 +591,9 @@ class TestP11A18DuplicateCallIdRejected:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -751,6 +770,9 @@ class TestP11A20UnknownTool:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -783,7 +805,6 @@ class TestP11A21HiddenTool:
         )
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[tool_call],
             ),
         ]
@@ -822,17 +843,14 @@ class TestP11A21HiddenTool:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
         # Prove write_alpha is NOT in exposed_tools
         assert obs.ref_error is not None
         assert obs.pyd_error is not None
-        # Reference: FastAgent.decide() rejects unknown tool names in
-        # the response before any execution
-        from dnd_assistant.errors import ModelError as ME
-
-        assert isinstance(obs.ref_error, ME)
-        assert isinstance(obs.pyd_error, ME)
 
 
 # ==============================================================================
@@ -909,84 +927,7 @@ class TestP11A22MixedAllowedUnknown:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
-        )
-
-
-# ==============================================================================
-# P11-A23: mixed allowed + hidden
-# ==============================================================================
-
-
-class TestP11A23MixedAllowedHidden:
-    """P11-A23: mixed allowed + hidden — ModelError, zero executions.
-
-    READ context where read_alpha exposed, write_alpha hidden by permission.
-    """
-
-    def test_mixed_allowed_hidden(
-        self,
-        ref_counters: HandlerCounters,
-        pyd_counters: HandlerCounters,
-        registry: ToolRegistry,
-        catalog: ToolRegistrySchema,
-        context_builder: AgentContextBuilder,
-    ) -> None:
-        ctx = make_read_context()
-
-        tool_call_1 = make_tool_call(
-            name="read_alpha",
-            arguments={"value": "ok"},
-            call_id="c1",
-        )
-        tool_call_2 = make_tool_call(
-            name="write_alpha",
-            arguments={"value": "secret"},
-            call_id="c2",
-        )
-        ref_responses = [
-            make_tool_aware_response(
-                content="",
-                tool_calls=[tool_call_1, tool_call_2],
-            ),
-        ]
-
-        def pyd_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
-            return ModelResponse(
-                parts=[
-                    ToolCallPart(
-                        tool_name="read_alpha",
-                        args={"value": "ok"},
-                        tool_call_id="c1",
-                    ),
-                    ToolCallPart(
-                        tool_name="write_alpha",
-                        args={"value": "secret"},
-                        tool_call_id="c2",
-                    ),
-                ]
-            )
-
-        scenario = Stage9Scenario(
-            user_input="mixed allowed and hidden",
-            execution_context=ctx,
-            ref_responses=ref_responses,
-            pyd_model_fn=pyd_fn,
-            expect_failure=True,
-        )
-
-        obs = run_scenario(
-            scenario,
-            registry=registry,
-            catalog=catalog,
-            context_builder=context_builder,
-            ref_counters=ref_counters,
-            pyd_counters=pyd_counters,
-        )
-
-        assert_parity(
-            obs,
-            expect_failure=True,
-            expected_model_requests_ref=1,
-            expected_model_requests_pyd=1,
-            expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )

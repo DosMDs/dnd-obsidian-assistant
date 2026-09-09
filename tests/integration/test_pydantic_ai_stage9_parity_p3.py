@@ -10,6 +10,7 @@ from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentOutcomeKind
+from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.tools.catalog import ToolRegistrySchema
 from dnd_assistant.tools.registry import ToolRegistry
 from tests.support.stage9_parity import (
@@ -74,7 +75,7 @@ class TestP11A24SchemaInvalidSingle:
     ) -> None:
         ctx = make_read_context()
         tool_call = make_tool_call(name="read_alpha", arguments={}, call_id="c1")
-        ref_responses = [make_tool_aware_response(content="", tool_calls=[tool_call])]
+        ref_responses = [make_tool_aware_response(tool_calls=[tool_call])]
 
         def pyd_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
             return ModelResponse(
@@ -103,6 +104,8 @@ class TestP11A24SchemaInvalidSingle:
             expected_model_requests_pyd=1,
             expected_executor_attempts=1,
             expected_handler_counts=(0, 0, 0),
+            expected_ref_error_type=ValidationError,
+            expected_pyd_error_type=ValidationError,
         )
 
 
@@ -129,7 +132,7 @@ class TestP11A25SchemaInvalidSecondRead:
         ctx = make_read_context()
         tc1 = make_tool_call(name="read_alpha", arguments={"value": "ok"}, call_id="c1")
         tc2 = make_tool_call(name="read_alpha", arguments={}, call_id="c2")
-        ref_responses = [make_tool_aware_response(content="", tool_calls=[tc1, tc2])]
+        ref_responses = [make_tool_aware_response(tool_calls=[tc1, tc2])]
 
         def pyd_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
             return ModelResponse(
@@ -161,6 +164,8 @@ class TestP11A25SchemaInvalidSecondRead:
             expected_model_requests_pyd=1,
             expected_executor_attempts=2,
             expected_handler_counts=(1, 0, 0),
+            expected_ref_error_type=ValidationError,
+            expected_pyd_error_type=ValidationError,
         )
 
 
@@ -207,6 +212,9 @@ class TestP11A31MalformedDirectOutput:
             expected_model_requests_ref=1,
             expected_model_requests_pyd=1,
             expected_handler_counts=(0, 0, 0),
+            expected_executor_attempts=0,
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -232,7 +240,7 @@ class TestP11A32MalformedPostToolOutput:
         ctx = make_read_context()
         tc = make_tool_call(name="read_alpha", arguments={"value": "ok"}, call_id="c1")
         ref_responses = [
-            make_tool_aware_response(content="", tool_calls=[tc]),
+            make_tool_aware_response(tool_calls=[tc]),
             make_tool_aware_response(content="not valid JSON at all"),
         ]
         request_count: list[int] = [0]
@@ -271,6 +279,8 @@ class TestP11A32MalformedPostToolOutput:
             expected_model_requests_pyd=2,
             expected_executor_attempts=1,
             expected_handler_counts=(1, 0, 0),
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 

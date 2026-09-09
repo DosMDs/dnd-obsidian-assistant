@@ -305,7 +305,7 @@ class TestP11A28ReadFailFast:
         tc1 = make_tool_call("read_alpha", {"value": "ok"}, "c1")
         tc2 = make_tool_call("read_beta", {"number": 0}, "c2")
         tc3 = make_tool_call("read_alpha", {"value": "never"}, "c3")
-        ref_responses = [make_tool_aware_response("", [tc1, tc2, tc3])]
+        ref_responses = [make_tool_aware_response(tool_calls=[tc1, tc2, tc3])]
 
         # Reference
         ref_gateway = _FakeModelGateway(ref_responses)
@@ -396,7 +396,7 @@ class TestP11A33FirstToolSucceedsSecondFails:
 
         # Reference: fail_on_request=2 raises ModelError
         custom_gateway = _FakeModelGateway(
-            [make_tool_aware_response("", [tc1])],
+            [make_tool_aware_response(tool_calls=[tc1])],
             fail_on_request=2,
             fail_exc=ModelError("simulated model failure on second request"),
         )
@@ -454,7 +454,7 @@ class TestP11A33FirstToolSucceedsSecondFails:
                         ),
                     ]
                 )
-            raise ValueError("Second model request failed")
+            raise ModelError("simulated second model failure")
 
         counting_model = FunctionModel(counting_fn)
         pydantic_runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=counting_model)
@@ -464,8 +464,7 @@ class TestP11A33FirstToolSucceedsSecondFails:
             pyd_error = exc
 
         assert isinstance(ref_error, ModelError)
-        assert isinstance(pyd_error, ValueError)
-        assert "Second model request failed" in str(pyd_error)
+        assert isinstance(pyd_error, ModelError)
         assert ref_model_requests == 2
         assert pyd_request_count[0] == 2
         assert ref_counting.execute_count == 1
@@ -504,8 +503,8 @@ class TestP11A29SecondRequestOneTool:
         tc1 = make_tool_call("read_alpha", {"value": "first"}, "c1")
         tc2 = make_tool_call("read_alpha", {"value": "second"}, "c2")
         ref_responses = [
-            make_tool_aware_response("", [tc1]),
-            make_tool_aware_response("", [tc2]),
+            make_tool_aware_response(tool_calls=[tc1]),
+            make_tool_aware_response(tool_calls=[tc2]),
         ]
         request_count: list[int] = [0]
 
@@ -549,6 +548,8 @@ class TestP11A29SecondRequestOneTool:
             expected_model_requests_pyd=2,
             expected_executor_attempts=1,
             expected_handler_counts=(1, 0, 0),
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )
 
 
@@ -583,8 +584,8 @@ class TestP11A30SecondRequestMultipleTools:
         tc2 = make_tool_call("read_alpha", {"value": "second"}, "c2")
         tc3 = make_tool_call("read_beta", {"number": 42}, "c3")
         ref_responses = [
-            make_tool_aware_response("", [tc1]),
-            make_tool_aware_response("", [tc2, tc3]),
+            make_tool_aware_response(tool_calls=[tc1]),
+            make_tool_aware_response(tool_calls=[tc2, tc3]),
         ]
         request_count: list[int] = [0]
 
@@ -629,4 +630,6 @@ class TestP11A30SecondRequestMultipleTools:
             expected_model_requests_pyd=2,
             expected_executor_attempts=1,
             expected_handler_counts=(1, 0, 0),
+            expected_ref_error_type=ModelError,
+            expected_pyd_error_type=ModelError,
         )

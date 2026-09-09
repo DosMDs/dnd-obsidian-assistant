@@ -222,7 +222,6 @@ class TestP11A03SingleReadRespond:
         # equivalent provider-neutral DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[tool_call],
             ),
             make_tool_aware_response(content=respond_json(msg)),
@@ -305,7 +304,6 @@ class TestP11A04SingleReadClarify:
         # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[tool_call],
             ),
             make_tool_aware_response(content=clarify_json(msg)),
@@ -388,7 +386,6 @@ class TestP11A05SingleWriteRespond:
         # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[tool_call],
             ),
             make_tool_aware_response(content=respond_json(msg)),
@@ -683,7 +680,6 @@ class TestP11A09TwoReadCalls:
         # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[tool_call_1, tool_call_2],
             ),
             make_tool_aware_response(content=respond_json(msg)),
@@ -786,7 +782,6 @@ class TestP11A10FourReadCalls:
         # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[
                     tool_call_1,
                     tool_call_2,
@@ -894,7 +889,6 @@ class TestP11A11RepeatedSameRead:
         # Both runtimes use tool-only first response for equivalent DTOs.
         ref_responses = [
             make_tool_aware_response(
-                content="",
                 tool_calls=[tool_call_1, tool_call_2],
             ),
             make_tool_aware_response(content=respond_json(msg)),
