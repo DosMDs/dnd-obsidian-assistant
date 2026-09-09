@@ -57,6 +57,7 @@ from tests.support.paim13_scenarios import (
     EvalHandlerState,
     check_schema_valid,
     get_context_for_scenario,
+    make_read_context,
 )
 from tests.support.pydantic_ai_eval import (
     DecisionObservation,
@@ -69,6 +70,7 @@ from tests.support.pydantic_ai_eval import (
     score_decision,
     summarize_metrics,
 )
+from tests.support.pydantic_ai_eval_datasets import FrozenDecisionDataset
 
 pytestmark = pytest.mark.ollama
 
@@ -208,6 +210,61 @@ def candidate_runtime(paim13_config):
         "counting_model": counting_model,
         "profile": profile,
     }
+
+
+# ── Frozen dataset fixture (warm-up + collection exactly once) ────────────────
+
+
+def _warmup(runtime: dict[str, Any]) -> None:
+    """Perform one warm-up decision on each runtime (excluded from metrics)."""
+    context = make_read_context()
+    try:
+        runtime["fast_agent"].decide(
+            "Hello, this is a warm-up request.",
+            execution_context=context,
+        )
+    except Exception:
+        pass
+
+
+@pytest.fixture(scope="module")
+def frozen_decision_dataset(
+    reference_runtime,
+    candidate_runtime,
+) -> FrozenDecisionDataset:
+    """Collect all Layer A observations exactly once with warm-up first.
+
+    Warm-up runs before any measured observation.  The returned dataset
+    is consumed by scenario tests and aggregate metrics — no additional
+    model calls.
+    """
+    ref_runtime = reference_runtime
+    cand_runtime = candidate_runtime
+
+    # Warm-up before measurement (excluded from all metrics)
+    _warmup(ref_runtime)
+    _warmup(cand_runtime)
+
+    ref_observations: list[DecisionObservation] = []
+    cand_observations: list[DecisionObservation] = []
+
+    for scenario in DECISION_SCENARIOS:
+        context = get_context_for_scenario(scenario.scenario_id)
+        for rep in range(3):
+            if rep % 2 == 0:
+                ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
+                cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
+            else:
+                cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
+                ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
+            ref_observations.append(ref_obs)
+            cand_observations.append(cand_obs)
+
+    return FrozenDecisionDataset(
+        scenarios=tuple(DECISION_SCENARIOS),
+        reference_observations=tuple(ref_observations),
+        candidate_observations=tuple(cand_observations),
+    )
 
 
 # ── Layer A: Reference decision observer ──────────────────────────────────────
@@ -372,34 +429,27 @@ class TestPaim13DecisionEval:
     Compares reference (FastAgent) vs candidate (PydanticAIFastAgent)
     first-decision tool selection, argument generation, schema validity,
     clarification, false WRITE selection, unnecessary calls, and abstention.
+
+    All observations come from the frozen dataset — no additional model calls.
     """
 
     @pytest.mark.parametrize("scenario", DECISION_SCENARIOS, ids=lambda s: s.scenario_id)
     def test_decision_scenario(
         self,
         scenario: EvalScenario,
-        reference_runtime,
-        candidate_runtime,
+        frozen_decision_dataset: FrozenDecisionDataset,
     ) -> None:
-        """Run one decision scenario on both runtimes and compare."""
-        ref_runtime = reference_runtime
-        cand_runtime = candidate_runtime
-
-        context = get_context_for_scenario(scenario.scenario_id)
-
-        ref_observations: list[DecisionObservation] = []
-        cand_observations: list[DecisionObservation] = []
-
-        for rep in range(3):
-            if rep % 2 == 0:
-                ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
-                cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
-            else:
-                cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
-                ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
-
-            ref_observations.append(ref_obs)
-            cand_observations.append(cand_obs)
+        """Score one decision scenario from the frozen dataset."""
+        ref_observations = [
+            o
+            for o in frozen_decision_dataset.reference_observations
+            if o.scenario_id == scenario.scenario_id
+        ]
+        cand_observations = [
+            o
+            for o in frozen_decision_dataset.candidate_observations
+            if o.scenario_id == scenario.scenario_id
+        ]
 
         # Score and classify
         ref_passes = sum(1 for o in ref_observations if score_decision(o, scenario.expectation))
@@ -456,30 +506,19 @@ _METRIC_LABELS = {
 
 
 class TestPaim13AggregateMetrics:
-    """Compute and report aggregate metrics across all scenarios."""
+    """Compute and report aggregate metrics across all scenarios.
+
+    All values derived from the frozen dataset — no additional model calls.
+    """
 
     def test_report_aggregate_metrics(
         self,
-        reference_runtime,
-        candidate_runtime,
+        frozen_decision_dataset: FrozenDecisionDataset,
         paim13_config,
     ) -> None:
         profile, model_name, ollama_version = paim13_config
-        ref_runtime = reference_runtime
-        cand_runtime = candidate_runtime
-        all_ref_observations: list[DecisionObservation] = []
-        all_cand_observations: list[DecisionObservation] = []
-        for scenario in DECISION_SCENARIOS:
-            context = get_context_for_scenario(scenario.scenario_id)
-            for rep in range(3):
-                if rep % 2 == 0:
-                    ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
-                    cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
-                else:
-                    cand_obs = _observe_candidate_decision(scenario, rep, cand_runtime, context)
-                    ref_obs = _observe_reference_decision(scenario, rep, ref_runtime, context)
-                all_ref_observations.append(ref_obs)
-                all_cand_observations.append(cand_obs)
+        all_ref_observations = list(frozen_decision_dataset.reference_observations)
+        all_cand_observations = list(frozen_decision_dataset.candidate_observations)
         ref_metrics = summarize_metrics(DECISION_SCENARIOS, all_ref_observations, "reference")
         cand_metrics = summarize_metrics(DECISION_SCENARIOS, all_cand_observations, "candidate")
         ref_decision_times = sorted(o.duration_seconds for o in all_ref_observations)

@@ -196,6 +196,63 @@ class TestCountingPydanticModelArchitecture:
         counter = CountingPydanticModel(fake)
         assert isinstance(counter, PydanticModel)
 
+    def test_settings_preserved(self) -> None:
+        """CountingPydanticModel.settings == delegate.settings."""
+        fake = FakeModel()
+        counter = CountingPydanticModel(fake)
+        assert counter.settings == fake.settings
+
+    def test_profile_preserved(self) -> None:
+        """CountingPydanticModel.profile == delegate.profile."""
+        fake = FakeModel()
+        counter = CountingPydanticModel(fake)
+        assert counter.profile == fake.profile
+
+    def test_model_name_preserved(self) -> None:
+        """CountingPydanticModel.model_name == delegate.model_name."""
+        fake = FakeModel()
+        counter = CountingPydanticModel(fake)
+        assert counter.model_name == fake.model_name
+
+    def test_system_preserved(self) -> None:
+        """CountingPydanticModel.system == delegate.system."""
+        fake = FakeModel()
+        counter = CountingPydanticModel(fake)
+        assert counter.system == fake.system
+
+    def test_base_url_preserved(self) -> None:
+        """CountingPydanticModel delegates base_url if the delegate has one."""
+
+        # FakeModel inherits base_url from Model (returns None by default)
+        fake = FakeModel()
+        counter = CountingPydanticModel(fake)
+        # Both should have the same base_url (None for FakeModel)
+        assert hasattr(fake, "base_url")
+        assert hasattr(counter, "base_url")
+        assert counter.base_url == fake.base_url
+
+    def test_request_preparation_transparency(self) -> None:
+        """CountingPydanticModel does not alter request/tool shape.
+
+        Verifies that ``prepare_request()`` on the wrapper produces the
+        same result as on the delegate when given identical inputs.
+        """
+        from pydantic_ai.models import ModelRequestParameters
+
+        fake = FakeModel()
+        counter = CountingPydanticModel(fake)
+
+        params = ModelRequestParameters(function_tools=[])
+        fake_result = fake.prepare_request(model_settings=None, model_request_parameters=params)
+        counter_result = counter.prepare_request(
+            model_settings=None, model_request_parameters=params
+        )
+
+        # The merged settings and customized parameters should be equivalent
+        assert fake_result[0] == counter_result[0], "merged model_settings must match"
+        # ModelRequestParameters dataclass equality works field-by-field
+        assert fake_result[1] == counter_result[1], "customized ModelRequestParameters must match"
+
     def test_pydantic_ai_fast_agent_construction(self) -> None:
         """PydanticAIFastAgent accepts CountingPydanticModel."""
         from dnd_assistant.application.pydantic_ai_fast_agent import (

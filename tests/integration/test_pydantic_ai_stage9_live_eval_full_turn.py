@@ -74,6 +74,10 @@ from tests.support.pydantic_ai_eval import (
     ToolCallObservation,
     score_full_turn,
 )
+from tests.support.pydantic_ai_eval_datasets import (
+    FrozenFullTurnDataset,
+    summarize_full_turn_aggregate,
+)
 
 pytestmark = pytest.mark.ollama
 
@@ -231,6 +235,58 @@ def candidate_runtime(paim13_config):
         "counting_model": counting_model,
         "profile": profile,
     }
+
+
+# ── Frozen dataset fixture (warm-up + collection exactly once) ────────────────
+
+
+def _warmup(runtime: dict[str, Any]) -> None:
+    """Perform one warm-up full-turn on each runtime (excluded from metrics)."""
+    context = make_read_context()
+    try:
+        runtime["loop"].run("Hello, this is a warm-up request.", execution_context=context)
+    except Exception:
+        pass
+
+
+@pytest.fixture(scope="module")
+def frozen_full_turn_dataset(
+    reference_runtime,
+    candidate_runtime,
+) -> FrozenFullTurnDataset:
+    """Collect all Layer B observations exactly once with warm-up first.
+
+    Warm-up runs before any measured observation.  The returned dataset
+    is consumed by scenario tests and aggregate metrics — no additional
+    model calls.
+    """
+    ref_runtime = reference_runtime
+    cand_runtime = candidate_runtime
+
+    # Warm-up before measurement (excluded from all metrics)
+    _warmup(ref_runtime)
+    _warmup(cand_runtime)
+
+    ref_observations: list[FullTurnObservation] = []
+    cand_observations: list[FullTurnObservation] = []
+
+    for scenario in FULL_TURN_SCENARIOS:
+        context = get_context_for_scenario(scenario.scenario_id)
+        for rep in range(3):
+            if rep % 2 == 0:
+                ref_obs = _observe_reference_full_turn(scenario, rep, ref_runtime, context)
+                cand_obs = _observe_candidate_full_turn(scenario, rep, cand_runtime, context)
+            else:
+                cand_obs = _observe_candidate_full_turn(scenario, rep, cand_runtime, context)
+                ref_obs = _observe_reference_full_turn(scenario, rep, ref_runtime, context)
+            ref_observations.append(ref_obs)
+            cand_observations.append(cand_obs)
+
+    return FrozenFullTurnDataset(
+        scenarios=tuple(FULL_TURN_SCENARIOS),
+        reference_observations=tuple(ref_observations),
+        candidate_observations=tuple(cand_observations),
+    )
 
 
 # ── Layer B: Reference full-turn observer ─────────────────────────────────────
@@ -469,29 +525,29 @@ def _observe_candidate_full_turn(
 
 
 class TestPaim13FullTurnEval:
-    """Full-turn quality comparison (Layer B)."""
+    """Full-turn quality comparison (Layer B).
+
+    All observations come from the frozen dataset — no additional model calls.
+    """
 
     @pytest.mark.parametrize("scenario", FULL_TURN_SCENARIOS, ids=lambda s: s.scenario_id)
     def test_full_turn_scenario(
         self,
         scenario: EvalScenario,
-        reference_runtime,
-        candidate_runtime,
+        frozen_full_turn_dataset: FrozenFullTurnDataset,
     ) -> None:
-        ref_runtime = reference_runtime
-        cand_runtime = candidate_runtime
-        context = get_context_for_scenario(scenario.scenario_id)
-        ref_observations: list[FullTurnObservation] = []
-        cand_observations: list[FullTurnObservation] = []
-        for rep in range(3):
-            if rep % 2 == 0:
-                ref_obs = _observe_reference_full_turn(scenario, rep, ref_runtime, context)
-                cand_obs = _observe_candidate_full_turn(scenario, rep, cand_runtime, context)
-            else:
-                cand_obs = _observe_candidate_full_turn(scenario, rep, cand_runtime, context)
-                ref_obs = _observe_reference_full_turn(scenario, rep, ref_runtime, context)
-            ref_observations.append(ref_obs)
-            cand_observations.append(cand_obs)
+        """Score one full-turn scenario from the frozen dataset."""
+        ref_observations = [
+            o
+            for o in frozen_full_turn_dataset.reference_observations
+            if o.scenario_id == scenario.scenario_id
+        ]
+        cand_observations = [
+            o
+            for o in frozen_full_turn_dataset.candidate_observations
+            if o.scenario_id == scenario.scenario_id
+        ]
+
         for obs in cand_observations:
             is_write_expected = (
                 scenario.expectation.kind == ScenarioExpectationKind.EXACT_TOOL_CALLS
@@ -509,32 +565,114 @@ class TestPaim13FullTurnEval:
 
 
 # ==============================================================================
-# Warm-up tests
+# Full-turn aggregate summary
 # ==============================================================================
 
 
-class TestPaim13WarmUp:
-    """Warm-up runs before measured eval (excluded from metrics)."""
+class TestPaim13FullTurnAggregate:
+    """Aggregate summary over the frozen Layer B dataset.
 
-    def test_reference_warmup(self, reference_runtime, paim13_config) -> None:
-        ref_runtime = reference_runtime
-        context = make_read_context()
-        try:
-            ref_runtime["loop"].run("Hello, this is a warm-up request.", execution_context=context)
-        except Exception:
-            pass
+    All values derived from the frozen observations — no additional model calls.
+    """
 
-    def test_candidate_warmup(self, candidate_runtime, paim13_config) -> None:
-        cand_runtime = candidate_runtime
-        context = make_read_context()
-        try:
-            cand_runtime["runtime"].run(
-                "Hello, this is a warm-up request.", execution_context=context
+    def test_report_full_turn_aggregate(
+        self,
+        frozen_full_turn_dataset: FrozenFullTurnDataset,
+        paim13_config,
+    ) -> None:
+        profile, model_name, ollama_version = paim13_config
+        ref_observations = list(frozen_full_turn_dataset.reference_observations)
+        cand_observations = list(frozen_full_turn_dataset.candidate_observations)
+
+        ref_summary = summarize_full_turn_aggregate(
+            list(FULL_TURN_SCENARIOS), ref_observations, "reference"
+        )
+        cand_summary = summarize_full_turn_aggregate(
+            list(FULL_TURN_SCENARIOS), cand_observations, "candidate"
+        )
+
+        print(f"\nPAIM13_MODEL={model_name}")
+        print(f"PAIM13_OLLAMA_VERSION={ollama_version}")
+        print(f"PAIM13_FULL_TURN_SCENARIO_COUNT={len(FULL_TURN_SCENARIOS)}")
+        print("PAIM13_FULL_TURN_REPETITIONS=3")
+
+        for label, ref_val, cand_val in [
+            (
+                "SCENARIO_MAJORITY_SUCCESS",
+                ref_summary.scenario_majority_success,
+                cand_summary.scenario_majority_success,
+            ),
+            (
+                "TOTAL_MODEL_REQUESTS",
+                ref_summary.total_model_requests,
+                cand_summary.total_model_requests,
+            ),
+            (
+                "MEAN_MODEL_REQUESTS",
+                ref_summary.mean_model_requests,
+                cand_summary.mean_model_requests,
+            ),
+            (
+                "TOTAL_INITIAL_TOOL_CALLS",
+                ref_summary.total_initial_tool_calls,
+                cand_summary.total_initial_tool_calls,
+            ),
+            (
+                "MEAN_INITIAL_TOOL_CALLS",
+                ref_summary.mean_initial_tool_calls,
+                cand_summary.mean_initial_tool_calls,
+            ),
+            (
+                "TOTAL_EXECUTED_TOOL_CALLS",
+                ref_summary.total_executed_tool_calls,
+                cand_summary.total_executed_tool_calls,
+            ),
+            (
+                "MEAN_EXECUTED_TOOL_CALLS",
+                ref_summary.mean_executed_tool_calls,
+                cand_summary.mean_executed_tool_calls,
+            ),
+            (
+                "TOTAL_HANDLER_INVOCATIONS",
+                ref_summary.total_handler_invocations,
+                cand_summary.total_handler_invocations,
+            ),
+            (
+                "MEAN_HANDLER_INVOCATIONS",
+                ref_summary.mean_handler_invocations,
+                cand_summary.mean_handler_invocations,
+            ),
+            (
+                "UNAUTHORIZED_WRITE_HANDLER_COUNT",
+                ref_summary.unauthorized_write_handler_count,
+                cand_summary.unauthorized_write_handler_count,
+            ),
+            (
+                "TURNS_WITH_EXCESS_REQUESTS",
+                ref_summary.turns_with_excess_requests,
+                cand_summary.turns_with_excess_requests,
+            ),
+        ]:
+            print(f"PAIM13_REF_{label}={ref_val}")
+            print(f"PAIM13_PYD_{label}={cand_val}")
+            if isinstance(ref_val, (int, float)) and isinstance(cand_val, (int, float)):
+                print(f"PAIM13_DELTA_{label}={cand_val - ref_val:+.4f}")
+
+        print(f"PAIM13_REF_FULL_TURN_P50_SECONDS={ref_summary.p50_seconds:.4f}")
+        print(f"PAIM13_PYD_FULL_TURN_P50_SECONDS={cand_summary.p50_seconds:.4f}")
+        print(f"PAIM13_REF_FULL_TURN_P95_SECONDS={ref_summary.p95_seconds:.4f}")
+        print(f"PAIM13_PYD_FULL_TURN_P95_SECONDS={cand_summary.p95_seconds:.4f}")
+        if ref_summary.p50_seconds > 0:
+            print(
+                f"PAIM13_FULL_TURN_P50_RATIO={cand_summary.p50_seconds / ref_summary.p50_seconds:.4f}"
             )
-        except Exception:
-            pass
+        if ref_summary.p95_seconds > 0:
+            print(
+                f"PAIM13_FULL_TURN_P95_RATIO={cand_summary.p95_seconds / ref_summary.p95_seconds:.4f}"
+            )
 
 
 # ==============================================================================
-# Warm-up tests
+# Warm-up is handled by the frozen_full_turn_dataset fixture
+# (before any measured observation collection).
 # ==============================================================================

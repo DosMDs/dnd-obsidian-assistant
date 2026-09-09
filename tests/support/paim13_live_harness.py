@@ -138,7 +138,13 @@ class CountingPydanticModel(Model):
     """
 
     def __init__(self, delegate: Model) -> None:
-        super().__init__()
+        # Preserve delegate settings and profile through the public
+        # Model constructor so that wrapper.settings/profile match
+        # the delegate's values.
+        super().__init__(
+            settings=delegate.settings,
+            profile=delegate.profile,
+        )
         self._delegate = delegate
         self._state = CountingPydanticModelState()
 

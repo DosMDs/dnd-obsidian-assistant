@@ -8049,3 +8049,186 @@ PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+
+## 57. PAIM-C30 correction record — Finalize PAIM-13 measurement harness
+
+**Status:** DONE
+**Completed:** 2026-09-09
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `f03a96dcbe0b2115ae9ccfc5f37c493123b87e12`
+**Parent SHA:** `699d278ff55668846f62d0c993b4769462b4f621`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### C29 remaining defects corrected
+
+| Defect | Description | Correction |
+|--------|-------------|------------|
+| Candidate measurement wrapper did not preserve delegate settings/profile | `CountingPydanticModel.__init__()` called `super().__init__()` without passing `settings` and `profile`, so `wrapper.settings` and `wrapper.profile` were always `None` | `super().__init__(settings=delegate.settings, profile=delegate.profile)` |
+| Decision samples were collected twice | `TestPaim13DecisionEval` collected observations per-scenario; `TestPaim13AggregateMetrics` independently collected the same 18×3 observations again | Single `frozen_decision_dataset` fixture collects all 54 ref + 54 candidate observations once; both test classes consume the same frozen dataset |
+| Full-turn samples were not a frozen shared dataset | `TestPaim13FullTurnEval` collected per-scenario; no aggregate summary existed | Single `frozen_full_turn_dataset` fixture collects all 27 ref + 27 candidate observations once; `TestPaim13FullTurnAggregate` consumes the same dataset |
+| Warm-up depended on post-measurement test ordering | `TestPaim13WarmUp` were standalone test methods relying on alphabetical sort before measured tests | Warm-up moved inside both `frozen_decision_dataset` and `frozen_full_turn_dataset` fixtures, before any measured observation collection |
+| Full-turn aggregate request/tool/latency reporting was incomplete | No aggregate summary existed for Layer B | `FullTurnAggregateSummary` DTO and `summarize_full_turn_aggregate()` function created; reports model requests, tool calls, handler invocations, WRITE safety, excess requests, p50/p95 |
+| Fresh root canonical pytest was missing | PAIM-C29 did not report a fresh `uv run pytest` result | Reported: 5174 passed, 143 skipped, 0 failed, 0 errors |
+
+### Counting wrapper transparency
+
+| Property | Result |
+|----------|--------|
+| `isinstance(wrapper, Model)` | YES |
+| `wrapper.settings == delegate.settings` | YES |
+| `wrapper.profile == delegate.profile` | YES |
+| `wrapper.model_name == delegate.model_name` | YES |
+| `wrapper.system == delegate.system` | YES |
+| `wrapper.base_url == delegate.base_url` | YES |
+| One request → count == 1, delegate called once | PASS |
+| Two requests → count == 2 | PASS |
+| Failed request → attempt count == 1, exception propagates | PASS |
+| `prepare_request()` produces same merged settings/params | PASS |
+
+### Frozen Layer A (decision) dataset
+
+```text
+scenarios:                   18
+repetitions:                 3
+reference observations:      54
+candidate observations:      54
+collection:                  exactly once (frozen_decision_dataset fixture)
+warm-up:                     before collection (in fixture)
+warm-up included in metrics: NO
+```
+
+Consumed by:
+- `TestPaim13DecisionEval.test_decision_scenario` (18 parametrized tests)
+- `TestPaim13AggregateMetrics.test_report_aggregate_metrics` (1 test)
+
+### Frozen Layer B (full-turn) dataset
+
+```text
+scenarios:                   9
+repetitions:                 3
+reference observations:      27
+candidate observations:      27
+collection:                  exactly once (frozen_full_turn_dataset fixture)
+warm-up:                     before collection (in fixture)
+warm-up included in metrics: NO
+```
+
+Consumed by:
+- `TestPaim13FullTurnEval.test_full_turn_scenario` (9 parametrized tests)
+- `TestPaim13FullTurnAggregate.test_report_full_turn_aggregate` (1 test)
+
+### Aggregate readiness
+
+All values derive from frozen data — no additional model calls:
+
+```text
+decision p50/p95:              YES (nearest_rank_percentile from frozen durations)
+full-turn p50/p95:             YES (nearest_rank_percentile from frozen durations)
+
+model requests/turn:           YES (FullTurnAggregateSummary.total/mean)
+initial emitted tools/turn:    YES (FullTurnAggregateSummary.total/mean)
+executed tools/turn:           YES (FullTurnAggregateSummary.total/mean)
+handlers/turn:                 YES (FullTurnAggregateSummary.total/mean)
+
+false-WRITE:                   YES (summarize_metrics metric index 8)
+hidden-WRITE:                  YES (summarize_metrics metric index 9)
+unauthorized WRITE:            YES (FullTurnAggregateSummary.unauthorized_write_handler_count)
+third-request count:           YES (FullTurnAggregateSummary.turns_with_excess_requests)
+
+scenario majority classification: YES (classify_majority from frozen observations)
+```
+
+### Request/context equality guards
+
+Four offline harness guards (in `test_pydantic_ai_eval_live_harness.py`):
+
+| Guard | Reference runtime | Candidate runtime | Request equality | Exposed tools equality |
+|-------|-------------------|-------------------|------------------|----------------------|
+| Direct | `FastAgent` + `FakeModelGateway` | `PydanticAIFastAgent` + `FakeModel` | PASS | PASS |
+| READ | `FastAgent` + `FakeModelGateway` | `PydanticAIFastAgent` + `FakeModel` | PASS | PASS |
+| WRITE | `FastAgent` + `FakeModelGateway` | `PydanticAIFastAgent` + `FakeModel` | PASS | PASS |
+| CLARIFY | `FastAgent` + `FakeModelGateway` | `PydanticAIFastAgent` + `FakeModel` | PASS | PASS |
+
+All use `make_deterministic_context_builder()` and equivalent deterministic model responses.
+
+### Wrapper/runtime identity guards
+
+Eight offline architecture guards (in `test_pydantic_ai_eval.py`):
+
+| Guard | Assertion |
+|-------|-----------|
+| FastAgent is reference decision type | `FastAgent.__name__ == "FastAgent"` |
+| PydanticAIFastAgent is candidate decision type | `PydanticAIFastAgent.__name__ == "PydanticAIFastAgent"` |
+| AgentLoop is reference full-turn type | `AgentLoop.__name__ == "AgentLoop"` |
+| PydanticAIAgentRuntime is candidate full-turn type | `PydanticAIAgentRuntime.__name__ == "PydanticAIAgentRuntime"` |
+| Reference path uses ToolExecutor | `ToolExecutor.__name__ == "ToolExecutor"` |
+| Candidate path uses PydanticAIToolBridge | `PydanticAIToolBridge.__name__ == "PydanticAIToolBridge"` |
+| Reference uses OllamaModelProvider | `OllamaModelProvider.__name__ == "OllamaModelProvider"` |
+| AgentToolExecutionService is reference type | `AgentToolExecutionService.__name__ == "AgentToolExecutionService"` |
+
+### File limits
+
+```text
+tests/support/paim13_live_harness.py:               435 lines
+tests/support/paim13_scenarios.py:                  580 lines
+tests/support/pydantic_ai_eval.py:                  908 lines
+tests/support/pydantic_ai_eval_datasets.py:         188 lines (new)
+tests/support/test_doubles.py:                      132 lines
+tests/unit/test_pydantic_ai_eval.py:                915 lines
+tests/unit/test_pydantic_ai_eval_live_harness.py:   539 lines
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py:  562 lines
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py:  678 lines
+```
+
+All PAIM-13 Python files < 1000 lines.
+
+Maintainability exception added/increased: NO
+
+### Changed files
+
+```text
+M tests/support/paim13_live_harness.py
+M tests/unit/test_pydantic_ai_eval_live_harness.py
+A tests/support/pydantic_ai_eval_datasets.py
+M tests/integration/test_pydantic_ai_stage9_live_eval_decision.py
+M tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M DEVELOPMENT_STATUS.md
+```
+
+No `src/` changes. No `pyproject.toml` or `uv.lock` changes.
+
+### Quality gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Eval/scorer unit tests | `uv run pytest tests/unit/test_pydantic_ai_eval.py -v` | 69 passed |
+| Live-harness unit tests | `uv run pytest tests/unit/test_pydantic_ai_eval_live_harness.py -v` | 21 passed |
+| PAIM-13 offline skips | `uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py -v` | 29 skipped |
+| PAIM-11 parity regressions | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity*.py -v` | 44 passed |
+| PAIM-12 offline | `uv run pytest tests/integration/test_pydantic_ai_ollama_runtime.py -v` | 9 passed |
+| Contract boundaries | `uv run pytest tests/contract/test_boundaries.py -v` | 97 passed |
+| Maintainability | `uv run pytest tests/contract/test_maintainability.py -v` | 443 passed |
+| Test harness policy | `uv run pytest tests/contract/test_test_harness_policy.py -v` | 25 passed |
+| Canonical root pytest | `uv run pytest` | 5174 passed, 143 skipped, 0 failed, 0 errors |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 380 files already formatted |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Historical prefix
+
+```text
+sections 1-56 unchanged:   YES
+section 57 appended:       YES
+```
+
+### Final status
+
+```text
+PAIM-C29 — DONE
+PAIM-C30 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
