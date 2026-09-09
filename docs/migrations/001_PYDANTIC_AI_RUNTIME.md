@@ -7879,4 +7879,173 @@ PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 56. PAIM-C29 correction record — Freeze and validate PAIM-13 measured harness
+
+### C28 defects corrected
+
+```text
+- CountingPydanticModel was not a Pydantic AI Model instance
+- offline counter tests did not call request()
+- failed candidate runs could report model_request_count=0
+- third-request guard could leave success=True
+- score_full_turn did not reject error_type
+- errored no-tool runs inflated correct abstention
+- metric labels were selected from numerator instead of metric position
+- request/context equality guards did not compare the two runtime decisions
+- decision scenario and aggregate tests used separate live sample sets
+- warm-up occurred after measured tests
+- full-turn aggregate latency/request/tool-use reporting was missing
+```
+
+### Changes made
+
+```text
+tests/support/paim13_live_harness.py:
+  CountingPydanticModel is now a proper pydantic_ai.models.Model subclass:
+    - Inherits from Model(ABC)
+    - Implements abstract model_name, system properties
+    - Implements abstract request() with counting + delegation
+    - request_stream() uses async generator delegation
+    - No __getattr__ fallback for abstract contract
+
+tests/support/test_doubles.py — NEW (132 lines):
+  FakeModel — minimal deterministic Model for offline testing
+  RaisingFakeModel — Model that raises on request
+  FakeModelGateway — deterministic ModelGateway for reference-side offline testing
+
+tests/unit/test_pydantic_ai_eval.py (906 lines, was 994):
+  - Replaced weak __getattr__/initial-count tests with architecture assertions
+    (isinstance Model, model_name delegation, system delegation)
+  - Replaced len()-only context equality with reference to new file
+  - Compacted TestDeterministicContextBuilder with shared helper
+  - File size reduced from 994 to 906 (under 1000)
+
+tests/unit/test_pydantic_ai_eval_live_harness.py — NEW (488 lines):
+  C29-M01: wrapper is instance of Model (architecture assertion)
+  C29-M02: one request → count == 1, delegate called once
+  C29-M03: two requests → count == 2
+  C29-M04: delegate raises → attempted request count == 1, exception propagates
+  C29-M05: request_stream delegates and does not corrupt non-stream count
+  Response identity/value preservation test
+  PydanticAIFastAgent construction with CountingPydanticModel
+  PydanticAIAgentRuntime construction with CountingPydanticModel
+  Metric label contract: all 11 labels in fixed order, position-based lookup
+  Harness-drift guards: 4 tests comparing reference vs candidate
+    AgentDecision.request and AgentDecision.exposed_tools for
+    direct/READ/WRITE/CLARIFY queries
+
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py (540 lines):
+  - model_request_count computed on ALL paths (not just success)
+  - Third-request guard sets success=False + error_type, cannot be silently
+    swallowed by except Exception
+
+tests/support/pydantic_ai_eval.py (908 lines):
+  - score_full_turn() now rejects observations with error_type is not None
+  - correct_abstention metric excludes errored no-tool observations from
+    numerator (no_tool_errored subtracted)
+
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py (523 lines):
+  - Metric labels use position-based lookup (enumerate index), not
+    _METRIC_LABELS.get(numerator, ...)
+```
+
+### Counting model
+
+```text
+isinstance(Model): YES
+PydanticAIFastAgent construction: PASS
+PydanticAIAgentRuntime construction: PASS
+
+1 request: count 1
+2 requests: count 2
+failed request: counted
+response delegation: exact
+```
+
+### Frozen datasets
+
+```text
+Layer A:
+18 × 3 × 2, executed exactly once when live
+
+Layer B:
+9 × 3 × 2, executed exactly once when live
+```
+
+Per-scenario and aggregate tests reuse the same frozen in-memory result.
+
+### Warm-up
+
+Warm-up tests exist in the full-turn module but still run after measured
+tests.  Full fixture-based warm-up before measured samples requires a
+session-scoped live runtime harness and is deferred to a follow-up
+correction or PAIM-13 execution task.
+
+### Scoring fixes
+
+```text
+score_full_turn:        now rejects error_type is not None before success check
+correct_abstention:     errored no-tool observations excluded from numerator
+third-request guard:    sets success=False + error_type, not caught by except
+model_request_count:    computed on ALL paths (success and error)
+metric labels:          position-based lookup via enumerate index
+```
+
+### Aggregate metrics readiness
+
+```text
+Decision p50/p95:       implemented from frozen observations
+Full-turn p50/p95:      implemented (needs live data)
+Full-turn model/tool:   observation fields exist (needs live data)
+WRITE safety:           run-level false-WRITE and hidden-WRITE metrics
+```
+
+### Context/request guards
+
+```text
+4 harness-drift tests comparing reference vs candidate:
+  - direct query: AgentDecision.request and exposed_tools match
+  - READ query: AgentDecision.request and exposed_tools match
+  - WRITE query: AgentDecision.request and exposed_tools match
+  - CLARIFY query: AgentDecision.request and exposed_tools match
+```
+
+### File sizes
+
+```text
+tests/support/pydantic_ai_eval.py                          — 908 lines
+tests/support/paim13_scenarios.py                           — 580 lines
+tests/support/paim13_live_harness.py                        — 428 lines
+tests/support/test_doubles.py                               — 132 lines (NEW)
+tests/unit/test_pydantic_ai_eval.py                         — 906 lines
+tests/unit/test_pydantic_ai_eval_live_harness.py            — 488 lines (NEW)
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py — 523 lines
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py — 540 lines
+```
+
+All Python files < 1000 lines.  No maintainability exception for PAIM-13.
+
+### Quality gates
+
+```text
+Unit tests (offline):   84 passed in ~2s
+```
+
+### Sections 1-55
+
+```text
+sections 1-55 unchanged: YES
+section 56 appended: YES
+```
+
+### Final status
+
+```text
+PAIM-C27 — DONE
+PAIM-C28 — DONE
+PAIM-C29 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
 ```

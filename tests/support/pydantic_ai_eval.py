@@ -535,6 +535,10 @@ def score_full_turn(
     Returns:
         ``True`` if the full turn passes, ``False`` otherwise.
     """
+    # An errored observation cannot pass
+    if observation.error_type is not None:
+        return False
+
     if not observation.success:
         return False
 
@@ -688,12 +692,22 @@ def summarize_metrics(
     ]
     no_tool_total = len(no_tool_scenarios) * 3
     no_tool_false = 0
+    no_tool_errored = 0
     for s in no_tool_scenarios:
         for rep in range(3):
             key = (s.scenario_id, rep)
             obs = obs_by_key.get(key)
-            if obs is not None and len(obs.tool_calls) > 0:
-                no_tool_false += 1
+            if obs is not None:
+                if len(obs.tool_calls) > 0:
+                    no_tool_false += 1
+                elif obs.error_type is not None:
+                    # Errored no-tool observation: runtime failed before
+                    # emitting a tool — not a correct abstention.
+                    no_tool_errored += 1
+
+    # Correct abstention: no-tool observation with no error AND no tool calls.
+    # An errored no-tool observation does NOT count as correct abstention.
+    correct_abstention_count = no_tool_total - no_tool_false - no_tool_errored
 
     missed = 0
     for s in exact_calls_scenarios:
@@ -706,8 +720,6 @@ def summarize_metrics(
                 # Missed if any expected tool name is absent
                 if not expected_names.issubset(observed_names):
                     missed += 1
-
-    correct_abstention_count = no_tool_total - no_tool_false
 
     clarify_scenarios = [
         s for s in scenarios if s.expectation.kind == ScenarioExpectationKind.CLARIFY_NO_TOOL

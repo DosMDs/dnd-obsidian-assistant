@@ -505,8 +505,8 @@ class TestPaim13AggregateMetrics:
             print(
                 f"PAIM13_SCENARIO {comp.scenario_id} REF={comp.reference_passes}/3 PYD={comp.candidate_passes}/3 class={comp.classification}"
             )
-        for ref_m, cand_m in zip(ref_metrics, cand_metrics, strict=True):
-            label = _METRIC_LABELS.get(ref_m.numerator, f"metric_{ref_m.numerator}")
+        for index, (ref_m, cand_m) in enumerate(zip(ref_metrics, cand_metrics, strict=True)):
+            label = _METRIC_LABELS[index]
             delta = cand_m.value - ref_m.value
             print(f"PAIM13_REF_{label}={ref_m.value:.4f} ({ref_m.numerator}/{ref_m.denominator})")
             print(

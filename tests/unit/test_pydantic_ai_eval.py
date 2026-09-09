@@ -834,96 +834,7 @@ class TestPaim13RuntimeIdentity:
 # ==============================================================================
 # Request/context equality guard
 # ==============================================================================
-
-
-class TestPaim13RequestContextEquality:
-    """Verify that reference and candidate runtimes receive equivalent
-    request data and execution context for the same scenario.
-
-    Uses the real deterministic context builder to produce actual
-    ``AgentContext`` snapshots.
-    """
-
-    def test_deterministic_context_for_direct_query(self) -> None:
-        """Direct query produces the same context from the real builder."""
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        ctx_a = builder.build("Tell me about Arlen")
-        ctx_b = builder.build("Tell me about Arlen")
-        assert len(ctx_a.relevant_entities) == len(ctx_b.relevant_entities)
-
-    def test_deterministic_context_for_read_query(self) -> None:
-        """READ query produces the same context from the real builder."""
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        ctx_a = builder.build("What is Black Keep?")
-        ctx_b = builder.build("What is Black Keep?")
-        assert len(ctx_a.relevant_entities) == len(ctx_b.relevant_entities)
-
-    def test_deterministic_context_for_write_query(self) -> None:
-        """WRITE query produces the same context from the real builder."""
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        ctx_a = builder.build("Mark the Moon Gate quest as completed")
-        ctx_b = builder.build("Mark the Moon Gate quest as completed")
-        assert len(ctx_a.relevant_entities) == len(ctx_b.relevant_entities)
-
-    def test_deterministic_context_for_clarify_query(self) -> None:
-        """CLARIFY query produces the same context from the real builder."""
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        ctx_a = builder.build("Tell me about the NPC")
-        ctx_b = builder.build("Tell me about the NPC")
-        assert len(ctx_a.relevant_entities) == len(ctx_b.relevant_entities)
-
-    def test_read_write_contexts_differ(self) -> None:
-        """READ and WRITE contexts have different permissions."""
-        from dnd_assistant.tools.types import (
-            ExecutionContext,
-            Permission,
-            SessionMode,
-        )
-
-        read_ctx = ExecutionContext(
-            granted_permission=Permission.READ,
-            session_mode=SessionMode.NO_ACTIVE_SESSION,
-        )
-        write_ctx = ExecutionContext(
-            granted_permission=Permission.WRITE,
-            session_mode=SessionMode.ACTIVE_SESSION,
-        )
-        assert read_ctx.granted_permission != write_ctx.granted_permission
-
-    def test_scenario_expectation_is_deterministic(self) -> None:
-        """Same scenario ID always produces the same expectation."""
-        exp1 = EvalExpectation(
-            kind=ScenarioExpectationKind.EXACT_TOOL_CALLS,
-            tool_calls=(
-                ExpectedToolCall(
-                    tool_name="write_quest_status",
-                    arguments={"name": "Moon Gate", "status": "completed"},
-                ),
-            ),
-            order_sensitive=True,
-        )
-        exp2 = EvalExpectation(
-            kind=ScenarioExpectationKind.EXACT_TOOL_CALLS,
-            tool_calls=(
-                ExpectedToolCall(
-                    tool_name="write_quest_status",
-                    arguments={"name": "Moon Gate", "status": "completed"},
-                ),
-            ),
-            order_sensitive=True,
-        )
-        assert exp1 == exp2
-        assert exp1.kind.name == "EXACT_TOOL_CALLS"
-        assert len(exp1.tool_calls) == 1
-        assert exp1.tool_calls[0].tool_name == "write_quest_status"
+# Full harness-drift guards moved to test_pydantic_ai_eval_live_harness.py
 
 
 # ==============================================================================
@@ -932,26 +843,43 @@ class TestPaim13RequestContextEquality:
 
 
 class TestCountingPydanticModel:
-    """Deterministic offline tests for CountingPydanticModel wrapper."""
+    """Architecture and basic offline tests for CountingPydanticModel wrapper.
+
+    Comprehensive literal request-counting tests (C29-M02 through C29-M05)
+    are in ``test_pydantic_ai_eval_live_harness.py``.
+    """
+
+    def test_isinstance_model(self) -> None:
+        from pydantic_ai.models import Model as PydanticModel
+
+        from tests.support.paim13_live_harness import CountingPydanticModel
+
+        assert issubclass(CountingPydanticModel, PydanticModel)
 
     def test_initial_count_is_zero(self) -> None:
         from tests.support.paim13_live_harness import (
             CountingPydanticModel,
             CountingPydanticModelState,
         )
+        from tests.support.test_doubles import FakeModel
 
-        counter = CountingPydanticModel(object())
+        counter = CountingPydanticModel(FakeModel())
         assert counter.state.request_count == 0
         assert isinstance(counter.state, CountingPydanticModelState)
 
-    def test_getattr_delegates_to_wrapped(self) -> None:
+    def test_model_name_delegates(self) -> None:
         from tests.support.paim13_live_harness import CountingPydanticModel
+        from tests.support.test_doubles import FakeModel
 
-        class _ModelWithAttr:
-            model_name = "test-model"
+        counter = CountingPydanticModel(FakeModel())
+        assert counter.model_name == "fake-model"
 
-        counter = CountingPydanticModel(_ModelWithAttr())
-        assert counter.model_name == "test-model"
+    def test_system_delegates(self) -> None:
+        from tests.support.paim13_live_harness import CountingPydanticModel
+        from tests.support.test_doubles import FakeModel
+
+        counter = CountingPydanticModel(FakeModel())
+        assert counter.system == "test-system"
 
 
 # ==============================================================================
@@ -962,33 +890,26 @@ class TestCountingPydanticModel:
 class TestDeterministicContextBuilder:
     """Offline tests for the deterministic AgentContext builder."""
 
-    def test_arlen_query_contains_arlen(self) -> None:
+    def _build(self, query: str):
         from tests.support.paim13_live_harness import make_deterministic_context_builder
 
-        builder = make_deterministic_context_builder()
-        context = builder.build("Tell me about Arlen")
+        return make_deterministic_context_builder().build(query)
+
+    def test_arlen_query_contains_arlen(self) -> None:
+        context = self._build("Tell me about Arlen")
         names = tuple(e.name for e in context.relevant_entities)
         assert "Arlen" in names
 
     def test_black_keep_query_contains_black_keep(self) -> None:
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        context = builder.build("What is Black Keep?")
+        context = self._build("What is Black Keep?")
         names = tuple(e.name for e in context.relevant_entities)
         assert "Black Keep" in names
 
     def test_moon_gate_query_contains_moon_gate(self) -> None:
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        context = builder.build("Tell me about the Moon Gate quest")
+        context = self._build("Tell me about the Moon Gate quest")
         names = tuple(e.name for e in context.relevant_entities)
         assert "Moon Gate" in names
 
     def test_greeting_has_no_relevant_entities(self) -> None:
-        from tests.support.paim13_live_harness import make_deterministic_context_builder
-
-        builder = make_deterministic_context_builder()
-        context = builder.build("Hello! How are you?")
+        context = self._build("Hello! How are you?")
         assert len(context.relevant_entities) == 0

@@ -416,22 +416,26 @@ def _observe_candidate_full_turn(
         )
         exposed_info = ExposedToolInfo(tool_names=exposed_names, has_write=has_write)
 
-        # Literal model request count from CountingPydanticModel delta
-        model_request_count = counting_model.state.request_count - pre_count
-
-        # Hard check: candidate must not perform a third semantic request
-        if model_request_count > 2:
-            raise RuntimeError(
-                f"Candidate performed {model_request_count} semantic requests "
-                f"(max 2 allowed). This is a critical PAIM-13 failure."
-            )
-
     except ModelError as exc:
         error_type = "ModelError"
         error_message = str(exc)
     except Exception as exc:
         error_type = type(exc).__name__
         error_message = str(exc)
+
+    # Literal model request count from CountingPydanticModel delta
+    # Computed on ALL paths (successful, errored, failed) — never inferred.
+    model_request_count = counting_model.state.request_count - pre_count
+
+    # Hard check: candidate must not perform a third semantic request.
+    # This is a critical PAIM-13 failure that cannot be silently swallowed.
+    if model_request_count > 2:
+        success = False
+        error_type = "RequestLimitViolation"
+        error_message = (
+            f"Candidate performed {model_request_count} semantic requests "
+            f"(max 2 allowed). This is a critical PAIM-13 failure."
+        )
 
     duration = time.perf_counter() - start
 
