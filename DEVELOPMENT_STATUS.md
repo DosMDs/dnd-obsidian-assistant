@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-09 (PAIM-C26)
+**Last updated:** 2026-09-09 (PAIM-C28)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -137,6 +137,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
 | PAIM-13 — Eval comparison against reference | IN PROGRESS |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
+| PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 

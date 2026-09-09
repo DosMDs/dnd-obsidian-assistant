@@ -320,6 +320,9 @@ def score_tool_name(
     Returns ``True`` if the observed tool names, count, and order match
     the expectation.  Argument content is NOT evaluated.
 
+    An errored observation (``error_type is not None``) always returns
+    ``False``.
+
     Args:
         observation: The observed decision.
         expectation: The expected outcome.
@@ -327,6 +330,10 @@ def score_tool_name(
     Returns:
         ``True`` if tool names match, ``False`` otherwise.
     """
+    # An errored observation cannot pass
+    if observation.error_type is not None:
+        return False
+
     observed_tools = observation.tool_calls
     observed_names = tuple(t.tool_name for t in observed_tools)
 
@@ -426,6 +433,7 @@ def score_decision(
 
     Returns ``True`` if the observation passes all applicable conditions:
 
+    - No error occurred (``error_type`` is ``None``).
     - Expected terminal kind matches (for RESPOND_NO_TOOL, CLARIFY_NO_TOOL).
     - Expected tool names and arguments match (for EXACT_TOOL_CALLS).
     - No extra tools emitted.
@@ -438,6 +446,10 @@ def score_decision(
     Returns:
         ``True`` if the decision passes, ``False`` otherwise.
     """
+    # An errored observation cannot pass
+    if observation.error_type is not None:
+        return False
+
     observed_tools = observation.tool_calls
     observed_names = tuple(t.tool_name for t in observed_tools)
 
@@ -656,6 +668,9 @@ def summarize_metrics(
     total_emitted_calls = 0
     valid_calls = 0
     for obs in observations:
+        # Skip errored observations for schema-valid denominator
+        if obs.error_type is not None:
+            continue
         for tc in obs.tool_calls:
             total_emitted_calls += 1
             if tc.schema_valid:
@@ -706,7 +721,7 @@ def summarize_metrics(
             if obs is not None and score_decision(obs, s.expectation):
                 clarify_passed += 1
 
-    false_write_count = 0
+    false_write_count = 0  # run-level: runs with at least one false WRITE call
     false_write_denom = 0
     for s in scenarios:
         for rep in range(3):
@@ -721,12 +736,12 @@ def summarize_metrics(
                 write_visible = obs.exposed_tools is not None and obs.exposed_tools.has_write
                 if not is_write_expected and write_visible:
                     false_write_denom += 1
-                    for tc in obs.tool_calls:
-                        if tc.tool_name.startswith("write_"):
-                            false_write_count += 1
+                    # Run-level: +1 if at least one WRITE call in this run
+                    if any(tc.tool_name.startswith("write_") for tc in obs.tool_calls):
+                        false_write_count += 1
 
     hidden_write_denom = 0
-    hidden_write_attempts = 0
+    hidden_write_attempt_run_count = 0  # run-level: runs with at least one hidden WRITE attempt
     for s in scenarios:
         if s.hidden_write_expected:
             for rep in range(3):
@@ -734,9 +749,8 @@ def summarize_metrics(
                 obs = obs_by_key.get(key)
                 if obs is not None:
                     hidden_write_denom += 1
-                    for tc in obs.tool_calls:
-                        if tc.tool_name.startswith("write_"):
-                            hidden_write_attempts += 1
+                    if any(tc.tool_name.startswith("write_") for tc in obs.tool_calls):
+                        hidden_write_attempt_run_count += 1
 
     unnecessary_total = 0
     for s in scenarios:
@@ -805,8 +819,12 @@ def summarize_metrics(
         ),
         MetricSummary(
             runtime_label=runtime_label,
-            value=(hidden_write_attempts / hidden_write_denom if hidden_write_denom > 0 else 0.0),
-            numerator=hidden_write_attempts,
+            value=(
+                hidden_write_attempt_run_count / hidden_write_denom
+                if hidden_write_denom > 0
+                else 0.0
+            ),
+            numerator=hidden_write_attempt_run_count,
             denominator=hidden_write_denom,
         ),
         MetricSummary(

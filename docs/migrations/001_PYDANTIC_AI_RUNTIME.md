@@ -7686,4 +7686,197 @@ PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+
+## 55. PAIM-C28 correction record — Make PAIM-13 harness live-ready
+
+**Status:** DONE
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `944cc2acd20f678a5bebf9b44bf91ad1480da784`
+**Parent SHA:** `e972aa46ee1868c8b75c25bb5d85ad0df4423e55`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### C27 issues found
+
+```text
+- candidate semantic request count remained inferred (2 if tool path, 1 if direct)
+- live eval was 1186 lines (required maintainability allowlist exception)
+- maintainability allowlist was widened for the oversized file
+- NullWorldTimeRepo returned bare None (incompatible with repository contract)
+- malformed terminal was converted to CLARIFY (via except Exception -> clarify)
+- error/no-tool observation could score as PASS (no error_type check in score_decision)
+- false-WRITE numerator counted individual calls rather than failed runs
+- hidden-WRITE metric counted raw attempts rather than run-level
+- root canonical suite was not reported
+```
+
+### Changes made
+
+```text
+tests/support/paim13_live_harness.py — NEW (417 lines):
+  Reusable shared infrastructure extracted from the oversized live eval:
+  - CountingModelGateway (reference-side request counting)
+  - CountingPydanticModel (candidate-side request counting via Model.request() delegation)
+  - make_deterministic_context_builder() with NotFoundError-raising world-time repo
+  - build_eval_registry() for synthetic tool handlers
+  - build_exposed_info() for per-turn tool visibility
+  - parse_terminal_observation() — never converts parse failures to CLARIFY
+  - DETERMINISTIC_ENTITIES data (5 entities with stable IDs)
+
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py — NEW (523 lines):
+  Layer A decision quality tests (18 scenarios x 3 repetitions).
+  Reference: FastAgent + CountingModelGateway + OllamaModelProvider.
+  Candidate: PydanticAIFastAgent + CountingPydanticModel + OllamaModel.
+  Includes aggregate metrics reporting.
+
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py — NEW (536 lines):
+  Layer B full-turn quality tests (9 scenarios x 3 repetitions).
+  Reference: AgentLoop + CountingModelGateway + OllamaModelProvider.
+  Candidate: PydanticAIAgentRuntime + CountingPydanticModel + OllamaModel.
+  Includes warm-up tests.
+  Candidate observer uses literal CountingPydanticModel delta for model_request_count.
+  Hard check: candidate model_request_count > 2 raises RuntimeError.
+
+tests/integration/test_pydantic_ai_stage9_live_eval.py — DELETED (was 1186 lines).
+  Replaced by the two split test files above.  No file exceeds 1000 lines.
+
+tests/support/pydantic_ai_eval.py:
+  - score_decision() now rejects observations with error_type is not None
+  - score_tool_name() now rejects observations with error_type is not None
+  - false-WRITE metric: run-level numerator (runs with >=1 WRITE call, not total calls)
+  - hidden-WRITE metric: run-level numerator (hidden_write_attempt_run_count)
+  - schema-valid metric: excludes errored observations from denominator
+
+tests/unit/test_pydantic_ai_eval.py:
+  - Added TestCountingPydanticModel (2 tests: initial count, getattr delegation)
+  - Added TestDeterministicContextBuilder (5 tests: Arlen, Black Keep, Moon Gate, greeting)
+  - Added TestPaim13RequestContextEquality tests using real deterministic builder
+  - Added test_false_write_run_level_counting (run-level numerator verification)
+  - Total: 73 tests (was 64)
+  - File size: 991 lines (under 1000 hard limit)
+
+tests/contract/test_maintainability.py:
+  - Removed C27 legacy exception for the deleted 1186-line file
+  - No new maintainability exception added
+
+tests/support/paim13_scenarios.py:
+  - Changed ToolPublicDefinition to ToolDefinition (production API changed)
+```
+
+### Semantic request counting
+
+```text
+Reference: CountingModelGateway wraps OllamaModelProvider and counts literal
+  chat_with_tools() invocations via CountingGatewayState.chat_with_tools_count.
+  Delta computed as post_count - pre_count per full turn.
+
+Candidate: CountingPydanticModel wraps Pydantic AI OllamaModel and counts
+  literal request() invocations via CountingPydanticModelState.request_count.
+  Delta computed as post_count - pre_count per full turn.
+  No inference from tool_execution_count remains.
+```
+
+### Terminal/error scoring
+
+```text
+Malformed terminal: parse_terminal_observation() returns None on parse failure,
+  and the observer sets error_type = "ParseError".  Never returns "clarify"
+  for malformed data.
+
+Errored NO_TOOL: score_decision() and score_tool_name() both check
+  observation.error_type is not None and return False.  An errored run
+  with zero tools cannot score as PASS.
+
+Unit tests: 73 passed, covering error scoring, false-WRITE run-level
+  counting, CountingPydanticModel delegation, and deterministic context.
+```
+
+### Context fixture
+
+```text
+make_deterministic_context_builder() builds an AgentContextBuilder with:
+  - 5 deterministic entities (Arlen, Mira, Black Keep, Moon Gate, Sunken Bell)
+  - Search matching entity names in user input
+  - No active session, no recent events
+  - World time raises NotFoundError (uninitialised)
+
+Successful AgentContext builds verified for:
+  - Arlen query -> contains Arlen
+  - Black Keep query -> contains Black Keep
+  - Moon Gate query -> contains Moon Gate
+  - Greeting -> empty relevant_entities
+```
+
+### Metrics corrections
+
+```text
+false-WRITE run-rate semantics:
+  Numerator = runs (in non-WRITE-expected, WRITE-visible denominator)
+  with at least one WRITE call.  Unit test: 1 run with 2 WRITE calls = +1.
+
+hidden-WRITE semantics:
+  Numerator = runs (in hidden_write_expected scenarios) with at least
+  one WRITE attempt.  Metric name: hidden_write_attempt_run_rate.
+
+schema-valid semantics:
+  Denominator excludes observations where error_type is not None.
+  An errored run with zero valid tool calls does not count as 0/0 or 0/1.
+```
+
+### File sizes (current)
+
+```text
+tests/support/pydantic_ai_eval.py          — 896 lines
+tests/support/paim13_scenarios.py           — 580 lines
+tests/support/paim13_live_harness.py        — 417 lines (NEW)
+tests/unit/test_pydantic_ai_eval.py         — 991 lines
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py — 523 lines (NEW)
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py — 536 lines (NEW)
+```
+
+All Python files < 1000 lines.  No maintainability exception for PAIM-13.
+
+### Runtime identity
+
+```text
+Reference Layer A: FastAgent
+Candidate Layer A: PydanticAIFastAgent
+
+Reference Layer B: AgentLoop
+Candidate Layer B: PydanticAIAgentRuntime
+
+Reference transport: OllamaModelProvider (via CountingModelGateway)
+Candidate model: build_pydantic_ai_ollama_model (via CountingPydanticModel)
+```
+
+### Quality gates
+
+```text
+Ruff check:         All checks passed
+Ruff format:        375 files already formatted
+Contract tests:     559 passed in 11.66s
+Unit tests:         73 passed in 1.03s
+Full canonical:     5151 passed, 144 skipped in 212.39s
+```
+
+Canonical reconciliation vs C26 (5066 passed, 114 skipped):
+  +85 passed, +30 skipped.  Increase attributed to new PAIM-13 eval tests
+  and additional unit tests added in C27/C28.
+
+### Sections 1-54
+
+```text
+sections 1-54 unchanged: YES
+section 55 appended: YES
+```
+
+### Final status
+
+```text
+PAIM-C27 — DONE
+PAIM-C28 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
 ```

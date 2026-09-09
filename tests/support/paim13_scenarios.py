@@ -14,12 +14,12 @@ from typing import Any, Literal
 from pydantic import BaseModel
 
 from dnd_assistant.storage.audit import AuditContext
-from dnd_assistant.tools.catalog import ToolPublicDefinition
 from dnd_assistant.tools.types import (
     ExecutionContext,
     Permission,
     SessionMode,
     SideEffect,
+    ToolDefinition,
 )
 from tests.support.pydantic_ai_eval import (
     EvalExpectation,
@@ -74,7 +74,7 @@ class EvalHandlerState:
 
 # ── Synthetic eval tool definitions ──────────────────────────────────────────
 
-READ_NPC_DEF = ToolPublicDefinition(
+READ_NPC_DEF = ToolDefinition(
     name="read_npc",
     description="Read information about an NPC by name. Available NPCs: Arlen, Mira.",
     input_schema=ReadNpcInput,
@@ -89,7 +89,7 @@ READ_NPC_DEF = ToolPublicDefinition(
     ),
 )
 
-READ_LOCATION_DEF = ToolPublicDefinition(
+READ_LOCATION_DEF = ToolDefinition(
     name="read_location",
     description="Read information about a location by name. Available locations: Black Keep.",
     input_schema=ReadLocationInput,
@@ -104,7 +104,7 @@ READ_LOCATION_DEF = ToolPublicDefinition(
     ),
 )
 
-READ_QUEST_DEF = ToolPublicDefinition(
+READ_QUEST_DEF = ToolDefinition(
     name="read_quest",
     description="Read information about a quest by name. Available quests: Moon Gate, Sunken Bell.",
     input_schema=ReadQuestInput,
@@ -119,7 +119,7 @@ READ_QUEST_DEF = ToolPublicDefinition(
     ),
 )
 
-WRITE_QUEST_STATUS_DEF = ToolPublicDefinition(
+WRITE_QUEST_STATUS_DEF = ToolDefinition(
     name="write_quest_status",
     description="Update the status of a quest. Status must be one of: active, completed, failed.",
     input_schema=WriteQuestStatusInput,
@@ -129,7 +129,7 @@ WRITE_QUEST_STATUS_DEF = ToolPublicDefinition(
     allowed_session_modes=frozenset({SessionMode.ACTIVE_SESSION}),
 )
 
-WRITE_CAMPAIGN_NOTE_DEF = ToolPublicDefinition(
+WRITE_CAMPAIGN_NOTE_DEF = ToolDefinition(
     name="write_campaign_note",
     description="Write a campaign note with the given text.",
     input_schema=WriteCampaignNoteInput,
@@ -139,7 +139,7 @@ WRITE_CAMPAIGN_NOTE_DEF = ToolPublicDefinition(
     allowed_session_modes=frozenset({SessionMode.ACTIVE_SESSION}),
 )
 
-ALL_EVAL_DEFS: tuple[ToolPublicDefinition, ...] = (
+ALL_EVAL_DEFS: tuple[ToolDefinition, ...] = (
     READ_NPC_DEF,
     READ_LOCATION_DEF,
     READ_QUEST_DEF,
