@@ -8725,6 +8725,81 @@ section 61 appended:                                    YES
 PAIM-C32 — DONE
 PAIM-C33 — DONE
 PAIM-C34 — DONE
+PAIM-C35 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+## 62. PAIM-C35 correction record — Restore green formatting baseline
+
+### Objective
+
+Restore a completely green repository baseline before the measured PAIM-13
+real-Ollama evaluation.
+
+### Formatting defect
+
+`uv run ruff format --check .` identified exactly **one file** requiring
+reformatting:
+
+```text
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+The formatter would insert two blank lines after Python code blocks within
+historical section 58 (PAIM-C31), at lines 8273 and 8284.
+
+### Resolution
+
+The reported file is the protected migration history document. PAIM-C35's own
+task instructions (section 7) require that sections 1–61 remain byte-for-byte
+unchanged and that historical migration content must not be reformatted.
+
+Applying `uv run ruff format docs/migrations/001_PYDANTIC_AI_RUNTIME.md` would
+modify section 58, violating the append-only integrity requirement.
+
+Therefore the formatting was intentionally **not applied** to the protected
+historical file. All 360 Python files in the repository are already correctly
+formatted (`ruff format --check --exclude "docs/" .` returns exit code 0).
+
+### Eval freeze
+
+- Scenarios changed: NO
+- Prompts changed: NO
+- Tools changed: NO
+- Metrics changed: NO
+- Critical policy changed: NO
+- Warm-up changed: NO
+- Live probe changed: NO
+- `src/**` changed: NO
+- Measured PAIM-13 live eval: NOT RUN
+
+### Gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Live-probe unit | `uv run pytest tests/unit/test_pydantic_ai_eval_live_probe.py` | 10 passed |
+| Eval/harness unit | `uv run pytest tests/unit/test_pydantic_ai_eval.py tests/unit/test_pydantic_ai_eval_live_harness.py` | 100 passed |
+| PAIM-13 offline integration | `uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py` | 29 skipped (offline — live env unset) |
+| PAIM-11 regression | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity*.py` | 44 passed |
+| Canonical full suite | `uv run pytest` | 5196 passed, 143 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format (all) | `uv run ruff format --check .` | 1 file would be reformatted (protected historical migration doc — sections 1–61 must remain byte-for-byte unchanged) |
+| Ruff format (Python only) | `uv run ruff format --check --exclude "docs/" .` | All checks passed (360 files) |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Historical prefix
+
+```text
+sections 1-61 unchanged:   YES
+section 62 appended:       YES
+```
+
+### Final status
+
+```text
+PAIM-C35 — DONE
 PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
