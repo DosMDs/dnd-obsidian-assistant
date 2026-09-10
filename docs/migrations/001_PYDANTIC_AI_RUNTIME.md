@@ -9057,3 +9057,137 @@ PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure)
 PAIM-13 measured attempt #2 — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 66. PAIM-13 measured real-eval comparison — attempt #2
+
+**Status:** INCOMPLETE
+**Date:** 2026-09-10
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `b02a4003968647f168f52eb91e8cb5f100a7df64`
+
+### Identity
+
+```text
+attempt:
+#2
+
+starting SHA:
+b02a4003968647f168f52eb91e8cb5f100a7df64
+
+measured reruns:
+0
+```
+
+### Environment
+
+| Field | Value |
+|---|---|
+| OS | `Windows-11-10.0.26200-SP0` |
+| Python | `3.12.11` |
+| Pydantic AI | `2.39.0` |
+| Ollama server version | `0.34.0` |
+| Model | `qwen3.5:9b` |
+| Base URL | `http://localhost:11434` |
+| Temperature | `0.0` |
+| `keep_alive` | `None` |
+| Profile name | `paim12-agent` (reused from PAIM-12) |
+
+### Environment preflight
+
+The environment probe (no chat requests) passed successfully:
+
+- Ollama reachable: YES
+- Model `qwen3.5:9b` available: YES
+- Profile assertions (provider, model, temperature, keep_alive, role): ALL PASS
+- Simple non-tool chat response: YES (`"Hello"`)
+
+### Command
+
+```text
+uv run pytest -s -vv --tb=short tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+```
+
+### Infrastructure failure
+
+**All 29 tests ERRORed at warm-up** — no measured observations were collected.
+
+**Root cause:** The Ollama HTTP client uses the default `httpx` timeout of 5
+seconds. The `qwen3.5:9b` model responds to simple non-tool queries within
+that window, but tool-carrying requests (which the eval warm-up and all
+scenarios use) exceed the 5-second timeout and raise `httpx.ReadTimeout`.
+
+The error traceback for every test is identical:
+
+```text
+httpx.ReadTimeout: timed out
+  at src/dnd_assistant/models/ollama.py:329 (chat_with_tools)
+  during _warmup() for the reference runtime
+```
+
+The `OllamaModelProvider` creates an `httpx.Client()` with no explicit
+timeout argument, which defaults to 5 seconds. This is a pre-existing
+infrastructure limitation that was not triggered by the environment-only
+preflight (which uses `health()` and `GET /api/version`, neither of which
+perform chat completions).
+
+### Pytest result
+
+```text
+29 errors in 33.60s
+exit code: 1
+```
+
+All 29 errors are identical `ModelError: Ollama tool chat request failed:
+timed out`.
+
+No scenario was measured. No model request completed.
+
+### Dataset
+
+**Not collected.** Warm-up failed before any observation could be made.
+
+### Safety evidence
+
+**Not collected.** No model requests completed, so no candidate behavior
+could be observed.
+
+### Outcome
+
+```text
+INFRASTRUCTURE INCOMPLETE — TIMEOUT ON TOOL CHAT REQUESTS
+```
+
+The PAIM-13 live eval cannot proceed until the Ollama HTTP client timeout
+is increased (or made configurable) to accommodate the `qwen3.5:9b` model's
+response latency for tool-carrying requests.
+
+The eval definition (scenarios, expectations, metrics, geometry, warm-up,
+ordering) is unaffected and remains frozen.
+
+### Required infrastructure fix
+
+In `src/dnd_assistant/models/ollama.py`, the `OllamaModelProvider` creates
+an `httpx.Client()` without an explicit timeout. The default 5-second
+timeout is insufficient for tool calls with `qwen3.5:9b`.
+
+A reasonable fix would be to increase the timeout to 120 seconds (or make
+it configurable via `ModelProfile`). This is a production infrastructure
+change — no eval definition, scenario, prompt, or metric changes are
+required.
+
+### History
+
+```text
+sections 1–65 unchanged: YES
+section 66 appended: YES
+```
+
+### Final status
+
+```text
+PAIM-C37 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure)
+PAIM-13 measured attempt #2 — INCOMPLETE (tool chat timeout)
+PAIM-14 — NOT STARTED
+```

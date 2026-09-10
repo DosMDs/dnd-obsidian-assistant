@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-10 (PAIM-C37)
+**Last updated:** 2026-09-10 (PAIM-13 attempt #2)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -135,7 +135,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
 | PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
-| PAIM-13 — Eval comparison against reference | IN PROGRESS — attempt #1 INCOMPLETE |
+| PAIM-13 — Eval comparison against reference | IN PROGRESS — attempt #2 INCOMPLETE |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
 | PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-C29 — Freeze and validate PAIM-13 measured harness | DONE |
@@ -175,7 +175,7 @@ REJECTED
 ```text
 PAIM-13 — Execute measured real eval comparison (attempt #2)
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
-PAIM-13 measured attempt #2 — NOT RUN
+PAIM-13 measured attempt #2 — INCOMPLETE (tool chat timeout, httpx default 5s insufficient for qwen3.5:9b tool calls)
 ```
 
 ### PAIM-C37 correction
