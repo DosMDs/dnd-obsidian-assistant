@@ -8861,6 +8861,107 @@ sample counts changed:     NO
 ```text
 PAIM-C36 — DONE
 PAIM-13 — IN PROGRESS
-PAIM-13 measured live eval — NOT RUN
+PAIM-13 measured live eval — INCOMPLETE (infrastructure failure)
 PAIM-14 — NOT STARTED
 ```
+
+## 64. PAIM-13 measured real-eval comparison — infrastructure failure
+
+**Status:** INCOMPLETE
+**Date:** 2026-09-10
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `881301b2c4248ff13c0f01dfca9f151ca7a69e56`
+
+### Environment
+
+| Field | Value |
+|---|---|
+| OS | `Windows-11-10.0.26200-SP0` |
+| Python | `3.12.11` |
+| Pydantic AI | `2.39.0` |
+| Ollama server version | `0.34.0` |
+| Model | `qwen3.5:9b` |
+| Base URL | `http://localhost:11434` |
+| Temperature | `0.0` |
+| `keep_alive` | `None` |
+| Profile name | `paim12-agent` (reused from PAIM-12) |
+
+### Environment preflight
+
+The environment probe (no chat requests) passed successfully:
+
+- Ollama reachable: YES
+- Model `qwen3.5:9b` available: YES
+- Profile assertions (provider, model, temperature, keep_alive, role): ALL PASS
+
+### Command
+
+```text
+uv run pytest -s -vv --tb=short tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+```
+
+### Infrastructure failure
+
+**All 29 tests ERRORed at fixture construction** — no model requests were made.
+
+**Root cause:** `PydanticAIToolBridge.__init__()` requires keyword-only
+`registry=` parameter, but both PAIM-13 live eval test files pass the
+registry positionally:
+
+| File | Line | Broken call |
+|---|---|---|
+| `test_pydantic_ai_stage9_live_eval_decision.py` | 186 | `PydanticAIToolBridge(cand_registry)` |
+| `test_pydantic_ai_stage9_live_eval_full_turn.py` | 205 | `PydanticAIToolBridge(cand_registry)` |
+
+Every other test file in the repository uses the correct keyword form
+`PydanticAIToolBridge(registry=...)`.
+
+### Pytest result
+
+```text
+29 errors in 12.53s
+exit code: 1
+```
+
+All 29 errors are identical `TypeError: PydanticAIToolBridge.__init__() takes
+1 positional argument but 2 were given`.
+
+No scenario was measured. No model request was made.
+
+### Dataset
+
+**Not collected.** Fixture construction failed before any observation could
+be made.
+
+### Safety evidence
+
+**Not collected.** No model requests were made, so no candidate behavior
+could be observed.
+
+### Outcome
+
+```text
+INFRASTRUCTURE INCOMPLETE — FIXTURE CONSTRUCTION FAILURE
+```
+
+The PAIM-13 live eval cannot proceed until the two positional constructor
+calls are corrected to keyword arguments. The eval definition (scenarios,
+expectations, metrics, geometry, warm-up, ordering) is unaffected and
+remains frozen.
+
+### Required fix
+
+In both files, change:
+
+```python
+cand_tool_bridge = PydanticAIToolBridge(cand_registry)
+```
+
+to:
+
+```python
+cand_tool_bridge = PydanticAIToolBridge(registry=cand_registry)
+```
+
+This is a test-harness fix only — no production code, no eval definition,
+and no scenario/prompt/metric changes are required.

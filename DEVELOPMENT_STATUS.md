@@ -135,7 +135,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
 | PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
-| PAIM-13 — Eval comparison against reference | IN PROGRESS |
+| PAIM-13 — Eval comparison against reference | IN PROGRESS — INFRASTRUCTURE FAILURE |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
 | PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-C29 — Freeze and validate PAIM-13 measured harness | DONE |
@@ -173,7 +173,31 @@ REJECTED
 
 ```text
 PAIM-13 — Execute measured real eval comparison
+PAIM-13 live eval — INCOMPLETE (infrastructure failure)
 ```
+
+### PAIM-13 infrastructure failure
+
+The PAIM-13 live eval test files (`test_pydantic_ai_stage9_live_eval_decision.py`,
+`test_pydantic_ai_stage9_live_eval_full_turn.py`) construct `PydanticAIToolBridge`
+with a positional argument:
+
+```python
+cand_tool_bridge = PydanticAIToolBridge(cand_registry)  # FAILS
+```
+
+The constructor now requires keyword-only syntax:
+
+```python
+cand_tool_bridge = PydanticAIToolBridge(registry=cand_registry)  # OK
+```
+
+This causes `TypeError` at fixture construction time, preventing any measured
+observation collection. All 29 tests ERROR before any model request.
+
+**Required fix:** Change the two positional constructor calls to keyword
+arguments in the two PAIM-13 live eval test files. The eval definition
+(scenarios, expectations, metrics, geometry) is unaffected.
 
 ## Current blockers
 
