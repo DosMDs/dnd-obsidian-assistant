@@ -44,6 +44,7 @@ from dnd_assistant.models.ollama_tool_adapter import (
     parse_tool_aware_response,
 )
 from dnd_assistant.models.profiles import ModelProfile
+from dnd_assistant.models.transport import build_ollama_http_timeout
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
@@ -95,7 +96,9 @@ class OllamaModelProvider:
             )
 
         self._profile = profile
-        self._client = httpx.Client()
+        self._client = httpx.Client(
+            timeout=build_ollama_http_timeout(),
+        )
 
     def close(self) -> None:
         """Close the underlying HTTP client, releasing any resources."""

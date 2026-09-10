@@ -237,11 +237,20 @@ def test_p9_u13_temperature_propagated() -> None:
 
 
 def test_p9_u14_temperature_none_not_forced() -> None:
-    """``temperature=None`` results in empty settings (no forced default)."""
+    """``temperature=None`` must not force a temperature value.
+
+    The project-owned Ollama timeout is always present in settings,
+    but temperature must remain absent when the profile has no explicit
+    temperature.
+    """
     profile = _make_profile(temperature=None)
     model = build_pydantic_ai_ollama_model(profile)
-    # When no settings are provided, model.settings should be empty
-    assert not model.settings, f"expected empty settings, got {model.settings}"
+    assert model.settings is not None
+    # Temperature must NOT be present
+    assert "temperature" not in model.settings, f"expected no temperature key, got {model.settings}"
+    # Timeout must be present (project-owned transport policy)
+    timeout = model.settings.get("timeout")
+    assert timeout is not None, "project timeout must be present in settings"
 
 
 # ==============================================================================

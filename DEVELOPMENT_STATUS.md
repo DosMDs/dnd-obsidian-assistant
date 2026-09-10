@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-10 (PAIM-13 attempt #2)
+**Last updated:** 2026-09-10 (PAIM-C38)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -147,6 +147,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C35 — Restore green formatting baseline | DONE |
 | PAIM-C36 — Reconcile Ruff with append-only migration history | DONE |
 | PAIM-C37 — Seal offline construction preflight for PAIM-13 live eval | DONE |
+| PAIM-C38 — Establish explicit Ollama request-timeout parity | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 
@@ -173,9 +174,10 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-13 — Execute measured real eval comparison (attempt #2)
+PAIM-13 — Execute measured real eval comparison (attempt #3)
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
-PAIM-13 measured attempt #2 — INCOMPLETE (tool chat timeout, httpx default 5s insufficient for qwen3.5:9b tool calls)
+PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
+PAIM-13 measured attempt #3 — NOT RUN
 ```
 
 ### PAIM-C37 correction
@@ -189,6 +191,23 @@ without Ollama.  A positional-call regression test guards against recurrence.
 
 The eval definition (scenarios, expectations, metrics, geometry) is unaffected.
 PAIM-13 measured attempt #2 has NOT been run.
+
+### PAIM-C38 correction
+
+PAIM-C38 established one explicit, bounded, project-owned Ollama model-request
+timeout policy used by both the native reference runtime and the Pydantic AI
+candidate runtime:
+
+- Connect timeout: 5s
+- Request/read ceiling: 120s
+
+The native `OllamaModelProvider` previously inherited HTTPX's 5-second default
+timeout.  The candidate Pydantic AI builder had no explicit matching project
+timeout.  Both now use the same shared policy from
+`dnd_assistant.models.transport.build_ollama_http_timeout()`.
+
+No PAIM-13 scenario, prompt, tool, expectation, metric, or geometry was changed.
+PAIM-13 measured attempt #3 has NOT been run.
 
 ## Current blockers
 

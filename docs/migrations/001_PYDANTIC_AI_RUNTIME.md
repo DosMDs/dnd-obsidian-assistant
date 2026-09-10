@@ -9191,3 +9191,77 @@ PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure)
 PAIM-13 measured attempt #2 — INCOMPLETE (tool chat timeout)
 PAIM-14 — NOT STARTED
 ```
+
+---
+
+## 67. PAIM-C38 correction record — Establish explicit Ollama request-timeout parity
+
+### Root cause
+
+PAIM-13 attempt #2 remained infrastructure-incomplete: the native
+`OllamaModelProvider` inherited HTTPX's 5-second default timeout, and the
+candidate Pydantic AI builder had no explicit matching project-owned timeout.
+
+Attempt #2 had one successful non-measured plain-chat preflight request before
+pytest, but zero measured observations were collected.
+
+### Correction
+
+One project-owned timeout policy now applies to both runtime paths:
+
+- Connect timeout: 5s
+- Request/read ceiling: 120s
+
+A shared factory `build_ollama_http_timeout()` in
+`src/dnd_assistant/models/transport.py` returns a fresh `httpx.Timeout` with
+the project constants.
+
+The native `OllamaModelProvider` now constructs its `httpx.Client` with this
+explicit timeout instead of the implicit HTTPX default.
+
+The Pydantic AI `build_pydantic_ai_ollama_model()` now propagates the same
+timeout through the public `ModelSettings.timeout` mechanism (Pydantic AI
+2.39.0 supports `ModelSettings.timeout` for Ollama).
+
+### What was NOT changed
+
+- `ModelProfile` was not widened (no timeout field added).
+- No transport retries were added.
+- No custom Pydantic AI HTTP client was required.
+- No PAIM-13 scenario, prompt, tool, expectation, metric, or geometry changed.
+- No PAIM-13 live eval harness file changed.
+- No PAIM-13 measured attempt was run.
+
+### Literal parity evidence
+
+Proved by deterministic offline tests in
+`tests/unit/test_ollama_transport_timeout.py`:
+
+```text
+native connect timeout: 5.0
+native read timeout:    120.0
+
+candidate ModelSettings timeout connect: 5.0
+candidate ModelSettings timeout read:    120.0
+```
+
+Both sides consume the same `build_ollama_http_timeout()` factory from
+`dnd_assistant.models.transport` — not duplicated literals.
+
+### History
+
+```text
+sections 1–66 unchanged: YES
+section 67 appended: YES
+```
+
+### Final status
+
+```text
+PAIM-C38 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure)
+PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout)
+PAIM-13 measured attempt #3 — NOT RUN
+PAIM-14 — NOT STARTED
+```

@@ -36,6 +36,7 @@ This module must NOT eagerly import:
 
 from __future__ import annotations
 
+from typing import Any
 from urllib.parse import urlparse
 
 from pydantic_ai.models.ollama import OllamaModel
@@ -44,6 +45,7 @@ from pydantic_ai.settings import ModelSettings
 
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
+from dnd_assistant.models.transport import build_ollama_http_timeout
 
 
 def build_pydantic_ai_ollama_model(
@@ -103,9 +105,18 @@ def build_pydantic_ai_ollama_model(
     # ── Framework construction ──────────────────────────────────────────
     provider = OllamaProvider(base_url=normalized_base_url)
 
-    settings: ModelSettings | None = None
+    # ── Transport timeout ─────────────────────────────────────────────
+    # The project-owned Ollama timeout policy applies to every model request.
+    # ModelSettings.timeout is the public Pydantic AI 2.39 mechanism for
+    # propagating HTTP transport timeouts to the Ollama provider.
+    settings_kwargs: dict[str, Any] = {
+        "timeout": build_ollama_http_timeout(),
+    }
+
     if profile.temperature is not None:
-        settings = ModelSettings(temperature=profile.temperature)
+        settings_kwargs["temperature"] = profile.temperature
+
+    settings = ModelSettings(**settings_kwargs)
 
     return OllamaModel(
         profile.model,
