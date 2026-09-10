@@ -119,7 +119,25 @@ contains documentation Markdown only.
 
 Skipped irrelevant gates are not failures.
 
-## 6. Prompt-generation rule
+## 6. Protected append-only migration history
+
+Append-only migration records under `docs/migrations/*.md` are excluded from
+Ruff formatting by repository configuration (`extend-exclude` in
+`pyproject.toml`).
+
+Agents must not:
+
+- reformat historical migration sections to satisfy Ruff;
+- substitute ad-hoc `--exclude` arguments for the project's canonical
+  formatting gate.
+
+When Ruff is applicable, use the configured root command:
+
+```text
+uv run ruff format --check .
+```
+
+## 7. Prompt-generation rule
 
 Task prompts must not mechanically include full pytest/Ruff for a task whose
 expected final diff is documentation-only.

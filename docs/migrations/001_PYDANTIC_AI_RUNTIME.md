@@ -8804,3 +8804,63 @@ PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 63. PAIM-C36 correction record — Reconcile Ruff with append-only migration history
+
+C35 established that the only file reported by
+`uv run ruff format --check .`
+was the append-only migration Markdown.
+
+Ruff >=0.16 includes Markdown in discovery and formats Python fenced blocks.
+
+Formatting the file would rewrite historical PAIM sections.
+
+C36 therefore added a narrow project-level Ruff exclusion for
+`docs/migrations/*.md`.
+
+No historical migration section was reformatted.
+
+The canonical command `uv run ruff format --check .` now passes without
+command-line exclusions.
+
+### Gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format (canonical) | `uv run ruff format --check .` | All checks passed (no CLI exclude) |
+| Live-probe unit | `uv run pytest tests/unit/test_pydantic_ai_eval_live_probe.py` | 10 passed |
+| Eval/harness unit | `uv run pytest tests/unit/test_pydantic_ai_eval.py tests/unit/test_pydantic_ai_eval_live_harness.py` | 100 passed |
+| PAIM-13 offline integration | `uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py` | 29 skipped (offline — live env unset) |
+| PAIM-11 regression | `uv run pytest tests/integration/test_pydantic_ai_stage9_parity*.py` | 44 passed |
+| Canonical full suite | `uv run pytest` | 5196 passed, 143 skipped |
+| git diff --check | `git diff --check` | No whitespace errors |
+
+### Historical prefix
+
+```text
+sections 1-62 unchanged:   YES
+section 63 appended:       YES
+```
+
+### PAIM-13 eval freeze
+
+```text
+scenarios changed:         NO
+prompts changed:           NO
+tool definitions changed:  NO
+metric formulas changed:   NO
+critical policy changed:   NO
+warm-up changed:           NO
+live probe changed:        NO
+sample counts changed:     NO
+```
+
+### Final status
+
+```text
+PAIM-C36 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
