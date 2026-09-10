@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-10 (PAIM-C36)
+**Last updated:** 2026-09-10 (PAIM-C37)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -135,7 +135,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
 | PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
-| PAIM-13 — Eval comparison against reference | IN PROGRESS — INFRASTRUCTURE FAILURE |
+| PAIM-13 — Eval comparison against reference | IN PROGRESS — attempt #1 INCOMPLETE |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
 | PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-C29 — Freeze and validate PAIM-13 measured harness | DONE |
@@ -146,6 +146,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C34 — Restore migration history append-only integrity | DONE |
 | PAIM-C35 — Restore green formatting baseline | DONE |
 | PAIM-C36 — Reconcile Ruff with append-only migration history | DONE |
+| PAIM-C37 — Seal offline construction preflight for PAIM-13 live eval | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 
@@ -172,32 +173,22 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-13 — Execute measured real eval comparison
-PAIM-13 live eval — INCOMPLETE (infrastructure failure)
+PAIM-13 — Execute measured real eval comparison (attempt #2)
+PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
+PAIM-13 measured attempt #2 — NOT RUN
 ```
 
-### PAIM-13 infrastructure failure
+### PAIM-C37 correction
 
-The PAIM-13 live eval test files (`test_pydantic_ai_stage9_live_eval_decision.py`,
-`test_pydantic_ai_stage9_live_eval_full_turn.py`) construct `PydanticAIToolBridge`
-with a positional argument:
+PAIM-C37 corrected the two positional `PydanticAIToolBridge(cand_registry)` calls
+to keyword-only `PydanticAIToolBridge(registry=cand_registry)` in both PAIM-13
+live eval fixture files.  The offline construction preflight in
+`tests/unit/test_pydantic_ai_eval_construction_preflight.py` now proves that both
+Layer A and Layer B candidate object graphs construct and execute deterministically
+without Ollama.  A positional-call regression test guards against recurrence.
 
-```python
-cand_tool_bridge = PydanticAIToolBridge(cand_registry)  # FAILS
-```
-
-The constructor now requires keyword-only syntax:
-
-```python
-cand_tool_bridge = PydanticAIToolBridge(registry=cand_registry)  # OK
-```
-
-This causes `TypeError` at fixture construction time, preventing any measured
-observation collection. All 29 tests ERROR before any model request.
-
-**Required fix:** Change the two positional constructor calls to keyword
-arguments in the two PAIM-13 live eval test files. The eval definition
-(scenarios, expectations, metrics, geometry) is unaffected.
+The eval definition (scenarios, expectations, metrics, geometry) is unaffected.
+PAIM-13 measured attempt #2 has NOT been run.
 
 ## Current blockers
 

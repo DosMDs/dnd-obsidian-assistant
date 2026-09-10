@@ -8965,3 +8965,95 @@ cand_tool_bridge = PydanticAIToolBridge(registry=cand_registry)
 
 This is a test-harness fix only — no production code, no eval definition,
 and no scenario/prompt/metric changes are required.
+
+## 65. PAIM-C37 correction record — Seal offline construction preflight
+
+### Attempt #1
+
+```text
+status: INFRASTRUCTURE INCOMPLETE
+datasets: NOT COLLECTED
+quality verdict: NOT AVAILABLE
+```
+
+### Constructor correction
+
+```text
+production constructor keyword-only: YES
+Layer-A live fixture uses registry=: YES
+Layer-B live fixture uses registry=: YES
+```
+
+### Offline executable construction evidence
+
+New test module:
+
+```text
+tests/unit/test_pydantic_ai_eval_construction_preflight.py
+```
+
+Layer A (PydanticAIFastAgent) candidate object graph:
+
+```text
+build_eval_registry(state)
+→ build_tool_registry_schema(registry)
+→ PydanticAIToolBridge(registry=...)
+→ DndAgentRunPreparer
+→ PydanticAIFastAgent
+→ deterministic decide(): PASS
+```
+
+Layer B (PydanticAIAgentRuntime) candidate object graph:
+
+```text
+build_eval_registry(state)
+→ build_tool_registry_schema(registry)
+→ PydanticAIToolBridge(registry=...)
+→ DndAgentRunPreparer
+→ PydanticAIFastAgent
+→ PydanticAIAgentRuntime
+→ deterministic run(): PASS
+```
+
+All tests use deterministic fakes (FakeModel, WarmupFakeModel). No real
+Ollama, no network, no environment variables.
+
+The old positional invocation `PydanticAIToolBridge(cand_registry)` would
+fail the `test_positional_call_raises_type_error` regression with
+`TypeError` because the constructor is keyword-only.
+
+### Eval freeze
+
+```text
+scenarios changed: NO
+prompts changed: NO
+tools changed: NO
+metrics changed: NO
+geometry changed: NO
+```
+
+### Quality gates
+
+```text
+canonical pytest: 5204 passed, 143 skipped, 0 failed
+ruff check: All checks passed
+ruff format --check: 380 files already formatted
+git diff --check: clean
+```
+
+### History
+
+```text
+sections 1–64 unchanged: YES
+section 65 appended: YES
+```
+
+### Final status
+
+```text
+PAIM-C37 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure)
+PAIM-13 measured attempt #2 — NOT RUN
+PAIM-14 — NOT STARTED
+```

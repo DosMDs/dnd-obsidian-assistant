@@ -183,7 +183,7 @@ def candidate_runtime(paim13_config):
     cand_catalog = build_tool_registry_schema(cand_registry)
     cand_context_builder = make_deterministic_context_builder()
 
-    cand_tool_bridge = PydanticAIToolBridge(cand_registry)
+    cand_tool_bridge = PydanticAIToolBridge(registry=cand_registry)
     cand_preparer = DndAgentRunPreparer(
         context_builder=cand_context_builder,
         tool_catalog=cand_catalog,
