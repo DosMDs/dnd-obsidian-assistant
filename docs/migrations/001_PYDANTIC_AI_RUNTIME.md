@@ -9673,3 +9673,100 @@ PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
 PAIM-13 measured attempt #4 — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 70. PAIM-C40 correction record — Correct PAIM-C39 evidence bookkeeping
+
+### Correction 1 — regression-test file
+
+Section 69 states:
+
+```text
+Added to tests/unit/test_pydantic_ai_eval.py
+```
+
+That is incorrect.
+
+The actual new regression-test file added by C39 is:
+
+```text
+tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+```
+
+`tests/unit/test_pydantic_ai_eval.py` was modified by C39 but was not the
+new regression-test file.
+
+### Correction 2 — test count
+
+Section 69 Final Report claimed 10 deterministic tests.
+
+Actual focused module result:
+
+```text
+uv run pytest tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+9 passed, 0 failed, 0 errors
+```
+
+### Correct C39 changed-file inventory
+
+```text
+M DEVELOPMENT_STATUS.md
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+M tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+M tests/support/pydantic_ai_eval.py
+M tests/support/pydantic_ai_eval_datasets.py
+A tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+```
+
+`tests/unit/test_pydantic_ai_eval.py` changed by C39:
+
+```text
+NO
+```
+
+### History integrity
+
+```text
+sections 1–69 content unchanged: YES
+  (one trailing blank-line separator added before section 70 heading,
+   which is part of the append structure, not a modification of section 69)
+section 70 appended: YES
+```
+
+### Gates
+
+```text
+uv run pytest tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+9 passed, 0 failed, 0 errors
+
+uv run pytest
+5231 passed, 143 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+All checks passed
+
+uv run ruff format --check .
+1 pre-existing unformatted file (tests/unit/test_pydantic_ai_eval_unauthorized_write.py)
+— not introduced by this task
+
+git diff --check
+no whitespace errors
+```
+
+### Final status
+
+```text
+PAIM-C40 — DONE
+PAIM-C39 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE
+PAIM-13 attempt #2 — INCOMPLETE
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+Active next:
+
+```text
+PAIM-13 — Execute measured real eval comparison (attempt #4)
+```
