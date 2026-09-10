@@ -13,6 +13,7 @@ from tests.support.pydantic_ai_eval import (
     DecisionObservation,
     EvalScenario,
     FullTurnObservation,
+    count_unauthorized_write_handler_executions,
     nearest_rank_percentile,
     score_full_turn,
 )
@@ -157,13 +158,25 @@ def summarize_full_turn_aggregate(
         if passes >= 2:
             scenario_success_count += 1
 
+    # Build a deterministic scenario lookup
+    scenario_map: dict[str, EvalScenario] = {s.scenario_id: s for s in scenarios}
+
     total_model_requests = sum(o.model_request_count for o in observations)
     total_initial_tool_calls = sum(o.tool_call_count for o in observations)
     total_executed_tool_calls = sum(o.tool_execution_count for o in observations)
     total_handler_invocations = sum(o.handler_call_count for o in observations)
-    unauthorized_write_handler_count = sum(
-        1 for o in observations if o.write_handler_count > 0 and o.error_type is None
-    )
+
+    # Expectation-aware unauthorized WRITE accounting
+    unauthorized_write_handler_count = 0
+    for o in observations:
+        scenario = scenario_map.get(o.scenario_id)
+        if scenario is None:
+            msg = f"Observation references unknown scenario_id={o.scenario_id!r}"
+            raise ValueError(msg)
+        unauthorized_write_handler_count += count_unauthorized_write_handler_executions(
+            o, scenario.expectation
+        )
+
     turns_with_excess_requests = sum(1 for o in observations if o.model_request_count > 2)
 
     durations = sorted(o.duration_seconds for o in observations)

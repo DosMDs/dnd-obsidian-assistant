@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-10 (PAIM-13 attempt #3)
+**Last updated:** 2026-09-10 (PAIM-C39)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -135,7 +135,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
 | PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
-| PAIM-13 — Eval comparison against reference | BLOCKED — EVAL REGRESSION (3 unauthorized WRITE handler executions) |
+| PAIM-13 — Eval comparison against reference | IN PROGRESS |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
 | PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-C29 — Freeze and validate PAIM-13 measured harness | DONE |
@@ -148,6 +148,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C36 — Reconcile Ruff with append-only migration history | DONE |
 | PAIM-C37 — Seal offline construction preflight for PAIM-13 live eval | DONE |
 | PAIM-C38 — Establish explicit Ollama request-timeout parity | DONE |
+| PAIM-C39 — Correct unauthorized WRITE accounting and blocker evidence | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 
@@ -174,10 +175,12 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-13 — BLOCKED — EVAL REGRESSION
+PAIM-C39 — DONE
+PAIM-13 — IN PROGRESS
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
-PAIM-13 attempt #3 — COMPLETE (EVAL REGRESSION BLOCKER: 3 unauthorized WRITE handler executions)
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — NOT RUN
 PAIM-14 — NOT STARTED
 ```
 
@@ -192,25 +195,30 @@ Candidate has 3 unauthorized WRITE handler executions.
 This is a critical PAIM-13 failure.
 ```
 
-This matches a predefined hard migration blocker:
+**PAIM-C39 correction:** The aggregate WRITE blocker verdict has been
+invalidated. The old aggregate counted every successful observation with
+any WRITE handler as unauthorized, without inspecting scenario expectations.
+E13-R08 explicitly expects `write_quest_status(name="Moon Gate", status="completed")`
+and ran 3 repetitions — all 3 candidate observations passed exact full-turn
+scoring. After correction, the deterministic regression tests prove that
+3 correct R08-style observations produce 0 unauthorized WRITE handler
+executions.
 
-```text
-candidate unauthorized WRITE handler executions > 0
-```
-
-Layer A (18 decision scenarios × 3 repetitions) completed with full parity:
-REF=0.2778 (5/18), PYD=0.2778 (5/18), all metrics at zero delta.
-
-Layer B (9 full-turn scenarios × 3 repetitions) completed per-scenario tests
-(all 9 passed), but the aggregate hard-blocker check failed before emitting
-Layer B metrics.
-
-The eval definition, scenarios, prompts, tools, expectations, metrics, and
-geometry were unchanged from the frozen PAIM-13 baseline.
+The measurement itself remains valid historical evidence. The blocker
+interpretation was invalid.
 
 ## Current blockers
 
-PAIM-13 — EVAL REGRESSION — Candidate has 3 unauthorized WRITE handler executions.
+```text
+No confirmed PAIM-13 runtime regression blocker.
+Attempt #3 aggregate WRITE blocker was invalidated by PAIM-C39.
+```
+
+Active next:
+
+```text
+PAIM-13 — Execute measured real eval comparison (attempt #4)
+```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
 

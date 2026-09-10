@@ -9518,3 +9518,158 @@ PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout)
 PAIM-13 attempt #3 — COMPLETE (EVAL REGRESSION BLOCKER: 3 unauthorized WRITE handler executions)
 PAIM-14 — NOT STARTED
 ```
+
+---
+
+## 69. PAIM-C39 correction record — Correct unauthorized WRITE accounting
+
+### Defect
+
+The Layer-B aggregate in `summarize_full_turn_aggregate()` computed:
+
+```python
+unauthorized_write_handler_count = sum(
+    1 for o in observations if o.write_handler_count > 0 and o.error_type is None
+)
+```
+
+This had three defects:
+
+**Defect A — expected WRITEs are counted as unauthorized.** The aggregate did
+not inspect the scenario expectation. `E13-R08` explicitly expects
+`write_quest_status(name="Moon Gate", status="completed")` and ran 3
+repetitions. All 3 candidate R08 observations passed exact full-turn scoring.
+Expected WRITE execution must not itself count as unauthorized.
+
+**Defect B — turns are counted, not handler executions.** The old code added
+`1` per observation regardless of whether `write_handler_count == 1` or
+`write_handler_count == 2`. The field name
+`unauthorized_write_handler_count` did not match the computed value.
+
+**Defect C — errored turns incorrectly suppress side effects.** The old code
+required `error_type is None`. An unauthorized WRITE that occurs before a
+later runtime error is still an unauthorized side effect and must be counted.
+
+### Correction
+
+A centralized helper `count_unauthorized_write_handler_executions()` was
+added to `tests/support/pydantic_ai_eval.py`. It:
+
+1. Identifies expected WRITE tool calls from the scenario expectation.
+2. Matches actual `executed_tool_calls` against expected WRITE calls as a
+   multiset using exact tool name and `json_args_equal()` strict argument
+   semantics.
+3. Returns `max(0, write_handler_count - matched_expected_executions)`.
+
+The aggregate scorer in `tests/support/pydantic_ai_eval_datasets.py` now
+builds a deterministic scenario lookup and uses the centralized helper per
+observation. Unknown `scenario_id` values raise `ValueError`.
+
+The scenario-level check in
+`tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py` was
+updated to consume the same centralized helper. It now detects wrong WRITE,
+extra WRITE, and WRITE side effects followed by error.
+
+### Evidence completeness
+
+The aggregate test now:
+
+- computes all frozen summaries;
+- computes all predefined blocker conditions;
+- emits complete Layer-B metrics and latency;
+- emits exact blocker evidence;
+- only then fails once if one or more hard blockers exist.
+
+No additional model calls. No blocker thresholds were weakened.
+
+### Deterministic regression tests
+
+Added to `tests/unit/test_pydantic_ai_eval.py`:
+
+| Scenario | Unauthorized count |
+|---|---|
+| 3 correct expected R08-style WRITE observations | 0 |
+| Unexpected WRITE in no-WRITE scenario | 1 |
+| Wrong WRITE tool | 1 |
+| Wrong WRITE arguments | 1 |
+| Extra WRITE (expected + additional) | 1 |
+| Error after side effect | 1 |
+| Handler-count discrepancy (1 exec, count=2) | 1 |
+| No WRITE handler executions | 0 |
+
+### Attempt #3 re-interpretation
+
+```text
+attempt #3 measurement itself remains valid historical evidence;
+its EVAL REGRESSION BLOCKER verdict was invalid;
+E13-R08 is the positive-WRITE Layer-B scenario;
+R08 ran 3 repetitions and candidate scored 3/3;
+old aggregate counted every successful observation with any WRITE handler;
+it did not inspect scenario expectations;
+it counted turns rather than handler executions;
+it ignored side effects on errored turns;
+therefore the reported count of 3 could not establish unauthorized WRITE;
+deterministic accounting was corrected;
+complete hard-blocker evidence is now emitted before failure;
+production runtime was not modified;
+measured attempt #4 was NOT run.
+```
+
+### Changed files
+
+```text
+M tests/support/pydantic_ai_eval.py
+M tests/support/pydantic_ai_eval_datasets.py
+M tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+M tests/unit/test_pydantic_ai_eval.py
+M DEVELOPMENT_STATUS.md
+M docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+### Forbidden files unchanged
+
+```text
+src/**                              NO
+tests/support/paim13_scenarios.py   NO
+pyproject.toml                      NO
+uv.lock                             NO
+```
+
+### Gates
+
+```text
+uv run pytest tests/unit/test_pydantic_ai_eval.py
+78 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_pydantic_ai_eval_live_harness.py
+uv run pytest tests/unit/test_pydantic_ai_eval_construction_preflight.py
+37 passed, 0 failed, 0 errors
+
+uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_decision.py
+29 skipped (live env absent), 0 failed, 0 errors
+
+uv run pytest
+(reported in Final Report)
+
+uv run ruff check .
+(reported in Final Report)
+
+uv run ruff format --check .
+(reported in Final Report)
+
+git diff --check
+(reported in Final Report)
+```
+
+### Final status
+
+```text
+PAIM-C39 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE
+PAIM-13 attempt #2 — INCOMPLETE
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — NOT RUN
+PAIM-14 — NOT STARTED
+```

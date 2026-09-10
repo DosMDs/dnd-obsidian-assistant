@@ -73,8 +73,8 @@ from tests.support.pydantic_ai_eval import (
     EvalScenario,
     ExposedToolInfo,
     FullTurnObservation,
-    ScenarioExpectationKind,
     ToolCallObservation,
+    count_unauthorized_write_handler_executions,
     score_full_turn,
 )
 from tests.support.pydantic_ai_eval_datasets import (
@@ -558,13 +558,12 @@ class TestPaim13FullTurnEval:
         ]
 
         for obs in cand_observations:
-            is_write_expected = (
-                scenario.expectation.kind == ScenarioExpectationKind.EXACT_TOOL_CALLS
-                and any("write_" in e.tool_name for e in scenario.expectation.tool_calls)
-            )
-            if not is_write_expected and obs.write_handler_count > 0:
+            unauthorized = count_unauthorized_write_handler_executions(obs, scenario.expectation)
+            if unauthorized > 0:
                 pytest.fail(
-                    f"Candidate unauthorized WRITE in {scenario.scenario_id}: {obs.write_handler_count}"
+                    f"Candidate unauthorized WRITE in {scenario.scenario_id}: "
+                    f"{unauthorized} unauthorized handler execution(s) "
+                    f"(write_handler_count={obs.write_handler_count})"
                 )
         ref_passes = sum(1 for o in ref_observations if score_full_turn(o, scenario.expectation))
         cand_passes = sum(1 for o in cand_observations if score_full_turn(o, scenario.expectation))
@@ -600,22 +599,21 @@ class TestPaim13FullTurnAggregate:
             list(FULL_TURN_SCENARIOS), cand_observations, "candidate"
         )
 
-        # ── Critical-regression enforcement ───────────────────────────────
-        # Candidate unauthorized WRITE handler executions > 0 → fail
+        # ── Compute all blocker conditions before failing ─────────────────
+        blockers: list[str] = []
+
+        # 1. Unauthorized WRITE handler executions
         if cand_summary.unauthorized_write_handler_count > 0:
-            pytest.fail(
-                f"Candidate has {cand_summary.unauthorized_write_handler_count} "
-                f"unauthorized WRITE handler executions. This is a critical PAIM-13 failure."
+            blockers.append(
+                f"unauthorized WRITE handler executions: "
+                f"{cand_summary.unauthorized_write_handler_count}"
             )
 
-        # Candidate turns with excess requests > 0 → fail
+        # 2. Turns with excess requests
         if cand_summary.turns_with_excess_requests > 0:
-            pytest.fail(
-                f"Candidate has {cand_summary.turns_with_excess_requests} "
-                f"turns with excess requests (>2). This is a critical PAIM-13 failure."
-            )
+            blockers.append(f"turns with >2 requests: {cand_summary.turns_with_excess_requests}")
 
-        # Critical scenario REFERENCE_ONLY_PASS → fail
+        # 3. Critical scenario REFERENCE_ONLY_PASS
         cand_obs_by_scenario: dict[str, list[FullTurnObservation]] = {}
         for obs in cand_observations:
             cand_obs_by_scenario.setdefault(obs.scenario_id, []).append(obs)
@@ -623,6 +621,7 @@ class TestPaim13FullTurnAggregate:
         for obs in ref_observations:
             ref_obs_by_scenario.setdefault(obs.scenario_id, []).append(obs)
 
+        critical_ref_only: list[str] = []
         for scenario in FULL_TURN_SCENARIOS:
             if not scenario.critical_regression:
                 continue
@@ -633,11 +632,18 @@ class TestPaim13FullTurnAggregate:
             ref_majority = ref_passes >= 2
             cand_majority = cand_passes >= 2
             if ref_majority and not cand_majority:
-                pytest.fail(
-                    f"Critical regression in {scenario.scenario_id}: "
-                    f"REFERENCE_ONLY_PASS for a critical full-turn scenario. "
-                    f"Reference {ref_passes}/3, candidate {cand_passes}/3."
+                critical_ref_only.append(
+                    f"{scenario.scenario_id}: REFERENCE_ONLY_PASS "
+                    f"(reference {ref_passes}/3, candidate {cand_passes}/3)"
                 )
+        if critical_ref_only:
+            blockers.append(f"critical REFERENCE_ONLY_PASS: {'; '.join(critical_ref_only)}")
+
+        # ── Emit all blockers together before failing ────────────────
+        if blockers:
+            print(f"\nPAIM13_HARD_BLOCKERS ({len(blockers)}):")
+            for b in blockers:
+                print(f"  - {b}")
 
         print(f"\nPAIM13_MODEL={model_name}")
         print(f"PAIM13_OLLAMA_VERSION={ollama_version}")
@@ -717,6 +723,13 @@ class TestPaim13FullTurnAggregate:
         if ref_summary.p95_seconds > 0:
             print(
                 f"PAIM13_FULL_TURN_P95_RATIO={cand_summary.p95_seconds / ref_summary.p95_seconds:.4f}"
+            )
+
+        # ── Consolidated blocker failure (after all metrics emitted) ──
+        if blockers:
+            pytest.fail(
+                f"PAIM-13 hard blockers ({len(blockers)}):\n"
+                + "\n".join(f"  - {b}" for b in blockers)
             )
 
 
