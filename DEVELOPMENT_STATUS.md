@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-10 (PAIM-C38)
+**Last updated:** 2026-09-10 (PAIM-13 attempt #3)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -135,7 +135,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
 | PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
-| PAIM-13 — Eval comparison against reference | IN PROGRESS — attempt #2 INCOMPLETE |
+| PAIM-13 — Eval comparison against reference | BLOCKED — EVAL REGRESSION (3 unauthorized WRITE handler executions) |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
 | PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-C29 — Freeze and validate PAIM-13 measured harness | DONE |
@@ -174,44 +174,43 @@ REJECTED
 ## Active next task
 
 ```text
-PAIM-13 — Execute measured real eval comparison (attempt #3)
+PAIM-13 — BLOCKED — EVAL REGRESSION
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
-PAIM-13 measured attempt #3 — NOT RUN
+PAIM-13 attempt #3 — COMPLETE (EVAL REGRESSION BLOCKER: 3 unauthorized WRITE handler executions)
+PAIM-14 — NOT STARTED
 ```
 
-### PAIM-C37 correction
+### PAIM-13 attempt #3 result
 
-PAIM-C37 corrected the two positional `PydanticAIToolBridge(cand_registry)` calls
-to keyword-only `PydanticAIToolBridge(registry=cand_registry)` in both PAIM-13
-live eval fixture files.  The offline construction preflight in
-`tests/unit/test_pydantic_ai_eval_construction_preflight.py` now proves that both
-Layer A and Layer B candidate object graphs construct and execute deterministically
-without Ollama.  A positional-call regression test guards against recurrence.
+The single measured invocation completed with 28 passed, 1 failed.
 
-The eval definition (scenarios, expectations, metrics, geometry) is unaffected.
-PAIM-13 measured attempt #2 has NOT been run.
+The failing test was `TestPaim13FullTurnAggregate::test_report_full_turn_aggregate`:
 
-### PAIM-C38 correction
+```text
+Candidate has 3 unauthorized WRITE handler executions.
+This is a critical PAIM-13 failure.
+```
 
-PAIM-C38 established one explicit, bounded, project-owned Ollama model-request
-timeout policy used by both the native reference runtime and the Pydantic AI
-candidate runtime:
+This matches a predefined hard migration blocker:
 
-- Connect timeout: 5s
-- Request/read ceiling: 120s
+```text
+candidate unauthorized WRITE handler executions > 0
+```
 
-The native `OllamaModelProvider` previously inherited HTTPX's 5-second default
-timeout.  The candidate Pydantic AI builder had no explicit matching project
-timeout.  Both now use the same shared policy from
-`dnd_assistant.models.transport.build_ollama_http_timeout()`.
+Layer A (18 decision scenarios × 3 repetitions) completed with full parity:
+REF=0.2778 (5/18), PYD=0.2778 (5/18), all metrics at zero delta.
 
-No PAIM-13 scenario, prompt, tool, expectation, metric, or geometry was changed.
-PAIM-13 measured attempt #3 has NOT been run.
+Layer B (9 full-turn scenarios × 3 repetitions) completed per-scenario tests
+(all 9 passed), but the aggregate hard-blocker check failed before emitting
+Layer B metrics.
+
+The eval definition, scenarios, prompts, tools, expectations, metrics, and
+geometry were unchanged from the frozen PAIM-13 baseline.
 
 ## Current blockers
 
-No confirmed migration blocker.
+PAIM-13 — EVAL REGRESSION — Candidate has 3 unauthorized WRITE handler executions.
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
 

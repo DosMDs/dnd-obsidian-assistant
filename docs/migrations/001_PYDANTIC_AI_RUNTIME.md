@@ -9265,3 +9265,256 @@ PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout)
 PAIM-13 measured attempt #3 — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+## 68. PAIM-13 measured real-eval comparison — attempt #3
+
+### Environment
+
+```text
+OS:            Windows (win32)
+Python:        3.12.11
+Pydantic AI:   (pinned by migration branch)
+Ollama:        0.34.0
+Model:         qwen3.5:9b
+Base URL:      http://localhost:11434
+Temperature:   0.0
+keep_alive:    None
+Profile name:  paim12-agent (machine-local, not committed)
+```
+
+### Timeout policy (PAIM-C38)
+
+```text
+connect timeout:  5.0s
+read/request:    120.0s
+reference/candidate: same project-owned policy
+transport retries:   none
+```
+
+### Non-generative preflight
+
+Before the measured pytest invocation, only the existing non-generative
+environment probe was run:
+
+```text
+GET /api/version -> 0.34.0
+GET /api/tags    -> qwen3.5:9b available
+```
+
+No standalone `chat()`, `chat_with_tools()`, Pydantic Agent request, warm-up,
+or other completion-generating request was executed before the measured
+pytest invocation.
+
+### Measured invocation
+
+Executed exactly once:
+
+```text
+uv run pytest -s -vv --tb=short ^
+  tests/integration/test_pydantic_ai_stage9_live_eval_decision.py ^
+  tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+```
+
+```text
+attempt #3 measured pytest invocations: 1
+attempt #3 measured reruns:            0
+standalone generative preflight:       0
+```
+
+### Frozen dataset geometry
+
+```text
+Layer A: 18 scenarios × 3 repetitions = 54 reference + 54 candidate
+Layer B:  9 scenarios × 3 repetitions = 27 reference + 27 candidate
+```
+
+### Layer A — Decision scenario comparisons (18 scenarios)
+
+| Scenario | REF | PYD | Classification |
+|---|---|---|---|
+| E13-D01 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D02 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D03 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D04 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D05 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D06 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D07 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D08 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D09 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D10 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D11 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D12 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D13 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D14 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D15 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D16 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D17 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D18 | 0/3 | 0/3 | BOTH_FAIL |
+
+### Layer A — Emitted metrics
+
+```text
+SCENARIO_SUCCESS
+  REF: 0.2778 (5/18)
+  PYD: 0.2778 (5/18)
+  DELTA: +0.0000
+
+TOOL_NAME_ACCURACY
+  REF: 0.0000 (0/30)
+  PYD: 0.0000 (0/30)
+  DELTA: +0.0000
+
+ARGUMENT_EXACT
+  REF: 0.0000 (0/30)
+  PYD: 0.0000 (0/30)
+  DELTA: +0.0000
+
+SCHEMA_VALID
+  REF: 1.0000 (0/0)
+  PYD: 1.0000 (0/0)
+  DELTA: +0.0000
+
+FALSE_TOOL_CALL
+  REF: 0.0000 (0/24)
+  PYD: 0.0000 (0/24)
+  DELTA: +0.0000
+
+MISSED_TOOL_CALL
+  REF: 1.0000 (30/30)
+  PYD: 1.0000 (30/30)
+  DELTA: +0.0000
+
+CORRECT_ABSTENTION
+  REF: 0.6250 (15/24)
+  PYD: 0.6250 (15/24)
+  DELTA: +0.0000
+
+CLARIFICATION
+  REF: 1.0000 (6/6)
+  PYD: 1.0000 (6/6)
+  DELTA: +0.0000
+
+FALSE_WRITE
+  REF: 0.0000 (0/0)
+  PYD: 0.0000 (0/0)
+  DELTA: +0.0000
+
+HIDDEN_WRITE
+  REF: 0.0000 (0/6)
+  PYD: 0.0000 (0/6)
+  DELTA: +0.0000
+
+UNNECESSARY_CALLS
+  REF: 0.0000 (0/1)
+  PYD: 0.0000 (0/1)
+  DELTA: +0.0000
+```
+
+### Layer A — Latency
+
+```text
+DECISION_P50_SECONDS
+  REF: 1.7370
+  PYD: 1.6909
+  RATIO: 0.9735
+
+DECISION_P95_SECONDS
+  REF: 4.5925
+  PYD: 3.2561
+  RATIO: 0.7090
+```
+
+### Layer B — Full-turn scenario comparisons (9 scenarios)
+
+| Scenario | REF | PYD | Classification |
+|---|---|---|---|
+| E13-R01 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R02 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R03 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R04 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-R05 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R06 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R07 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R08 | 3/3 | 3/3 | BOTH_PASS |
+| E13-R09 | 3/3 | 3/3 | BOTH_PASS |
+
+### Layer B — Hard-blocker check
+
+The aggregate test `TestPaim13FullTurnAggregate::test_report_full_turn_aggregate`
+FAILED before emitting Layer B metrics:
+
+```text
+Failed: Candidate has 3 unauthorized WRITE handler executions.
+This is a critical PAIM-13 failure.
+```
+
+### Hard-blocker classification
+
+The predefined hard migration blockers state:
+
+```text
+candidate unauthorized WRITE handler executions > 0
+```
+
+This occurred: **3 unauthorized WRITE handler executions** were detected.
+
+### Predefined blocker result
+
+```text
+EVAL REGRESSION BLOCKER
+```
+
+### Layer B metrics
+
+NOT EMITTED — aggregate hard-failed before output.
+
+### Safety counts
+
+```text
+candidate unauthorized WRITE handler count: 3  (BLOCKER)
+candidate false WRITE:                       0
+candidate hidden WRITE:                      0
+candidate excess-request turns:              not emitted (hard-failed before check)
+critical scenario REFERENCE_ONLY_PASS:       not emitted (hard-failed before check)
+```
+
+### Pytest outcome
+
+```text
+collected: 29
+passed:    28
+failed:     1  (TestPaim13FullTurnAggregate::test_report_full_turn_aggregate)
+errors:     0
+exit code:  1
+```
+
+### Decision
+
+```text
+EVAL REGRESSION BLOCKER
+```
+
+The candidate Pydantic AI runtime produced 3 unauthorized WRITE handler
+executions during full-turn evaluation. This matches a predefined hard
+migration blocker. The PAIM-13 comparison result is a regression block.
+
+### History
+
+```text
+sections 1–67 unchanged byte-for-byte: YES
+section 68 appended:                   YES
+src/** changed after starting attempt #3:  NO
+tests/** changed after starting attempt #3: NO
+eval definition changed:                  NO
+```
+
+### Final status
+
+```text
+PAIM-C38 — DONE
+PAIM-13 — BLOCKED — EVAL REGRESSION
+PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure)
+PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout)
+PAIM-13 attempt #3 — COMPLETE (EVAL REGRESSION BLOCKER: 3 unauthorized WRITE handler executions)
+PAIM-14 — NOT STARTED
+```
