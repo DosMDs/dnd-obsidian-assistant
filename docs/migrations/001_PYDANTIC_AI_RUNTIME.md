@@ -8270,7 +8270,6 @@ class CountingPydanticModel(Model):
         super().__init__(settings=delegate.settings, profile=delegate.profile)
         self._delegate = delegate
         self._state = CountingPydanticModelState()
-
     # manual delegation of model_name, system, request_stream, etc.
 ```
 
@@ -8281,7 +8280,6 @@ class CountingPydanticModel(WrapperModel):
     def __init__(self, delegate: Model) -> None:
         super().__init__(wrapped=delegate)
         self._state = CountingPydanticModelState()
-
     # WrapperModel inherits all delegation: model_name, system, settings,
     # profile, base_url, model_id, request_stream, prepare_request,
     # customize_request_parameters, etc.
@@ -8658,6 +8656,75 @@ section 60 appended:       YES
 ```text
 PAIM-C32 — DONE
 PAIM-C33 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 measured live eval — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+## 61. PAIM-C34 correction record — Restore migration history append-only integrity
+
+### Defect
+
+PAIM-C33 claimed `sections 1-59 unchanged: YES`, but its Git diff
+inserted two blank lines inside historical section content (before section
+60), violating the append-only integrity of the migration history document.
+
+### Correction
+
+- Compared `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` at parent
+  `0a405ad7aace2a4458d0c13599236017474298eb` versus current HEAD.
+- Identified two spurious blank lines:
+  - After `CountingPydanticModel` class (old line 8273)
+  - After `WrapperModel` class (old line 8284)
+- Removed both blank lines via targeted IDE edits.
+- Verified that the historical prefix (sections 1–59) now matches the
+  parent version exactly: `Compare-Object` yields zero differences.
+- Section 60 (PAIM-C33 record) preserved unchanged.
+- No production, test, or eval behavior was modified.
+- Measured PAIM-13 live eval was NOT run.
+
+### Changed files
+
+```
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md  — removed 2 blank lines from
+                                               historical content; appended
+                                               this section
+```
+
+### Preserved behavior
+
+- PAIM-C33 technical live-preflight implementation — unchanged
+- PAIM-13 scenarios/prompts/tools/metrics — unchanged
+- `src/` directory — no files changed
+- No test file was modified
+
+### Gates
+
+| Gate | Command | Result |
+|------|---------|--------|
+| Historical prefix comparison | `Compare-Object` parent vs HEAD (lines 1–8580) | IDENTICAL — zero diffs |
+| Section 60 preserved | grep for `^## 60\.` | Found at line 8582 |
+| Section 61 appended | grep for `^## 61\.` | Found |
+| `src/**` unchanged | `git diff -- src/` | No changes |
+| Canonical full suite | `uv run pytest` | 5196 passed, 143 skipped |
+| Ruff check | `uv run ruff check .` | All checks passed |
+| Ruff format | `uv run ruff format --check .` | 1 file would be reformatted (pre-existing; parent also not ruff-formatted; exact restoration required by task) |
+| git diff --check | `git diff --check` | No whitespace errors (CRLF→LF warning only) |
+
+### Historical prefix
+
+```text
+sections 1-59 restored exactly from parent 0a405ad7:   YES
+section 60 preserved:                                   YES
+section 61 appended:                                    YES
+```
+
+### Final status
+
+```text
+PAIM-C32 — DONE
+PAIM-C33 — DONE
+PAIM-C34 — DONE
 PAIM-13 — IN PROGRESS
 PAIM-13 measured live eval — NOT RUN
 PAIM-14 — NOT STARTED
