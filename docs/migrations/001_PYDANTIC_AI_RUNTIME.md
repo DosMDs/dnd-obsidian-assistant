@@ -9770,3 +9770,125 @@ Active next:
 ```text
 PAIM-13 — Execute measured real eval comparison (attempt #4)
 ```
+
+## 71. PAIM-C41 correction record — Restore green baseline and correct C40 evidence
+
+### Evidence contradiction in section 70
+
+PAIM-C40 section 70 contained an internal contradiction.
+
+Incorrect sentence:
+
+```text
+tests/unit/test_pydantic_ai_eval.py was modified by C39 but was not the
+new regression-test file.
+```
+
+Correct fact:
+
+```text
+tests/unit/test_pydantic_ai_eval.py was NOT changed by C39.
+```
+
+The actual C39 regression-test file was:
+
+```text
+tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+```
+
+The focused module contains 9 tests.
+
+### Formatting correction
+
+The same C39 regression-test file was the only file reported by the canonical
+Ruff formatter check:
+
+```text
+uv run ruff format --check .
+1 file would be reformatted:
+  tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+```
+
+It was formatted using Ruff only:
+
+```text
+uv run ruff format tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+1 file reformatted
+```
+
+No test or scorer semantics changed. The diff is only a trailing newline fix.
+
+Canonical `uv run ruff format --check .` is now green.
+
+### Semantic freeze
+
+```text
+test names changed:        NO
+test count changed:        NO  (still 9 tests)
+assertions changed:        NO
+expected values changed:   NO
+helper calls changed:      NO
+PAIM-C39 semantics changed: NO
+scorer semantics changed:   NO
+scenarios changed:          NO
+prompts changed:            NO
+metrics changed:            NO
+geometry changed:           NO
+src/** changed:             NO
+PAIM-13 attempt #4 run:     NO
+```
+
+### History integrity
+
+```text
+sections 1–70 unchanged: YES
+section 71 appended:     YES
+```
+
+### Gates
+
+```text
+uv run pytest tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+9 passed, 0 failed, 0 errors
+
+uv run pytest tests/unit/test_pydantic_ai_eval.py
+PASS
+
+uv run pytest tests/unit/test_pydantic_ai_eval_live_harness.py
+PASS
+
+uv run pytest tests/unit/test_pydantic_ai_eval_construction_preflight.py
+PASS
+
+uv run pytest
+0 failed, 0 errors
+
+uv run ruff check .
+All checks passed
+
+uv run ruff format --check .
+PASS, exit code 0
+
+git diff --check
+no whitespace errors
+```
+
+### Final status
+
+```text
+PAIM-C41 — DONE
+PAIM-C39 — DONE
+PAIM-C40 — historical correction record retained
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE
+PAIM-13 attempt #2 — INCOMPLETE
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+Active next:
+
+```text
+PAIM-13 — Execute measured real eval comparison (attempt #4)
+```
