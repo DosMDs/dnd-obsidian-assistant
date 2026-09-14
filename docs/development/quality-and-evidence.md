@@ -28,8 +28,8 @@ runtime/test fixture, golden/generated input, schema or other machine-consumed
 application data.
 
 Typical documentation-only files: `README.md`, `DEVELOPMENT_STATUS.md`,
-`docs/**/*.md`, `GIGACODE.md`, `.gigacode/rules/*.md`,
-`.gigacode/skills/**/*.md`.
+`docs/**/*.md`, `AGENTS.md`, `.opencode/agents/*.md`,
+`.opencode/skills/**/*.md`.
 
 Required by default: inspect the complete final diff; validate
 documentation/status consistency; derive and verify the exact changed-file

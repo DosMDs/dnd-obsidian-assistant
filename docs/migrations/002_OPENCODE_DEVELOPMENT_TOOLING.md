@@ -44,6 +44,7 @@ OC foundation commits:
 | OC-02 | Consolidate durable development rules into lazy OpenCode-era policies | DONE |
 | OC-02C | Correction: make plan-first workflow mandatory | DONE |
 | OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | DONE |
+| OC-03A | Remove or isolate legacy development-agent artifacts | DONE |
 | OC-04 | (planned; defined by its Task Contract) | FUTURE / PLANNED |
 | OC-05 | (planned; defined by its Task Contract) | PLANNED |
 | OC-06 | (planned; defined by its Task Contract) | PLANNED |
@@ -96,3 +97,24 @@ Detailed Final Reports are intentionally not duplicated here.
   `docs/development/review-workflow.md` were left untouched; deletion/cleanup
   belongs to later cutover tasks. Pydantic AI migration remains a dedicated
   skill, not merged into `model-gateway`.
+
+## 8. OC-03A scope
+
+- Removed the untracked foreign/compatibility surfaces `.agents/`,
+  `.codex/` and `docs/development/review-workflow.md` after confirming they
+  were untracked, contained no secret/local-credential content, and were fully
+  superseded by `.opencode/skills/` and `.opencode/agents/`.
+- Migrated only the durable host-neutral review-orchestration procedure from
+  `review-workflow.md` into `.opencode/skills/code-review/SKILL.md`; the
+  Codex-specific TOML agents, branch names and setup references were not
+  migrated.
+- Isolated tracked legacy GigaCode artifacts from the active OpenCode workflow
+  without deleting them: removed `GIGACODE.md` from `AGENTS.md` navigation and
+  replaced GigaCode-era examples in `docs/development/quality-and-evidence.md`
+  with OpenCode-era paths.
+- Deferred physical retirement: `.gigacode/`, `.gigacode_vsc/`, `GIGACODE.md`
+  and `README_GIGACODE_SETUP.md` remain in place because canonical/status/test
+  references still cite them. Their removal belongs to a coordinated cutover
+  task (OC-05), not OC-03A; no runtime/application behavior changed.
+- Historical ADR, migration, maintenance and stage evidence were left
+  untouched.

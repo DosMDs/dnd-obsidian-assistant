@@ -181,7 +181,6 @@ docs/development/project-invariants.md
 
 ```text
 DEVELOPMENT_STATUS.md   canonical current roadmap state
-GIGACODE.md             full legacy project instructions (migration reference)
 docs/development/       durable OpenCode-era development policies (lazy)
 docs/adr/               architecture decisions
 docs/stages/            detailed stage history and evidence
