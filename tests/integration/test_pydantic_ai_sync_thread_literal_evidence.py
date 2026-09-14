@@ -26,20 +26,19 @@ import json
 import os
 import sqlite3
 import threading
-from collections.abc import Sequence
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic_ai import RunContext
 from pydantic_ai.messages import (
+    ModelMessage,
     ModelResponse,
     TextPart,
     ToolCallPart,
 )
 from pydantic_ai.models import Model
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
@@ -60,6 +59,7 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
     make_handler_counters,
@@ -114,6 +114,15 @@ def _make_tool_call_response(
     tool_call_id: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> ModelResponse:
+    if tool_call_id is None:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=tool_name,
+                    args=args or {"value": "hello"},
+                )
+            ]
+        )
     return ModelResponse(
         parts=[
             ToolCallPart(
@@ -167,40 +176,7 @@ def tool_catalog(tool_registry: ToolRegistry) -> ToolRegistrySchema:
 
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -377,8 +353,8 @@ class TestC21E01CompleteThreadIdentity:
             model_request_count: int = 0
 
             def model_fn(
-                ctx: RunContext[object],
-                agent_info: object,
+                messages: list[ModelMessage],
+                agent_info: AgentInfo,
             ) -> ModelResponse:
                 nonlocal model_request_count
                 model_request_count += 1
@@ -472,8 +448,8 @@ class TestC21E02LiteralExecutorClassification:
             model_request_count: int = 0
 
             def model_fn(
-                ctx: RunContext[object],
-                agent_info: object,
+                messages: list[ModelMessage],
+                agent_info: AgentInfo,
             ) -> ModelResponse:
                 nonlocal model_request_count
                 model_request_count += 1
@@ -827,6 +803,7 @@ class TestC21E05SqliteThreadAffinity:
         db_path = tmp.name
         tmp.close()
 
+        conn: sqlite3.Connection | None = None
         try:
             conn = sqlite3.connect(db_path)
             conn.execute("CREATE TABLE IF NOT EXISTS test (id INTEGER PRIMARY KEY, value TEXT)")
@@ -902,5 +879,6 @@ class TestC21E05SqliteThreadAffinity:
 
             assert result.outcome is not None
         finally:
-            conn.close()
+            if conn is not None:
+                conn.close()
             os.unlink(db_path)

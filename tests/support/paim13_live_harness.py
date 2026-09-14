@@ -47,6 +47,12 @@ from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
     ExecutionContext,
 )
+from tests.support.context_builder_doubles import (
+    MissingWorldTimeRepository,
+    NullSearchService,
+    NullSessionEventRepository,
+    NullSessionMetadataRepository,
+)
 from tests.support.paim13_scenarios import (
     READ_LOCATION_DEF,
     READ_NPC_DEF,
@@ -64,6 +70,7 @@ from tests.support.paim13_scenarios import (
 from tests.support.pydantic_ai_eval import (
     ExposedToolInfo,
 )
+from tests.support.repository_doubles import VaultRepositoryWriteStubs
 
 # ── Counting ModelGateway decorator (reference side) ──────────────────────────
 
@@ -220,33 +227,39 @@ DETERMINISTIC_ENTITIES: dict[str, dict[str, object]] = {
 }
 
 
+@dataclass
+class _EntityLike:
+    id: object
+    type: object
+    name: object
+    status: object
+    visibility: object
+    knowledge_status: object
+    tags: object
+
+
+@dataclass
+class _DocLike:
+    entity: object
+    body: object
+
+
 def _make_entity_like(data: dict[str, object]) -> Any:
     """Create a simple entity-like object with attribute access."""
-
-    class _EntityLike:
-        pass
-
-    obj = _EntityLike()
-    obj.id = data["entity_id"]
-    obj.type = data["entity_type"]
-    obj.name = data["name"]
-    obj.status = data["status"]
-    obj.visibility = Visibility.PLAYER
-    obj.knowledge_status = data["knowledge_status"]
-    obj.tags = data["tags"]
-    return obj
+    return _EntityLike(
+        id=data["entity_id"],
+        type=data["entity_type"],
+        name=data["name"],
+        status=data["status"],
+        visibility=Visibility.PLAYER,
+        knowledge_status=data["knowledge_status"],
+        tags=data["tags"],
+    )
 
 
 def _make_document_like(entity: Any, body: str) -> Any:
     """Create a simple document-like object with .entity and .body."""
-
-    class _DocLike:
-        pass
-
-    obj = _DocLike()
-    obj.entity = entity
-    obj.body = body
-    return obj
+    return _DocLike(entity=entity, body=body)
 
 
 # ── Deterministic context builder ─────────────────────────────────────────────
@@ -261,7 +274,7 @@ def make_deterministic_context_builder() -> AgentContextBuilder:
     no recent events.  World time raises ``NotFoundError`` (uninitialised).
     """
 
-    class _DeterministicVault:
+    class _DeterministicVault(VaultRepositoryWriteStubs):
         def get_entity(self, entity_id: str) -> Any:
             for _key, data in DETERMINISTIC_ENTITIES.items():
                 if data["entity_id"] == entity_id:
@@ -279,8 +292,8 @@ def make_deterministic_context_builder() -> AgentContextBuilder:
         def search_entities(self, *args: Any, **kwargs: Any) -> list[Any]:
             return []
 
-    class _DeterministicSearch:
-        def search(self, query: Any, limit: int = 5) -> list[Any]:
+    class _DeterministicSearch(NullSearchService):
+        def search(self, query: Any, *, limit: int = 5) -> list[Any]:
             text = query.text.lower() if hasattr(query, "text") else str(query).lower()
             hits: list[Any] = []
             for name, data in DETERMINISTIC_ENTITIES.items():
@@ -297,15 +310,15 @@ def make_deterministic_context_builder() -> AgentContextBuilder:
         def search_entities(self, *args: Any, **kwargs: Any) -> list[Any]:
             return []
 
-    class _NullSessionRepo:
+    class _NullSessionRepo(NullSessionMetadataRepository):
         def get_active_session(self) -> Any:
             return None
 
-    class _NullEventRepo:
+    class _NullEventRepo(NullSessionEventRepository):
         def list_events(self, session_id: str) -> list[Any]:
             return []
 
-    class _NullWorldTimeRepo:
+    class _NullWorldTimeRepo(MissingWorldTimeRepository):
         def get_current_world_time(self) -> Any:
             raise NotFoundError("World time not initialised")
 

@@ -16,7 +16,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 from pydantic_ai.messages import ModelResponse
@@ -42,21 +42,19 @@ from dnd_assistant.application.pydantic_ai_run_deps import (
 from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
-from dnd_assistant.errors import ModelError, NotFoundError
+from dnd_assistant.errors import ModelError
 from dnd_assistant.models.gateway import ModelGateway
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
+    FiniteJsonValue,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
-from dnd_assistant.retrieval.service import SearchService
-from dnd_assistant.retrieval.types import SearchHit, SearchQuery
 from dnd_assistant.storage.audit import AuditContext
-from dnd_assistant.storage.session_events import RawSessionEvent
-from dnd_assistant.storage.session_metadata import RawSessionMetadata
-from dnd_assistant.storage.types import VaultDocument, VaultRepository
 from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
@@ -67,8 +65,11 @@ from dnd_assistant.tools.types import (
     SideEffect,
     ToolDefinition,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 
 _FAKE_WORLD_TICK = 12345
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 # ── Shared schemas ──────────────────────────────────────────────────────────────
@@ -198,39 +199,8 @@ def make_registry_with_hidden(
 # ── Stubs ───────────────────────────────────────────────────────────────────────
 
 
-class _StubSearchService(SearchService):
-    def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-        return []
-
-
-class _StubVaultRepository(VaultRepository):
-    def get_entity(self, entity_id: str) -> VaultDocument:
-        raise ValueError("unexpected call")
-
-
-class _StubSessionRepo:
-    def get_active_session(self) -> RawSessionMetadata | None:
-        return None
-
-
-class _StubEventRepo:
-    def list_events(self, session_id: str) -> list[RawSessionEvent]:
-        return []
-
-
-class _StubWorldTimeRepo:
-    def get_current_world_time(self) -> None:
-        raise NotFoundError("no world time")
-
-
 def make_context_builder() -> AgentContextBuilder:
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
+    return make_stub_context_builder()
 
 
 # ── Fake ModelGateway for reference runtime ────────────────────────────────────
@@ -273,20 +243,20 @@ class _FakeModelGateway(ModelGateway):
             return self._responses[self.call_count - 1]
         return self._responses[-1]
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called")
 
 
-class _CountingToolExecutor:
+class _CountingToolExecutor(ToolExecutor):
     """Wraps a real ToolExecutor and counts execute() attempts."""
 
     def __init__(self, executor: ToolExecutor) -> None:
@@ -327,12 +297,12 @@ def make_tool_aware_response(
 
 def make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -518,26 +488,32 @@ def _copy_registry(
     for td in source.list_definitions():
         if td.name == "read_alpha":
 
-            def handler(inp: _StringInput, ctx: object) -> _ToolOutput:
+            def read_alpha_handler(inp: _StringInput, ctx: object) -> _ToolOutput:
                 counters.alpha += 1
                 return _ToolOutput(result=f"alpha:{inp.value}")
+
+            dest.register(td, read_alpha_handler)
         elif td.name == "read_beta":
 
-            def handler(inp: _IntInput, ctx: object) -> _ToolOutput:
+            def read_beta_handler(inp: _IntInput, ctx: object) -> _ToolOutput:
                 counters.beta += 1
                 return _ToolOutput(result=f"beta:{inp.number}")
+
+            dest.register(td, read_beta_handler)
         elif td.name == "write_alpha":
 
-            def handler(inp: _StringInput, ctx: object) -> _ToolOutput:
+            def write_alpha_handler(inp: _StringInput, ctx: object) -> _ToolOutput:
                 counters.write_alpha += 1
                 return _ToolOutput(result=f"write:{inp.value}")
+
+            dest.register(td, write_alpha_handler)
         else:
 
-            def handler(inp: _StringInput, ctx: object) -> _ToolOutput:
+            def other_handler(inp: _StringInput, ctx: object) -> _ToolOutput:
                 counters.alpha += 1
                 return _ToolOutput(result=f"other:{inp.value}")
 
-        dest.register(td, handler)
+            dest.register(td, other_handler)
 
 
 # ── Dual-runtime execution ─────────────────────────────────────────────────────

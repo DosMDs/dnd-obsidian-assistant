@@ -14,21 +14,29 @@ from __future__ import annotations
 import subprocess
 import sys
 import textwrap
+from typing import TypeVar
 
 import pytest
+from pydantic import BaseModel
 
-from dnd_assistant.application.agent_context import AgentContext
+from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
 from dnd_assistant.application.fast_agent import AgentDecision, FastAgent
 from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
+    FiniteJsonValue,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
+from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode, SideEffect
+
+_T = TypeVar("_T", bound=BaseModel)
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
 
@@ -56,7 +64,7 @@ def _make_context(
     *,
     permission: Permission = Permission.READ,
     session_mode: SessionMode = SessionMode.NO_ACTIVE_SESSION,
-    audit: object = None,
+    audit: AuditContext | None = None,
 ) -> ExecutionContext:
     """Build an ``ExecutionContext`` with minimal boilerplate."""
     return ExecutionContext(
@@ -85,7 +93,7 @@ def _make_context_with(
 # ── Fakes ──────────────────────────────────────────────────────────────────────
 
 
-class _FakeAgentContextBuilder:
+class _FakeAgentContextBuilder(AgentContextBuilder):
     """Fake ``AgentContextBuilder`` that returns a pre-built context."""
 
     def __init__(self, context: AgentContext) -> None:
@@ -97,7 +105,7 @@ class _FakeAgentContextBuilder:
         return self._context
 
 
-class _FakeAgentContextBuilderRaises:
+class _FakeAgentContextBuilderRaises(AgentContextBuilder):
     """Fake that raises on build."""
 
     def __init__(self, exc: Exception) -> None:
@@ -130,16 +138,16 @@ class _FakeModelGateway:
             raise ModelError("fake model error")
         return self._response
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called in S9-02")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called in S9-02")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called in S9-02")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called in S9-02")
 
 
@@ -157,16 +165,16 @@ class _FakeModelGatewayRaises:
         self.chat_with_tools_call_count += 1
         raise ModelError("fake model failure")
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called in S9-02")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called in S9-02")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called in S9-02")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called in S9-02")
 
 
@@ -187,13 +195,13 @@ def _make_tool_response(
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     """Build a ``ToolCall``."""
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -214,7 +222,7 @@ class TestToolArgumentBoundary:
 
     def _decide_with_args(
         self,
-        arguments: dict[str, object],
+        arguments: dict[str, FiniteJsonValue],
         read_tool: ToolPublicDefinition,
     ) -> AgentDecision:
         catalog = ToolRegistrySchema(tools=[read_tool])

@@ -338,6 +338,7 @@ def make_deferred_handler(
                 input_data=input_data,
                 context=context,
             )
+            assert isinstance(output, ToolOutput)
             results[call.tool_call_id] = output.result
 
         return requests.build_results(calls=results)

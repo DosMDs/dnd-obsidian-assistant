@@ -32,6 +32,7 @@ from dnd_assistant.tools.types import (
 )
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
+    ToolOutput,
     make_agent,
     make_deferred_handler,
     make_frozen_snapshot,
@@ -503,6 +504,7 @@ def test_missing_tool_call_ids(
                     input_data=input_data,
                     context=context,
                 )
+                assert isinstance(output, ToolOutput)
                 results[call.tool_call_id] = output.result
 
             return requests.build_results(calls=results)

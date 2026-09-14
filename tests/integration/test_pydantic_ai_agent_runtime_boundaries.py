@@ -37,6 +37,7 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
     make_handler_counters,
@@ -85,7 +86,7 @@ def _make_tool_call_response(
             ToolCallPart(
                 tool_name=tool_name,
                 args=args or {"x": 42},
-                tool_call_id=tool_call_id,
+                tool_call_id=tool_call_id,  # type: ignore[arg-type]
             )
         ]
     )
@@ -133,40 +134,7 @@ def tool_catalog(tool_registry: ToolRegistry) -> ToolRegistrySchema:
 
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),  # type: ignore[arg-type]
-        event_repository=_StubEventRepo(),  # type: ignore[arg-type]
-        world_time_repository=_StubWorldTimeRepo(),  # type: ignore[arg-type]
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -780,7 +748,7 @@ class TestP827ExplicitNoneId:
                         ToolCallPart(
                             tool_name="read_alpha",
                             args={"value": "none-id"},
-                            tool_call_id=None,
+                            tool_call_id=None,  # type: ignore[arg-type]
                         ),
                     ]
                 )

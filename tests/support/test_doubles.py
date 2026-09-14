@@ -6,7 +6,7 @@ All offline-safe: no network, no model, no framework imports beyond
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -119,15 +119,17 @@ class RaisingFakeModel(Model):
         msg = "Simulated model failure"
         raise RuntimeError(msg)
 
+    @asynccontextmanager
     async def request_stream(
         self,
         messages: list[ModelMessage],
         model_settings: ModelSettings | None,
         model_request_parameters: ModelRequestParameters,
         run_context: Any | None = None,
-    ) -> AsyncGenerator[Any, None]:
+    ) -> AsyncIterator[Any]:
         msg = "Simulated model failure"
         raise RuntimeError(msg)
+        yield  # pragma: no cover - makes this an async generator for typing
 
 
 class FakeModelGateway:

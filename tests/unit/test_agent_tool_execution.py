@@ -35,6 +35,7 @@ from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    FiniteJsonValue,
     MessageRole,
     ToolAwareResponse,
     ToolCall,
@@ -248,12 +249,12 @@ def write_context(audit_ctx: AuditContext) -> ExecutionContext:
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -316,6 +317,7 @@ class TestTurnBinding:
         result = service.execute(decision, tool_call, execution_context=read_context)
         assert isinstance(result, AgentToolExecutionResult)
         assert result.tool_call is tool_call
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "read: hello"
 
     def test_call_object_equal_to_decision_member_accepted(
@@ -328,6 +330,7 @@ class TestTurnBinding:
         decision = _make_decision(tool_calls=[original], exposed_tools=exposed)
         result = service.execute(decision, same_value, execution_context=read_context)
         assert result.tool_call is same_value
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "read: hello"
 
     def test_same_name_different_arguments_rejected(
@@ -469,6 +472,7 @@ class TestTrustedExecution:
         exposed = [_make_tool_public("read_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "read: hello"
 
     def test_raw_arguments_reach_tool_executor(
@@ -484,6 +488,7 @@ class TestTrustedExecution:
             tool_executor=ToolExecutor(registry),
         )
         result = svc.execute(decision, tool_call, execution_context=read_context)
+        assert isinstance(result.output, NestedOutput)
         assert result.output.count == 42
 
     def test_pydantic_input_coercion_happens_in_tool_executor_not_application(
@@ -499,6 +504,7 @@ class TestTrustedExecution:
             tool_executor=ToolExecutor(registry),
         )
         result = svc.execute(decision, tool_call, execution_context=read_context)
+        assert isinstance(result.output, NestedOutput)
         assert result.output.count == 42
 
     def test_unknown_executor_registry_tool_raises_not_found(
@@ -610,6 +616,7 @@ class TestTrustedExecution:
         ]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=write_context)
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "write: world"
 
     def test_invalid_output_raises_validation_error_after_handler(
@@ -782,6 +789,7 @@ class TestMultiCallPrimitive:
         )
         # Execute only the second call
         result = service.execute(decision, call_b, execution_context=read_context)
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "read: second"
 
     def test_sibling_call_not_automatically_executed(

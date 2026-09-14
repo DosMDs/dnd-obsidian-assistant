@@ -19,12 +19,20 @@ Architecture preserved (PAIM-07 contract):
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import TypeVar
 
 import pytest
+from pydantic import BaseModel
 from pydantic_ai.exceptions import ModelAPIError, UnexpectedModelBehavior
-from pydantic_ai.messages import ModelResponse, TextPart, ThinkingPart, ToolCallPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelResponse,
+    TextPart,
+    ThinkingPart,
+    ToolCallPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
@@ -33,17 +41,27 @@ from dnd_assistant.application.pydantic_ai_fast_agent import (
 )
 from dnd_assistant.application.pydantic_ai_run_deps import (
     DndAgentRunPreparer,
+    PreparedDndAgentRun,
 )
 from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
 from dnd_assistant.errors import ModelError
-from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole
+from dnd_assistant.models.types import (
+    ChatMessage,
+    ChatRequest,
+    ChatResponse,
+    MessageRole,
+    ModelHealth,
+)
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import HandlerCounters, make_tool_registry
+
+_T = TypeVar("_T", bound=BaseModel)
 
 # ==============================================================================
 # Helpers
@@ -64,7 +82,7 @@ def _make_context(
 
 
 def _make_function_model(
-    response_fn: object,
+    response_fn: Callable[[list[ModelMessage], AgentInfo, list[int]], ModelResponse],
 ) -> tuple[FunctionModel, list[int]]:
     """Create a FunctionModel with a request counter.
 
@@ -73,7 +91,7 @@ def _make_function_model(
     """
     request_counter: list[int] = [0]
 
-    def _respond(messages: list, agent_info: object) -> ModelResponse:
+    def _respond(messages: list[ModelMessage], agent_info: AgentInfo) -> ModelResponse:
         request_counter[0] += 1
         return response_fn(messages, agent_info, request_counter)
 
@@ -117,40 +135,7 @@ def tool_bridge(tool_registry: ToolRegistry) -> PydanticAIToolBridge:
 
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),  # type: ignore[arg-type]
-        event_repository=_StubEventRepo(),  # type: ignore[arg-type]
-        world_time_repository=_StubWorldTimeRepo(),  # type: ignore[arg-type]
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -210,11 +195,13 @@ class TestC13E01ExactFrameworkVisibleToolOrder:
     ) -> None:
         """AgentInfo.function_tools order matches snapshot names and decision exposure."""
         captured_agent_info: list[AgentInfo] = []
-        captured_runs: list[object] = []
+        captured_runs: list[PreparedDndAgentRun] = []
 
         original_prepare = preparer.prepare
 
-        def spy_prepare(user_input: str, *, execution_context: object) -> object:
+        def spy_prepare(
+            user_input: str, *, execution_context: ExecutionContext
+        ) -> PreparedDndAgentRun:
             result = original_prepare(user_input, execution_context=execution_context)
             captured_runs.append(result)
             return result
@@ -317,11 +304,13 @@ class TestC13E03TwoRunExposureIsolation:
         decide() calls. Captures preparer spy for exact snapshot parity.
         """
         captured_infos: list[AgentInfo] = []
-        captured_runs: list[object] = []
+        captured_runs: list[PreparedDndAgentRun] = []
 
         original_prepare = preparer.prepare
 
-        def spy_prepare(user_input: str, *, execution_context: object) -> object:
+        def spy_prepare(
+            user_input: str, *, execution_context: ExecutionContext
+        ) -> PreparedDndAgentRun:
             result = original_prepare(user_input, execution_context=execution_context)
             captured_runs.append(result)
             return result
@@ -399,10 +388,12 @@ class TestC13E04SnapshotPolicyRunIsolation:
         """Each decide() produces distinct deps, snapshots, and policies."""
         from pydantic_ai.messages import ToolCallPart as TCP
 
-        captured: list[object] = []
+        captured: list[PreparedDndAgentRun] = []
         original_prepare = preparer.prepare
 
-        def spy_prepare(user_input: str, *, execution_context: object) -> object:
+        def spy_prepare(
+            user_input: str, *, execution_context: ExecutionContext
+        ) -> PreparedDndAgentRun:
             result = original_prepare(user_input, execution_context=execution_context)
             captured.append(result)
             return result
@@ -487,6 +478,18 @@ class TestC13E05ReferenceParityTextAndTool:
                         ),
                     ),
                 )
+
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                raise AssertionError("chat() should not be called")
+
+            def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
+                raise AssertionError("generate_structured() should not be called")
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                raise AssertionError("embed() should not be called")
+
+            def health(self) -> ModelHealth:
+                raise AssertionError("health() should not be called")
 
         gateway = _FakeGateway()
         old_agent = FastAgent(
@@ -588,6 +591,18 @@ class TestC13E06ReferenceParityMultiRead:
                         ),
                     ),
                 )
+
+            def chat(self, request: ChatRequest) -> ChatResponse:
+                raise AssertionError("chat() should not be called")
+
+            def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
+                raise AssertionError("generate_structured() should not be called")
+
+            def embed(self, texts: list[str]) -> list[list[float]]:
+                raise AssertionError("embed() should not be called")
+
+            def health(self) -> ModelHealth:
+                raise AssertionError("health() should not be called")
 
         gateway = _FakeGateway()
         old_agent = FastAgent(

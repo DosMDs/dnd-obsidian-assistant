@@ -20,7 +20,6 @@ import json
 import subprocess
 import sys
 import threading
-from collections.abc import Sequence
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from queue import Queue
@@ -55,6 +54,7 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
     make_handler_counters,
@@ -109,6 +109,15 @@ def _make_tool_call_response(
     tool_call_id: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> ModelResponse:
+    if tool_call_id is None:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=tool_name,
+                    args=args or {"value": "hello"},
+                )
+            ]
+        )
     return ModelResponse(
         parts=[
             ToolCallPart(
@@ -162,40 +171,7 @@ def tool_catalog(tool_registry: ToolRegistry) -> ToolRegistrySchema:
 
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -440,41 +416,9 @@ class TestC21E08WorkerThreadOwnership:
                 counters_local = make_handler_counters()
                 registry = make_tool_registry(counters_local)
 
-                from dnd_assistant.errors import NotFoundError
-                from dnd_assistant.retrieval.service import SearchService
-                from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-                from dnd_assistant.storage.session_events import RawSessionEvent
-                from dnd_assistant.storage.session_metadata import RawSessionMetadata
-                from dnd_assistant.storage.types import VaultDocument, VaultRepository
                 from dnd_assistant.tools.catalog import build_tool_registry_schema
 
-                class _StubSearchService(SearchService):
-                    def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-                        return []
-
-                class _StubVaultRepository(VaultRepository):
-                    def get_entity(self, entity_id: str) -> VaultDocument:
-                        raise ValueError("unexpected call")
-
-                class _StubSessionRepo:
-                    def get_active_session(self) -> RawSessionMetadata | None:
-                        return None
-
-                class _StubEventRepo:
-                    def list_events(self, session_id: str) -> list[RawSessionEvent]:
-                        return []
-
-                class _StubWorldTimeRepo:
-                    def get_current_world_time(self) -> None:
-                        raise NotFoundError("no world time")
-
-                ctx_builder = AgentContextBuilder(
-                    search_service=_StubSearchService(),
-                    vault_repository=_StubVaultRepository(),
-                    session_repository=_StubSessionRepo(),
-                    event_repository=_StubEventRepo(),
-                    world_time_repository=_StubWorldTimeRepo(),
-                )
+                ctx_builder = make_stub_context_builder()
 
                 # Register a handler that captures its thread ID
                 from pydantic import BaseModel
@@ -724,46 +668,14 @@ async def main():
         make_handler_counters,
         make_tool_registry,
     )
+    from tests.support.context_builder_doubles import make_stub_context_builder
     from collections.abc import Sequence
 
     counters = make_handler_counters()
     registry = make_tool_registry(counters)
     catalog = build_tool_registry_schema(registry)
 
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query, *, limit=5):
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id):
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self):
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id):
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self):
-            raise NotFoundError("no world time")
-
-    ctx_builder = AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
+    ctx_builder = make_stub_context_builder()
 
     tool_bridge = PydanticAIToolBridge(registry=registry)
     preparer = DndAgentRunPreparer(

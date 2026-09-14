@@ -312,13 +312,13 @@ def _observe_reference_decision(
         observed_calls: list[ToolCallObservation] = []
         for tc in response.message.tool_calls:
             schema_valid = check_schema_valid(
-                tc.tool_name,
+                tc.tool_name,  # type: ignore[attr-defined]
                 tc.arguments,
                 exposed_tool_names=exposed_names,
             )
             observed_calls.append(
                 ToolCallObservation(
-                    tool_name=tc.tool_name,
+                    tool_name=tc.tool_name,  # type: ignore[attr-defined]
                     arguments=tc.arguments,
                     call_id=tc.call_id,
                     schema_valid=schema_valid,
@@ -388,13 +388,13 @@ def _observe_candidate_decision(
         observed_calls: list[ToolCallObservation] = []
         for tc in response.message.tool_calls:
             schema_valid = check_schema_valid(
-                tc.tool_name,
+                tc.tool_name,  # type: ignore[attr-defined]
                 tc.arguments,
                 exposed_tool_names=exposed_names,
             )
             observed_calls.append(
                 ToolCallObservation(
-                    tool_name=tc.tool_name,
+                    tool_name=tc.tool_name,  # type: ignore[attr-defined]
                     arguments=tc.arguments,
                     call_id=tc.call_id,
                     schema_valid=schema_valid,

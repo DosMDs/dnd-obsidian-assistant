@@ -18,8 +18,8 @@ import pydantic_ai.exceptions
 import pytest
 from pydantic import BaseModel
 from pydantic_ai import Agent, UnexpectedModelBehavior
-from pydantic_ai.messages import ModelResponse, ToolCallPart
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
+from pydantic_ai.models.function import AgentInfo, FunctionDef, FunctionModel
 from pydantic_ai.models.ollama import OllamaModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
@@ -316,7 +316,8 @@ def test_q7_custom_ollama_base_url() -> None:
     provider = OllamaProvider(base_url=custom_url)
     model = OllamaModel("qwen3", provider=provider)
 
-    base = str(model.provider.base_url)
+    assert model.provider is provider
+    base = str(provider.base_url)
     assert custom_url in base, f"expected {custom_url} in {base}"
 
 
@@ -326,7 +327,8 @@ def test_q7_custom_ollama_base_url_with_openai_provider() -> None:
     provider = OpenAIProvider(base_url=custom_url)
     model = OllamaModel("qwen3", provider=provider)
 
-    base = str(model.provider.base_url)
+    assert model.provider is provider
+    base = str(provider.base_url)
     assert custom_url in base, f"expected {custom_url} in {base}"
 
 
@@ -412,14 +414,14 @@ def test_q8_connection_failure() -> None:
 
 def _make_unknown_tool_response_counter(
     counter: list[int],
-) -> object:
+) -> FunctionDef:
     """Return a FunctionModel function that counts model invocations.
 
     Each call appends 1 to *counter* and returns a ToolCallPart for an
     unregistered tool name.
     """
 
-    def _respond(messages: list, agent_info: object) -> ModelResponse:
+    def _respond(messages: list[ModelMessage], agent_info: AgentInfo) -> ModelResponse:
         counter[0] += 1
         return ModelResponse(
             parts=[ToolCallPart(tool_name="nonexistent_tool", args="{}")],

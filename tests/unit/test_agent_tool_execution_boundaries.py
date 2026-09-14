@@ -27,6 +27,7 @@ from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    FiniteJsonValue,
     MessageRole,
     ToolAwareResponse,
     ToolCall,
@@ -111,12 +112,12 @@ def read_context() -> ExecutionContext:
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -161,13 +162,13 @@ def _make_decision(
     )
 
 
-class _CountingExecutor:
+class _CountingExecutor(ToolExecutor):
     """ToolExecutor stand-in that counts calls and never succeeds on its own."""
 
     def __init__(self) -> None:
         self.call_count = 0
 
-    def execute(  # type: ignore[override]
+    def execute(
         self,
         tool_name: str,
         *,
@@ -363,6 +364,7 @@ class TestExactValidCallExecutes:
         result = service.execute(decision, tool_call, execution_context=read_context)
         assert isinstance(result, AgentToolExecutionResult)
         assert result.tool_call is tool_call
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "read: hello"
 
     def test_equivalent_call_executes_once(
@@ -377,6 +379,7 @@ class TestExactValidCallExecutes:
         decision = _make_decision(tool_calls=[original], exposed_tools=exposed)
         result = service.execute(decision, same_value, execution_context=read_context)
         assert isinstance(result, AgentToolExecutionResult)
+        assert isinstance(result.output, ResultOutput)
         assert result.output.result == "read: hello"
 
     def test_dict_order_different_still_executes(

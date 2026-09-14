@@ -46,8 +46,17 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
 )
+from tests.support.context_builder_doubles import (
+    MissingWorldTimeRepository,
+    NullSearchService,
+    NullSessionEventRepository,
+    NullSessionMetadataRepository,
+    UntouchedVaultRepository,
+    make_stub_context_builder,
+)
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
+    ToolOutput,
     make_handler_counters,
     make_tool_registry,
 )
@@ -140,13 +149,16 @@ def _make_tool_call_response(
     parts: list[Any] = []
     if text is not None:
         parts.append(TextPart(content=text))
-    parts.append(
-        ToolCallPart(
-            tool_name=tool_name,
-            args=args or {"x": 42},
-            tool_call_id=tool_call_id,
+    if tool_call_id is None:
+        parts.append(ToolCallPart(tool_name=tool_name, args=args or {"x": 42}))
+    else:
+        parts.append(
+            ToolCallPart(
+                tool_name=tool_name,
+                args=args or {"x": 42},
+                tool_call_id=tool_call_id,
+            )
         )
-    )
     return ModelResponse(parts=parts)
 
 
@@ -199,40 +211,7 @@ def tool_bridge(tool_registry: ToolRegistry) -> PydanticAIToolBridge:
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
     """Return a minimal AgentContextBuilder that returns a fixed context."""
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),  # type: ignore[arg-type]
-        event_repository=_StubEventRepo(),  # type: ignore[arg-type]
-        world_time_repository=_StubWorldTimeRepo(),  # type: ignore[arg-type]
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -374,7 +353,9 @@ class TestP803SingleReadRespond:
         assert request_count[0] == 2
         assert len(result.tool_executions) == 1
         assert result.tool_executions[0].tool_call.name == "read_alpha"
-        assert result.tool_executions[0].output.result == "alpha:hello"
+        output = result.tool_executions[0].output
+        assert isinstance(output, ToolOutput)
+        assert output.result == "alpha:hello"
         assert result.outcome.kind == AgentOutcomeKind.RESPOND
         assert result.outcome.message == "Found it!"
         # First response text preserved
@@ -512,10 +493,14 @@ class TestP806TwoReadSequential:
 
         assert request_count[0] == 2
         assert len(result.tool_executions) == 2
-        assert result.tool_executions[0].tool_call.name == "read_alpha"
-        assert result.tool_executions[0].output.result == "alpha:first"
-        assert result.tool_executions[1].tool_call.name == "read_beta"
-        assert result.tool_executions[1].output.result == "beta:42"
+        first = result.tool_executions[0]
+        second = result.tool_executions[1]
+        assert first.tool_call.name == "read_alpha"
+        assert isinstance(first.output, ToolOutput)
+        assert first.output.result == "alpha:first"
+        assert second.tool_call.name == "read_beta"
+        assert isinstance(second.output, ToolOutput)
+        assert second.output.result == "beta:42"
         assert result.outcome.kind == AgentOutcomeKind.RESPOND
         assert result.outcome.message == "Both done!"
         assert counters.alpha == 1
@@ -565,14 +550,22 @@ class TestP807FourReadMaximum:
 
         assert request_count[0] == 2
         assert len(result.tool_executions) == 4
-        assert result.tool_executions[0].tool_call.name == "read_alpha"
-        assert result.tool_executions[0].output.result == "alpha:a"
-        assert result.tool_executions[1].tool_call.name == "read_beta"
-        assert result.tool_executions[1].output.result == "beta:1"
-        assert result.tool_executions[2].tool_call.name == "read_alpha"
-        assert result.tool_executions[2].output.result == "alpha:b"
-        assert result.tool_executions[3].tool_call.name == "read_beta"
-        assert result.tool_executions[3].output.result == "beta:2"
+        e0 = result.tool_executions[0]
+        e1 = result.tool_executions[1]
+        e2 = result.tool_executions[2]
+        e3 = result.tool_executions[3]
+        assert e0.tool_call.name == "read_alpha"
+        assert isinstance(e0.output, ToolOutput)
+        assert e0.output.result == "alpha:a"
+        assert e1.tool_call.name == "read_beta"
+        assert isinstance(e1.output, ToolOutput)
+        assert e1.output.result == "beta:1"
+        assert e2.tool_call.name == "read_alpha"
+        assert isinstance(e2.output, ToolOutput)
+        assert e2.output.result == "alpha:b"
+        assert e3.tool_call.name == "read_beta"
+        assert isinstance(e3.output, ToolOutput)
+        assert e3.output.result == "beta:2"
         assert result.outcome.message == "All four done!"
         assert counters.alpha == 2
         assert counters.beta == 2
@@ -619,8 +612,12 @@ class TestP808RepeatedSameRead:
 
         assert request_count[0] == 2
         assert len(result.tool_executions) == 2
-        assert result.tool_executions[0].output.result == "alpha:x"
-        assert result.tool_executions[1].output.result == "alpha:y"
+        o0 = result.tool_executions[0].output
+        o1 = result.tool_executions[1].output
+        assert isinstance(o0, ToolOutput)
+        assert isinstance(o1, ToolOutput)
+        assert o0.result == "alpha:x"
+        assert o1.result == "alpha:y"
         assert counters.alpha == 2
 
 
@@ -664,6 +661,7 @@ class TestP809DeterministicToolResultReplay:
         assert execution.tool_message.role == MessageRole.TOOL
         assert execution.tool_message.tool_name == "read_alpha"
         assert execution.tool_message.tool_call_id == "call-r1"
+        assert execution.tool_message.content is not None
         assert '"result":"alpha:replay"' in execution.tool_message.content
         assert execution.tool_message.content == json.dumps(
             {"result": "alpha:replay"},
@@ -738,39 +736,12 @@ class TestP811ContextPreparationOnce:
         class CountingContextBuilder(AgentContextBuilder):
             def __init__(self) -> None:
                 # Pass stub dependencies to parent
-                from dnd_assistant.errors import NotFoundError
-                from dnd_assistant.retrieval.service import SearchService
-                from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-                from dnd_assistant.storage.session_events import RawSessionEvent
-                from dnd_assistant.storage.session_metadata import RawSessionMetadata
-                from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-                class _StubSearchService(SearchService):
-                    def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-                        return []
-
-                class _StubVaultRepository(VaultRepository):
-                    def get_entity(self, entity_id: str) -> VaultDocument:
-                        raise ValueError("unexpected call")
-
-                class _StubSessionRepo:
-                    def get_active_session(self) -> RawSessionMetadata | None:
-                        return None
-
-                class _StubEventRepo:
-                    def list_events(self, session_id: str) -> list[RawSessionEvent]:
-                        return []
-
-                class _StubWorldTimeRepo:
-                    def get_current_world_time(self) -> None:
-                        raise NotFoundError("no world time")
-
                 super().__init__(
-                    search_service=_StubSearchService(),
-                    vault_repository=_StubVaultRepository(),
-                    session_repository=_StubSessionRepo(),  # type: ignore[arg-type]
-                    event_repository=_StubEventRepo(),  # type: ignore[arg-type]
-                    world_time_repository=_StubWorldTimeRepo(),  # type: ignore[arg-type]
+                    search_service=NullSearchService(),
+                    vault_repository=UntouchedVaultRepository(),
+                    session_repository=NullSessionMetadataRepository(),
+                    event_repository=NullSessionEventRepository(),
+                    world_time_repository=MissingWorldTimeRepository(),
                 )
 
             def build(self, user_input: str) -> AgentContext:

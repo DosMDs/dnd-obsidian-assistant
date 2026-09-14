@@ -8,6 +8,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING, Any
 
+from pydantic_ai.messages import TextPart
+
 from tests.support.paim13_live_harness import CountingPydanticModel
 from tests.support.test_doubles import FakeModel, RaisingFakeModel
 
@@ -57,6 +59,7 @@ class TestCountingPydanticModelLiteral:
 
             assert counter.state.request_count == 1
             assert fake.invocation_count == pre + 1
+            assert isinstance(response.parts[0], TextPart)
             assert response.parts[0].content == "ok"
 
         self._run(_test())
@@ -189,6 +192,7 @@ class TestCountingPydanticModelResponsePreservation:
                 model_request_parameters=None,  # type: ignore[arg-type]
             )
 
+            assert isinstance(response.parts[0], TextPart)
             assert response.parts[0].content == "ok"
             assert len(response.parts) == 1
 

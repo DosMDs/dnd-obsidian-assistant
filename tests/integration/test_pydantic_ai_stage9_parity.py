@@ -504,6 +504,8 @@ class TestP11A06WriteUnavailableNoAudit:
         )
 
         # Verify write_alpha is NOT in exposed_tools
+        assert obs.reference is not None
+        assert obs.pydantic is not None
         ref_names = tuple(t.name for t in obs.reference.initial_decision.exposed_tools)
         pyd_names = tuple(t.name for t in obs.pydantic.initial_decision.exposed_tools)
         assert "write_alpha" not in ref_names
@@ -572,6 +574,8 @@ class TestP11A07WriteUnavailableReadPermission:
         )
 
         # Verify write_alpha is NOT in exposed_tools
+        assert obs.reference is not None
+        assert obs.pydantic is not None
         ref_names = tuple(t.name for t in obs.reference.initial_decision.exposed_tools)
         pyd_names = tuple(t.name for t in obs.pydantic.initial_decision.exposed_tools)
         assert "write_alpha" not in ref_names
@@ -642,6 +646,8 @@ class TestP11A08WriteUnavailableWrongMode:
         )
 
         # Verify write_alpha is NOT in exposed_tools
+        assert obs.reference is not None
+        assert obs.pydantic is not None
         ref_names = tuple(t.name for t in obs.reference.initial_decision.exposed_tools)
         pyd_names = tuple(t.name for t in obs.pydantic.initial_decision.exposed_tools)
         assert "write_alpha" not in ref_names

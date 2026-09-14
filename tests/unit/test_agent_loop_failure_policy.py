@@ -15,19 +15,22 @@ Covers:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 import pytest
 from pydantic import BaseModel
 
-from dnd_assistant.application.agent_context import AgentContext
+from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentLoop
 from dnd_assistant.application.fast_agent import AgentDecision
 from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
+    FiniteJsonValue,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
@@ -41,6 +44,8 @@ from dnd_assistant.tools.types import (
     SessionMode,
     ToolDefinition,
 )
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 class StringInput(BaseModel):
@@ -99,12 +104,12 @@ def _make_tool_response(
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -125,7 +130,7 @@ def _make_tool_public(
     )
 
 
-class _FakeAgentContextBuilder:
+class _FakeAgentContextBuilder(AgentContextBuilder):
     def __init__(self, context: AgentContext) -> None:
         self._context = context
         self.build_call_count: int = 0
@@ -154,16 +159,16 @@ class _FakeModelGateway:
             raise ModelError("fake model error")
         return self._response
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called")
 
 

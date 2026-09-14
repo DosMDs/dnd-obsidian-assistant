@@ -27,6 +27,7 @@ from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    FiniteJsonValue,
     MessageRole,
     ToolAwareResponse,
     ToolCall,
@@ -272,12 +273,12 @@ def read_context() -> ExecutionContext:
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -353,6 +354,7 @@ class TestResultSerialization:
         exposed = [_make_tool_public("unicode_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["name"] == "\u0413\u044d\u043d\u0434\u0430\u043b\u044c\u0444"
         assert "\u043f\u0440\u0438\u0432\u0435\u0442" in parsed["tags"]
@@ -367,6 +369,7 @@ class TestResultSerialization:
         exposed = [_make_tool_public("none_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["value"] is None
         assert "null" in result.tool_message.content
@@ -381,6 +384,7 @@ class TestResultSerialization:
         exposed = [_make_tool_public("false_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["flag"] is False
         assert '"flag":false' in result.tool_message.content
@@ -395,6 +399,7 @@ class TestResultSerialization:
         exposed = [_make_tool_public("zero_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["count"] == 0
         assert parsed["count"] is not False
@@ -434,6 +439,7 @@ class TestResultSerialization:
             session_mode=SessionMode.NO_ACTIVE_SESSION,
         )
         result = svc.execute(decision, tool_call, execution_context=ctx)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["text"] == ""
 
@@ -471,6 +477,7 @@ class TestResultSerialization:
             session_mode=SessionMode.NO_ACTIVE_SESSION,
         )
         result = svc.execute(decision, tool_call, execution_context=ctx)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["items"] == []
 
@@ -508,6 +515,7 @@ class TestResultSerialization:
             session_mode=SessionMode.NO_ACTIVE_SESSION,
         )
         result = svc.execute(decision, tool_call, execution_context=ctx)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["data"] == {}
 
@@ -520,6 +528,7 @@ class TestResultSerialization:
         exposed = [_make_tool_public("nested_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["metadata"] == {"key": "val", "nested": {"inner": 42}}
         assert parsed["tags"] == ["a", "b"]
@@ -559,6 +568,7 @@ class TestResultSerialization:
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
         content = result.tool_message.content
+        assert content is not None
         # Verify sort_keys: "count" before "flag" before "metadata" before "name" before "tags"
         assert content.index('"count"') < content.index('"flag"')
         assert content.index('"flag"') < content.index('"metadata"')
@@ -598,6 +608,7 @@ class TestToolMessage:
         exposed = [_make_tool_public("read_tool")]
         decision = _make_decision(tool_calls=[tool_call], exposed_tools=exposed)
         result = service.execute(decision, tool_call, execution_context=read_context)
+        assert result.tool_message.content is not None
         parsed = json.loads(result.tool_message.content)
         assert parsed["result"] == "read: hello"
 
@@ -688,6 +699,7 @@ class TestSerializationFailure:
             session_mode=SessionMode.NO_ACTIVE_SESSION,
         )
         result = svc.execute(decision, tool_call, execution_context=ctx)
+        assert result.tool_message.content is not None
         assert json.loads(result.tool_message.content) == {"value": "ok"}
 
     def test_real_serialization_failure_raises_validation_error(self) -> None:

@@ -17,16 +17,26 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TypeVar
 
 import pytest
+from pydantic import BaseModel
 
+from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentLoop
-from dnd_assistant.application.fast_agent import AgentDecision
+from dnd_assistant.application.agent_tool_execution import (
+    AgentToolExecutionResult,
+    AgentToolExecutionService,
+)
+from dnd_assistant.application.fast_agent import AgentDecision, FastAgent
 from dnd_assistant.errors import ModelError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
+    FiniteJsonValue,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
@@ -37,6 +47,8 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+
+_T = TypeVar("_T", bound=BaseModel)
 
 _FAKE_WORLD_TICK = 12345
 
@@ -55,10 +67,8 @@ class ForeignPermission(StrEnum):
 def _make_context_with(
     *,
     user_input: str = "test",
-) -> object:
-    from dnd_assistant.application.agent_context import AgentContext as AC
-
-    return AC(
+) -> AgentContext:
+    return AgentContext(
         user_input=user_input,
         current_world_tick=_FAKE_WORLD_TICK,
         active_session=None,
@@ -90,12 +100,12 @@ def _make_single_message_request() -> ChatRequest:
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -133,7 +143,7 @@ def _make_write_context() -> ExecutionContext:
 # ── Fake FastAgent returning a manually constructed AgentDecision ─────────
 
 
-class _FakeFastAgent:
+class _FakeFastAgent(FastAgent):
     """Test double that returns a manually constructed AgentDecision.
 
     This bypasses normal FastAgent.decide() validation so that tests can
@@ -153,11 +163,11 @@ class _FakeFastAgent:
         return self._decision
 
 
-class _FakeAgentContextBuilder:
+class _FakeAgentContextBuilder(AgentContextBuilder):
     def __init__(self) -> None:
         self.build_call_count: int = 0
 
-    def build(self, user_input: str) -> object:
+    def build(self, user_input: str) -> AgentContext:
         self.build_call_count += 1
         return _make_context_with()
 
@@ -174,20 +184,20 @@ class _FakeModelGateway:
         self.chat_with_tools_call_count += 1
         return _make_tool_response(content='{"kind":"respond","message":"done"}')
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called")
 
 
-class _FakeToolExecutionService:
+class _FakeToolExecutionService(AgentToolExecutionService):
     """Records calls but does not validate exposed tools."""
 
     def __init__(self) -> None:
@@ -199,9 +209,9 @@ class _FakeToolExecutionService:
         tool_call: ToolCall,
         *,
         execution_context: ExecutionContext,
-    ) -> object:
+    ) -> AgentToolExecutionResult:
         self.execute_call_count += 1
-        return None
+        raise AssertionError("execute() should not be called")
 
 
 def _make_agent_loop_with_fake_fast_agent(
@@ -254,8 +264,10 @@ class TestMissingExposedDefinition:
         )
         loop = _make_agent_loop_with_fake_fast_agent(decision)
 
-        fake_svc = loop._tool_execution_service  # type: ignore[attr-defined]
-        gateway = loop._model_gateway  # type: ignore[attr-defined]
+        fake_svc = loop._tool_execution_service
+        gateway = loop._model_gateway
+        assert isinstance(fake_svc, _FakeToolExecutionService)
+        assert isinstance(gateway, _FakeModelGateway)
 
         with pytest.raises(ModelError, match="no matching exposed"):
             loop.run("test", execution_context=_make_write_context())
@@ -290,8 +302,10 @@ class TestDuplicateExposedDefinitions:
         )
         loop = _make_agent_loop_with_fake_fast_agent(decision)
 
-        fake_svc = loop._tool_execution_service  # type: ignore[attr-defined]
-        gateway = loop._model_gateway  # type: ignore[attr-defined]
+        fake_svc = loop._tool_execution_service
+        gateway = loop._model_gateway
+        assert isinstance(fake_svc, _FakeToolExecutionService)
+        assert isinstance(gateway, _FakeModelGateway)
 
         with pytest.raises(ModelError, match="Ambiguous snapshot"):
             loop.run("test", execution_context=_make_write_context())
@@ -374,8 +388,10 @@ class TestMalformedPermission:
         )
         loop = _make_agent_loop_with_fake_fast_agent(decision)
 
-        fake_svc = loop._tool_execution_service  # type: ignore[attr-defined]
-        gateway = loop._model_gateway  # type: ignore[attr-defined]
+        fake_svc = loop._tool_execution_service
+        gateway = loop._model_gateway
+        assert isinstance(fake_svc, _FakeToolExecutionService)
+        assert isinstance(gateway, _FakeModelGateway)
 
         with pytest.raises(ModelError, match="malformed permission"):
             loop.run("test", execution_context=_make_write_context())
@@ -438,8 +454,10 @@ class TestMalformedSnapshotEntry:
         )
         loop = _make_agent_loop_with_fake_fast_agent(decision)
 
-        fake_svc = loop._tool_execution_service  # type: ignore[attr-defined]
-        gateway = loop._model_gateway  # type: ignore[attr-defined]
+        fake_svc = loop._tool_execution_service
+        gateway = loop._model_gateway
+        assert isinstance(fake_svc, _FakeToolExecutionService)
+        assert isinstance(gateway, _FakeModelGateway)
 
         with pytest.raises(ModelError, match=match):
             loop.run("test", execution_context=_make_write_context())
@@ -517,8 +535,10 @@ class TestMalformedNameField:
         )
         loop = _make_agent_loop_with_fake_fast_agent(decision)
 
-        fake_svc = loop._tool_execution_service  # type: ignore[attr-defined]
-        gateway = loop._model_gateway  # type: ignore[attr-defined]
+        fake_svc = loop._tool_execution_service
+        gateway = loop._model_gateway
+        assert isinstance(fake_svc, _FakeToolExecutionService)
+        assert isinstance(gateway, _FakeModelGateway)
 
         with pytest.raises(ModelError, match=match):
             loop.run("test", execution_context=_make_write_context())
@@ -581,8 +601,10 @@ class TestMalformedUnrelatedEntry:
         )
         loop = _make_agent_loop_with_fake_fast_agent(decision)
 
-        fake_svc = loop._tool_execution_service  # type: ignore[attr-defined]
-        gateway = loop._model_gateway  # type: ignore[attr-defined]
+        fake_svc = loop._tool_execution_service
+        gateway = loop._model_gateway
+        assert isinstance(fake_svc, _FakeToolExecutionService)
+        assert isinstance(gateway, _FakeModelGateway)
 
         with pytest.raises(ModelError, match=match):
             loop.run("test", execution_context=_make_write_context())

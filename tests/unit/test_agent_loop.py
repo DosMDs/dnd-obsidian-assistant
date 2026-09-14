@@ -19,25 +19,32 @@ Covers:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import pytest
 from pydantic import BaseModel
 from pydantic import ValidationError as PydanticValidationError
 
-from dnd_assistant.application.agent_context import AgentContext
+from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
 from dnd_assistant.application.agent_loop import (
     AgentLoop,
     AgentOutcomeKind,
     AgentTextOutcome,
     _parse_agent_outcome,
 )
+from dnd_assistant.application.agent_tool_execution import (
+    AgentToolExecutionResult,
+    AgentToolExecutionService,
+)
 from dnd_assistant.application.fast_agent import AgentDecision, FastAgent
 from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
+    FiniteJsonValue,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
@@ -55,6 +62,8 @@ from dnd_assistant.tools.types import (
 )
 
 _FAKE_WORLD_TICK = 12345
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 class StringInput(BaseModel):
@@ -139,12 +148,12 @@ def _make_tool_response(
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -152,7 +161,7 @@ def _make_tool_call(
 # ── Fakes ──────────────────────────────────────────────────────────────────────
 
 
-class _FakeAgentContextBuilder:
+class _FakeAgentContextBuilder(AgentContextBuilder):
     """Fake ``AgentContextBuilder`` that returns a pre-built context."""
 
     def __init__(self, context: AgentContext) -> None:
@@ -185,23 +194,23 @@ class _FakeModelGateway:
             raise ModelError("fake model error")
         return self._response
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called")
 
 
-class _FakeToolExecutionService:
+class _FakeToolExecutionService(AgentToolExecutionService):
     """Fake ``AgentToolExecutionService`` that records calls."""
 
-    def __init__(self, result: object = None) -> None:
+    def __init__(self, result: AgentToolExecutionResult | None = None) -> None:
         self._result = result
         self.execute_call_count: int = 0
         self.last_decision: AgentDecision | None = None
@@ -214,7 +223,7 @@ class _FakeToolExecutionService:
         tool_call: ToolCall,
         *,
         execution_context: ExecutionContext,
-    ) -> object:
+    ) -> AgentToolExecutionResult:
         self.execute_call_count += 1
         self.last_decision = decision
         self.last_tool_call = tool_call
@@ -434,7 +443,9 @@ class TestSingleToolPath:
 
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 1
-        assert result.tool_executions[0].output.result == "read: hello"
+        output = result.tool_executions[0].output
+        assert isinstance(output, ResultOutput)
+        assert output.result == "read: hello"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "Found: read: hello"
         assert builder.build_call_count == 1
@@ -484,7 +495,9 @@ class TestSingleToolPath:
 
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 1
-        assert result.tool_executions[0].output.result == "read: hello"
+        output = result.tool_executions[0].output
+        assert isinstance(output, ResultOutput)
+        assert output.result == "read: hello"
         assert result.outcome.kind is AgentOutcomeKind.CLARIFY
         assert result.outcome.message == "Which record do you mean?"
         assert builder.build_call_count == 1
@@ -698,7 +711,9 @@ class TestWriteSafety:
 
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 1
-        assert result.tool_executions[0].output.result == "write: world"
+        output = result.tool_executions[0].output
+        assert isinstance(output, ResultOutput)
+        assert output.result == "write: world"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "written"
 

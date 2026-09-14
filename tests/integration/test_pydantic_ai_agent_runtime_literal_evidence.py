@@ -24,12 +24,12 @@ Required evidence:
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Awaitable, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic_ai import RunContext, UsageLimits
+from pydantic_ai import RunContext
 from pydantic_ai.capabilities import HandleDeferredToolCalls
 from pydantic_ai.messages import (
     ModelResponse,
@@ -39,6 +39,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.models import Model
 from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults
+from pydantic_ai.usage import RunUsage
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
@@ -62,6 +63,7 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
     make_handler_counters,
@@ -108,6 +110,15 @@ def _make_tool_call_response(
     tool_call_id: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> ModelResponse:
+    if tool_call_id is None:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=tool_name,
+                    args=args or {"value": "hello"},
+                )
+            ]
+        )
     return ModelResponse(
         parts=[
             ToolCallPart(
@@ -156,40 +167,7 @@ def tool_catalog(tool_registry: ToolRegistry) -> ToolRegistrySchema:
 
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -246,7 +224,7 @@ class TestC17E1LiteralCtxDepsIdentity:
             def capturing_handler(
                 ctx: RunContext[DndAgentDeps],
                 requests: DeferredToolRequests,
-            ) -> DeferredToolResults | None:
+            ) -> DeferredToolResults | Awaitable[DeferredToolResults | None] | None:
                 captured_ctx_deps.append(ctx.deps)
                 return original_cap_handler(ctx, requests)
 
@@ -313,7 +291,7 @@ class TestC17E2WrongDepsFailClosed:
         ctx = RunContext[DndAgentDeps](
             deps=prepared_b.deps,
             model=_make_function_model(lambda m, i: _make_respond_response("x")),
-            usage=UsageLimits(),
+            usage=RunUsage(),
             retries={},
         )
 

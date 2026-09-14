@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import threading
-from collections.abc import Sequence
 from queue import Queue
 from typing import Any
 
@@ -43,6 +42,7 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     make_handler_counters,
     make_tool_registry,
@@ -85,6 +85,15 @@ def _make_tool_call_response(
     tool_call_id: str | None = None,
     args: dict[str, Any] | None = None,
 ) -> ModelResponse:
+    if tool_call_id is None:
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name=tool_name,
+                    args=args or {"value": "hello"},
+                )
+            ]
+        )
     return ModelResponse(
         parts=[
             ToolCallPart(
@@ -148,40 +157,7 @@ class TestP10E08WorkerThreadRuntime:
 
                 catalog = build_tool_registry_schema(registry)
 
-                from dnd_assistant.errors import NotFoundError
-                from dnd_assistant.retrieval.service import SearchService
-                from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-                from dnd_assistant.storage.session_events import RawSessionEvent
-                from dnd_assistant.storage.session_metadata import RawSessionMetadata
-                from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-                class _StubSearchService(SearchService):
-                    def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-                        return []
-
-                class _StubVaultRepository(VaultRepository):
-                    def get_entity(self, entity_id: str) -> VaultDocument:
-                        raise ValueError("unexpected call")
-
-                class _StubSessionRepo:
-                    def get_active_session(self) -> RawSessionMetadata | None:
-                        return None
-
-                class _StubEventRepo:
-                    def list_events(self, session_id: str) -> list[RawSessionEvent]:
-                        return []
-
-                class _StubWorldTimeRepo:
-                    def get_current_world_time(self) -> None:
-                        raise NotFoundError("no world time")
-
-                ctx_builder = AgentContextBuilder(
-                    search_service=_StubSearchService(),
-                    vault_repository=_StubVaultRepository(),
-                    session_repository=_StubSessionRepo(),
-                    event_repository=_StubEventRepo(),
-                    world_time_repository=_StubWorldTimeRepo(),
-                )
+                ctx_builder = make_stub_context_builder()
 
                 model_request_count: int = 0
 

@@ -28,7 +28,6 @@ from __future__ import annotations
 import os
 import statistics
 import time
-from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -36,7 +35,6 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_loop import AgentOutcomeKind
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
     PydanticAIAgentRuntime,
@@ -47,16 +45,10 @@ from dnd_assistant.application.pydantic_ai_run_deps import (
 from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
-from dnd_assistant.errors import NotFoundError
 from dnd_assistant.models.ollama import OllamaModelProvider
 from dnd_assistant.models.pydantic_ai_ollama import (
     build_pydantic_ai_ollama_model,
 )
-from dnd_assistant.retrieval.service import SearchService
-from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-from dnd_assistant.storage.session_events import RawSessionEvent
-from dnd_assistant.storage.session_metadata import RawSessionMetadata
-from dnd_assistant.storage.types import VaultDocument, VaultRepository
 from dnd_assistant.tools.catalog import (
     build_tool_registry_schema,
 )
@@ -68,6 +60,7 @@ from dnd_assistant.tools.types import (
 from dnd_assistant.tools.types import (
     ToolDefinition as ProjectToolDefinition,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     make_read_context,
 )
@@ -182,35 +175,9 @@ def _build_paim12_runtime(
     registry contents differ.
     """
 
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
     catalog = build_tool_registry_schema(registry)
     bridge = PydanticAIToolBridge(registry=registry)
-    context_builder = AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),
-        event_repository=_StubEventRepo(),
-        world_time_repository=_StubWorldTimeRepo(),
-    )
+    context_builder = make_stub_context_builder()
     preparer = DndAgentRunPreparer(
         context_builder=context_builder,
         tool_catalog=catalog,

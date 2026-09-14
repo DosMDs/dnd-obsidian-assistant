@@ -19,11 +19,10 @@ network access.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
-
 import pytest
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.messages import ModelMessage, ModelResponse
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from dnd_assistant.application.agent_context import (
     AgentContext,
@@ -43,6 +42,7 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
     make_tool_registry,
@@ -65,7 +65,7 @@ def _make_counting_function_model() -> tuple[FunctionModel, list[int]]:
     """
     request_counter: list[int] = [0]
 
-    def _respond(messages: list, agent_info: object) -> object:
+    def _respond(messages: list[ModelMessage], agent_info: AgentInfo) -> ModelResponse:
         request_counter[0] += 1
         from pydantic_ai.messages import ModelResponse, TextPart
 
@@ -80,40 +80,7 @@ def _make_sentinel_context_builder() -> AgentContextBuilder:
 
     The sentinel is placed in the user_input field of the AgentContext.
     """
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _CountingSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_CountingSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),  # type: ignore[arg-type]
-        event_repository=_StubEventRepo(),  # type: ignore[arg-type]
-        world_time_repository=_StubWorldTimeRepo(),  # type: ignore[arg-type]
-    )
+    return make_stub_context_builder()
 
 
 def _make_handler_counters() -> HandlerCounters:
@@ -361,9 +328,9 @@ class TestNoImplicitDepsSerialization:
         """Sentinel value in deps is NOT present in model-facing messages."""
         prepared = preparer.prepare(_SENTINEL, execution_context=read_context)
 
-        captured_messages: list[list[object]] = []
+        captured_messages: list[list[ModelMessage]] = []
 
-        def _capture_model(messages: list, agent_info: object) -> object:
+        def _capture_model(messages: list[ModelMessage], agent_info: AgentInfo) -> ModelResponse:
             captured_messages.append(list(messages))
             from pydantic_ai.messages import ModelResponse, TextPart
 

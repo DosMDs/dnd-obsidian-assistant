@@ -29,7 +29,7 @@ def _make_call(
     return ToolCallPart(
         tool_name=tool_name,
         args=args if args is not None else {"value": "hello"},
-        tool_call_id=tool_call_id,
+        tool_call_id=tool_call_id,  # type: ignore[arg-type]
     )
 
 

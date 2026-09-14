@@ -23,22 +23,29 @@ Covers:
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, TypeVar
 
 import pytest
 from pydantic import BaseModel
 
-from dnd_assistant.application.agent_context import AgentContext
+from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
 from dnd_assistant.application.agent_loop import (
     AgentLoop,
     AgentOutcomeKind,
+)
+from dnd_assistant.application.agent_tool_execution import (
+    AgentToolExecutionResult,
+    AgentToolExecutionService,
 )
 from dnd_assistant.application.fast_agent import AgentDecision
 from dnd_assistant.errors import ModelError
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
+    ChatResponse,
+    FiniteJsonValue,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
@@ -55,6 +62,8 @@ from dnd_assistant.tools.types import (
 )
 
 _FAKE_WORLD_TICK = 12345
+
+_T = TypeVar("_T", bound=BaseModel)
 
 
 class StringInput(BaseModel):
@@ -120,12 +129,12 @@ def _make_tool_response(
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -151,7 +160,7 @@ def _make_tool_public(
 # ── Fakes ────────────────────────────────────────────────────────────────────
 
 
-class _FakeAgentContextBuilder:
+class _FakeAgentContextBuilder(AgentContextBuilder):
     def __init__(self, context: AgentContext) -> None:
         self._context = context
         self.build_call_count: int = 0
@@ -180,16 +189,16 @@ class _FakeModelGateway:
             raise ModelError("fake model error")
         return self._response
 
-    def chat(self, request: ChatRequest) -> None:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         raise AssertionError("chat() should not be called")
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> None:
+    def generate_structured(self, request: ChatRequest, schema: type[_T]) -> _T:
         raise AssertionError("generate_structured() should not be called")
 
-    def embed(self, texts: list[str]) -> None:
+    def embed(self, texts: list[str]) -> list[list[float]]:
         raise AssertionError("embed() should not be called")
 
-    def health(self) -> None:
+    def health(self) -> ModelHealth:
         raise AssertionError("health() should not be called")
 
 
@@ -331,8 +340,12 @@ class TestReadBatchSuccess:
 
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 2
-        assert result.tool_executions[0].output.result == "read: first"
-        assert result.tool_executions[1].output.result == "read: second"
+        first = result.tool_executions[0].output
+        second = result.tool_executions[1].output
+        assert isinstance(first, ResultOutput)
+        assert isinstance(second, ResultOutput)
+        assert first.result == "read: first"
+        assert second.result == "read: second"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "done"
         assert builder.build_call_count == 1
@@ -373,7 +386,9 @@ class TestReadBatchSuccess:
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 4
         for i in range(4):
-            assert result.tool_executions[i].output.result == f"read: {i}"
+            output = result.tool_executions[i].output
+            assert isinstance(output, ResultOutput)
+            assert output.result == f"read: {i}"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
         assert result.outcome.message == "all done"
 
@@ -452,8 +467,12 @@ class TestReadBatchSuccess:
         result = loop.run("test", execution_context=read_context)
 
         assert len(result.tool_executions) == 2
-        assert result.tool_executions[0].output.result == "read: hello"
-        assert result.tool_executions[1].output.result == "read: world"
+        first = result.tool_executions[0].output
+        second = result.tool_executions[1].output
+        assert isinstance(first, ResultOutput)
+        assert isinstance(second, ResultOutput)
+        assert first.result == "read: hello"
+        assert second.result == "read: world"
 
 
 # ── Call-cap rejection tests ────────────────────────────────────────────────
@@ -768,7 +787,9 @@ class TestSingleCallUnchanged:
 
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 1
-        assert result.tool_executions[0].output.result == "read: hello"
+        output = result.tool_executions[0].output
+        assert isinstance(output, ResultOutput)
+        assert output.result == "read: hello"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
 
     def test_single_write_with_audit_unchanged(
@@ -810,7 +831,9 @@ class TestSingleCallUnchanged:
 
         assert gateway.chat_with_tools_call_count == 2
         assert len(result.tool_executions) == 1
-        assert result.tool_executions[0].output.result == "write: world"
+        output = result.tool_executions[0].output
+        assert isinstance(output, ResultOutput)
+        assert output.result == "write: world"
         assert result.outcome.kind is AgentOutcomeKind.RESPOND
 
     def test_direct_clarification_unchanged(self) -> None:
@@ -841,7 +864,7 @@ class TestSingleCallUnchanged:
 # ── Helper: _FakeToolExecutionService ───────────────────────────────────────
 
 
-class _FakeToolExecutionService:
+class _FakeToolExecutionService(AgentToolExecutionService):
     """Fake that records calls but does not validate exposed tools."""
 
     def __init__(self) -> None:
@@ -853,6 +876,6 @@ class _FakeToolExecutionService:
         tool_call: ToolCall,
         *,
         execution_context: ExecutionContext,
-    ) -> object:
+    ) -> AgentToolExecutionResult:
         self.execute_call_count += 1
-        return None
+        raise AssertionError("execute() should not be called")

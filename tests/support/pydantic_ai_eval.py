@@ -303,7 +303,7 @@ def _strict_json_value_equal(left: object, right: object) -> bool:
     """Recursive strict JSON value comparison preserving exact types."""
     if type(left) is not type(right):
         return False
-    if isinstance(left, dict):
+    if isinstance(left, dict) and isinstance(right, dict):
         if len(left) != len(right):
             return False
         for k in left:
@@ -312,7 +312,7 @@ def _strict_json_value_equal(left: object, right: object) -> bool:
             if not _strict_json_value_equal(left[k], right[k]):
                 return False
         return True
-    if isinstance(left, list):
+    if isinstance(left, list) and isinstance(right, list):
         if len(left) != len(right):
             return False
         return all(_strict_json_value_equal(a, b) for a, b in zip(left, right, strict=True))
@@ -522,6 +522,8 @@ def score_decision(
                         return False
 
         return True
+
+    return False
 
 
 # ── Full-turn scoring ──────────────────────────────────────────────────────────

@@ -7,14 +7,13 @@ no real Ollama or network access.
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
 import pytest
-from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import Model
-from pydantic_ai.models.function import FunctionModel
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from dnd_assistant.application.agent_context import (
     AgentContext,
@@ -34,6 +33,7 @@ from dnd_assistant.application.pydantic_ai_tool_bridge import (
 )
 from dnd_assistant.models.types import (
     ChatMessage,
+    FiniteJsonValue,
     MessageRole,
     ToolAwareResponse,
     ToolCall,
@@ -48,6 +48,7 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
 )
+from tests.support.context_builder_doubles import make_stub_context_builder
 from tests.support.pydantic_ai_runtime import (
     HandlerCounters,
     make_tool_registry,
@@ -129,13 +130,13 @@ def _make_tool_response(
 
 def _make_tool_call(
     name: str,
-    arguments: dict[str, object] | None = None,
+    arguments: dict[str, FiniteJsonValue] | None = None,
     call_id: str | None = None,
 ) -> ToolCall:
     """Build a ``ToolCall``."""
     return ToolCall(
         name=name,
-        arguments=arguments or {},
+        arguments=arguments if arguments is not None else {},
         call_id=call_id,
     )
 
@@ -177,40 +178,7 @@ def tool_bridge(tool_registry: ToolRegistry) -> PydanticAIToolBridge:
 @pytest.fixture
 def context_builder() -> AgentContextBuilder:
     """Return a minimal AgentContextBuilder that returns a fixed context."""
-    from dnd_assistant.errors import NotFoundError
-    from dnd_assistant.retrieval.service import SearchService
-    from dnd_assistant.retrieval.types import SearchHit, SearchQuery
-    from dnd_assistant.storage.session_events import RawSessionEvent
-    from dnd_assistant.storage.session_metadata import RawSessionMetadata
-    from dnd_assistant.storage.types import VaultDocument, VaultRepository
-
-    class _StubSearchService(SearchService):
-        def search(self, query: SearchQuery, *, limit: int = 5) -> Sequence[SearchHit]:
-            return []
-
-    class _StubVaultRepository(VaultRepository):
-        def get_entity(self, entity_id: str) -> VaultDocument:
-            raise ValueError("unexpected call")
-
-    class _StubSessionRepo:
-        def get_active_session(self) -> RawSessionMetadata | None:
-            return None
-
-    class _StubEventRepo:
-        def list_events(self, session_id: str) -> list[RawSessionEvent]:
-            return []
-
-    class _StubWorldTimeRepo:
-        def get_current_world_time(self) -> None:
-            raise NotFoundError("no world time")
-
-    return AgentContextBuilder(
-        search_service=_StubSearchService(),
-        vault_repository=_StubVaultRepository(),
-        session_repository=_StubSessionRepo(),  # type: ignore[arg-type]
-        event_repository=_StubEventRepo(),  # type: ignore[arg-type]
-        world_time_repository=_StubWorldTimeRepo(),  # type: ignore[arg-type]
-    )
+    return make_stub_context_builder()
 
 
 @pytest.fixture
@@ -765,9 +733,11 @@ class TestP7_21InstructionsExact:
         self, preparer: DndAgentRunPreparer, read_context: ExecutionContext
     ) -> None:
         """Capture AgentInfo.instructions and verify it equals SYSTEM_PROMPT."""
-        captured_info: list[object] = []
+        captured_info: list[AgentInfo] = []
 
-        def _capture_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
+        def _capture_response(
+            messages: list[ModelMessage], info: AgentInfo, counter: list[int]
+        ) -> ModelResponse:
             captured_info.append(info)
             return ModelResponse(parts=[TextPart(content="ok")])
 
@@ -792,9 +762,11 @@ class TestP7_22UserPayloadExact:
         self, preparer: DndAgentRunPreparer, read_context: ExecutionContext
     ) -> None:
         """The actual framework user prompt matches the AgentDecision.request USER content."""
-        captured_messages: list[list[object]] = []
+        captured_messages: list[list[ModelMessage]] = []
 
-        def _capture_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
+        def _capture_response(
+            messages: list[ModelMessage], info: AgentInfo, counter: list[int]
+        ) -> ModelResponse:
             captured_messages.append(list(messages))
             return ModelResponse(parts=[TextPart(content="ok")])
 
@@ -830,9 +802,11 @@ class TestP7_23AdversarialContext:
         self, preparer: DndAgentRunPreparer, read_context: ExecutionContext
     ) -> None:
         """Adversarial campaign text must not appear in framework instructions."""
-        captured_info: list[object] = []
+        captured_info: list[AgentInfo] = []
 
-        def _capture_response(messages: list, info: object, counter: list[int]) -> ModelResponse:
+        def _capture_response(
+            messages: list[ModelMessage], info: AgentInfo, counter: list[int]
+        ) -> ModelResponse:
             captured_info.append(info)
             return ModelResponse(parts=[TextPart(content="ok")])
 
