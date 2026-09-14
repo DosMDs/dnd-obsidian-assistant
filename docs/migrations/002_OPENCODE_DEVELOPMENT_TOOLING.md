@@ -43,8 +43,8 @@ OC foundation commits:
 | OC-01LSP | OpenCode Python LSP support | DONE |
 | OC-02 | Consolidate durable development rules into lazy OpenCode-era policies | DONE |
 | OC-02C | Correction: make plan-first workflow mandatory | DONE |
-| OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | FUTURE / PLANNED |
-| OC-04 | (planned; defined by its Task Contract) | PLANNED |
+| OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | DONE |
+| OC-04 | (planned; defined by its Task Contract) | FUTURE / PLANNED |
 | OC-05 | (planned; defined by its Task Contract) | PLANNED |
 | OC-06 | (planned; defined by its Task Contract) | PLANNED |
 
@@ -78,3 +78,21 @@ Detailed Final Reports are intentionally not duplicated here.
 - `docs/adr/0001-development-workflow-vscode-gigacode.md` retains its original
   conditional PLAN wording as historical evidence from an accepted, dated ADR,
   not current workflow policy.
+
+## 7. OC-03 scope
+
+- Created `.opencode/skills/` as the sole canonical OpenCode-era skill root,
+  with one `SKILL.md` per migrated skill (17 total): stage-workflow,
+  pre-finalization-audit, correction-review, code-review, eval-harness,
+  pydantic-ai-migration, testing, bug-fix, implement-feature, domain-model,
+  vault-repository, calendar-service, retrieval-entity-resolution,
+  session-runtime, tool-layer, model-gateway, changeset.
+- Ported/merged/rewrote the 17 `.gigacode/skills/*` sources and reconciled the
+  11 pre-existing `.agents/skills/*` copies; generic durable policy is
+  referenced from `AGENTS.md`/`docs/development/*` rather than duplicated.
+- Scoped frontmatter to `name` + `description`; skills remain on-demand and are
+  not globally injected through `opencode.json`.
+- Legacy sources (`.gigacode/skills/`, `.agents/`, `.codex/`) and
+  `docs/development/review-workflow.md` were left untouched; deletion/cleanup
+  belongs to later cutover tasks. Pydantic AI migration remains a dedicated
+  skill, not merged into `model-gateway`.
