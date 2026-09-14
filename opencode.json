@@ -1,0 +1,77 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "deepseek/deepseek-flash",
+  "default_agent": "build",
+  "subagent_depth": 1,
+  "agent": {
+    "plan": {
+      "description": "Read-only planning and analysis. Cannot mutate repository state.",
+      "mode": "primary",
+      "model": "deepseek/deepseek-flash",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "lsp": "allow",
+        "skill": "allow",
+        "edit": "deny",
+        "todowrite": "deny",
+        "external_directory": "ask",
+        "webfetch": "ask",
+        "websearch": "ask",
+        "bash": {
+          "*": "deny",
+          "git status*": "allow",
+          "git diff*": "allow",
+          "git log*": "allow",
+          "git show*": "allow",
+          "git rev-parse*": "allow",
+          "git branch*": "allow",
+          "git ls-files*": "allow",
+          "git worktree list*": "allow"
+        },
+        "task": {
+          "*": "deny",
+          "architecture-reviewer": "allow"
+        }
+      }
+    },
+    "build": {
+      "description": "Default implementation agent. Makes scoped repository changes and runs development commands; finalization only when the Task Contract authorizes it.",
+      "mode": "primary",
+      "model": "deepseek/deepseek-flash",
+      "permission": {
+        "read": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "list": "allow",
+        "lsp": "allow",
+        "skill": "allow",
+        "edit": "allow",
+        "todowrite": "allow",
+        "external_directory": "ask",
+        "webfetch": "allow",
+        "websearch": "ask",
+        "bash": {
+          "*": "allow",
+          "*rebase*": "ask",
+          "*checkout *": "ask",
+          "*switch *": "ask",
+          "*--force*": "deny",
+          "*--force-with-lease*": "deny",
+          "*reset --hard*": "deny",
+          "*filter-branch*": "deny",
+          "*git clean*": "deny",
+          "*push*--delete*": "deny"
+        },
+        "task": {
+          "*": "allow",
+          "architecture-reviewer": "allow",
+          "test-evidence-reviewer": "allow",
+          "final-diff-reviewer": "allow"
+        }
+      }
+    }
+  }
+}
