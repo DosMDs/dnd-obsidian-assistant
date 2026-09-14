@@ -26,6 +26,7 @@ Detailed ordinary stage records belong in `docs/stages/`. Cross-cutting migratio
 | Stage 7 — Tool Registry and Executor | `07_TOOL_REGISTRY_AND_EXECUTOR.md` |
 | Stage 8 — Model Gateway / Ollama | `08_MODEL_GATEWAY_AND_OLLAMA.md` |
 | Stage 9 — Fast Agent | `09_FAST_AGENT.md` |
+| Stage 10 — ChangeSet | `10_CHANGESET.md` |
 
 ## Active cross-cutting migration
 

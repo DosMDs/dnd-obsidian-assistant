@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (S9-07)
+**Last updated:** 2026-09-14 (S10-00)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE` (Pydantic AI migration `ACCEPTED`; reference-runtime retirement `PAIM-RETIRE-01` `DONE`; S9-07 completion review `DONE`); next Stage 10
-**Active stage:** Stage 9 — Fast Agent `DONE`; next Stage 10 — ChangeSet (`NOT STARTED`)
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 `NOT STARTED`)
+**Active stage:** Stage 10 — ChangeSet (`IN PROGRESS`)
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 
@@ -44,7 +44,7 @@ docs/adr/          architecture decisions
 | 7. Tool Registry / Executor | DONE | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` |
 | 8. Model Gateway / Ollama | DONE | `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` |
 | 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
-| 10. ChangeSet | NOT STARTED | — |
+| 10. ChangeSet | IN PROGRESS | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | NOT STARTED | — |
 | 12. Campaign State | NOT STARTED | — |
 | 13. Bootstrap | NOT STARTED | — |
@@ -65,8 +65,37 @@ docs/adr/          architecture decisions
 
 `S9-07` completed the full Stage-9 historical/architectural review after the PAIM
 final architecture decision (`ACCEPTED`) and reference-runtime retirement
-(`PAIM-RETIRE-01`, `DONE`). Stage 9 is now `DONE`; Stage 10 remains `NOT STARTED`
-and must not begin until separately authorized.
+(`PAIM-RETIRE-01`, `DONE`). Stage 9 is now `DONE`.
+
+## Current Stage-10 tasks
+
+| Task | Status |
+|---|---|
+| S10-00 — Architecture/domain contract and kickoff | DONE |
+| S10-01 — ChangeSet + operation domain schemas | NOT STARTED |
+| S10-02 — Pure validator / whole-batch preflight | NOT STARTED |
+| S10-03 — Review DTO + approval/rejection + fingerprint binding | NOT STARTED |
+| S10-04 — ChangeSetApplier + revision/conflict safety | NOT STARTED |
+| S10-05 — CLI review/apply workflow + proposal persistence decision | NOT STARTED |
+| S10-06 — Failure / partial-application / audit hardening | NOT STARTED |
+| S10-07 — Full Stage-10 historical review / completion | NOT STARTED |
+
+`S10-00` completed the trusted ChangeSet architecture/domain contract. Verdict:
+
+```text
+S10_ARCHITECTURE_READY
+```
+
+Architecture baseline SHA:
+
+```text
+7c331f29cd418e4c4cda6a487fbbf5f1983d20eb
+```
+
+Detailed record: `docs/stages/10_CHANGESET.md`; decision:
+`docs/adr/0006-changeset-review-apply-boundary.md`. No ChangeSet implementation
+or production/test source exists yet; `S10-01` remains `NOT STARTED`. Stage 10
+must not begin implementation until the next task is explicitly authorized.
 
 ## Accepted custom reference baseline
 
@@ -219,7 +248,7 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-Stage 10 — ChangeSet (NOT STARTED; do not begin without explicit authorization)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-01 — ChangeSet + operation domain schemas)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -477,12 +506,14 @@ PAIM-14 production cutover complete; no removable superseded runtime remained.
 PAIM-15 migration verdict ACCEPTED; shared contracts extracted to agent_contracts.
 PAIM-RETIRE-01 complete; executable reference agent runtime retired.
 S9-07 review complete; no blocking Stage-9 defect; Stage 9 DONE.
+S10-00 architecture/domain contract complete; verdict S10_ARCHITECTURE_READY.
+No confirmed Stage-10 blocker; no ChangeSet implementation exists yet.
 ```
 
 Active next:
 
 ```text
-Stage 10 — ChangeSet (NOT STARTED; do not begin without explicit authorization)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-01 — ChangeSet + operation domain schemas)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
@@ -538,6 +569,8 @@ Known risks documented in PAIM-02 evidence (unchanged):
 |---|---|
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state |
 | `docs/stages/09_FAST_AGENT.md` | Detailed Stage-9 history/reference behavior |
+| `docs/stages/10_CHANGESET.md` | Stage-10 architecture record and task map |
+| `docs/adr/0006-changeset-review-apply-boundary.md` | ChangeSet review/apply architecture decision |
 | `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` | PAIM task plan/history/evidence |
 | `docs/adr/0003-pydantic-ai-runtime-migration.md` | Migration architecture/rollback decision |
 | `AGENTS.md` | Always-on OpenCode development invariants |
