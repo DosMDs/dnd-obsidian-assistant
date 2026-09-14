@@ -11154,9 +11154,9 @@ and are not retired-symbol matches.
 
 ```text
 deleted tracked files:        26  (3 source + 23 test/support)
-modified tracked files:       24  (6 source + 18 test/support)
+modified tracked files:       27  (6 source + 18 test/support + 3 docs)
 new tracked files:             1  tests/unit/test_agent_contracts.py
-git diff --stat:              50 files changed, 116 insertions(+), 17623 deletions(-)
+git show --stat:              54 files changed, 781 insertions(+), 17629 deletions(-)
 ```
 
 ### Quality gates
@@ -11172,7 +11172,7 @@ uv run pyright
   0 errors, 0 warnings, 0 informations
 
 uv run pytest --collect-only -q
-  5047 tests collected
+  5046 tests collected
 
 uv run pytest tests/contract/test_boundaries.py tests/unit/test_agent_contracts.py \
     tests/unit/test_dnd_agent_policy.py tests/unit/test_pydantic_ai_eval*.py \
@@ -11181,7 +11181,7 @@ uv run pytest tests/contract/test_boundaries.py tests/unit/test_agent_contracts.
   347 passed
 
 uv run pytest -q
-  4932 passed, 114 skipped, 1 warning in 152.59s
+  4932 passed, 114 skipped, 1 warning in 150.07s
 ```
 
 The skipped tests are the opt-in live Ollama / live-eval tests. No real Ollama
