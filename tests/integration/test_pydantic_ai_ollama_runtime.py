@@ -15,8 +15,8 @@ import httpx2
 import pytest
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
-from dnd_assistant.application.agent_loop import AgentOutcomeKind
-from dnd_assistant.application.agent_tool_execution import (
+from dnd_assistant.application.agent_contracts import (
+    AgentOutcomeKind,
     AgentToolExecutionResult,
 )
 from dnd_assistant.application.pydantic_ai_agent_runtime import (

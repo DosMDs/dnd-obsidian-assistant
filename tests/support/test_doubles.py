@@ -14,15 +14,6 @@ from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models import CompletedStreamedResponse, Model, ModelRequestParameters
 from pydantic_ai.settings import ModelSettings
 
-from dnd_assistant.models.types import (
-    ChatMessage,
-    ChatRequest,
-    ChatResponse,
-    MessageRole,
-    ToolAwareResponse,
-)
-from dnd_assistant.tools.catalog import ToolPublicDefinition
-
 
 class FakeModel(Model):
     """Minimal deterministic Pydantic AI ``Model`` for offline testing.
@@ -132,35 +123,6 @@ class RaisingFakeModel(Model):
         yield  # pragma: no cover - makes this an async generator for typing
 
 
-class FakeModelGateway:
-    """Minimal deterministic ``ModelGateway`` for offline testing.
-
-    Returns a fixed text response on every ``chat_with_tools()`` call.
-    Implements the ``ModelGateway`` protocol structurally.
-    """
-
-    def chat(self, request: ChatRequest) -> ChatResponse:
-        return ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="ok"))
-
-    def chat_with_tools(
-        self,
-        request: ChatRequest,
-        tools: list[ToolPublicDefinition],
-    ) -> ToolAwareResponse:
-        return ToolAwareResponse(
-            message=ChatMessage(role=MessageRole.ASSISTANT, content="ok", tool_calls=()),
-        )
-
-    def generate_structured(self, request: ChatRequest, schema: type) -> Any:
-        return schema()
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        return [[0.0] * 4 for _ in texts]
-
-    def health(self) -> Any:
-        return {"status": "ok"}
-
-
 # ── Warm-up deterministic fakes (PAIM-C32) ──────────────────────────────────────
 
 
@@ -171,7 +133,7 @@ class WarmupFakeModel(FakeModel):
     """FakeModel variant that returns valid AgentTextOutcome JSON.
 
     Used for offline warm-up preflight tests where the model response
-    must be parseable by ``_parse_agent_outcome``.
+    must be parseable by ``parse_agent_outcome``.
     """
 
     async def request(
@@ -182,24 +144,3 @@ class WarmupFakeModel(FakeModel):
     ) -> ModelResponse:
         self._invocation_count += 1
         return ModelResponse(parts=[TextPart(content=_WARMUP_OUTCOME_JSON)])
-
-
-class WarmupFakeModelGateway(FakeModelGateway):
-    """FakeModelGateway variant that returns valid AgentTextOutcome JSON.
-
-    Used for offline warm-up preflight tests where the model response
-    must be parseable by ``_parse_agent_outcome``.
-    """
-
-    def chat_with_tools(
-        self,
-        request: ChatRequest,
-        tools: list[ToolPublicDefinition],
-    ) -> ToolAwareResponse:
-        return ToolAwareResponse(
-            message=ChatMessage(
-                role=MessageRole.ASSISTANT,
-                content=_WARMUP_OUTCOME_JSON,
-                tool_calls=(),
-            ),
-        )

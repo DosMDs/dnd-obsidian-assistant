@@ -4,10 +4,10 @@ This module provides a single public function ``select_agent_tools`` that
 filters a provider-neutral ``ToolRegistrySchema`` based on the current
 trusted ``ExecutionContext``.
 
-It is a **pre-model defence-in-depth** boundary.  The caller (future
-FastAgent orchestration) uses this to determine which tools the model may
-see.  ``ToolExecutor`` remains the authoritative execution boundary and
-independently enforces permission, session-mode, and audit prerequisites.
+It is a **pre-model defence-in-depth** boundary.  The agent runtime uses
+this to determine which tools the model may see.  ``ToolExecutor`` remains
+the authoritative execution boundary and independently enforces permission,
+session-mode, and audit prerequisites.
 
 This module belongs to ``application/`` because it coordinates accepted
 Tool-Layer metadata into the model-orchestration boundary.

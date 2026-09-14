@@ -36,7 +36,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from typer.testing import CliRunner
 
-from dnd_assistant.application.agent_loop import (
+from dnd_assistant.application.agent_contracts import (
     AgentOutcomeKind,
     AgentRunResult,
     AgentTextOutcome,

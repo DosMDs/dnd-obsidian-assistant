@@ -20,7 +20,7 @@ from dnd_assistant.application.agent_context import (
     AgentContext,
     AgentContextBuilder,
 )
-from dnd_assistant.application.agent_loop import (
+from dnd_assistant.application.agent_contracts import (
     AgentOutcomeKind,
     AgentRunResult,
 )

@@ -48,10 +48,7 @@ if TYPE_CHECKING:
 # ── Central safety constants ──────────────────────────────────────────────────
 
 MAX_TOOL_CALLS_PER_RUN: int = 4
-"""Maximum number of initial tool calls accepted in one bounded run.
-
-Must match ``AgentLoop.MAX_TOOL_CALLS_PER_RUN == 4``.
-"""
+"""Maximum number of initial tool calls accepted in one bounded run."""
 
 MAX_MODEL_REQUESTS_PER_RUN: int = 2
 """Maximum model requests per run (policy contract for PAIM-08).

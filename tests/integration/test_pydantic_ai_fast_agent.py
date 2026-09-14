@@ -19,7 +19,7 @@ from dnd_assistant.application.agent_context import (
     AgentContext,
     AgentContextBuilder,
 )
-from dnd_assistant.application.fast_agent import (
+from dnd_assistant.application.agent_contracts import (
     AgentDecision,
 )
 from dnd_assistant.application.pydantic_ai_fast_agent import (

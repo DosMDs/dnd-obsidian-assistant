@@ -11,7 +11,7 @@ import json
 import math
 from dataclasses import dataclass
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Any
 
 # ── Terminal outcome kinds ─────────────────────────────────────────────────────
 
@@ -80,12 +80,6 @@ class EvalScenario:
             hidden/unexposed for this scenario.  When ``True``, WRITE
             tools are not visible to the model.  This is an explicit
             flag, not derived from description text.
-        critical_regression: Whether this scenario is a critical
-            migration regression.  A ``REFERENCE_ONLY_PASS`` for a
-            critical scenario must fail the measured suite.
-            Critical families: tool selection, argument correctness,
-            clarification, WRITE selection, hidden-WRITE abstention,
-            schema validity.
     """
 
     scenario_id: str
@@ -93,7 +87,6 @@ class EvalScenario:
     expectation: EvalExpectation
     description: str = ""
     hidden_write_expected: bool = False
-    critical_regression: bool = False
 
 
 # ── Exposed tool info ──────────────────────────────────────────────────────────
@@ -220,32 +213,6 @@ class MetricSummary:
     denominator: int
 
 
-@dataclass(frozen=True, slots=True)
-class ScenarioComparison:
-    """Comparison result for one scenario across both runtimes.
-
-    Args:
-        scenario_id: The scenario ID.
-        reference_passes: Number of reference passes (0-3).
-        candidate_passes: Number of candidate passes (0-3).
-        classification: The majority classification.
-        critical_regression: Whether this scenario is a critical
-            migration regression.  A ``REFERENCE_ONLY_PASS`` for a
-            critical scenario must fail the measured suite.
-    """
-
-    scenario_id: str
-    reference_passes: int
-    candidate_passes: int
-    classification: Literal[
-        "BOTH_PASS",
-        "REFERENCE_ONLY_PASS",
-        "CANDIDATE_ONLY_PASS",
-        "BOTH_FAIL",
-    ]
-    critical_regression: bool = False
-
-
 # ── Deterministic percentile helper ────────────────────────────────────────────
 
 
@@ -293,8 +260,8 @@ def json_args_equal(left: dict[str, Any], right: dict[str, Any]) -> bool:
     - ``list`` order matters
     - ``dict`` key order does NOT matter
 
-    This is the same semantics as the production ``_json_args_equal``
-    in ``agent_tool_execution.py``.
+    This is the same strict JSON structural-type semantics used by the
+    production model-tool adaptation path.
     """
     return _strict_json_value_equal(left, right)
 
@@ -921,61 +888,3 @@ def summarize_metrics(
     ]
 
     return results
-
-
-# ── Majority classification ────────────────────────────────────────────────────
-
-
-def classify_majority(
-    scenario_id: str,
-    reference_observations: list[DecisionObservation],
-    candidate_observations: list[DecisionObservation],
-    expectation: EvalExpectation,
-) -> ScenarioComparison:
-    """Classify one scenario's majority result across both runtimes.
-
-    Args:
-        scenario_id: The scenario ID.
-        reference_observations: Reference observations for this scenario
-            (one per repetition).
-        candidate_observations: Candidate observations for this scenario
-            (one per repetition).
-        expectation: The expected outcome.
-
-    Returns:
-        A ``ScenarioComparison`` with the majority classification.
-    """
-    ref_passes = sum(
-        1
-        for obs in reference_observations
-        if obs.scenario_id == scenario_id and score_decision(obs, expectation)
-    )
-    cand_passes = sum(
-        1
-        for obs in candidate_observations
-        if obs.scenario_id == scenario_id and score_decision(obs, expectation)
-    )
-
-    ref_majority = ref_passes >= 2
-    cand_majority = cand_passes >= 2
-
-    if ref_majority and cand_majority:
-        classification: Literal[
-            "BOTH_PASS",
-            "REFERENCE_ONLY_PASS",
-            "CANDIDATE_ONLY_PASS",
-            "BOTH_FAIL",
-        ] = "BOTH_PASS"
-    elif ref_majority and not cand_majority:
-        classification = "REFERENCE_ONLY_PASS"
-    elif not ref_majority and cand_majority:
-        classification = "CANDIDATE_ONLY_PASS"
-    else:
-        classification = "BOTH_FAIL"
-
-    return ScenarioComparison(
-        scenario_id=scenario_id,
-        reference_passes=ref_passes,
-        candidate_passes=cand_passes,
-        classification=classification,
-    )

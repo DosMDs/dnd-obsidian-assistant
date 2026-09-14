@@ -124,49 +124,74 @@ def test_gateway_does_not_import_tools() -> None:
     assert not mod_names, f"gateway imported tool modules: {mod_names}"
 
 
-# ── production CLI composition must not import the reference runtime ──────
-# PAIM-14 cut the production ``dnd ask`` composition over to the Pydantic AI
-# runtime.  The custom ``AgentLoop`` / ``FastAgent`` / native
-# ``OllamaModelProvider`` are retained only as explicit test/reference
-# infrastructure (PAIM-11 parity, PAIM-13 live comparison).  Production
-# composition must never re-import them.
+# ── production CLI composition / runtime dependency boundaries ────────────
+# The accepted production orchestration path is:
+#   CLI → PydanticAIAgentRuntime → DndAgentPolicy / PydanticAIToolBridge
+#       → ToolExecutor → services → VaultRepository
+# Production composition must not depend on obsolete custom orchestration or
+# on the retained native Ollama provider infrastructure (used by non-agent
+# provider operations only).
 
-_REFERENCE_RUNTIME_MODULES: tuple[str, ...] = (
+# Retired custom agent-runtime modules (PAIM-RETIRE-01).  These must not be
+# reintroduced.  The absence regression below is a lightweight guard; the AST
+# dependency assertions are the durable architecture boundary.
+_RETIRED_APPLICATION_MODULES: tuple[str, ...] = (
     "dnd_assistant.application.agent_loop",
     "dnd_assistant.application.fast_agent",
     "dnd_assistant.application.agent_tool_execution",
+)
+
+# Native Ollama provider infrastructure retained for non-agent operations
+# (chat, structured output, embeddings, health).
+_NATIVE_PROVIDER_MODULES: tuple[str, ...] = (
     "dnd_assistant.models.ollama",
     "dnd_assistant.models.ollama_chat_adapter",
     "dnd_assistant.models.ollama_tool_adapter",
     "dnd_assistant.models.ollama_embedding_adapter",
 )
 
+# Import targets that accepted production orchestration must never regain.
+_FORBIDDEN_RUNTIME_IMPORT_TARGETS: tuple[str, ...] = (
+    *_RETIRED_APPLICATION_MODULES,
+    *_NATIVE_PROVIDER_MODULES,
+)
 
-def test_cli_agent_runtime_does_not_import_reference_runtime() -> None:
+
+def test_retired_reference_runtime_modules_absent() -> None:
+    """Retirement regression: obsolete custom orchestration modules are gone.
+
+    Lightweight guard against silent reintroduction.  The durable contract is
+    the AST dependency assertion below, which protects the accepted
+    production dependency shape regardless of module existence.
+    """
+    present = sorted(
+        m for m in _RETIRED_APPLICATION_MODULES if importlib.util.find_spec(m) is not None
+    )
+    assert not present, f"retired reference-runtime modules were reintroduced: {present}"
+
+
+def test_cli_agent_runtime_does_not_import_native_provider() -> None:
     _clean_import("dnd_assistant.cli.agent_runtime")
     loaded = _modules_loaded()
-    offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in loaded)
+    offending = sorted(m for m in _FORBIDDEN_RUNTIME_IMPORT_TARGETS if m in loaded)
     assert not offending, (
-        f"production CLI composition imported retained reference-only runtime modules: {offending}"
+        f"production CLI composition imported obsolete/provider-only modules: {offending}"
     )
 
 
-def test_cli_ask_does_not_import_reference_runtime() -> None:
+def test_cli_ask_does_not_import_native_provider() -> None:
     _clean_import("dnd_assistant.cli.ask")
     loaded = _modules_loaded()
-    offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in loaded)
+    offending = sorted(m for m in _FORBIDDEN_RUNTIME_IMPORT_TARGETS if m in loaded)
     assert not offending, (
-        f"production CLI ask command imported retained reference-only runtime modules: {offending}"
+        f"production CLI ask command imported obsolete/provider-only modules: {offending}"
     )
 
 
-# ── production Pydantic runtime must not import the reference runtime ─────
-# PAIM-15 relocated the shared provider-neutral contracts to
-# ``dnd_assistant.application.agent_contracts`` so the production Pydantic
-# runtime no longer imports the reference ``FastAgent`` / ``AgentLoop`` /
-# ``AgentToolExecutionService`` modules.  The reference modules are imported
-# lazily inside functions, so a clean-import check is insufficient; this AST
-# scan covers imports at every nesting depth (normal and deferred/call-time).
+# ── production Pydantic runtime must not import obsolete/provider modules ──
+# The production runtime imports shared contracts from
+# ``dnd_assistant.application.agent_contracts`` only.  This AST scan covers
+# imports at every nesting depth (normal and deferred/call-time).
 
 _PRODUCTION_PYDANTIC_RUNTIME_MODULES: tuple[str, ...] = (
     "dnd_assistant.application.pydantic_ai_agent_runtime",
@@ -195,11 +220,11 @@ def _module_import_targets(module_path: str) -> set[str]:
 
 
 @pytest.mark.parametrize("module_path", _PRODUCTION_PYDANTIC_RUNTIME_MODULES)
-def test_production_pydantic_runtime_does_not_import_reference_modules(module_path: str) -> None:
+def test_production_pydantic_runtime_does_not_import_obsolete_modules(module_path: str) -> None:
     targets = _module_import_targets(module_path)
-    offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in targets)
+    offending = sorted(m for m in _FORBIDDEN_RUNTIME_IMPORT_TARGETS if m in targets)
     assert not offending, (
-        f"{module_path} imports retained reference-only runtime modules: {offending}. "
+        f"{module_path} imports obsolete/provider-only modules: {offending}. "
         "Import shared contracts from dnd_assistant.application.agent_contracts instead."
     )
 

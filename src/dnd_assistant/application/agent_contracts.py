@@ -1,12 +1,9 @@
-"""Neutral shared agent contracts for the Fast Agent (PAIM-15).
+"""Neutral shared agent contracts for the Fast Agent.
 
-This module is the neutral home for the **production-shared, provider-neutral**
-DTOs and deterministic helpers that are used by both the production Pydantic AI
-runtime and the retained reference runtime.
+This module is the neutral home for the provider-neutral DTOs and
+deterministic helpers used by the accepted Pydantic AI agent runtime.
 
-It intentionally contains **no** orchestration classes.  The custom reference
-implementations (``FastAgent``, ``AgentLoop``, ``AgentToolExecutionService``)
-remain in their reference-only modules and import these contracts from here.
+It intentionally contains **no** orchestration classes.
 
 Ownership
 ─────────
@@ -19,11 +16,9 @@ Owned here:
     ``AgentToolExecutionResult`` / ``build_agent_tool_execution_result`` —
         deterministic TOOL-result adaptation.
 
-Owned elsewhere (unchanged):
+Owned elsewhere:
     ``MAX_TOOL_CALLS_PER_RUN`` — canonical constant in
         ``dnd_assistant.application.dnd_agent_policy``.
-    ``FastAgent`` / ``AgentLoop`` / ``AgentToolExecutionService`` — reference
-        runtime, test/evidence infrastructure only.
 
 This module must not import from::
 
@@ -33,9 +28,6 @@ This module must not import from::
     dnd_assistant.retrieval
     dnd_assistant.cli
     dnd_assistant.tools.executor
-    dnd_assistant.application.fast_agent
-    dnd_assistant.application.agent_loop
-    dnd_assistant.application.agent_tool_execution
 """
 
 from __future__ import annotations
@@ -88,9 +80,9 @@ class AgentDecision:
 def build_agent_request(context: AgentContext) -> ChatRequest:
     """Build a deterministic ``ChatRequest`` from an ``AgentContext``.
 
-    This is the shared projection used by both the custom ``FastAgent`` and
-    the migration ``PydanticAIFastAgent``.  It produces the exact provider-
-    neutral ``SYSTEM + USER`` conversation snapshot.
+    This is the shared projection used by the agent runtime.
+    It produces the exact provider-neutral ``SYSTEM + USER`` conversation
+    snapshot.
 
     The USER payload is deterministic JSON with ``sort_keys=True``,
     ``separators=(",", ":")``, ``ensure_ascii=False``, and ``allow_nan=False``.
@@ -285,8 +277,8 @@ def build_agent_tool_execution_result(
     """Build a frozen ``AgentToolExecutionResult`` from a tool call and output.
 
     Reuses the deterministic TOOL-message serialisation from
-    ``_build_tool_message``.  This is the shared factory used by both
-    ``AgentToolExecutionService`` and ``PydanticAIAgentRuntime``.
+    ``_build_tool_message``.  This is the shared factory used by the
+    accepted Pydantic AI agent runtime.
 
     Args:
         tool_call: The ``ToolCall`` that was executed.

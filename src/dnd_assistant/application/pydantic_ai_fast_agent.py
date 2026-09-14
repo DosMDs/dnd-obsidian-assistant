@@ -1,9 +1,8 @@
 """Pydantic AI one-step FastAgent decision boundary (PAIM-07).
 
-This module provides the migration replacement for the custom ``FastAgent``
-first-decision mechanics.  It performs exactly one Pydantic AI model request
-and adapts the framework response into the existing provider-neutral
-``AgentDecision`` DTO.
+This module provides the accepted one-step first-decision mechanics.  It
+performs exactly one Pydantic AI model request and adapts the framework
+response into the provider-neutral ``AgentDecision`` DTO.
 
 Architecture
 ────────────
@@ -31,7 +30,7 @@ Owned here:
 
 Owned elsewhere (unchanged):
     DndAgentRunPreparer — preparation orchestration.
-    build_agent_request — deterministic request projection (fast_agent.py).
+    build_agent_request — deterministic request projection (agent_contracts).
     AgentDecision, ToolAwareResponse, ToolCall — provider-neutral DTOs.
 
 This module must not import from::
@@ -41,9 +40,6 @@ This module must not import from::
     dnd_assistant.retrieval
     dnd_assistant.cli
     dnd_assistant.tools.executor
-    dnd_assistant.application.fast_agent
-    dnd_assistant.application.agent_loop
-    dnd_assistant.application.agent_tool_execution
 """
 
 from __future__ import annotations

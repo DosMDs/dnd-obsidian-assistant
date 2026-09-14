@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PAIM-15)
+**Last updated:** 2026-09-14 (PAIM-RETIRE-01)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 in progress; Pydantic AI migration `ACCEPTED`; reference-runtime retirement (`PAIM-RETIRE-01`) before S9-07
+**Roadmap position:** Stage 9 in progress; Pydantic AI migration `ACCEPTED`; reference-runtime retirement (`PAIM-RETIRE-01`) `DONE`; next S9-07
 **Active stage:** Stage 9 — Fast Agent
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -157,7 +157,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C43 — Restore CountingModelGateway Protocol compatibility | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | DONE |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | DONE |
-| PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests | NOT STARTED |
+| PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests | DONE |
 
 ## PAIM outcome policy
 
@@ -212,12 +212,13 @@ PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
 PAIM-13 measured attempt #4 — VALID / passes comparison gates (see Layer-A correction below)
 PAIM-14 — DONE
 PAIM-15 — DONE (verdict: ACCEPTED)
+PAIM-RETIRE-01 — DONE
 ```
 
 Active next:
 
 ```text
-PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests
+S9-07 — Full Stage-9 historical review / completion (NOT STARTED)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -408,6 +409,43 @@ Layer-A ToolCall-observation metrics superseded by PAIM-EVAL-CORR-01
 
 Full literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 74.
 
+## PAIM-RETIRE-01 — reference-runtime retirement DONE
+
+Completed 2026-09-14 on `feat/pydantic-ai-runtime`.
+
+The executable custom/reference agent runtime retained through PAIM-15 was
+retired:
+
+```text
+application/fast_agent.py::FastAgent                           REMOVED
+application/agent_loop.py::AgentLoop                           REMOVED
+application/agent_tool_execution.py::AgentToolExecutionService REMOVED
+```
+
+Retained:
+
+```text
+agent_contracts.py             neutral shared contracts
+DndAgentPolicy                 batch-admission policy
+PydanticAIAgentRuntime / PydanticAIFastAgent
+PydanticAIToolBridge → ToolExecutor → services → VaultRepository
+ModelGateway + native Ollama    non-agent provider infrastructure
+general eval infrastructure    reusable for Stage 14
+```
+
+Reference-only/parity tests and migration-comparison harnesses were removed;
+direct shared-contract coverage migrated to `tests/unit/test_agent_contracts.py`.
+Stage-9 safety coverage remains on the accepted Pydantic AI runtime.
+`tests/contract/test_boundaries.py` protects the accepted dependency shape
+(CLI/Pydantic runtime must not regain obsolete/custom orchestration or native
+provider dependencies).
+
+Literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 77.
+
+Full-suite result after retirement: 4932 passed, 114 skipped.
+
+Next task: `S9-07` (NOT STARTED).
+
 ## Current blockers
 
 ```text
@@ -416,12 +454,13 @@ Attempt #3 aggregate WRITE blocker was invalidated by PAIM-C39.
 Attempt #4 Layer B measured VALID; Layer-A ToolCall-observation metrics invalid.
 PAIM-14 production cutover complete; no removable superseded runtime remained.
 PAIM-15 migration verdict ACCEPTED; shared contracts extracted to agent_contracts.
+PAIM-RETIRE-01 complete; executable reference agent runtime retired.
 ```
 
 Active next:
 
 ```text
-PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests
+S9-07 — Full Stage-9 historical review / completion (NOT STARTED)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)

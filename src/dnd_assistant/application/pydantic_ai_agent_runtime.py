@@ -1,8 +1,8 @@
-"""Pydantic AI bounded agent runtime — replacement for AgentLoop (PAIM-08).
+"""Pydantic AI bounded agent runtime (PAIM-08).
 
-This module provides the migration replacement for the custom ``AgentLoop``
-bounded model-tool-model orchestration.  It performs exactly one Pydantic AI
-agent run with at most 2 model requests and at most 4 tool executions.
+This module provides the accepted bounded model-tool-model orchestration.
+It performs exactly one Pydantic AI agent run with at most 2 model requests
+and at most 4 tool executions.
 
 Architecture
 ────────────
@@ -37,7 +37,6 @@ Owned elsewhere (unchanged):
     DndAgentRunPreparer — preparation orchestration.
     DndAgentPolicy — batch-admission policy.
     PydanticAIToolBridge — snapshot, execution adapter.
-    AgentLoop — Git/reference behavioral baseline.
     AgentRunResult, AgentDecision, ToolAwareResponse — provider-neutral DTOs.
 
 This module must not import from::
@@ -47,9 +46,6 @@ This module must not import from::
     dnd_assistant.retrieval
     dnd_assistant.cli
     dnd_assistant.tools.executor
-    dnd_assistant.application.fast_agent
-    dnd_assistant.application.agent_loop
-    dnd_assistant.application.agent_tool_execution
 """
 
 from __future__ import annotations
@@ -87,7 +83,7 @@ if TYPE_CHECKING:
 
 
 class PydanticAIAgentRuntime:
-    """Bounded Pydantic AI agent runtime — migration replacement for AgentLoop.
+    """Bounded Pydantic AI agent runtime (PAIM-08).
 
     Performs exactly one Pydantic AI agent run with at most 2 model requests
     and at most ``DndAgentPolicy.MAX_TOOL_CALLS_PER_RUN`` (4) tool executions.

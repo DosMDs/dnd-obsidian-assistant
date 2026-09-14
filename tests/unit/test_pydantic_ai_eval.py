@@ -7,26 +7,6 @@ from __future__ import annotations
 
 import pytest
 
-from dnd_assistant.application.agent_loop import AgentLoop
-from dnd_assistant.application.agent_tool_execution import (
-    AgentToolExecutionService,
-)
-from dnd_assistant.application.fast_agent import FastAgent
-from dnd_assistant.application.pydantic_ai_agent_runtime import (
-    PydanticAIAgentRuntime,
-)
-from dnd_assistant.application.pydantic_ai_fast_agent import (
-    PydanticAIFastAgent,
-)
-from dnd_assistant.application.pydantic_ai_run_deps import (
-    DndAgentRunPreparer,
-)
-from dnd_assistant.application.pydantic_ai_tool_bridge import (
-    PydanticAIToolBridge,
-)
-from dnd_assistant.models.ollama import OllamaModelProvider
-from dnd_assistant.tools.executor import ToolExecutor
-from dnd_assistant.tools.registry import ToolRegistry
 from tests.support.pydantic_ai_eval import (
     DecisionObservation,
     EvalExpectation,
@@ -36,7 +16,6 @@ from tests.support.pydantic_ai_eval import (
     FullTurnObservation,
     ScenarioExpectationKind,
     ToolCallObservation,
-    classify_majority,
     json_args_equal,
     nearest_rank_percentile,
     score_arguments,
@@ -546,114 +525,6 @@ class TestScoreDecision:
 
 
 # ==============================================================================
-# classify_majority
-# ==============================================================================
-
-
-def _tc(name: str, args: dict) -> ToolCallObservation:
-    return ToolCallObservation(
-        tool_name=name,
-        arguments=args,
-        call_id="1",
-        schema_valid=True,
-    )
-
-
-def _obs_for_scenario(
-    sid: str,
-    terminal_kind: str | None = None,
-    tool_calls: tuple[ToolCallObservation, ...] = (),
-) -> DecisionObservation:
-    return DecisionObservation(
-        scenario_id=sid,
-        repetition=0,
-        duration_seconds=0.1,
-        tool_calls=tool_calls,
-        terminal_kind=terminal_kind,
-    )
-
-
-class TestClassifyMajority:
-    def test_both_pass(self) -> None:
-        ref_obs = [
-            _obs_for_scenario("T01", terminal_kind="respond"),
-            _obs_for_scenario("T01", terminal_kind="respond"),
-            _obs_for_scenario("T01", terminal_kind="respond"),
-        ]
-        cand_obs = [
-            _obs_for_scenario("T01", terminal_kind="respond"),
-            _obs_for_scenario("T01", terminal_kind="respond"),
-            _obs_for_scenario("T01", terminal_kind="respond"),
-        ]
-        expectation = EvalExpectation(kind=ScenarioExpectationKind.RESPOND_NO_TOOL)
-        result = classify_majority("T01", ref_obs, cand_obs, expectation)
-        assert result.classification == "BOTH_PASS"
-        assert result.reference_passes == 3
-        assert result.candidate_passes == 3
-
-    def test_reference_only_pass(self) -> None:
-        ref_obs = [
-            _obs_for_scenario("T02", terminal_kind="respond"),
-            _obs_for_scenario("T02", terminal_kind="respond"),
-            _obs_for_scenario("T02", terminal_kind="respond"),
-        ]
-        cand_obs = [
-            _obs_for_scenario("T02", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T02", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T02", terminal_kind="respond"),
-        ]
-        expectation = EvalExpectation(kind=ScenarioExpectationKind.RESPOND_NO_TOOL)
-        result = classify_majority("T02", ref_obs, cand_obs, expectation)
-        assert result.classification == "REFERENCE_ONLY_PASS"
-
-    def test_candidate_only_pass(self) -> None:
-        ref_obs = [
-            _obs_for_scenario("T03", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T03", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T03", terminal_kind="respond"),
-        ]
-        cand_obs = [
-            _obs_for_scenario("T03", terminal_kind="respond"),
-            _obs_for_scenario("T03", terminal_kind="respond"),
-            _obs_for_scenario("T03", terminal_kind="respond"),
-        ]
-        expectation = EvalExpectation(kind=ScenarioExpectationKind.RESPOND_NO_TOOL)
-        result = classify_majority("T03", ref_obs, cand_obs, expectation)
-        assert result.classification == "CANDIDATE_ONLY_PASS"
-
-    def test_both_fail(self) -> None:
-        ref_obs = [
-            _obs_for_scenario("T04", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T04", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T04", tool_calls=(_tc("read_npc", {}),)),
-        ]
-        cand_obs = [
-            _obs_for_scenario("T04", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T04", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T04", tool_calls=(_tc("read_npc", {}),)),
-        ]
-        expectation = EvalExpectation(kind=ScenarioExpectationKind.RESPOND_NO_TOOL)
-        result = classify_majority("T04", ref_obs, cand_obs, expectation)
-        assert result.classification == "BOTH_FAIL"
-
-    def test_reference_only_pass_detection(self) -> None:
-        """REFERENCE_ONLY_PASS is detected correctly (critical for PAIM-13)."""
-        ref_obs = [
-            _obs_for_scenario("T05", terminal_kind="respond"),
-            _obs_for_scenario("T05", terminal_kind="respond"),
-            _obs_for_scenario("T05", terminal_kind="respond"),
-        ]
-        cand_obs = [
-            _obs_for_scenario("T05", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T05", tool_calls=(_tc("read_npc", {}),)),
-            _obs_for_scenario("T05", tool_calls=(_tc("read_npc", {}),)),
-        ]
-        expectation = EvalExpectation(kind=ScenarioExpectationKind.RESPOND_NO_TOOL)
-        result = classify_majority("T05", ref_obs, cand_obs, expectation)
-        assert result.classification == "REFERENCE_ONLY_PASS"
-
-
-# ==============================================================================
 # summarize_metrics — basic smoke
 # ==============================================================================
 
@@ -770,65 +641,6 @@ class TestSummarizeMetrics:
         """Empty/small sample validation for nearest_rank_percentile."""
         with pytest.raises(ValueError, match="empty"):
             nearest_rank_percentile([], 50)
-
-
-# ==============================================================================
-# Offline architecture tests — runtime identity
-# ==============================================================================
-
-
-class TestPaim13RuntimeIdentity:
-    """Offline architecture tests asserting correct runtime identity.
-
-    These tests verify that the eval infrastructure correctly identifies
-    which runtime class belongs to which path.  They do NOT require
-    Ollama or any network access.
-
-    Reference path:
-        FastAgent + AgentLoop + AgentToolExecutionService + ToolExecutor
-
-    Candidate path:
-        PydanticAIFastAgent + PydanticAIAgentRuntime + DndAgentRunPreparer
-        + PydanticAIToolBridge + ToolExecutor
-    """
-
-    def test_fast_agent_is_reference_type(self) -> None:
-        """FastAgent is the reference decision runtime."""
-        assert FastAgent.__name__ == "FastAgent"
-        assert not issubclass(FastAgent, PydanticAIFastAgent)
-
-    def test_pydantic_ai_fast_agent_is_candidate_type(self) -> None:
-        """PydanticAIFastAgent is the candidate decision runtime."""
-        assert PydanticAIFastAgent.__name__ == "PydanticAIFastAgent"
-        assert not issubclass(PydanticAIFastAgent, FastAgent)
-
-    def test_agent_loop_is_reference_full_turn_type(self) -> None:
-        """AgentLoop is the reference full-turn runtime."""
-        assert AgentLoop.__name__ == "AgentLoop"
-        assert not issubclass(AgentLoop, PydanticAIAgentRuntime)
-
-    def test_pydantic_ai_agent_runtime_is_candidate_type(self) -> None:
-        """PydanticAIAgentRuntime is the candidate full-turn runtime."""
-        assert PydanticAIAgentRuntime.__name__ == "PydanticAIAgentRuntime"
-        assert not issubclass(PydanticAIAgentRuntime, AgentLoop)
-
-    def test_reference_path_uses_tool_executor(self) -> None:
-        """Reference path uses ToolExecutor (not PydanticAIToolBridge)."""
-        assert ToolExecutor.__name__ == "ToolExecutor"
-        assert ToolRegistry.__name__ == "ToolRegistry"
-
-    def test_candidate_path_uses_pydantic_ai_tool_bridge(self) -> None:
-        """Candidate path uses PydanticAIToolBridge (not ToolExecutor directly)."""
-        assert PydanticAIToolBridge.__name__ == "PydanticAIToolBridge"
-        assert DndAgentRunPreparer.__name__ == "DndAgentRunPreparer"
-
-    def test_reference_uses_ollama_model_provider(self) -> None:
-        """Reference path uses native OllamaModelProvider."""
-        assert OllamaModelProvider.__name__ == "OllamaModelProvider"
-
-    def test_agent_tool_execution_service_is_reference_type(self) -> None:
-        """AgentToolExecutionService is the reference execution service."""
-        assert AgentToolExecutionService.__name__ == "AgentToolExecutionService"
 
 
 # ==============================================================================

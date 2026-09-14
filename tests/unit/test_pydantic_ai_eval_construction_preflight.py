@@ -151,7 +151,7 @@ class TestPaim13LayerBCandidateConstruction:
 
         model = FakeModel()
 
-        # Layer B needs both FastAgent (for warm-up) and Runtime
+        # Layer B needs both the one-step agent (for warm-up) and the runtime
         fast_agent = PydanticAIFastAgent(run_preparer=preparer, model=model)
         runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=model)
         return fast_agent, runtime

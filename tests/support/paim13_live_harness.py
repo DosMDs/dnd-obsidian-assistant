@@ -1,30 +1,26 @@
 """PAIM-13 live eval harness — reusable fixtures, counters, context builders.
 
-This module provides shared infrastructure for the PAIM-13 live eval
-comparison tests:
+This module provides general, runtime-neutral infrastructure for deterministic
+model/runtime evaluation:
 
-- ``CountingModelGateway`` — wraps native ``ModelGateway`` and counts
-  ``chat_with_tools()`` calls (reference-side counting).
 - ``CountingPydanticModel`` — wraps Pydantic AI ``Model`` and counts
-  ``request()`` calls (candidate-side counting).
-- ``_make_deterministic_context_builder()`` — builds an ``AgentContextBuilder``
+  ``request()`` calls.
+- ``make_deterministic_context_builder()`` — builds an ``AgentContextBuilder``
   with deterministic test doubles.
-- ``_build_eval_registry()`` — builds a ``ToolRegistry`` with synthetic
+- ``build_eval_registry()`` — builds a ``ToolRegistry`` with synthetic
   eval tools.
-- ``_build_exposed_info()`` — builds ``ExposedToolInfo`` for a context.
+- ``build_exposed_info()`` — builds ``ExposedToolInfo`` for a context.
 - Deterministic entity data and helper functions.
 
-All offline-safe: no network, no model, no framework imports at module
-level.
+All offline-safe: no network, no model at module level.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, TypeVar
+from typing import Any
 
 import httpx
-from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.wrapper import WrapperModel
@@ -34,15 +30,8 @@ from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_tool_selection import select_agent_tools
 from dnd_assistant.domain.types import Visibility
 from dnd_assistant.errors import NotFoundError
-from dnd_assistant.models.gateway import ModelGateway
-from dnd_assistant.models.types import (
-    ChatRequest,
-    ChatResponse,
-    ModelHealth,
-    ToolAwareResponse,
-)
 from dnd_assistant.retrieval.types import MatchKind, SearchHit
-from dnd_assistant.tools.catalog import ToolPublicDefinition, build_tool_registry_schema
+from dnd_assistant.tools.catalog import build_tool_registry_schema
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import (
     ExecutionContext,
@@ -72,58 +61,7 @@ from tests.support.pydantic_ai_eval import (
 )
 from tests.support.repository_doubles import VaultRepositoryWriteStubs
 
-# ── Counting ModelGateway decorator (reference side) ──────────────────────────
-
-T = TypeVar("T", bound=BaseModel)
-
-
-@dataclass
-class CountingGatewayState:
-    """Mutable state for a ``CountingModelGateway``.
-
-    Tracks literal ``chat_with_tools`` invocations.
-    """
-
-    chat_with_tools_count: int = 0
-
-
-class CountingModelGateway:
-    """Test-only ``ModelGateway`` decorator that counts semantic requests.
-
-    Wraps a real ``ModelGateway`` (``OllamaModelProvider``) and counts
-    every ``chat_with_tools()`` call.  Delegates all other calls unchanged.
-    """
-
-    def __init__(self, delegate: ModelGateway) -> None:
-        self._delegate = delegate
-        self._state = CountingGatewayState()
-
-    @property
-    def state(self) -> CountingGatewayState:
-        return self._state
-
-    def chat_with_tools(
-        self,
-        request: ChatRequest,
-        tools: list[ToolPublicDefinition],
-    ) -> ToolAwareResponse:
-        self._state.chat_with_tools_count += 1
-        return self._delegate.chat_with_tools(request, tools)
-
-    def chat(self, request: ChatRequest) -> ChatResponse:
-        return self._delegate.chat(request)
-
-    def generate_structured(self, request: ChatRequest, schema: type[T]) -> T:
-        return self._delegate.generate_structured(request, schema)
-
-    def embed(self, texts: list[str]) -> list[list[float]]:
-        return self._delegate.embed(texts)
-
-    def health(self) -> ModelHealth:
-        return self._delegate.health()
-
-
-# ── Counting Pydantic Model wrapper (candidate side) ──────────────────────────
+# ── Counting Pydantic Model wrapper ───────────────────────────────────────────
 
 
 @dataclass
@@ -385,41 +323,6 @@ def build_exposed_info(
     names = tuple(t.name for t in selected)
     has_write = any(t.permission.value == "write" for t in selected)
     return ExposedToolInfo(tool_names=names, has_write=has_write)
-
-
-# ── Terminal observation parser (shared) ──────────────────────────────────────
-
-
-def parse_terminal_observation(
-    response: Any,
-    tool_calls: tuple[Any, ...],
-) -> str | None:
-    """Parse terminal kind from an ``AgentTextOutcome`` JSON response.
-
-    Returns ``None`` when tool calls are present (not terminal).
-    Returns the outcome kind value string when a valid outcome is parsed.
-    Sets ``error_type`` on the caller when parsing fails (never returns
-    ``"clarify"`` for malformed data).
-
-    Args:
-        response: The ``ToolAwareResponse`` from a decision.
-        tool_calls: Observed tool calls (non-empty means not terminal).
-
-    Returns:
-        The terminal kind string, or ``None`` if tool calls exist.
-    """
-    if tool_calls:
-        return None
-
-    from dnd_assistant.application.agent_loop import _parse_agent_outcome
-    from dnd_assistant.errors import ModelError
-
-    try:
-        outcome = _parse_agent_outcome(response)
-        return outcome.kind.value
-    except (ModelError, Exception):
-        # Malformed terminal — caller must set error_type
-        return None
 
 
 # ── PAIM-13 Ollama live environment probe ──────────────────────────────────

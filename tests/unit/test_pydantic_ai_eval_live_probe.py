@@ -301,13 +301,11 @@ class TestPaim13LiveProbeArchitecture:
     """
 
     def test_no_ollama_model_provider_version_used(self) -> None:
-        """The PAIM-13 live probe does not call ``OllamaModelProvider.version()``.
+        """The shared live probe does not call ``OllamaModelProvider.version()``.
 
-        Verifies that the shared probe function and both live modules
-        do not reference a nonexistent ``version`` attribute on
-        ``OllamaModelProvider``.
+        Verifies that the shared probe function does not reference a
+        nonexistent ``version`` attribute on ``OllamaModelProvider``.
         """
-        import ast
         from pathlib import Path
 
         # Check the shared probe module
@@ -319,32 +317,3 @@ class TestPaim13LiveProbeArchitecture:
         )
         probe_source = probe_path.read_text(encoding="utf-8")
         assert "native.version()" not in probe_source, "Shared probe must not call native.version()"
-
-        # Check both live integration modules
-        for module_name in [
-            "test_pydantic_ai_stage9_live_eval_decision.py",
-            "test_pydantic_ai_stage9_live_eval_full_turn.py",
-        ]:
-            module_path = (
-                Path(__file__).resolve().parent.parent.parent
-                / "tests"
-                / "integration"
-                / module_name
-            )
-            source = module_path.read_text(encoding="utf-8")
-            assert "native.version()" not in source, f"{module_name} must not call native.version()"
-
-            # Parse AST to verify paim13_config function body
-            # does not use OllamaModelProvider directly
-            tree = ast.parse(source)
-            paim13_config_found = False
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef) and node.name == "paim13_config":
-                    paim13_config_found = True
-                    func_source = ast.get_source_segment(source, node)
-                    assert func_source is not None
-                    assert "OllamaModelProvider" not in func_source, (
-                        f"{module_name} paim13_config must not use OllamaModelProvider directly"
-                    )
-                    break
-            assert paim13_config_found, f"{module_name} must define a paim13_config fixture"

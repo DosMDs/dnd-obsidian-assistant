@@ -5,7 +5,8 @@ Responsibility
 Owns: model interaction — prompt completion, structured output, tool calling,
        embeddings, health checks.
 Must not own: prompt templates, domain logic, storage, tool execution.
-Called by: application layer (FastAgent, PostSessionProcessor, etc.).
+Called by: provider-neutral model infrastructure (embeddings, structured
+       output, health, future post-session/heavy model use).
 Failure boundary: raises ModelError on provider/network failure.
 
 Canonical logical operations
@@ -29,12 +30,13 @@ via a ``TYPE_CHECKING``-only import.  This keeps the gateway module
 lightweight — importing ``dnd_assistant.models.gateway`` must not eagerly
 load storage, retrieval, application, CLI, or Ollama.
 
-PAIM-14 status
-──────────────
-The production ``dnd ask`` composition now uses the Pydantic AI ``Model``
-boundary.  This Protocol and its native ``OllamaModelProvider`` are retained
-as explicit test/reference infrastructure only (PAIM-11 parity, PAIM-13 live
-comparison).  Production composition must not import them.
+Provider-infrastructure status
+──────────────────────────────
+The production ``dnd ask`` composition uses the Pydantic AI ``Model``
+boundary.  This Protocol and its native ``OllamaModelProvider`` remain
+provider-neutral, non-agent model infrastructure (chat, structured output,
+embeddings, health) and are not part of the ``dnd ask`` orchestration path.
+Production ``dnd ask`` composition must not import them.
 """
 
 from __future__ import annotations

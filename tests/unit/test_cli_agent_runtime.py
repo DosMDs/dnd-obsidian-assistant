@@ -298,14 +298,14 @@ class TestAskRuntimeClose:
         provider.close.assert_called_once()
 
     def test_close_after_success(self) -> None:
-        """close() is called after a successful AgentLoop run."""
+        """close() is called after a successful agent run."""
         provider = MagicMock()
-        agent_loop = MagicMock()
-        agent_loop.run.return_value = MagicMock()
+        mock_runtime = MagicMock()
+        mock_runtime.run.return_value = MagicMock()
         runtime = AskRuntime(
             MagicMock(
                 model=provider,
-                agent_runtime=agent_loop,
+                agent_runtime=mock_runtime,
                 recovery_service=MagicMock(),
                 vault_root=MagicMock(),
                 audit_service=None,
@@ -316,14 +316,14 @@ class TestAskRuntimeClose:
         provider.close.assert_called_once()
 
     def test_close_after_model_error(self) -> None:
-        """close() is called after a ModelError from the agent loop."""
+        """close() is called after a ModelError from the agent runtime."""
         provider = MagicMock()
-        agent_loop = MagicMock()
-        agent_loop.run.side_effect = DndAssistantError("Model error")
+        mock_runtime = MagicMock()
+        mock_runtime.run.side_effect = DndAssistantError("Model error")
         runtime = AskRuntime(
             MagicMock(
                 model=provider,
-                agent_runtime=agent_loop,
+                agent_runtime=mock_runtime,
                 recovery_service=MagicMock(),
                 vault_root=MagicMock(),
                 audit_service=None,

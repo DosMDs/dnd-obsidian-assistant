@@ -1,6 +1,6 @@
 # ADR-0003 — Controlled Pydantic AI Runtime Migration
 
-- **Status:** Accepted — Pydantic AI is the production agent runtime (PAIM-15 verdict `ACCEPTED`); executable reference-runtime retirement pending `PAIM-RETIRE-01`
+- **Status:** Accepted — Pydantic AI is the production agent runtime (PAIM-15 verdict `ACCEPTED`); executable reference-runtime retirement complete (`PAIM-RETIRE-01`)
 - **Date:** 2026-09-04
 - **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 - **Migration branch:** `feat/pydantic-ai-runtime`
@@ -239,3 +239,15 @@ PAIM-15
 ```
 
 `S9-07` becomes executable only after `PAIM-RETIRE-01` is independently accepted.
+
+## Retirement completed (PAIM-RETIRE-01)
+
+`PAIM-RETIRE-01` completed the retirement: the executable custom `FastAgent`,
+`AgentLoop` and `AgentToolExecutionService` runtime implementations and their
+reference-only/parity tests were removed. The accepted Pydantic AI runtime
+(`PydanticAIAgentRuntime` / `PydanticAIFastAgent`), `agent_contracts.py`,
+`DndAgentPolicy`, `PydanticAIToolBridge` and `ToolExecutor` remain the
+production path. `ModelGateway` and native Ollama provider infrastructure
+remain as non-agent provider infrastructure. `S9-07` is the next task
+(`NOT STARTED`). Literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`
+section 77.

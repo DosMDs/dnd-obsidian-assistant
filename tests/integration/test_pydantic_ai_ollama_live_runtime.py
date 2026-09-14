@@ -35,7 +35,7 @@ from typing import Any
 import pytest
 from pydantic import BaseModel
 
-from dnd_assistant.application.agent_loop import AgentOutcomeKind
+from dnd_assistant.application.agent_contracts import AgentOutcomeKind
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
     PydanticAIAgentRuntime,
 )

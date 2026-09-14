@@ -11002,3 +11002,207 @@ Active next:
 ```text
 PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests
 ```
+
+
+## 77. PAIM-RETIRE-01 completion record — Retire executable reference agent runtime
+
+**Status:** DONE
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA (verified):** `259115fe4d54bda81956ea152870c6532c97f59a`
+(upstream `origin/feat/pydantic-ai-runtime` at the same SHA, clean tree)
+
+### Scope
+
+Retire the executable custom/reference Fast Agent runtime that PAIM-15
+intentionally retained only for migration parity/eval evidence, and remove
+reference-only tests/eval plumbing. No Pydantic AI runtime redesign, no
+provider-infrastructure removal, no history rewrite.
+
+Observed production path remains unchanged:
+
+```text
+CLI (cli/ask.py, cli/agent_runtime.py)
+→ PydanticAIAgentRuntime
+→ DndAgentRunPreparer / DndAgentPolicy
+→ PydanticAIToolBridge
+→ ToolExecutor
+→ application/domain services
+→ VaultRepository
+```
+
+### Removed executable reference runtime (source)
+
+```text
+src/dnd_assistant/application/fast_agent.py
+src/dnd_assistant/application/agent_loop.py
+src/dnd_assistant/application/agent_tool_execution.py
+```
+
+### Removed reference-only / migration-comparison tests and scaffolding
+
+```text
+tests/unit/test_agent_loop.py
+tests/unit/test_agent_loop_boundaries.py
+tests/unit/test_agent_loop_failure_policy.py
+tests/unit/test_agent_loop_multi_tool.py
+tests/unit/test_agent_loop_snapshot_policy.py
+tests/unit/test_agent_tool_execution.py
+tests/unit/test_agent_tool_execution_boundaries.py
+tests/unit/test_agent_tool_result_serialization.py
+tests/unit/test_fast_agent.py
+tests/unit/test_fast_agent_boundaries.py
+tests/unit/test_pydantic_ai_eval_frozen_observations.py
+tests/unit/test_pydantic_ai_eval_model_counters.py
+tests/support/stage9_parity.py
+tests/support/pydantic_ai_eval_datasets.py
+tests/integration/test_pydantic_ai_stage9_parity.py
+tests/integration/test_pydantic_ai_stage9_parity_p2.py
+tests/integration/test_pydantic_ai_stage9_parity_p3.py
+tests/integration/test_pydantic_ai_stage9_parity_p4.py
+tests/integration/test_pydantic_ai_stage9_parity_p5.py
+tests/integration/test_pydantic_ai_stage9_parity_exposure.py
+tests/integration/test_pydantic_ai_agent_runtime_parity.py
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+```
+
+Reference-only symbols trimmed from retained support modules:
+
+```text
+tests/support/paim13_live_harness.py  CountingModelGateway, CountingGatewayState,
+                                      parse_terminal_observation (reference parser)
+tests/support/pydantic_ai_eval.py     ScenarioComparison, classify_majority,
+                                      REFERENCE_ONLY_PASS semantics, critical_regression
+tests/support/paim13_scenarios.py     critical_regression field usages
+tests/support/test_doubles.py         FakeModelGateway, WarmupFakeModelGateway
+```
+
+Embedded reference-parity tests removed from surviving candidate test modules:
+
+```text
+tests/integration/test_pydantic_ai_fast_agent_boundaries.py  P7-24/P7-25
+tests/integration/test_pydantic_ai_fast_agent_evidence.py    C13-E05/C13-E06
+tests/unit/test_pydantic_ai_eval.py                          TestPaim13RuntimeIdentity,
+                                                             TestClassifyMajority
+tests/unit/test_pydantic_ai_eval_live_harness.py             TestPaim13RequestContextEquality,
+                                                             TestWarmupPreflight, TestMetricLabels
+tests/unit/test_dnd_agent_policy.py                          TestConstantParity (AgentLoop parity)
+```
+
+### Retained
+
+```text
+agent_contracts.py            neutral shared contracts (framework/provider-neutral)
+DndAgentPolicy                batch-admission policy
+Pydantic AI runtime           PydanticAIAgentRuntime / PydanticAIFastAgent
+PydanticAIToolBridge          snapshot + execution adapter
+ToolExecutor                  final authorization/execution boundary
+ModelGateway + native Ollama  provider/adapters/transport/profiles (non-agent
+                              infra: chat, structured output, embeddings, health,
+                              future post-session use)
+General eval infrastructure   pydantic_ai_eval scoring DTOs/functions,
+                              paim13_scenarios, CountingPydanticModel,
+                              deterministic context builder, env probe,
+                              context_builder_doubles, pydantic_ai_runtime doubles
+```
+
+### Migrated shared-contract coverage
+
+Direct, reference-free unit coverage for the neutral contracts was migrated to:
+
+```text
+tests/unit/test_agent_contracts.py
+  - build_agent_tool_execution_result deterministic JSON serialisation + TOOL message
+  - build_agent_request deterministic SYSTEM/USER projection
+  - AgentTextOutcome validation, parse_agent_outcome parsing/fail-closed
+```
+
+Stage-9 safety invariants retain executable coverage on the accepted Pydantic
+runtime (frozen exposure, hidden/unknown tool fail-close, mixed WRITE batch
+rejection, duplicate call-id rejection, tool budget, WRITE audit prerequisite,
+terminal second-response rule, clarification, sequential fail-fast,
+deterministic replay, approval rejection, ctx/deps identity fail-closed) in
+`test_pydantic_ai_agent_runtime*.py`, `test_dnd_agent_policy.py`, and
+`test_pydantic_ai_tool_bridge*.py`. No safety invariant lost coverage.
+
+### Durable dependency-boundary contract
+
+`tests/contract/test_boundaries.py` was updated to protect the accepted
+dependency shape rather than relying on module absence:
+
+- CLI composition (`cli.agent_runtime`, `cli.ask`) must not import obsolete
+  custom orchestration or native Ollama provider modules.
+- production Pydantic runtime AST scan must not import those targets.
+- a lightweight `find_spec(...) is None` regression proves the retired
+  modules are not silently reintroduced.
+
+### Intentional remaining textual references
+
+Repository search for the retired symbols/modules returns only:
+
+```text
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md   historical PAIM evidence (append-only)
+docs/stages/09_FAST_AGENT.md                 historical Stage-9 history (append-only)
+DEVELOPMENT_STATUS.md                        historical PAIM task records
+tests/contract/test_boundaries.py            permanent boundary assertion
+```
+
+`PydanticAIFastAgent` / `PydanticAIAgentRuntime` are the accepted runtime names
+and are not retired-symbol matches.
+
+### Git-derived inventory
+
+```text
+deleted tracked files:        26  (3 source + 23 test/support)
+modified tracked files:       24  (6 source + 18 test/support)
+new tracked files:             1  tests/unit/test_agent_contracts.py
+git diff --stat:              50 files changed, 116 insertions(+), 17623 deletions(-)
+```
+
+### Quality gates
+
+```text
+uv run ruff check .
+  All checks passed!
+
+uv run ruff format --check .
+  352 files already formatted
+
+uv run pyright
+  0 errors, 0 warnings, 0 informations
+
+uv run pytest --collect-only -q
+  5047 tests collected
+
+uv run pytest tests/contract/test_boundaries.py tests/unit/test_agent_contracts.py \
+    tests/unit/test_dnd_agent_policy.py tests/unit/test_pydantic_ai_eval*.py \
+    tests/integration/test_pydantic_ai_agent_runtime.py \
+    tests/integration/test_pydantic_ai_fast_agent*.py -q
+  347 passed
+
+uv run pytest -q
+  4932 passed, 114 skipped, 1 warning in 152.59s
+```
+
+The skipped tests are the opt-in live Ollama / live-eval tests. No real Ollama
+run was required or performed.
+
+### History integrity
+
+```text
+sections 1-76 unchanged:                 YES
+section 77 appended:                     YES
+PAIM-11 parity history:                  unchanged
+PAIM-13 comparison history:              unchanged
+PAIM-14/15 decision evidence:            unchanged
+historical correction records:           unchanged
+```
+
+### Sequencing
+
+```text
+PAIM-15
+→ PAIM-RETIRE-01   (DONE)
+→ S9-07            (next; NOT STARTED)
+→ Stage 10
+```

@@ -953,17 +953,3 @@ class TestAdmissionImmutability:
         assert admission.calls[1].tool_name == "read_alpha"
         assert admission.calls[0].position == 0
         assert admission.calls[1].position == 1
-
-
-# ==============================================================================
-# Constant parity with AgentLoop
-# ==============================================================================
-
-
-class TestConstantParity:
-    def test_max_tool_calls_matches_agent_loop(self) -> None:
-        from dnd_assistant.application.agent_loop import (
-            MAX_TOOL_CALLS_PER_RUN as REF,
-        )
-
-        assert MAX_TOOL_CALLS_PER_RUN == REF == 4
