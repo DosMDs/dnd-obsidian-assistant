@@ -228,7 +228,7 @@ class TestC17E4DeferredHandlerCounter:
 
         def spy_make_deferred(
             prepared: PreparedDndAgentRun,
-        ) -> tuple[HandleDeferredToolCalls, list[Any]]:
+        ) -> tuple[HandleDeferredToolCalls[DndAgentDeps], list[Any]]:
             handler_cap, execs = original_make_deferred(prepared)
             original_cap_handler = handler_cap.handler
 

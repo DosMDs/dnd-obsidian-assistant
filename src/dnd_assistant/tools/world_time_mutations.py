@@ -52,6 +52,7 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
     ToolDefinition,
+    require_audit,
 )
 
 if TYPE_CHECKING:
@@ -231,13 +232,13 @@ def _set_world_time_handler(
     if input_model.expected_revision is None:
         state = world_time_repository.initialize_current_world_time(
             input_model.world_tick,
-            audit=context.audit,
+            audit=require_audit(context),
         )
     else:
         state = world_time_repository.set_current_world_time(
             input_model.world_tick,
             expected_revision=input_model.expected_revision,
-            audit=context.audit,
+            audit=require_audit(context),
         )
 
     game_date = calendar_service.tick_to_date(state.current_world_tick)
@@ -286,7 +287,7 @@ def _advance_world_time_handler(
     state = world_time_repository.set_current_world_time(
         new_tick,
         expected_revision=input_model.expected_revision,
-        audit=context.audit,
+        audit=require_audit(context),
     )
 
     game_date = calendar_service.tick_to_date(state.current_world_tick)

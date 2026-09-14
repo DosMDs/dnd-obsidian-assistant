@@ -27,7 +27,7 @@ from dnd_assistant.domain.types import Revision
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.atomic import atomic_write_text
-from dnd_assistant.storage.audit import AuditContext, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditPhase, AuditService
 from dnd_assistant.storage.paths import _resolve_vault_root
 
 # ── TypeAdapters for runtime validation ───────────────────────────────────────
@@ -605,7 +605,7 @@ def _build_audit_record(
     session: str | None = None,
     model_profile: str | None = None,
     prompt_version: str | None = None,
-    phase: str = "committed",
+    phase: AuditPhase = "committed",
 ):
     """Build an ``AuditRecord`` for a world-time mutation."""
     from dnd_assistant.storage.audit import AuditRecord

@@ -28,6 +28,7 @@ from pydantic import TypeAdapter
 
 from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
+from dnd_assistant.storage.audit import AuditContext, AuditPhase, AuditRecord, AuditService
 from dnd_assistant.storage.session_metadata import _authorized_metadata_read
 from dnd_assistant.storage.session_paths import (
     SessionStoragePaths,
@@ -35,9 +36,9 @@ from dnd_assistant.storage.session_paths import (
 )
 
 if TYPE_CHECKING:
-    from pydantic.types import AwareDatetime
+    from collections.abc import Mapping
 
-    from dnd_assistant.storage.audit import AuditContext, AuditService
+    from pydantic.types import AwareDatetime
 
 
 # ── Constants ─────────────────────────────────────────────────────────────────
@@ -758,11 +759,9 @@ def _build_audit_record(
     session: str | None = None,
     model_profile: str | None = None,
     prompt_version: str | None = None,
-    phase: str = "committed",
+    phase: AuditPhase = "committed",
 ):
     """Build an ``AuditRecord`` for a session event append."""
-    from dnd_assistant.storage.audit import AuditRecord
-
     return AuditRecord(
         operation_id=operation_id,
         real_time=real_time,
@@ -857,8 +856,8 @@ class ObsidianSessionEventRepository:
         *,
         event_type: str,
         real_time: AwareDatetime,
-        world_tick: int,
-        extra_fields: dict[str, object] | None,
+        world_tick: WorldTick,
+        extra_fields: Mapping[str, object] | None,
         audit: AuditContext,
     ) -> RawSessionEvent:
         """Append a raw event to the session's events.jsonl.

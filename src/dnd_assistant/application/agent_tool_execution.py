@@ -199,7 +199,7 @@ def _json_args_equal(left: object, right: object) -> bool:
     """
     if type(left) is not type(right):
         return False
-    if isinstance(left, dict):
+    if isinstance(left, dict) and isinstance(right, dict):
         if len(left) != len(right):
             return False
         for k in left:
@@ -208,7 +208,7 @@ def _json_args_equal(left: object, right: object) -> bool:
             if not _json_args_equal(left[k], right[k]):
                 return False
         return True
-    if isinstance(left, list):
+    if isinstance(left, list) and isinstance(right, list):
         if len(left) != len(right):
             return False
         return all(_json_args_equal(a, b) for a, b in zip(left, right, strict=True))

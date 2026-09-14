@@ -65,7 +65,7 @@ from pydantic import BaseModel
 from dnd_assistant.errors import ValidationError
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Collection, Sequence
 
     from pydantic_ai.messages import ToolCallPart
     from pydantic_ai.toolsets import ExternalToolset
@@ -518,8 +518,8 @@ def _normalize_json_schema(schema: dict[str, Any]) -> str:
 def _verify_exact_enum_members(
     tool_name: str,
     field_name: str,
-    public_values: list[StrEnum],
-    canonical_values: frozenset[StrEnum],
+    public_values: Sequence[StrEnum],
+    canonical_values: Collection[StrEnum],
     expected_enum: type[StrEnum],
 ) -> None:
     """Verify that a collection of enum values has exact types and matches.

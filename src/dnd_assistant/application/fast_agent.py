@@ -51,7 +51,13 @@ from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole
 from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION, SYSTEM_PROMPT
 
 if TYPE_CHECKING:
-    from dnd_assistant.application.agent_context import AgentContext, AgentContextBuilder
+    from dnd_assistant.application.agent_context import (
+        AgentContext,
+        AgentContextBuilder,
+        AgentEntityContext,
+        AgentEventContext,
+        AgentSessionContext,
+    )
     from dnd_assistant.models.gateway import ModelGateway
     from dnd_assistant.models.types import ToolAwareResponse
     from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
@@ -206,7 +212,7 @@ def _build_user_json(context: AgentContext) -> str:
 
 
 def _serialize_session(
-    session: object,
+    session: AgentSessionContext | None,
 ) -> dict[str, object] | None:
     """Serialize an ``AgentSessionContext`` or return ``None``."""
     if session is None:
@@ -218,7 +224,7 @@ def _serialize_session(
     }
 
 
-def _serialize_entity(entity: object) -> dict[str, object]:
+def _serialize_entity(entity: AgentEntityContext) -> dict[str, object]:
     """Serialize an ``AgentEntityContext``."""
     return {
         "entity_id": entity.entity_id,
@@ -232,7 +238,7 @@ def _serialize_entity(entity: object) -> dict[str, object]:
     }
 
 
-def _serialize_event(event: object) -> dict[str, object]:
+def _serialize_event(event: AgentEventContext) -> dict[str, object]:
     """Serialize an ``AgentEventContext``."""
     return {
         "event_id": event.event_id,

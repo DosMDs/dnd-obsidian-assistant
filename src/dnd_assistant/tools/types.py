@@ -243,6 +243,22 @@ class ExecutionContext:
     audit: AuditContext | None = None
 
 
+def require_audit(context: ExecutionContext) -> AuditContext:
+    """Return the non-``None`` ``AuditContext`` required by a WRITE handler.
+
+    ``ToolExecutor`` enforces this prerequisite before invoking a WRITE
+    handler.  Making the guarantee explicit at the point of use lets a
+    handler pass a statically non-``None`` audit context to storage and
+    application services without weakening their contracts.
+
+    Raises:
+        ValidationError: ``context.audit`` is ``None``.
+    """
+    if context.audit is None:
+        raise ValidationError("WRITE tool requires a non-None AuditContext")
+    return context.audit
+
+
 # ── Public conversion helpers ────────────────────────────────────────────
 
 

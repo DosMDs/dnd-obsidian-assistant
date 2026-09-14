@@ -33,6 +33,7 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
     ToolDefinition,
+    require_audit,
 )
 
 if TYPE_CHECKING:
@@ -309,7 +310,7 @@ def _start_session_handler(
     3. Return the persisted Session.
     """
     _check_recovery_preflight(recovery_service)
-    session = runtime_service.start_session(audit=context.audit)
+    session = runtime_service.start_session(audit=require_audit(context))
     return StartSessionOutput(session=session)
 
 
@@ -331,7 +332,7 @@ def _record_event_handler(
     raw_event = runtime_service.record_event(
         input_model.event_type,
         extra_fields=input_model.extra_fields,
-        audit=context.audit,
+        audit=require_audit(context),
     )
     event_result = SessionEventResult(
         event_id=raw_event.event_id,
@@ -360,7 +361,7 @@ def _record_note_handler(
     _check_recovery_preflight(recovery_service)
     raw_event = runtime_service.record_note(
         input_model.text,
-        audit=context.audit,
+        audit=require_audit(context),
     )
     event_result = SessionEventResult(
         event_id=raw_event.event_id,
@@ -389,7 +390,7 @@ def _end_session_handler(
     _check_recovery_preflight(recovery_service)
     session = runtime_service.end_session(
         touched_entity_ids=input_model.touched_entity_ids,
-        audit=context.audit,
+        audit=require_audit(context),
     )
     return EndSessionOutput(session=session)
 

@@ -15,15 +15,23 @@ Registry has no filesystem access and no dependency on:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypeVar, cast
+
+from pydantic import BaseModel
 
 from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
-from dnd_assistant.tools.types import ToolBinding, ToolDefinition
+from dnd_assistant.tools.types import Handler, ToolBinding, ToolDefinition
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
-    from dnd_assistant.tools.types import Handler
+    from dnd_assistant.tools.types import ExecutionContext
+
+# Concrete handlers are typed against their tool's specific input model.  The
+# registry accepts such handlers generically while storing them under the
+# input-model-agnostic ``Handler`` alias used at invocation time; the executor
+# always validates raw input into ``definition.input_schema`` before invoking.
+InputModelT = TypeVar("InputModelT", bound=BaseModel)
 
 
 class ToolRegistry:
@@ -37,12 +45,17 @@ class ToolRegistry:
 
     # ── Registration ─────────────────────────────────────────────────────
 
-    def register(self, definition: ToolDefinition, handler: Handler) -> None:
+    def register(
+        self,
+        definition: ToolDefinition,
+        handler: Callable[[InputModelT, ExecutionContext], object],
+    ) -> None:
         """Register a tool definition with its callable handler.
 
         Args:
             definition: The tool definition.
-            handler: The callable handler.
+            handler: The callable handler, typed against the tool's specific
+                input model.
 
         Raises:
             ValidationError: The definition is invalid or the handler is
@@ -60,7 +73,9 @@ class ToolRegistry:
 
         self._bindings[definition.name] = ToolBinding(
             definition=definition,
-            handler=handler,
+            # Runtime logic guarantees ``handler`` accepts the validated
+            # ``definition.input_schema`` instance supplied by ToolExecutor.
+            handler=cast(Handler, handler),
         )
 
     # ── Lookup ───────────────────────────────────────────────────────────

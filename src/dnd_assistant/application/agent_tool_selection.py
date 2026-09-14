@@ -30,6 +30,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from collections.abc import Collection
+
     from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
     from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 
@@ -121,7 +123,7 @@ def _is_permission_eligible(
 
 def _is_session_mode_eligible(
     context: ExecutionContext,
-    allowed_modes: frozenset[SessionMode],
+    allowed_modes: Collection[SessionMode],
     mode_enum: type[SessionMode],
 ) -> bool:
     """Check whether ``context.session_mode`` is structurally valid and allowed.

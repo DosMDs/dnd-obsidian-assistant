@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 # ── WorldTick ────────────────────────────────────────────────────────────────
 
 
-def _validate_world_tick(value: object) -> int:
+def make_world_tick(value: object) -> WorldTick:
     """Validate a WorldTick value.
 
     WorldTick is a strict integer number of game minutes relative to the
@@ -83,7 +83,7 @@ def _validate_world_tick(value: object) -> int:
 
 WorldTick = Annotated[
     int,
-    BeforeValidator(_validate_world_tick),
+    BeforeValidator(make_world_tick),
     Field(
         strict=True,
         description="Canonical game-time value: integer minutes relative to campaign epoch",
@@ -891,7 +891,7 @@ class DeterministicCalendarService:
             + self._epoch_minute_of_day
         )
 
-        return WorldTick(abs_minute - epoch_abs_minute)
+        return make_world_tick(abs_minute - epoch_abs_minute)
 
     def tick_to_date(self, tick: WorldTick) -> GameDate:
         """Convert a ``WorldTick`` to its canonical ``GameDate``.
@@ -901,7 +901,7 @@ class DeterministicCalendarService:
         Complexity: O(number of months + number of intercalary days),
         not O(abs(year)) or O(abs(tick)).
         """
-        _validate_world_tick(tick)
+        make_world_tick(tick)
 
         # Absolute minute = epoch absolute minute + tick
         epoch_abs_minute = (
@@ -965,10 +965,10 @@ class DeterministicCalendarService:
         The new ``WorldTick`` after advancing by ``minutes``.
         """
         # Validate inputs using existing strict-integer helpers
-        _validate_world_tick(current_tick)
+        make_world_tick(current_tick)
         self._validate_minutes(minutes)
 
-        return WorldTick(current_tick + minutes)
+        return make_world_tick(current_tick + minutes)
 
     def time_until(
         self,
@@ -992,8 +992,8 @@ class DeterministicCalendarService:
         -------
         Signed integer difference in minutes.
         """
-        _validate_world_tick(start_tick)
-        _validate_world_tick(end_tick)
+        make_world_tick(start_tick)
+        make_world_tick(end_tick)
 
         return int(end_tick - start_tick)
 
@@ -1109,8 +1109,8 @@ class DeterministicCalendarService:
         ValueError
             If ``start_tick > end_tick``, or tick values fail strict validation.
         """
-        _validate_world_tick(start_tick)
-        _validate_world_tick(end_tick)
+        make_world_tick(start_tick)
+        make_world_tick(end_tick)
 
         if start_tick > end_tick:
             raise ValueError(f"start_tick ({start_tick}) must not exceed end_tick ({end_tick})")
@@ -1212,7 +1212,7 @@ class DeterministicCalendarService:
         ValueError
             If ``days`` is invalid or tick values fail strict validation.
         """
-        _validate_world_tick(current_tick)
+        make_world_tick(current_tick)
         days = self._validate_nonnegative_int(days, "days")
 
         window_minutes = days * self._minutes_per_day
@@ -1245,7 +1245,7 @@ class DeterministicCalendarService:
         ValueError
             If ``current_tick`` fails strict validation.
         """
-        _validate_world_tick(current_tick)
+        make_world_tick(current_tick)
 
         overdue: list[TimelineEvent] = []
         for ev in events:
@@ -1286,7 +1286,7 @@ class DeterministicCalendarService:
         -------
         ``(min_delta, max_delta)`` or ``None`` for unknown events.
         """
-        _validate_world_tick(current_tick)
+        make_world_tick(current_tick)
 
         interval = self._event_interval(event)
         if interval is None:

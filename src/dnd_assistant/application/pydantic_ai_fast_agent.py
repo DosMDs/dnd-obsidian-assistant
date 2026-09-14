@@ -57,6 +57,8 @@ from dnd_assistant.errors import ModelError
 from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
 
 if TYPE_CHECKING:
+    from pydantic_ai.run import AgentRunResult as PydanticAgentRunResult
+
     from dnd_assistant.application.fast_agent import AgentDecision
     from dnd_assistant.application.pydantic_ai_run_deps import (
         DndAgentRunPreparer,
@@ -193,7 +195,7 @@ class PydanticAIFastAgent:
 
 
 def _adapt_result(
-    result: object,
+    result: PydanticAgentRunResult[str | DeferredToolRequests],
     prepared: PreparedDndAgentRun,
 ) -> ToolAwareResponse:
     """Adapt a Pydantic AI ``AgentRunResult`` to a project ``ToolAwareResponse``.

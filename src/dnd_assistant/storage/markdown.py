@@ -91,7 +91,10 @@ def _make_yaml() -> ruamel.yaml.YAML:
     yaml.default_flow_style = False
     yaml.allow_unicode = True
     yaml.indent(mapping=2, sequence=2, offset=0)
-    yaml.sort_base_mapping_type_on_output = False
+    # ruamel.yaml's bundled stubs incorrectly declare this writable boolean
+    # attribute as ``None``; assigning ``False`` is the documented runtime API
+    # (verified against the installed version), so suppress only this rule.
+    yaml.sort_base_mapping_type_on_output = False  # pyright: ignore[reportAttributeAccessIssue]
     return yaml
 
 

@@ -47,6 +47,7 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
     ToolDefinition,
+    require_audit,
 )
 
 if TYPE_CHECKING:
@@ -291,7 +292,7 @@ def _patch_entity_handler(
         requested_id,
         input_model.patch,
         expected_revision=input_model.expected_revision,
-        audit=context.audit,
+        audit=require_audit(context),
     )
 
     # 3. Verify returned document entity ID matches requested ID.
@@ -336,7 +337,7 @@ def _append_entity_fact_handler(
         requested_id,
         expected_revision=input_model.expected_revision,
         fact=input_model.fact,
-        audit=context.audit,
+        audit=require_audit(context),
     )
 
     # 3. Verify returned document entity ID matches requested ID.

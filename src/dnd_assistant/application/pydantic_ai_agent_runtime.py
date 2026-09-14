@@ -66,17 +66,20 @@ from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
+    from pydantic_ai.messages import ModelMessage, ModelResponse
+    from pydantic_ai.run import AgentRunResult as PydanticAgentRunResult
 
     from dnd_assistant.application.agent_loop import AgentRunResult
     from dnd_assistant.application.agent_tool_execution import (
         AgentToolExecutionResult,
     )
+    from dnd_assistant.application.fast_agent import AgentDecision
     from dnd_assistant.application.pydantic_ai_run_deps import (
         DndAgentDeps,
         DndAgentRunPreparer,
         PreparedDndAgentRun,
     )
-    from dnd_assistant.models.types import ToolCall
+    from dnd_assistant.models.types import ChatRequest, ToolCall
     from dnd_assistant.tools.types import ExecutionContext
 
 
@@ -206,7 +209,7 @@ class PydanticAIAgentRuntime:
 def _make_deferred_handler(
     prepared: PreparedDndAgentRun,
 ) -> tuple[
-    HandleDeferredToolCalls,
+    HandleDeferredToolCalls[DndAgentDeps],
     list[AgentToolExecutionResult],
 ]:
     """Create a fresh ``HandleDeferredToolCalls`` bound to this run.
@@ -308,7 +311,9 @@ def _make_deferred_handler(
             captured_executions.append(execution)
 
             # Deterministic TOOL JSON for framework replay
-            results_by_id[call.tool_call_id] = execution.tool_message.content
+            tool_content = execution.tool_message.content
+            assert tool_content is not None  # built by _build_tool_message
+            results_by_id[call.tool_call_id] = tool_content
 
         # 7. Build deferred results using exact call IDs
         try:
@@ -326,10 +331,10 @@ def _make_deferred_handler(
 
 
 def _map_to_agent_run_result(
-    result: object,
+    result: PydanticAgentRunResult[str | DeferredToolRequests],
     prepared: PreparedDndAgentRun,
-    request: object,
-    captured_executions: list[object],
+    request: ChatRequest,
+    captured_executions: list[AgentToolExecutionResult],
 ) -> AgentRunResult:
     """Map a Pydantic AI ``AgentRunResult`` to a project ``AgentRunResult``.
 
@@ -427,7 +432,9 @@ def _map_to_agent_run_result(
     )
 
 
-def _has_tool_calls_in_history(result: object) -> bool:
+def _has_tool_calls_in_history(
+    result: PydanticAgentRunResult[str | DeferredToolRequests],
+) -> bool:
     """Check if the framework run history contains any tool calls.
 
     Looks for a ``ModelResponse`` with ``ToolCallPart`` in the message history.
@@ -450,10 +457,10 @@ def _has_tool_calls_in_history(result: object) -> bool:
 
 
 def _build_initial_decision(
-    result: object,
+    result: PydanticAgentRunResult[str | DeferredToolRequests],
     prepared: PreparedDndAgentRun,
-    request: object,
-) -> object:
+    request: ChatRequest,
+) -> AgentDecision:
     """Build the ``AgentDecision`` from the first model response.
 
     Args:
@@ -541,8 +548,8 @@ def _adapt_tool_calls_from_parts(
 
 
 def _find_first_model_response(
-    all_messages: list[object],
-) -> object | None:
+    all_messages: list[ModelMessage],
+) -> ModelResponse | None:
     """Find the first ``ModelResponse`` in the framework message history.
 
     Args:
@@ -559,7 +566,9 @@ def _find_first_model_response(
     return None
 
 
-def _get_terminal_output(result: object) -> object:
+def _get_terminal_output(
+    result: PydanticAgentRunResult[str | DeferredToolRequests],
+) -> object:
     """Get the terminal output from a Pydantic AI ``AgentRunResult``.
 
     After the deferred handler resolves, the framework continues the same

@@ -256,7 +256,7 @@ class TestC18E1RealSecondDeferredBatch:
 
         def spy_make_deferred(
             prepared: PreparedDndAgentRun,
-        ) -> tuple[HandleDeferredToolCalls, list[Any]]:
+        ) -> tuple[HandleDeferredToolCalls[DndAgentDeps], list[Any]]:
             captured_policy_instances.append(prepared.deps.policy)
             handler_cap, execs = original_make_deferred(prepared)
             original_cap_handler = handler_cap.handler
@@ -769,7 +769,7 @@ class TestC18E2BuildResultsErrorMapping:
 
         def spy_make_deferred(
             prepared: PreparedDndAgentRun,
-        ) -> tuple[HandleDeferredToolCalls, list[Any]]:
+        ) -> tuple[HandleDeferredToolCalls[DndAgentDeps], list[Any]]:
             handler_cap, execs = original_make_deferred(prepared)
             original_cap_handler = handler_cap.handler
 

@@ -13,6 +13,7 @@ This package belongs to the storage layer and must not import from:
 """
 
 import importlib as _importlib
+from typing import TYPE_CHECKING
 
 from dnd_assistant.storage.session_recovery.repository import (
     ObsidianSessionRecoveryRepository,
@@ -22,6 +23,11 @@ from dnd_assistant.storage.session_recovery.types import (
     RecoveryIssue,
     SessionRecoveryReport,
 )
+
+if TYPE_CHECKING:
+    # Statically re-export the protocol for type checkers and ``__all__``;
+    # the runtime value is provided lazily by ``__getattr__`` below.
+    from dnd_assistant.storage.types import SessionRecoveryRepository
 
 
 # Lazy import to avoid circular-import identity issues when storage.__init__

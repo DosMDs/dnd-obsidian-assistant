@@ -63,6 +63,9 @@ from dnd_assistant.errors import StorageError
 
 # ── AuditRecord schema ─────────────────────────────────────────────────────
 
+AuditPhase = Literal["intent", "committed"]
+"""Canonical two-phase audit operation phase shared across storage modules."""
+
 
 class AuditRecord(BaseModel):
     """A single audited Vault operation.
@@ -105,7 +108,7 @@ class AuditRecord(BaseModel):
     application actor performed the Vault operation.
     """
 
-    phase: Literal["intent", "committed"] = "committed"
+    phase: AuditPhase = "committed"
     """Operation phase.
 
     ``"intent"`` means the mutation was durably announced before any

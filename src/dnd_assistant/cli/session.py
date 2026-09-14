@@ -246,6 +246,10 @@ def _session_end(
             audit=audit,
         )
 
+        # close_session always stamps the finish timestamp; narrow for the
+        # Optional Session field so the CLI can render it.
+        assert session.real_finished_at is not None
+
         touch_count = len(touched_id)
         touch_line = f"  Затронуто сущностей: {touch_count}" if touch_count else ""
 
