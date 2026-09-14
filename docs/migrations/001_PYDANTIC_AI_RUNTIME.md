@@ -10065,3 +10065,196 @@ Active next:
 ```text
 PAIM-13 — Execute measured real eval comparison (attempt #4)
 ```
+
+## 73. PAIM-C43 correction record — Restore CountingModelGateway Protocol compatibility
+
+PAIM-C43 is a typed-contract / test-harness correction. It restores exact
+structural compatibility between the PAIM-13 reference-side test wrapper
+``CountingModelGateway`` and the canonical production ``ModelGateway``
+Protocol. No production runtime behavior, measurement geometry or scoring
+changed. PAIM-C43 supersedes the typed-contract gap missed by PAIM-C42.
+
+### Defect
+
+``CountingModelGateway`` (``tests/support/paim13_live_harness.py``) declared:
+
+```text
+chat                (ChatRequest) -> ToolAwareResponse      (should be ChatResponse)
+generate_structured (ChatRequest, schema: type) -> Any      (imprecise generic)
+health              () -> Any                               (imprecise)
+```
+
+The canonical Protocol declares:
+
+```text
+chat                (ChatRequest) -> ChatResponse
+generate_structured (ChatRequest, schema: type[T]) -> T   (T bound=BaseModel)
+health              () -> ModelHealth
+```
+
+``ChatResponse`` and ``ToolAwareResponse`` are distinct, unrelated models.
+Pyright therefore rejected ``CountingModelGateway`` wherever a
+``ModelGateway`` was required (``FastAgent`` / ``AgentLoop`` construction) and
+also flagged the ``chat`` return statement inside the wrapper. PAIM-C42 added
+runtime counter tests but no type-diagnostic gate, so this defect survived.
+
+### Correction
+
+Only the test-harness decorator typing was corrected; the production Protocol
+was not weakened or modified:
+
+```text
+chat(...)                -> ChatResponse
+generate_structured(...) -> type[T] -> T   (module-level TypeVar bound=BaseModel)
+health()                 -> ModelHealth
+chat_with_tools / embed  -> unchanged
+```
+
+The wrapper delegate is typed as the canonical ``ModelGateway``, so the
+wrapper now conforms to the production contract rather than vice versa.
+
+### Pyright evidence (literal, targeted file scope)
+
+```text
+uv run pyright --version
+pyright 1.1.414
+
+Baseline (before):
+  tests/support/paim13_live_harness.py:102
+    Type "ChatResponse" is not assignable to return type "ToolAwareResponse"
+  tests/unit/test_pydantic_ai_eval_frozen_observations.py:{129,177,182}
+  tests/integration/test_pydantic_ai_stage9_live_eval_decision.py:151
+  tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py:{161,167}
+    Argument of type "CountingModelGateway" cannot be assigned to parameter
+    "model_gateway" of type "ModelGateway"
+  30 errors total, 7 relevant to CountingModelGateway/ModelGateway
+
+After:
+  23 errors total, 0 relevant to CountingModelGateway/ModelGateway
+  new relevant errors introduced: 0
+  (23 remaining are pre-existing unrelated diagnostics in the same files:
+   synthetic entity/document attribute assignment, deterministic fake
+   repository protocols, tool handler registration variance, and unrelated
+   ToolCall.tool_name access in the live decision fixtures)
+```
+
+Targeted file scope:
+
+```text
+tests/support/paim13_live_harness.py
+tests/unit/test_pydantic_ai_eval_model_counters.py
+tests/unit/test_pydantic_ai_eval_frozen_observations.py
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+```
+
+There is no repository-level Pyright include/scope configuration; the
+reproducible check is the targeted command above.
+
+### New/extended regression tests
+
+```text
+tests/unit/test_pydantic_ai_eval_model_counters.py   (12 tests total)
+  existing 6 literal-counter tests retained
+  TestCountingModelGatewayDelegation:
+    test_chat_preserves_exact_response
+    test_chat_with_tools_preserves_exact_response
+    test_generate_structured_preserves_exact_typed_result
+    test_embed_preserves_exact_result
+    test_health_preserves_exact_model_health
+    test_delegate_exceptions_propagate_unchanged (all five operations)
+```
+
+``chat_with_tools_count`` semantics are unchanged: counting occurs only at
+``chat_with_tools``.
+
+### Acceptance → literal evidence
+
+```text
+chat                -> returned is delegate ChatResponse
+chat_with_tools     -> returned is delegate ToolAwareResponse
+generate_structured -> returned is delegate typed _SampleSchema result
+embed               -> returned is delegate embedding list
+health              -> returned is delegate ModelHealth
+exceptions          -> exc_info.value is sentinel for all five operations
+conformance         -> Pyright targeted scope: 7 relevant -> 0 relevant
+```
+
+### Semantic freeze
+
+```text
+src/** changed:                  NO
+production ModelGateway changed: NO
+PAIM-13 scenario corpus changed: NO
+scoring/metrics changed:         NO
+request counters changed:        NO
+WRITE accounting changed:        NO
+ToolExecutor changed:            NO
+DndAgentPolicy changed:          NO
+Ollama transport changed:        NO
+measurement geometry changed:    NO
+PAIM-13 attempt #4 run:          NO
+```
+
+### Gates (literal)
+
+```text
+uv run pyright --version
+pyright 1.1.414
+
+uv run pytest tests/unit/test_pydantic_ai_eval_model_counters.py
+12 passed
+
+uv run pytest tests/unit/test_pydantic_ai_eval_frozen_observations.py \
+               tests/unit/test_pydantic_ai_eval_construction_preflight.py \
+               tests/unit/test_pydantic_ai_eval_live_harness.py \
+               tests/unit/test_pydantic_ai_eval.py \
+               tests/unit/test_pydantic_ai_eval_unauthorized_write.py
+124 passed, 1 warning
+
+uv run pytest tests/unit/test_model_gateway_contracts.py \
+               tests/unit/test_gateway_protocol.py \
+               tests/integration/test_pydantic_ai_stage9_live_eval_decision.py \
+               tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+76 passed, 29 skipped
+
+uv run pytest   (DND_ASSISTANT_PAIM13_CONFIG / _AGENT_PROFILE explicitly unset)
+5256 passed, 143 skipped, 1 warning
+
+uv run ruff check .
+All checks passed
+
+uv run ruff format --check .
+373 files already formatted
+
+git diff --check
+no whitespace errors
+```
+
+### History integrity
+
+```text
+sections 1–72 unchanged:         YES
+section 73 appended:             YES
+PAIM-C42 evidence:               unchanged
+PAIM-13 attempt #3 evidence:     unchanged
+```
+
+### Final status
+
+```text
+PAIM-C42 — DONE
+PAIM-C43 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE
+PAIM-13 attempt #2 — INCOMPLETE
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+Active next:
+
+```text
+PAIM-13 — Execute measured real eval comparison (attempt #4)
+```

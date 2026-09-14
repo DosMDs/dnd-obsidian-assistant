@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PAIM-C42)
+**Last updated:** 2026-09-14 (PAIM-C43)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -152,6 +152,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C40 — Correct PAIM-C39 evidence bookkeeping | DONE |
 | PAIM-C41 — Restore green baseline and correct C40 evidence | DONE |
 | PAIM-C42 — Seal PAIM-13 pre-live evidence boundaries | DONE |
+| PAIM-C43 — Restore CountingModelGateway Protocol compatibility | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 
@@ -182,6 +183,7 @@ PAIM-C39 — DONE
 PAIM-C40 — historical correction record retained
 PAIM-C41 — DONE
 PAIM-C42 — DONE
+PAIM-C43 — DONE
 PAIM-13 — IN PROGRESS
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
@@ -189,6 +191,23 @@ PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
 PAIM-13 measured attempt #4 — NOT RUN
 PAIM-14 — NOT STARTED
 ```
+
+### PAIM-C43 typed-contract correction
+
+PAIM-C43 supersedes the typed-contract gap missed by PAIM-C42. The
+reference-side test wrapper `CountingModelGateway` declared
+`chat() -> ToolAwareResponse`, `generate_structured(...) -> Any` and
+`health() -> Any`, which are not structurally compatible with the canonical
+`ModelGateway` Protocol (`chat() -> ChatResponse`,
+`generate_structured(schema: type[T]) -> T`, `health() -> ModelHealth`).
+Pyright rejected the wrapper wherever a `ModelGateway` was required, even
+though the PAIM-C42 runtime counter tests passed.
+
+PAIM-C43 corrects only the test-harness decorator typing (the production
+Protocol is unchanged). Targeted Pyright evidence: 7 relevant compatibility
+errors before, 0 after, 0 new relevant errors. See
+`docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 73 for literal evidence.
+PAIM-C42's historical evidence is unchanged.
 
 ### PAIM-13 attempt #3 result
 

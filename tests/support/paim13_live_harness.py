@@ -21,9 +21,10 @@ level.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, TypeVar
 
 import httpx
+from pydantic import BaseModel
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.wrapper import WrapperModel
@@ -36,6 +37,8 @@ from dnd_assistant.errors import NotFoundError
 from dnd_assistant.models.gateway import ModelGateway
 from dnd_assistant.models.types import (
     ChatRequest,
+    ChatResponse,
+    ModelHealth,
     ToolAwareResponse,
 )
 from dnd_assistant.retrieval.types import MatchKind, SearchHit
@@ -63,6 +66,8 @@ from tests.support.pydantic_ai_eval import (
 )
 
 # ── Counting ModelGateway decorator (reference side) ──────────────────────────
+
+T = TypeVar("T", bound=BaseModel)
 
 
 @dataclass
@@ -98,16 +103,16 @@ class CountingModelGateway:
         self._state.chat_with_tools_count += 1
         return self._delegate.chat_with_tools(request, tools)
 
-    def chat(self, request: ChatRequest) -> ToolAwareResponse:
+    def chat(self, request: ChatRequest) -> ChatResponse:
         return self._delegate.chat(request)
 
-    def generate_structured(self, request: ChatRequest, schema: type) -> Any:
+    def generate_structured(self, request: ChatRequest, schema: type[T]) -> T:
         return self._delegate.generate_structured(request, schema)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         return self._delegate.embed(texts)
 
-    def health(self) -> Any:
+    def health(self) -> ModelHealth:
         return self._delegate.health()
 
 

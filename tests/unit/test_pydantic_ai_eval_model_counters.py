@@ -12,12 +12,14 @@ from __future__ import annotations
 from typing import Any
 
 import pytest
+from pydantic import BaseModel
 
 from dnd_assistant.models.types import (
     ChatMessage,
     ChatRequest,
     ChatResponse,
     MessageRole,
+    ModelHealth,
     ToolAwareResponse,
     ToolCall,
 )
@@ -49,8 +51,19 @@ def _tool_call_response() -> ToolAwareResponse:
     )
 
 
+class _SampleSchema(BaseModel):
+    """Minimal Pydantic schema for structured-output delegation tests."""
+
+    value: int = 0
+
+
 class _SpyGateway:
-    """Test-local ``ModelGateway`` spy recording every operation."""
+    """Test-local ``ModelGateway`` spy recording every operation.
+
+    Every operation returns a distinct, pre-constructed exact result
+    instance so delegation identity can be asserted.  When ``error`` is
+    set, every operation raises that exact exception instance.
+    """
 
     def __init__(
         self,
@@ -63,7 +76,17 @@ class _SpyGateway:
         self.embed_calls = 0
         self.health_calls = 0
         self._response = response if response is not None else _text_response()
+        self._chat_response = ChatResponse(
+            message=ChatMessage(role=MessageRole.ASSISTANT, content="ok"),
+        )
+        self._structured_response = _SampleSchema(value=7)
+        self._embedding_response: list[list[float]] = [[0.0] * 4]
+        self._health_response = ModelHealth(reachable=True, model_available=True)
         self._error = error
+
+    def _raise_if_error(self) -> None:
+        if self._error is not None:
+            raise self._error
 
     def chat_with_tools(
         self,
@@ -71,25 +94,28 @@ class _SpyGateway:
         tools: list[ToolPublicDefinition],
     ) -> ToolAwareResponse:
         self.chat_with_tools_calls += 1
-        if self._error is not None:
-            raise self._error
+        self._raise_if_error()
         return self._response
 
     def chat(self, request: ChatRequest) -> ChatResponse:
         self.chat_calls += 1
-        return ChatResponse(message=ChatMessage(role=MessageRole.ASSISTANT, content="ok"))
+        self._raise_if_error()
+        return self._chat_response
 
     def generate_structured(self, request: ChatRequest, schema: type) -> Any:
         self.generate_structured_calls += 1
-        return schema()
+        self._raise_if_error()
+        return self._structured_response
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         self.embed_calls += 1
-        return [[0.0] * 4 for _ in texts]
+        self._raise_if_error()
+        return self._embedding_response
 
-    def health(self) -> Any:
+    def health(self) -> ModelHealth:
         self.health_calls += 1
-        return {"status": "ok"}
+        self._raise_if_error()
+        return self._health_response
 
 
 class TestCountingModelGatewayLiteral:
@@ -153,7 +179,7 @@ class TestCountingModelGatewayLiteral:
         gateway = CountingModelGateway(delegate)
 
         gateway.chat(_make_request())
-        gateway.generate_structured(_make_request(), dict)
+        gateway.generate_structured(_make_request(), _SampleSchema)
         gateway.embed(["a", "b"])
         gateway.health()
 
@@ -162,3 +188,73 @@ class TestCountingModelGatewayLiteral:
         assert delegate.generate_structured_calls == 1
         assert delegate.embed_calls == 1
         assert delegate.health_calls == 1
+
+
+class TestCountingModelGatewayDelegation:
+    """Exact delegate result/exception preservation across all operations."""
+
+    def test_chat_preserves_exact_response(self) -> None:
+        delegate = _SpyGateway()
+        gateway = CountingModelGateway(delegate)
+
+        returned = gateway.chat(_make_request())
+
+        assert returned is delegate._chat_response
+        assert delegate.chat_calls == 1
+
+    def test_chat_with_tools_preserves_exact_response(self) -> None:
+        delegate = _SpyGateway()
+        gateway = CountingModelGateway(delegate)
+
+        returned = gateway.chat_with_tools(_make_request(), [])
+
+        assert returned is delegate._response
+        assert delegate.chat_with_tools_calls == 1
+
+    def test_generate_structured_preserves_exact_typed_result(self) -> None:
+        delegate = _SpyGateway()
+        gateway = CountingModelGateway(delegate)
+
+        returned = gateway.generate_structured(_make_request(), _SampleSchema)
+
+        assert returned is delegate._structured_response
+        assert isinstance(returned, _SampleSchema)
+        assert delegate.generate_structured_calls == 1
+
+    def test_embed_preserves_exact_result(self) -> None:
+        delegate = _SpyGateway()
+        gateway = CountingModelGateway(delegate)
+
+        returned = gateway.embed(["a", "b"])
+
+        assert returned is delegate._embedding_response
+        assert delegate.embed_calls == 1
+
+    def test_health_preserves_exact_model_health(self) -> None:
+        delegate = _SpyGateway()
+        gateway = CountingModelGateway(delegate)
+
+        returned = gateway.health()
+
+        assert returned is delegate._health_response
+        assert delegate.health_calls == 1
+
+    def test_delegate_exceptions_propagate_unchanged(self) -> None:
+        sentinel = _SentinelError("boom")
+        delegate = _SpyGateway(error=sentinel)
+        gateway = CountingModelGateway(delegate)
+
+        operations = (
+            lambda: gateway.chat(_make_request()),
+            lambda: gateway.chat_with_tools(_make_request(), []),
+            lambda: gateway.generate_structured(_make_request(), _SampleSchema),
+            lambda: gateway.embed(["a"]),
+            lambda: gateway.health(),
+        )
+
+        for operation in operations:
+            with pytest.raises(_SentinelError) as exc_info:
+                operation()
+            assert exc_info.value is sentinel
+
+        assert gateway.state.chat_with_tools_count == 1
