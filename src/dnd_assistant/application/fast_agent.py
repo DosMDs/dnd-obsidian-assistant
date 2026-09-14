@@ -31,57 +31,34 @@ Importing this module must NOT eagerly load::
     dnd_assistant.retrieval
     dnd_assistant.cli
 
-PAIM-14 status
+PAIM-15 status
 ──────────────
-The production ``dnd ask`` composition now uses ``PydanticAIFastAgent`` /
-``PydanticAIAgentRuntime``.  The ``FastAgent`` class is retained as explicit
-test/reference infrastructure only (PAIM-11 parity, PAIM-13 live comparison).
-The shared ``AgentDecision`` DTO and ``build_agent_request()`` projection
-remain part of the production Pydantic runtime contract.
+The shared provider-neutral ``AgentDecision`` DTO, the ``build_agent_request()``
+projection and their deterministic serialization helpers now live in
+``dnd_assistant.application.agent_contracts``.  The ``FastAgent`` class remains
+as explicit test/evidence reference infrastructure only (PAIM-11 parity,
+PAIM-13 live comparison) pending PAIM-RETIRE-01.  Production code must import
+the shared contracts from ``agent_contracts``, never from this module.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from dnd_assistant.application.agent_contracts import (
+    AgentDecision,
+    build_agent_request,
+)
 from dnd_assistant.errors import ModelError
-from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION, SYSTEM_PROMPT
+from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
 
 if TYPE_CHECKING:
-    from dnd_assistant.application.agent_context import (
-        AgentContext,
-        AgentContextBuilder,
-        AgentEntityContext,
-        AgentEventContext,
-        AgentSessionContext,
-    )
+    from dnd_assistant.application.agent_context import AgentContextBuilder
     from dnd_assistant.models.gateway import ModelGateway
-    from dnd_assistant.models.types import ToolAwareResponse
-    from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
+    from dnd_assistant.tools.catalog import ToolRegistrySchema
     from dnd_assistant.tools.types import ExecutionContext
 
-
-# ── Public DTO ──────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class AgentDecision:
-    """Provider-neutral snapshot of a single Fast Agent decision step.
-
-    Attributes:
-        prompt_version: Reproducible prompt identity for tracing/evals.
-        request: Exact conversation history used for the first model turn.
-        exposed_tools: Exact allowlist snapshot shown to the model for this turn.
-        response: Validated provider-neutral ``ToolAwareResponse``.
-    """
-
-    prompt_version: str
-    request: ChatRequest
-    exposed_tools: tuple[ToolPublicDefinition, ...]
-    response: ToolAwareResponse
+__all__ = ["AgentDecision", "FastAgent", "build_agent_request"]
 
 
 # ── FastAgent ───────────────────────────────────────────────────────────────────
@@ -162,88 +139,3 @@ class FastAgent:
             exposed_tools=exposed_tools,
             response=response,
         )
-
-
-# ── Public deterministic request builder ───────────────────────────────────────
-
-
-def build_agent_request(context: AgentContext) -> ChatRequest:
-    """Build a deterministic ``ChatRequest`` from an ``AgentContext``.
-
-    This is the shared projection used by both the custom ``FastAgent`` and
-    the migration ``PydanticAIFastAgent``.  It produces the exact provider-
-    neutral ``SYSTEM + USER`` conversation snapshot.
-
-    The USER payload is deterministic JSON with ``sort_keys=True``,
-    ``separators=(",", ":")``, ``ensure_ascii=False``, and ``allow_nan=False``.
-    """
-    user_payload = _build_user_json(context)
-    return ChatRequest(
-        messages=(
-            ChatMessage(role=MessageRole.SYSTEM, content=SYSTEM_PROMPT),
-            ChatMessage(role=MessageRole.USER, content=user_payload),
-        ),
-    )
-
-
-# ── Deterministic USER JSON payload ────────────────────────────────────────────
-
-
-def _build_user_json(context: AgentContext) -> str:
-    """Build a deterministic JSON string from an ``AgentContext``.
-
-    The payload uses explicit field mapping so that future fields added to
-    ``AgentContext`` do not automatically leak into model context.
-    """
-    payload: dict[str, object] = {
-        "user_input": context.user_input,
-        "current_world_tick": context.current_world_tick,
-        "active_session": _serialize_session(context.active_session),
-        "relevant_entities": [_serialize_entity(e) for e in context.relevant_entities],
-        "recent_events": [_serialize_event(e) for e in context.recent_events],
-    }
-    return json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    )
-
-
-def _serialize_session(
-    session: AgentSessionContext | None,
-) -> dict[str, object] | None:
-    """Serialize an ``AgentSessionContext`` or return ``None``."""
-    if session is None:
-        return None
-    # Avoid circular import: AgentSessionContext is a frozen dataclass
-    return {
-        "session_id": session.session_id,
-        "world_tick_start": session.world_tick_start,
-    }
-
-
-def _serialize_entity(entity: AgentEntityContext) -> dict[str, object]:
-    """Serialize an ``AgentEntityContext``."""
-    return {
-        "entity_id": entity.entity_id,
-        "entity_type": entity.entity_type,
-        "name": entity.name,
-        "status": entity.status,
-        "knowledge_status": entity.knowledge_status,
-        "tags": list(entity.tags),
-        "body_excerpt": entity.body_excerpt,
-        "body_truncated": entity.body_truncated,
-    }
-
-
-def _serialize_event(event: AgentEventContext) -> dict[str, object]:
-    """Serialize an ``AgentEventContext``."""
-    return {
-        "event_id": event.event_id,
-        "event_type": event.event_type,
-        "world_tick": event.world_tick,
-        "text_excerpt": event.text_excerpt,
-        "text_truncated": event.text_truncated,
-    }

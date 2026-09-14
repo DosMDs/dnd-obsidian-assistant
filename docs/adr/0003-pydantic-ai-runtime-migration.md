@@ -1,6 +1,6 @@
 # ADR-0003 — Controlled Pydantic AI Runtime Migration
 
-- **Status:** Accepted for controlled migration; final runtime adoption pending
+- **Status:** Accepted — Pydantic AI is the production agent runtime (PAIM-15 verdict `ACCEPTED`); executable reference-runtime retirement pending `PAIM-RETIRE-01`
 - **Date:** 2026-09-04
 - **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 - **Migration branch:** `feat/pydantic-ai-runtime`
@@ -207,4 +207,35 @@ Canonical task plan:
 docs/migrations/001_PYDANTIC_AI_RUNTIME.md
 ```
 
-`S9-07` and Stage 10 are deferred until PAIM final architecture review.
+## Final disposition (PAIM-15)
+
+PAIM-15 recorded the final migration verdict:
+
+```text
+ACCEPTED
+```
+
+Production `dnd ask` uses the project-owned Pydantic AI runtime
+(`PydanticAIAgentRuntime` → `DndAgentRunPreparer` / `DndAgentPolicy` →
+`PydanticAIToolBridge` → `ToolExecutor` → services → `VaultRepository`).
+Project-owned boundaries (policy, authorization, `ToolExecutor`, Vault) are
+unchanged.
+
+PAIM-15 extracted the shared provider-neutral contracts into
+`dnd_assistant.application.agent_contracts` so the production runtime no longer
+imports the reference `FastAgent` / `AgentLoop` / `AgentToolExecutionService`
+modules. Those reference implementations are retained temporarily as
+test/evidence infrastructure only and are to be retired by `PAIM-RETIRE-01`.
+`ModelGateway` and native `OllamaModelProvider` remain as provider-neutral /
+non-agent model infrastructure and are not part of the `dnd ask` orchestration.
+
+Sequencing after PAIM-15:
+
+```text
+PAIM-15
+→ PAIM-RETIRE-01
+→ S9-07
+→ Stage 10
+```
+
+`S9-07` becomes executable only after `PAIM-RETIRE-01` is independently accepted.

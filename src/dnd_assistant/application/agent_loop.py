@@ -28,26 +28,35 @@ Importing this module must NOT eagerly load::
     dnd_assistant.retrieval
     dnd_assistant.cli
 
-PAIM-14 status
+PAIM-15 status
 ──────────────
-The production ``dnd ask`` composition now uses ``PydanticAIAgentRuntime``.
-The ``AgentLoop`` class and its private multi-call helpers are retained as
-explicit test/reference infrastructure only (PAIM-11 parity, PAIM-13 live
-comparison).  The shared DTOs (``AgentRunResult``, ``AgentTextOutcome``,
-``AgentOutcomeKind``, ``_parse_agent_outcome``, ``MAX_TOOL_CALLS_PER_RUN``)
-remain part of the production Pydantic runtime contract.
+The shared DTOs (``AgentRunResult``, ``AgentTextOutcome``, ``AgentOutcomeKind``,
+``parse_agent_outcome``) and the canonical ``MAX_TOOL_CALLS_PER_RUN`` constant
+now live in ``dnd_assistant.application.agent_contracts`` and
+``dnd_assistant.application.dnd_agent_policy`` respectively.  They are
+re-exported here for compatibility.  The ``AgentLoop`` class and its private
+multi-call helpers remain as explicit test/evidence reference infrastructure
+only (PAIM-11 parity, PAIM-13 live comparison) pending PAIM-RETIRE-01.
+Production code must import the shared contracts from ``agent_contracts``,
+never from this module.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from enum import StrEnum
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, field_validator
-from pydantic import ValidationError as PydanticValidationError
-
+from dnd_assistant.application.agent_contracts import (
+    AgentOutcomeKind,
+    AgentRunResult,
+    AgentTextOutcome,
+    parse_agent_outcome,
+)
+from dnd_assistant.application.dnd_agent_policy import MAX_TOOL_CALLS_PER_RUN
 from dnd_assistant.errors import ModelError
+
+# Backward-compatible private alias retained for reference tests and the
+# reference ``AgentLoop`` implementation.
+_parse_agent_outcome = parse_agent_outcome
 
 if TYPE_CHECKING:
     from dnd_assistant.application.agent_context import AgentContextBuilder
@@ -55,116 +64,20 @@ if TYPE_CHECKING:
         AgentToolExecutionResult,
         AgentToolExecutionService,
     )
-    from dnd_assistant.application.fast_agent import AgentDecision, FastAgent
+    from dnd_assistant.application.fast_agent import FastAgent
     from dnd_assistant.models.gateway import ModelGateway
-    from dnd_assistant.models.types import ToolAwareResponse, ToolCall
+    from dnd_assistant.models.types import ToolCall
     from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
     from dnd_assistant.tools.types import ExecutionContext
 
-
-# ── Hard bounds ─────────────────────────────────────────────────────────────────
-
-
-MAX_TOOL_CALLS_PER_RUN: int = 4
-"""Maximum number of initial tool calls accepted in one bounded run.
-
-0 calls -> direct terminal outcome.
-1 call  -> READ or WRITE through ToolExecutor.
-2..4 calls -> READ-only sequential batch.
-5+ calls -> rejected before any execution.
-"""
-
-
-# ── Terminal outcome schema ────────────────────────────────────────────────────
-
-
-class AgentOutcomeKind(StrEnum):
-    """Deterministic terminal outcome classification for a Fast Agent run.
-
-    ``RESPOND`` — the model produced a final answer.
-    ``CLARIFY`` — the model needs more information from the user.
-    """
-
-    RESPOND = "respond"
-    CLARIFY = "clarify"
-
-
-class AgentTextOutcome(BaseModel):
-    """Provider-neutral validated terminal outcome from model output.
-
-    Attributes:
-        kind: ``RESPOND`` or ``CLARIFY``.
-        message: Non-empty, non-whitespace-only user-facing text.
-    """
-
-    kind: AgentOutcomeKind
-    message: str
-
-    model_config = {"extra": "forbid", "frozen": True}
-
-    @field_validator("message")
-    @classmethod
-    def _message_non_empty(cls, value: str) -> str:
-        if not value:
-            raise ValueError("message must not be empty")
-        if not value.strip():
-            raise ValueError("message must not be whitespace-only")
-        return value
-
-
-# ── AgentRunResult ─────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class AgentRunResult:
-    """Complete result of one bounded Fast Agent run.
-
-    Attributes:
-        initial_decision: The ``AgentDecision`` from the first model call.
-        tool_executions: Tuple of ``AgentToolExecutionResult`` values, one
-            per executed tool call.  Empty for the direct path.
-        final_response: The final ``ToolAwareResponse`` (either the initial
-            decision response or the second model call response).
-        outcome: The validated terminal ``AgentTextOutcome``.
-    """
-
-    initial_decision: AgentDecision
-    tool_executions: tuple[AgentToolExecutionResult, ...]
-    final_response: ToolAwareResponse
-    outcome: AgentTextOutcome
-
-
-# ── Terminal content parsing ───────────────────────────────────────────────────
-
-
-def _parse_agent_outcome(response: ToolAwareResponse) -> AgentTextOutcome:
-    """Parse a ``ToolAwareResponse`` with zero tool calls into an ``AgentTextOutcome``.
-
-    Args:
-        response: A ``ToolAwareResponse`` whose assistant message has zero
-            tool calls and whose content is a valid ``AgentTextOutcome`` JSON.
-
-    Returns:
-        A validated ``AgentTextOutcome``.
-
-    Raises:
-        ModelError: If the response contains tool calls, or the content
-            is not valid ``AgentTextOutcome`` JSON.
-    """
-    if response.message.tool_calls:
-        raise ModelError("Cannot parse AgentTextOutcome from a response with tool calls")
-
-    content = response.message.content
-    if not content:
-        raise ModelError("Cannot parse AgentTextOutcome from empty content")
-
-    try:
-        return AgentTextOutcome.model_validate_json(content)
-    except PydanticValidationError as exc:
-        raise ModelError(
-            "Model output failed AgentTextOutcome validation",
-            cause=exc,
-        ) from exc
+__all__ = [
+    "MAX_TOOL_CALLS_PER_RUN",
+    "AgentLoop",
+    "AgentOutcomeKind",
+    "AgentRunResult",
+    "AgentTextOutcome",
+    "parse_agent_outcome",
+]
 
 
 # ── Multi-call safety helpers ──────────────────────────────────────────────────

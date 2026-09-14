@@ -9,8 +9,11 @@ avoiding contamination from pytest's own collection phase.
 
 from __future__ import annotations
 
+import ast
 import importlib
+import importlib.util
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -131,6 +134,7 @@ def test_gateway_does_not_import_tools() -> None:
 _REFERENCE_RUNTIME_MODULES: tuple[str, ...] = (
     "dnd_assistant.application.agent_loop",
     "dnd_assistant.application.fast_agent",
+    "dnd_assistant.application.agent_tool_execution",
     "dnd_assistant.models.ollama",
     "dnd_assistant.models.ollama_chat_adapter",
     "dnd_assistant.models.ollama_tool_adapter",
@@ -153,6 +157,50 @@ def test_cli_ask_does_not_import_reference_runtime() -> None:
     offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in loaded)
     assert not offending, (
         f"production CLI ask command imported retained reference-only runtime modules: {offending}"
+    )
+
+
+# ── production Pydantic runtime must not import the reference runtime ─────
+# PAIM-15 relocated the shared provider-neutral contracts to
+# ``dnd_assistant.application.agent_contracts`` so the production Pydantic
+# runtime no longer imports the reference ``FastAgent`` / ``AgentLoop`` /
+# ``AgentToolExecutionService`` modules.  The reference modules are imported
+# lazily inside functions, so a clean-import check is insufficient; this AST
+# scan covers imports at every nesting depth (normal and deferred/call-time).
+
+_PRODUCTION_PYDANTIC_RUNTIME_MODULES: tuple[str, ...] = (
+    "dnd_assistant.application.pydantic_ai_agent_runtime",
+    "dnd_assistant.application.pydantic_ai_fast_agent",
+)
+
+
+def _module_import_targets(module_path: str) -> set[str]:
+    """Return every module named by an import statement at any nesting depth.
+
+    Walks the full AST so that deferred/call-time imports inside functions or
+    methods are included, not only module-level imports.
+    """
+    spec = importlib.util.find_spec(module_path)
+    assert spec is not None and spec.origin is not None, f"cannot locate module {module_path}"
+    source = Path(spec.origin).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+
+    targets: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            targets.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            targets.add(node.module)
+    return targets
+
+
+@pytest.mark.parametrize("module_path", _PRODUCTION_PYDANTIC_RUNTIME_MODULES)
+def test_production_pydantic_runtime_does_not_import_reference_modules(module_path: str) -> None:
+    targets = _module_import_targets(module_path)
+    offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in targets)
+    assert not offending, (
+        f"{module_path} imports retained reference-only runtime modules: {offending}. "
+        "Import shared contracts from dnd_assistant.application.agent_contracts instead."
     )
 
 

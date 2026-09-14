@@ -41,6 +41,9 @@ This module must not import from::
     dnd_assistant.retrieval
     dnd_assistant.cli
     dnd_assistant.tools.executor
+    dnd_assistant.application.fast_agent
+    dnd_assistant.application.agent_loop
+    dnd_assistant.application.agent_tool_execution
 """
 
 from __future__ import annotations
@@ -59,7 +62,7 @@ from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
 if TYPE_CHECKING:
     from pydantic_ai.run import AgentRunResult as PydanticAgentRunResult
 
-    from dnd_assistant.application.fast_agent import AgentDecision
+    from dnd_assistant.application.agent_contracts import AgentDecision
     from dnd_assistant.application.pydantic_ai_run_deps import (
         DndAgentRunPreparer,
         PreparedDndAgentRun,
@@ -129,7 +132,7 @@ class PydanticAIFastAgent:
                 requests an unknown/hidden tool, arguments are malformed,
                 or any other framework error occurs.
         """
-        from dnd_assistant.application.fast_agent import (
+        from dnd_assistant.application.agent_contracts import (
             AgentDecision,
             build_agent_request,
         )

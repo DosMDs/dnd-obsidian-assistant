@@ -47,6 +47,9 @@ This module must not import from::
     dnd_assistant.retrieval
     dnd_assistant.cli
     dnd_assistant.tools.executor
+    dnd_assistant.application.fast_agent
+    dnd_assistant.application.agent_loop
+    dnd_assistant.application.agent_tool_execution
 """
 
 from __future__ import annotations
@@ -69,11 +72,11 @@ if TYPE_CHECKING:
     from pydantic_ai.messages import ModelMessage, ModelResponse
     from pydantic_ai.run import AgentRunResult as PydanticAgentRunResult
 
-    from dnd_assistant.application.agent_loop import AgentRunResult
-    from dnd_assistant.application.agent_tool_execution import (
+    from dnd_assistant.application.agent_contracts import (
+        AgentDecision,
+        AgentRunResult,
         AgentToolExecutionResult,
     )
-    from dnd_assistant.application.fast_agent import AgentDecision
     from dnd_assistant.application.pydantic_ai_run_deps import (
         DndAgentDeps,
         DndAgentRunPreparer,
@@ -148,7 +151,7 @@ class PydanticAIAgentRuntime:
             DndAssistantError: Propagated from tool execution.
             Exception: Propagated from tool execution.
         """
-        from dnd_assistant.application.fast_agent import (
+        from dnd_assistant.application.agent_contracts import (
             build_agent_request,
         )
         from dnd_assistant.prompts.agent_v2 import SYSTEM_PROMPT
@@ -232,7 +235,7 @@ def _make_deferred_handler(
     Returns:
         A tuple of ``(HandleDeferredToolCalls, list[AgentToolExecutionResult])``.
     """
-    from dnd_assistant.application.agent_tool_execution import (
+    from dnd_assistant.application.agent_contracts import (
         build_agent_tool_execution_result,
     )
     from dnd_assistant.application.pydantic_ai_response_adapter import (
@@ -351,11 +354,11 @@ def _map_to_agent_run_result(
     Raises:
         ModelError: If the result type is unexpected or terminal parsing fails.
     """
-    from dnd_assistant.application.agent_loop import (
+    from dnd_assistant.application.agent_contracts import (
+        AgentDecision,
         AgentRunResult,
-        _parse_agent_outcome,
+        parse_agent_outcome,
     )
-    from dnd_assistant.application.fast_agent import AgentDecision
     from dnd_assistant.models.types import (
         ChatMessage,
         MessageRole,
@@ -385,7 +388,7 @@ def _map_to_agent_run_result(
                 ),
             )
 
-            outcome = _parse_agent_outcome(final_response)
+            outcome = parse_agent_outcome(final_response)
 
             return AgentRunResult(
                 initial_decision=initial_decision,
@@ -417,7 +420,7 @@ def _map_to_agent_run_result(
             response=initial_response,
         )
 
-        outcome = _parse_agent_outcome(initial_response)
+        outcome = parse_agent_outcome(initial_response)
 
         return AgentRunResult(
             initial_decision=initial_decision,
@@ -471,7 +474,7 @@ def _build_initial_decision(
     Returns:
         An ``AgentDecision`` representing the first model response.
     """
-    from dnd_assistant.application.fast_agent import AgentDecision
+    from dnd_assistant.application.agent_contracts import AgentDecision
     from dnd_assistant.models.types import (
         ChatMessage,
         MessageRole,

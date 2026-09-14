@@ -65,6 +65,33 @@
 | S9-C11 — Reconcile S9-C10 canonical test evidence | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
+## PAIM-15 runtime status
+
+The PAIM-15 final architecture review recorded the migration verdict
+`ACCEPTED`. Since PAIM-14 the production `dnd ask` composition uses the
+project-owned Pydantic AI runtime boundary:
+
+```text
+CLI (cli/ask.py)
+→ PydanticAIAgentRuntime
+→ DndAgentRunPreparer / DndAgentPolicy
+→ PydanticAIToolBridge
+→ ToolExecutor
+→ services
+→ VaultRepository
+```
+
+The `FastAgent`, `AgentLoop` and `AgentToolExecutionService` implementations
+documented in this stage history are **TEST/REFERENCE ONLY** pending
+`PAIM-RETIRE-01`; production no longer instantiates them. The shared
+provider-neutral contracts (`AgentDecision`, `build_agent_request`,
+`AgentRunResult`, `AgentTextOutcome`, `AgentOutcomeKind`,
+`parse_agent_outcome`, `AgentToolExecutionResult`,
+`build_agent_tool_execution_result`) now live in
+`dnd_assistant.application.agent_contracts`.
+
+Stage sequencing after PAIM-15: `PAIM-RETIRE-01` → `S9-07` → Stage 10.
+
 ## S9-02 — One-step FastAgent model decision boundary
 
 **Accepted starting boundary:** `76666cd5ebdfe92106a0e63e0e1489df4d8a0b7e`

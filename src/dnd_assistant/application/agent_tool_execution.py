@@ -27,42 +27,38 @@ Importing this module must NOT eagerly load::
     dnd_assistant.storage
     dnd_assistant.retrieval
     dnd_assistant.cli
+
+PAIM-15 status
+──────────────
+The shared ``AgentToolExecutionResult`` DTO and ``build_agent_tool_execution_result()``
+factory now live in ``dnd_assistant.application.agent_contracts`` and are
+re-exported here for compatibility.  ``AgentToolExecutionService`` remains as
+explicit test/evidence reference infrastructure only (consumed by the reference
+``AgentLoop``) pending PAIM-RETIRE-01.  Production code must import the shared
+contracts from ``agent_contracts``, never from this module.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from pydantic_core import PydanticSerializationError
-
+from dnd_assistant.application.agent_contracts import (
+    AgentToolExecutionResult,
+    build_agent_tool_execution_result,
+)
 from dnd_assistant.errors import ValidationError
 
 if TYPE_CHECKING:
-    from dnd_assistant.application.fast_agent import AgentDecision
-    from dnd_assistant.models.types import ChatMessage, ToolCall
+    from dnd_assistant.application.agent_contracts import AgentDecision
+    from dnd_assistant.models.types import ToolCall
     from dnd_assistant.tools.executor import ToolExecutor
-    from dnd_assistant.tools.types import BaseModel, ExecutionContext
+    from dnd_assistant.tools.types import ExecutionContext
 
-
-# ── Public DTO ──────────────────────────────────────────────────────────────────
-
-
-@dataclass(frozen=True, slots=True)
-class AgentToolExecutionResult:
-    """Result of executing one validated tool call.
-
-    Attributes:
-        tool_call: The exact ``ToolCall`` that was executed.
-        output: The validated typed ``BaseModel`` returned by ``ToolExecutor``.
-        tool_message: A provider-neutral ``ChatMessage`` with ``role=TOOL``
-            containing the deterministic JSON-serialised output.
-    """
-
-    tool_call: ToolCall
-    output: BaseModel
-    tool_message: ChatMessage
+__all__ = [
+    "AgentToolExecutionResult",
+    "AgentToolExecutionService",
+    "build_agent_tool_execution_result",
+]
 
 
 # ── AgentToolExecutionService ───────────────────────────────────────────────────
@@ -115,7 +111,7 @@ class AgentToolExecutionService:
         """
         # Deferred runtime imports: keep provider/tool/storage packages out
         # of module-import scope.
-        from dnd_assistant.application.fast_agent import AgentDecision as AD
+        from dnd_assistant.application.agent_contracts import AgentDecision as AD
         from dnd_assistant.models.types import ToolCall as TC
         from dnd_assistant.tools.types import ExecutionContext as EC
 
@@ -213,80 +209,3 @@ def _json_args_equal(left: object, right: object) -> bool:
             return False
         return all(_json_args_equal(a, b) for a, b in zip(left, right, strict=True))
     return left == right
-
-
-def build_agent_tool_execution_result(
-    tool_call: ToolCall,
-    output: BaseModel,
-) -> AgentToolExecutionResult:
-    """Build a frozen ``AgentToolExecutionResult`` from a tool call and output.
-
-    Reuses the deterministic TOOL-message serialisation from
-    ``_build_tool_message``.  This is the shared factory used by both
-    ``AgentToolExecutionService`` and ``PydanticAIAgentRuntime``.
-
-    Args:
-        tool_call: The ``ToolCall`` that was executed.
-        output: The validated typed ``BaseModel`` from ``ToolExecutor``.
-
-    Returns:
-        An ``AgentToolExecutionResult`` with deterministic TOOL message.
-    """
-    tool_message = _build_tool_message(output, tool_call)
-    return AgentToolExecutionResult(
-        tool_call=tool_call,
-        output=output,
-        tool_message=tool_message,
-    )
-
-
-def _build_tool_message(
-    output: BaseModel,
-    tool_call: ToolCall,
-) -> ChatMessage:
-    """Build a deterministic TOOL ``ChatMessage`` from a validated output.
-
-    The output is serialised using Pydantic's ``model_dump(mode="json")``
-    followed by deterministic ``json.dumps``.
-
-    Args:
-        output: The validated typed ``BaseModel`` from ``ToolExecutor``.
-        tool_call: The original ``ToolCall`` (for name and call_id).
-
-    Returns:
-        A ``ChatMessage`` with ``role=TOOL``.
-
-    Raises:
-        ValidationError: If the validated output cannot be serialised to
-            model-facing JSON.
-    """
-    from dnd_assistant.models.types import ChatMessage, MessageRole
-
-    try:
-        json_ready = output.model_dump(mode="json", by_alias=True)
-    except PydanticSerializationError as exc:
-        raise ValidationError(
-            "Failed to serialise tool output to JSON",
-            cause=exc,
-        ) from exc
-
-    try:
-        content = json.dumps(
-            json_ready,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        )
-    except (ValueError, TypeError, OverflowError) as exc:
-        raise ValidationError(
-            "Failed to serialise tool output to JSON",
-            cause=exc,
-        ) from exc
-
-    return ChatMessage(
-        role=MessageRole.TOOL,
-        content=content,
-        tool_name=tool_call.name,
-        tool_call_id=tool_call.call_id,
-    )

@@ -10784,3 +10784,221 @@ boundary guards. PAIM-13 live measurement was not rerun (PAIM-13 env unset).
    `build_agent_request`) out of the reference modules so `agent_loop.py` /
    `fast_agent.py` become reference-only.
 3. Final outcome classification `ACCEPTED` / `PARTIAL` / `REJECTED`.
+
+## 76. PAIM-15 completion record — final architecture verdict ACCEPTED
+
+**Status:** DONE
+**Completed:** 2026-09-14
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `e726ad0c5822e09d1b6d83c961139d54faec47b5`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Reason
+
+PAIM-15 is the final architecture review of the Pydantic AI migration. It
+decides `ACCEPTED` / `PARTIAL` / `REJECTED`, extracts the shared
+provider-neutral contracts so the production runtime carries no reference
+imports, and defines the reference-runtime retirement sequence. The executable
+reference runtime is **not** deleted in PAIM-15.
+
+### Final verdict
+
+```text
+ACCEPTED
+```
+
+The verdict means:
+
+- production `dnd ask` uses the Pydantic AI runtime;
+- `ToolExecutor`, `DndAgentPolicy`, authorization, tool exposure and Vault
+  boundaries remain project-owned;
+- no superseded custom agent runtime is instantiated by production;
+- the executable reference runtime is temporarily retained only as explicit
+  test/evidence infrastructure pending `PAIM-RETIRE-01`.
+
+This is not `PARTIAL`: no custom generic runtime component is retained in
+production for architectural superiority. It is not `REJECTED`: the migration
+preserved the Stage-9 safety invariants and no blocker criterion fired.
+
+### Production architecture (verified)
+
+```text
+cli/ask.py
+→ cli/agent_runtime.py::compose_ask_runtime
+→ build_pydantic_ai_ollama_model(profile)
+→ PydanticAIToolBridge(registry=tool_registry)
+→ DndAgentRunPreparer(context_builder, catalog, bridge)
+→ PydanticAIAgentRuntime(run_preparer, model)
+→ DndAgentPolicy.admit_tool_batch
+→ PydanticAIToolBridge.execute
+→ ToolExecutor.execute
+→ registered tool handlers → services → VaultRepository
+```
+
+### Neutral shared contract extraction
+
+The production runtime previously imported shared DTOs from the reference
+modules at call time. PAIM-15 created:
+
+```text
+src/dnd_assistant/application/agent_contracts.py
+```
+
+containing only genuinely production-shared, provider-neutral contracts and
+their deterministic helpers:
+
+```text
+AgentDecision
+build_agent_request (+ deterministic serialization helpers)
+AgentOutcomeKind
+AgentTextOutcome
+AgentRunResult
+parse_agent_outcome
+AgentToolExecutionResult
+build_agent_tool_execution_result (+ deterministic TOOL-message builder)
+```
+
+`MAX_TOOL_CALLS_PER_RUN` remains canonically owned by
+`application/dnd_agent_policy.py`; `agent_loop.py` re-exports it for
+compatibility and does not re-own it.
+
+The reference modules now import the shared contracts from `agent_contracts`
+and re-export the prior names for compatibility:
+
+- `fast_agent.py` — retains `FastAgent`, imports `AgentDecision` /
+  `build_agent_request`.
+- `agent_loop.py` — retains `AgentLoop` and its reference-only multi-call
+  helpers, imports `AgentRunResult` / `parse_agent_outcome` / outcome types,
+  and keeps `_parse_agent_outcome` as an alias.
+- `agent_tool_execution.py` — retains `AgentToolExecutionService`, imports the
+  shared execution DTO/builder.
+
+Reference behavior is unchanged.
+
+`pydantic_ai_agent_runtime.py` and `pydantic_ai_fast_agent.py` now import
+shared contracts/helpers only from `agent_contracts`, neither at module import
+time nor at call time.
+
+### Boundary contract
+
+`tests/contract/test_boundaries.py` adds an AST-based scan
+(`test_production_pydantic_runtime_does_not_import_reference_modules`) that
+walks every import node at any nesting depth for
+`application.pydantic_ai_agent_runtime` and
+`application.pydantic_ai_fast_agent` and asserts none of the retained reference
+modules is imported. The AST scan is required because the prior reference
+imports were deferred/call-time and a clean-import check could not observe them.
+
+### Reference runtime classification
+
+```text
+application/fast_agent.py::FastAgent                            TEST/REFERENCE ONLY
+application/agent_loop.py::AgentLoop                            TEST/REFERENCE ONLY
+application/agent_tool_execution.py::AgentToolExecutionService  TEST/REFERENCE ONLY
+```
+
+`ModelGateway` and native `OllamaModelProvider` (+ `ollama_chat_adapter`,
+`ollama_tool_adapter`, `ollama_embedding_adapter`) are retained as
+provider-neutral / non-agent model infrastructure (embeddings, structured
+generation, health). They are not part of the current `dnd ask` production
+orchestration path and are not part of the PAIM-RETIRE-01 deletion scope.
+
+### PAIM-13 Layer-A evidence correction
+
+The architecture verdict does not depend on live model behavior. For the
+historical measured attempt #4:
+
+- Layer B (full-turn) remains valid runtime/full-turn evidence.
+- Layer-A metrics that depend on `ToolCall` observation are **not valid
+  evidence**: the Layer-A observers read the wrong `ToolCall` field
+  (`tc.tool_name` instead of the canonical `tc.name`), so emitted tool calls
+  were swallowed as observation errors. This was corrected by
+  `PAIM-EVAL-CORR-01`.
+- The historical `BOTH_FAIL` scenarios are not claimed to have been caused
+  entirely by this defect.
+- The invalid Layer-A tool metrics are not reinterpreted as actual model
+  failures or passes.
+- Sections 1–75 are unchanged; this record is appended. No live Ollama rerun
+  was performed in PAIM-15.
+
+### Changed files
+
+```text
+src/dnd_assistant/application/agent_contracts.py    (new)
+src/dnd_assistant/application/fast_agent.py
+src/dnd_assistant/application/agent_loop.py
+src/dnd_assistant/application/agent_tool_execution.py
+src/dnd_assistant/application/pydantic_ai_agent_runtime.py
+src/dnd_assistant/application/pydantic_ai_fast_agent.py
+tests/contract/test_boundaries.py
+DEVELOPMENT_STATUS.md
+docs/adr/0003-pydantic-ai-runtime-migration.md
+docs/stages/09_FAST_AGENT.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+```
+
+No `pyproject.toml` / `uv.lock` change. No policy, runtime-semantics,
+Vault/domain/storage/retrieval, tool-handler or Ollama-transport change.
+
+### Quality gates (literal)
+
+```text
+uv run pyright
+  0 errors, 0 warnings, 0 informations
+
+uv run ruff check .
+  All checks passed!
+
+uv run ruff format --check .
+  377 files already formatted
+
+uv run pytest tests/contract/test_boundaries.py tests/unit/test_dnd_agent_policy.py
+  tests/unit/test_pydantic_ai_* tests/integration/test_pydantic_ai_* -q
+  677 passed, 43 skipped, 1 warning in 24.74s
+
+uv run pytest -q
+  5269 passed, 143 skipped, 1 warning in 172.51s
+
+git diff --check
+  no whitespace errors
+```
+
+No real Ollama run was required or performed.
+
+### History integrity
+
+```text
+sections 1–75 unchanged:            YES
+section 76 appended:                YES
+PAIM-13 attempts #1–#4:             unchanged
+PAIM-C42 / PAIM-C43 evidence:       unchanged
+```
+
+### Sequencing
+
+```text
+PAIM-15
+→ PAIM-RETIRE-01
+→ S9-07
+→ Stage 10
+```
+
+`S9-07` becomes executable only after `PAIM-RETIRE-01` is independently
+accepted. `PAIM-RETIRE-01` owns deletion of the superseded `FastAgent` /
+`AgentLoop` / `AgentToolExecutionService` runtime implementations, deletion or
+reclassification of reference-only tests and live-parity harnesses,
+preservation of historical migration evidence, and confirmation that
+`ModelGateway` / Ollama non-agent capabilities remain intact.
+
+### Final status
+
+```text
+PAIM-15 — DONE
+Migration verdict — ACCEPTED
+```
+
+Active next:
+
+```text
+PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests
+```

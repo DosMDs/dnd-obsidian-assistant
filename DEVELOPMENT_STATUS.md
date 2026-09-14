@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PYR-01E)
+**Last updated:** 2026-09-14 (PAIM-15)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
+**Roadmap position:** Stage 9 in progress; Pydantic AI migration `ACCEPTED`; reference-runtime retirement (`PAIM-RETIRE-01`) before S9-07
 **Active stage:** Stage 9 — Fast Agent
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -63,7 +63,9 @@ docs/adr/          architecture decisions
 | S9-06 — CLI `dnd ask` + mocked/parser-backed end-to-end integration | DONE |
 | S9-07 — Full Stage-9 historical review / completion | NOT STARTED |
 
-`S9-07` is intentionally deferred until the PAIM final architecture decision. Stage 10 must not start before S9-07 completes.
+`S9-07` is intentionally deferred until the PAIM final architecture decision and the
+reference-runtime retirement task (`PAIM-RETIRE-01`) are accepted. Stage 10 must not
+start before S9-07 completes.
 
 ## Accepted custom reference baseline
 
@@ -154,7 +156,8 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C42 — Seal PAIM-13 pre-live evidence boundaries | DONE |
 | PAIM-C43 — Restore CountingModelGateway Protocol compatibility | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | DONE |
-| PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
+| PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | DONE |
+| PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests | NOT STARTED |
 
 ## PAIM outcome policy
 
@@ -206,9 +209,97 @@ PAIM-13 — DONE
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
 PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
-PAIM-13 measured attempt #4 — VALID / passes comparison gates
+PAIM-13 measured attempt #4 — VALID / passes comparison gates (see Layer-A correction below)
 PAIM-14 — DONE
+PAIM-15 — DONE (verdict: ACCEPTED)
 ```
+
+Active next:
+
+```text
+PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests
+```
+
+## PAIM-15 final architecture review — verdict `ACCEPTED`
+
+Completed 2026-09-14 on `feat/pydantic-ai-runtime`.
+
+### Migration verdict
+
+```text
+ACCEPTED
+```
+
+The verdict means:
+
+- production `dnd ask` uses the Pydantic AI runtime;
+- `ToolExecutor`, `DndAgentPolicy`, authorization, exposure policy and Vault
+  boundaries remain project-owned;
+- no superseded custom agent runtime is instantiated by production;
+- the executable reference runtime is temporarily retained **only** as explicit
+  test/evidence infrastructure pending `PAIM-RETIRE-01`.
+
+### Current production architecture
+
+```text
+CLI (cli/ask.py)
+→ PydanticAIAgentRuntime (application/pydantic_ai_agent_runtime.py)
+→ DndAgentRunPreparer / DndAgentPolicy (application/pydantic_ai_run_deps.py,
+  application/dnd_agent_policy.py)
+→ PydanticAIToolBridge (application/pydantic_ai_tool_bridge.py)
+→ ToolExecutor (tools/executor.py)
+→ services
+→ VaultRepository
+```
+
+### Neutral shared contracts (PAIM-15 extraction)
+
+PAIM-15 moved the production-shared provider-neutral DTOs/helpers out of the
+reference-runtime modules into:
+
+```text
+src/dnd_assistant/application/agent_contracts.py
+```
+
+The production Pydantic runtime (`pydantic_ai_agent_runtime.py`,
+`pydantic_ai_fast_agent.py`) now imports shared contracts **only** from
+`agent_contracts`, never from `application.fast_agent`,
+`application.agent_loop` or `application.agent_tool_execution`. A new
+`tests/contract/test_boundaries.py` AST scan enforces this for normal and
+deferred/call-time imports.
+
+### Reference runtime classification
+
+```text
+application/fast_agent.py::FastAgent                          TEST/REFERENCE ONLY
+application/agent_loop.py::AgentLoop                          TEST/REFERENCE ONLY
+application/agent_tool_execution.py::AgentToolExecutionService TEST/REFERENCE ONLY
+```
+
+`ModelGateway` and native `OllamaModelProvider` are retained as
+provider-neutral/non-agent model infrastructure (embeddings, structured
+generation, health). They are **not** part of the current `dnd ask` production
+orchestration path.
+
+### PAIM-13 Layer-A evidence correction
+
+The production architecture verdict does not depend on live model behavior. The
+following applies to the historical PAIM-13 measured attempt #4 evidence:
+
+- **Layer B (full-turn) remains valid** runtime/full-turn parity evidence.
+- **Layer-A metrics that depend on `ToolCall` observation from attempt #4 are
+  not valid evidence**: the Layer-A observers read the wrong `ToolCall` field
+  (`tc.tool_name` instead of the canonical `tc.name`), so emitted tool calls
+  were swallowed as observation errors (corrected by PAIM-EVAL-CORR-01).
+- Do **not** claim that all historical `BOTH_FAIL` scenarios were caused by
+  this defect.
+- Do **not** reinterpret the invalid Layer-A tool metrics as actual model
+  failures or passes.
+- Historical append-only evidence is unchanged; the migration document carries
+  the appended reinterpretation record.
+
+No live Ollama rerun was performed in PAIM-15.
+
 
 ### PAIM-14 production cutover and reference classification
 
@@ -299,15 +390,20 @@ Layer B: SCENARIO_MAJORITY_SUCCESS 8/9 vs 8/9; TOTAL_MODEL_REQUESTS 42 vs 42;
 expectation-aware WRITE accounting. No scenario expectation, scoring
 formula, metric threshold, WRITE rule or measurement geometry was changed.
 
-The result is runtime parity, not a functional pass: the enforced PAIM-C31
-hard blockers did not fire, but both runtimes produced 0/30 Layer A tool
-selections and critical `E13-D15`/`E13-R04` failed on both sides. Section 74
-records the coverage/claim limits.
+The measurement fired no PAIM-C31 hard blockers, but its interpretation is
+bounded: **Layer B (full-turn) is valid runtime/full-turn evidence**, while the
+**Layer-A metrics that depend on `ToolCall` observation are not valid evidence**
+(the observers read the wrong `ToolCall` field; corrected by PAIM-EVAL-CORR-01).
+Do not reinterpret the invalid Layer-A tool metrics as actual model failures or
+passes, and do not attribute every historical `BOTH_FAIL` scenario to the
+observer defect. See the PAIM-15 Layer-A correction record above and the
+appended reinterpretation in section 76 of the migration document.
 
 Outcome:
 
 ```text
-VALID / passes comparison gates (PAIM-C31 hard blockers)
+VALID comparison-gate result for Layer B;
+Layer-A ToolCall-observation metrics superseded by PAIM-EVAL-CORR-01
 ```
 
 Full literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 74.
@@ -317,14 +413,15 @@ Full literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 74.
 ```text
 No confirmed PAIM-13 runtime regression blocker.
 Attempt #3 aggregate WRITE blocker was invalidated by PAIM-C39.
-Attempt #4 measured VALID / passes comparison gates.
+Attempt #4 Layer B measured VALID; Layer-A ToolCall-observation metrics invalid.
 PAIM-14 production cutover complete; no removable superseded runtime remained.
+PAIM-15 migration verdict ACCEPTED; shared contracts extracted to agent_contracts.
 ```
 
 Active next:
 
 ```text
-PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED
+PAIM-RETIRE-01 — Retire executable reference agent runtime + reference-only tests
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
