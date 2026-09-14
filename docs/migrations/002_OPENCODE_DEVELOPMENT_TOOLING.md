@@ -42,7 +42,8 @@ OC foundation commits:
 | OC-01C | Harden OpenCode agent permissions | DONE |
 | OC-01LSP | OpenCode Python LSP support | DONE |
 | OC-02 | Consolidate durable development rules into lazy OpenCode-era policies | DONE |
-| OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | PLANNED |
+| OC-02C | Correction: make plan-first workflow mandatory | DONE |
+| OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | FUTURE / PLANNED |
 | OC-04 | (planned; defined by its Task Contract) | PLANNED |
 | OC-05 | (planned; defined by its Task Contract) | PLANNED |
 | OC-06 | (planned; defined by its Task Contract) | PLANNED |
@@ -62,3 +63,18 @@ OC foundation commits:
   to OC-03.
 
 Detailed Final Reports are intentionally not duplicated here.
+
+## 6. OC-02C correction
+
+- Made plan-first mandatory for every development task, replacing the earlier
+  conditional wording that limited read-only PLAN behavior to multi-file,
+  architectural, migration, storage or risky changes.
+- Added a compact always-on invariant to `AGENTS.md` and the full procedure
+  (lifecycle, session boundaries, PLAN REPORT/STOP, acceptance boundary,
+  same-session BUILD, state-change stop condition, correction = new
+  task/session/PLAN, two-phase BUILD handoff) to
+  `docs/development/task-workflow.md`; `quality-and-evidence.md` was not
+  changed.
+- `docs/adr/0001-development-workflow-vscode-gigacode.md` retains its original
+  conditional PLAN wording as historical evidence from an accepted, dated ADR,
+  not current workflow policy.

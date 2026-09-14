@@ -1,8 +1,9 @@
 # Task workflow
 
-Durable workflow contract for development tasks. Read this for stage, multi-file,
-migration, correction or Git-finalization work. Quality-gate selection and
-evidence rules live in [quality-and-evidence.md](quality-and-evidence.md).
+Durable workflow contract for development tasks. Read this for **every**
+development task: plan-first procedure, session boundaries and Git
+finalization. Quality-gate selection and evidence rules live in
+[quality-and-evidence.md](quality-and-evidence.md).
 
 ## 1. Task kickoff and status authority
 
@@ -61,13 +62,45 @@ an unrelated defect or missing feature is discovered:
 
 Do not absorb unrelated work into the current task.
 
-## 5. PLAN vs BUILD behavior
+## 5. Mandatory plan-first lifecycle
 
-- Investigate before mutating: inspect relevant docs, code and tests.
-- Use planning/read-only behavior for multi-file, architectural, migration,
-  storage or otherwise risky changes before editing.
-- Once a plan is authorized, BUILD implements that exact plan; do not silently
-  broaden or re-scope it.
+Every development task uses the same lifecycle:
+
+```text
+new Task ID → new OpenCode session → PLAN → PLAN REPORT
+→ explicit plan acceptance → BUILD in the same session
+→ implementation → required gates/review
+→ commit + ordinary push when authorized
+→ Final Report → architect review
+```
+
+- A correction is a new Task ID → new session → PLAN again.
+- Task size changes PLAN depth, not whether PLAN occurs. A trivial task may have
+  a very short PLAN; PLAN is still mandatory.
+- **PLAN is read-only.** It must not edit/write/apply patches, stage, commit,
+  push or otherwise mutate Git state, and must not begin implementation.
+
+### PLAN responsibilities
+
+Before implementation, PLAN must:
+
+- read `DEVELOPMENT_STATUS.md` and `AGENTS.md`;
+- capture branch, HEAD, upstream and working-tree state;
+- inspect only relevant docs, code and tests — search before broad reading and
+  use LSP definitions/references/symbols where useful;
+- identify the owning layer and the intended diff;
+- map each acceptance criterion to literal evidence;
+- select the required quality gates;
+- identify risks/blockers;
+- define the context/token strategy.
+
+### PLAN REPORT
+
+PLAN ends with a concise report covering repository baseline, relevant findings,
+owning layer/architecture constraints, intended changed files, implementation
+steps, acceptance → evidence map, quality gates, risks/blockers, and
+context/token strategy. PLAN then **STOPs**; it never automatically transitions
+to BUILD.
 
 Approval is required before destructive Git operations, modifying a real
 campaign Vault, deleting data, irreversible migrations, changing
@@ -75,7 +108,45 @@ credentials/secrets, enabling unrestricted MCP filesystem/shell tools, and
 publishing/releasing. Never read or modify `.env` or credential/token files
 unless the user explicitly requests a safe configuration task.
 
-## 6. Git finalization
+## 6. Session boundaries and BUILD activation
+
+- Every new Task ID starts a new OpenCode session; a correction Task ID also
+  starts a new session. Fresh sessions prevent stale-context contamination
+  between tasks.
+- After explicit plan acceptance, BUILD runs in the same session as PLAN. The
+  original Task Contract and the accepted PLAN remain authoritative.
+- **BUILD begins only after explicit acceptance of the PLAN.**
+- BUILD reuses the context already gathered during PLAN instead of repeating
+  broad investigation.
+- If repository state materially changed between PLAN and BUILD: **STOP**,
+  report the difference, and do not blindly continue.
+
+### BUILD responsibilities
+
+BUILD:
+
+- implements the accepted plan exactly and does not silently broaden scope;
+- uses the smallest sufficient context;
+- runs the required gates and collects literal evidence;
+- uses reviewers only when materially useful;
+- reviews the final Git diff;
+- performs the authorized commit + ordinary push;
+- verifies HEAD == upstream;
+- produces the Final Report, then STOPs.
+
+BUILD never starts the next roadmap task automatically.
+
+## 7. Two-phase task handoff
+
+Architect-generated development tasks are captured in two phases:
+
+- **Phase 1 — PLAN Task Contract:** the problem, scope, acceptance criteria and
+  evidence plan. Ends at the PLAN REPORT.
+- **Phase 2 — BUILD handoff (only after acceptance):** a short handoff that
+  references the original Task Contract and the accepted PLAN instead of
+  repeating the full prompt.
+
+## 8. Git finalization
 
 When a Task Contract requires normal Git finalization, after all changes and
 required gates are complete:
@@ -119,8 +190,9 @@ destructive branch deletion / git clean
 
 If an ordinary push is rejected, stop and report the reason.
 
-## 7. Correction lifecycle
+## 9. Correction lifecycle
 
+- A correction is a new Task ID → new session → PLAN again; see §5–§6.
 - A correction pass fixes a confirmed defect in the owning layer and adds
   regression coverage where practical.
 - If the same task requires two or more correction passes for the same class of

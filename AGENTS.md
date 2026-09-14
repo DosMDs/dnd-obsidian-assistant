@@ -50,6 +50,17 @@ map each acceptance criterion to literal evidence
 Do not invent missing APIs when repository evidence can answer the question;
 inspect the code first.
 
+## Mandatory plan-first
+
+```text
+new Task ID → new session → PLAN → PLAN REPORT
+→ explicit plan acceptance → BUILD in the same session
+```
+
+PLAN is read-only and stops at the PLAN REPORT. A correction is a new Task ID,
+new session and new PLAN. Task size changes PLAN depth, not whether PLAN occurs.
+Detailed procedure: docs/development/task-workflow.md.
+
 ## Scope discipline
 
 Make the smallest coherent change and stay within the authorized task scope.
@@ -148,7 +159,7 @@ when its trigger applies:
 
 ```text
 docs/development/task-workflow.md
-  stage / multi-file / migration / correction / Git-finalization task
+  every development task (plan-first, session boundaries, Git finalization)
 
 docs/development/quality-and-evidence.md
   tests / evals / parity / acceptance evidence / quality-gate selection
