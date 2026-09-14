@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-09-14 (S10-00)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 `NOT STARTED`)
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`)
 **Active stage:** Stage 10 — ChangeSet (`IN PROGRESS`)
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -72,7 +72,7 @@ final architecture decision (`ACCEPTED`) and reference-runtime retirement
 | Task | Status |
 |---|---|
 | S10-00 — Architecture/domain contract and kickoff | DONE |
-| S10-01 — ChangeSet + operation domain schemas | NOT STARTED |
+| S10-01 — ChangeSet + operation domain schemas | DONE |
 | S10-02 — Pure validator / whole-batch preflight | NOT STARTED |
 | S10-03 — Review DTO + approval/rejection + fingerprint binding | NOT STARTED |
 | S10-04 — ChangeSetApplier + revision/conflict safety | NOT STARTED |
@@ -93,9 +93,10 @@ Architecture baseline SHA:
 ```
 
 Detailed record: `docs/stages/10_CHANGESET.md`; decision:
-`docs/adr/0006-changeset-review-apply-boundary.md`. No ChangeSet implementation
-or production/test source exists yet; `S10-01` remains `NOT STARTED`. Stage 10
-must not begin implementation until the next task is explicitly authorized.
+`docs/adr/0006-changeset-review-apply-boundary.md`. `S10-01` implemented the
+immutable domain proposal schemas only (`domain/changeset.py`); no validator,
+review, fingerprint or apply implementation exists yet, and `S10-02` remains
+`NOT STARTED`.
 
 ## Accepted custom reference baseline
 
@@ -248,7 +249,7 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-01 — ChangeSet + operation domain schemas)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-02 — Pure validator / whole-batch preflight)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -507,13 +508,14 @@ PAIM-15 migration verdict ACCEPTED; shared contracts extracted to agent_contract
 PAIM-RETIRE-01 complete; executable reference agent runtime retired.
 S9-07 review complete; no blocking Stage-9 defect; Stage 9 DONE.
 S10-00 architecture/domain contract complete; verdict S10_ARCHITECTURE_READY.
-No confirmed Stage-10 blocker; no ChangeSet implementation exists yet.
+S10-01 immutable ChangeSet/operation domain schemas complete in domain/changeset.py.
+No confirmed Stage-10 blocker; no validator/review/fingerprint/apply exists yet.
 ```
 
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-01 — ChangeSet + operation domain schemas)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-02 — Pure validator / whole-batch preflight)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)

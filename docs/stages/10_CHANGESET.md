@@ -5,7 +5,7 @@
 ```text
 Stage 10 — IN PROGRESS
 S10-00 — DONE
-S10-01 — NOT STARTED
+S10-01 — DONE
 S10-02 — NOT STARTED
 S10-03 — NOT STARTED
 S10-04 — NOT STARTED
@@ -28,9 +28,9 @@ S10_ARCHITECTURE_READY
 ```
 
 This document is the canonical Stage-10 architecture record and task map. It
-describes **contracts and evidence plans**. It does not claim that any ChangeSet
-implementation already exists. At S10-00 only this architecture record, the ADR
-and the status updates exist; `S10-01` onward remain `NOT STARTED`.
+describes **contracts and evidence plans**. `S10-01` implemented the immutable
+domain proposal schemas only; no validation/preflight, review, fingerprint or
+apply implementation exists yet, and `S10-02` onward remain `NOT STARTED`.
 
 ## 1. Purpose
 
@@ -397,4 +397,69 @@ Accepted amendments:
       ChangeSet authority
 Deliverable:       this stage record + ADR-0006 + status updates
 Next task:         S10-01 — ChangeSet + operation domain schemas
+```
+
+## 18. S10-01 record
+
+```text
+Task:              S10-01 — ChangeSet + operation domain schemas
+Routing:           DIRECT
+Baseline:          feat/changeset @ f5dcff58444882e821b8544ac7e845d103028b7e
+                   upstream origin/feat/changeset, clean working tree
+```
+
+Implemented the immutable Stage-10 proposal schemas only, in:
+
+```text
+src/dnd_assistant/domain/changeset.py
+```
+
+Contracts:
+
+```text
+ChangeSetId         validated opaque proposal id (distinct from EntityId)
+ProposalProvenance  provenance + optional model_profile/prompt_version
+EntityFieldUpdate   semantic allowlist (name, status, visibility,
+                    knowledge_status, created_session, last_seen_session, tags)
+CreateEntityOperation  kind="create_entity"
+UpdateEntityOperation  kind="update_entity" + mandatory expected_revision
+AppendFactOperation    kind="append_fact" + mandatory expected_revision
+ChangeOperation     discriminated union on `kind` (no generic fallback)
+ChangeSet           schema_version=1, changeset_id, provenance, session_ref,
+                    ordered non-empty operations
+```
+
+All models are `frozen=True` with `extra="forbid"`. `EntityFieldUpdate`
+preserves "unset" versus "explicit None" (only nullable session fields accept
+explicit `None`) and serializes only explicitly supplied fields so
+`model_dump`/`model_validate` round-trips are lossless. No filesystem path,
+fingerprint/hash, approval/review state or storage DTO appears in the domain
+schemas.
+
+Evidence:
+
+```text
+tests/unit/test_changeset_domain.py   143 tests (allowlist, immutability,
+                                      union, round-trip, I1 path-field absence)
+tests/contract/test_boundaries.py     domain.changeset import boundary
+                                      (no storage/application/models/tools/
+                                      retrieval/cli; no pathlib/os/hashlib)
+```
+
+Gates:
+
+```text
+uv run pytest tests/unit/test_changeset_domain.py -q   143 passed
+uv run pytest tests/contract/test_boundaries.py -q     104 passed
+uv run ruff check .                                    All checks passed
+uv run ruff format --check .                           356 files already formatted
+uv run pyright                                          0 errors, 0 warnings
+uv run pytest                                           5080 passed, 114 skipped
+```
+
+No validator/preflight (S10-02), review/fingerprint (S10-03), applier (S10-04) or
+CLI (S10-05) behavior was implemented. No `EntityIdAllocator` was introduced.
+
+```text
+Next task:         S10-02 — Pure validator / whole-batch preflight (NOT STARTED)
 ```

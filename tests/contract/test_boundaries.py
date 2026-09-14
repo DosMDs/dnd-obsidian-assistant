@@ -783,3 +783,41 @@ def test_boundary_restores_module_identity() -> None:
     assert id(snapshot["dnd_assistant.tools.registry"].ToolRegistry) == original_id, (
         "Fixture snapshot does not contain the original ToolRegistry class"
     )
+
+
+# ── domain/changeset must not depend on upper/persistence layers ──────────
+# The Stage-10 proposal schemas are untrusted domain data.  Importing them must
+# not pull in storage, application, models, tools, retrieval or CLI, and the
+# module must not import persistence-oriented stdlib modules (pathlib/os/hashlib)
+# as the durable layer-boundary direction is checked first.
+
+_FORBIDDEN_CHANGESET_LAYERS: tuple[str, ...] = (
+    "dnd_assistant.storage",
+    "dnd_assistant.application",
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.retrieval",
+    "dnd_assistant.cli",
+)
+
+_FORBIDDEN_CHANGESET_STDLIB: tuple[str, ...] = ("pathlib", "os", "hashlib")
+
+
+def test_domain_changeset_does_not_import_upper_layers() -> None:
+    _clean_import("dnd_assistant.domain.changeset")
+    loaded = _modules_loaded()
+    offending = sorted(
+        module
+        for module in loaded
+        for layer in _FORBIDDEN_CHANGESET_LAYERS
+        if module == layer or module.startswith(f"{layer}.")
+    )
+    assert not offending, f"domain.changeset imported forbidden layers: {offending}"
+
+
+def test_domain_changeset_does_not_import_persistence_stdlib() -> None:
+    targets = _module_import_targets("dnd_assistant.domain.changeset")
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_CHANGESET_STDLIB
+    )
+    assert not offending, f"domain.changeset imported persistence stdlib: {offending}"
