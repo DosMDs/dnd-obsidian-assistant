@@ -30,7 +30,7 @@ from dnd_assistant.application.agent_loop import AgentLoop
 from dnd_assistant.application.agent_tool_execution import (
     AgentToolExecutionService,
 )
-from dnd_assistant.application.fast_agent import FastAgent
+from dnd_assistant.application.fast_agent import AgentDecision, FastAgent
 from dnd_assistant.application.pydantic_ai_agent_runtime import (
     PydanticAIAgentRuntime,
 )
@@ -44,19 +44,25 @@ from dnd_assistant.application.pydantic_ai_tool_bridge import (
     PydanticAIToolBridge,
 )
 from dnd_assistant.models.types import (
+    ChatMessage,
     ChatRequest,
+    MessageRole,
     ToolAwareResponse,
+    ToolCall,
 )
 from dnd_assistant.tools.catalog import (
     ToolPublicDefinition,
     build_tool_registry_schema,
 )
 from dnd_assistant.tools.executor import ToolExecutor
+from dnd_assistant.tools.types import ExecutionContext, Permission
 from tests.integration.test_pydantic_ai_stage9_live_eval_decision import (
-    _warmup as _warmup_decision,
+    _observe_candidate_decision,
+    _observe_reference_decision,
+    collect_decision_dataset,
 )
 from tests.integration.test_pydantic_ai_stage9_live_eval_decision import (
-    collect_decision_dataset,
+    _warmup as _warmup_decision,
 )
 from tests.integration.test_pydantic_ai_stage9_live_eval_full_turn import (
     _warmup as _warmup_full_turn,
@@ -74,9 +80,13 @@ from tests.support.paim13_scenarios import (
     DECISION_SCENARIOS,
     FULL_TURN_SCENARIOS,
     EvalHandlerState,
+    make_read_context,
 )
 from tests.support.pydantic_ai_eval import (
     DecisionObservation,
+    EvalExpectation,
+    EvalScenario,
+    ScenarioExpectationKind,
     classify_majority,
     count_unauthorized_write_handler_executions,
     nearest_rank_percentile,
@@ -490,3 +500,85 @@ class TestFrozenConsumersZeroCalls:
         assert cand_summary.total_model_requests == sum(
             o.model_request_count for o in cand_observations
         )
+
+
+# ==============================================================================
+# Gap C — Layer-A observers read the canonical ToolCall.name field
+# ==============================================================================
+
+
+class _StaticDecisionAgent:
+    """Stub decision boundary returning a pre-built ``AgentDecision``.
+
+    Used to exercise the Layer-A observers offline with a real tool call.
+    """
+
+    def __init__(self, decision: AgentDecision) -> None:
+        self._decision = decision
+
+    def decide(
+        self,
+        user_input: str,
+        *,
+        execution_context: ExecutionContext,
+    ) -> AgentDecision:
+        return self._decision
+
+
+def _build_tool_call_decision(*, tool_name: str, arguments: dict[str, Any]) -> AgentDecision:
+    """Build an ``AgentDecision`` containing exactly one real tool call."""
+    exposed = ToolPublicDefinition(
+        name=tool_name,
+        description="stub tool",
+        input_schema={"type": "object"},
+        output_schema={"type": "object"},
+        permission=Permission.READ,
+        side_effects=[],
+        allowed_session_modes=[],
+    )
+    return AgentDecision(
+        prompt_version="stub",
+        request=ChatRequest(messages=(ChatMessage(role=MessageRole.USER, content="stub request"),)),
+        exposed_tools=(exposed,),
+        response=ToolAwareResponse(
+            message=ChatMessage(
+                role=MessageRole.ASSISTANT,
+                content=None,
+                tool_calls=(ToolCall(name=tool_name, arguments=arguments, call_id="call-1"),),
+            )
+        ),
+    )
+
+
+class TestToolCallObservationCanonicalField:
+    """Both Layer-A observers must read ``ToolCall.name`` (not ``tool_name``)."""
+
+    @pytest.mark.parametrize(
+        "observer",
+        [_observe_reference_decision, _observe_candidate_decision],
+        ids=["reference", "candidate"],
+    )
+    def test_real_tool_call_is_observed_without_attribute_error(
+        self,
+        observer: Any,
+    ) -> None:
+        decision = _build_tool_call_decision(tool_name="read_npc", arguments={"name": "Borin"})
+        runtime: dict[str, Any] = {"fast_agent": _StaticDecisionAgent(decision)}
+        scenario = EvalScenario(
+            scenario_id="E13-OBS",
+            user_input="Who is the blacksmith?",
+            expectation=EvalExpectation(kind=ScenarioExpectationKind.NO_TOOL_ANY_TERMINAL),
+        )
+
+        observation = observer(scenario, 0, runtime, make_read_context())
+
+        # A pre-fix ``tc.tool_name`` AttributeError is swallowed into the
+        # observation as an error result — assert the canonical conversion.
+        assert observation.error_type is None
+        assert observation.error_message is None
+        assert len(observation.tool_calls) == 1
+        observed = observation.tool_calls[0]
+        assert observed.tool_name == "read_npc"
+        assert observed.arguments == {"name": "Borin"}
+        assert observed.call_id == "call-1"
+        assert observed.schema_valid is True
