@@ -3,6 +3,7 @@
   "model": "deepseek/deepseek-flash",
   "default_agent": "build",
   "subagent_depth": 1,
+  "lsp": true,
   "agent": {
     "plan": {
       "description": "Read-only planning and analysis. Cannot mutate repository state.",
