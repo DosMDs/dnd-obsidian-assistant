@@ -45,7 +45,7 @@ OC foundation commits:
 | OC-02C | Correction: make plan-first workflow mandatory | DONE |
 | OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | DONE |
 | OC-03A | Remove or isolate legacy development-agent artifacts | DONE |
-| OC-04 | (planned; defined by its Task Contract) | FUTURE / PLANNED |
+| OC-04 | DeepSeek V4.1 Flash development-agent qualification | DONE |
 | OC-05 | (planned; defined by its Task Contract) | PLANNED |
 | OC-06 | (planned; defined by its Task Contract) | PLANNED |
 
@@ -118,3 +118,14 @@ Detailed Final Reports are intentionally not duplicated here.
   task (OC-05), not OC-03A; no runtime/application behavior changed.
 - Historical ADR, migration, maintenance and stage evidence were left
   untouched.
+
+## 9. OC-04 scope
+
+- Qualified `deepseek/deepseek-flash` as the default OpenCode development-agent
+  model under a frozen external suite (SHA-256 recorded in
+  `003_DEEPSEEK_DEVELOPMENT_AGENT_QUALIFICATION.md`).
+- Result: **ACCEPTED** (weighted score 92/100; zero critical failures; recorded
+  weakness: Q8 skill selection).
+- `opencode.json`, `AGENTS.md`, `.opencode/skills/*` and `.opencode/agents/*`
+  were not modified; the qualification ran in a disposable system-temp worktree
+  that was removed afterward.
