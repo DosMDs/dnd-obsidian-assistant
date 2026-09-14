@@ -69,6 +69,16 @@ non-documentation reason, completion requires pytest exit code 0 with 0 failed
 and 0 errors. `"N passed, M skipped, K errors"` is not a passing gate for
 `K > 0`.
 
+### Typed-boundary Pyright policy
+
+- Relevant type errors on changed typed boundaries must be resolved; they cannot
+  be ignored because pytest is green. pytest proves behavior, not type
+  correctness.
+- `uv run pyright` is the reproducible type-evidence command for changed typed
+  boundaries; LSP is semantic inspection, not reproducible type evidence.
+- Repository-wide Pyright is **not** yet a universal mandatory gate; PYR-01E owns
+  that final decision.
+
 ### Protected append-only migration history
 
 Append-only records under `docs/migrations/*.md` are excluded from Ruff

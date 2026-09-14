@@ -50,16 +50,34 @@ map each acceptance criterion to literal evidence
 Do not invent missing APIs when repository evidence can answer the question;
 inspect the code first.
 
-## Mandatory plan-first
+## Adaptive task routing
+
+Classify the task before editing. Task size changes routing depth, not whether
+the routing decision is made.
 
 ```text
-new Task ID → new session → PLAN → PLAN REPORT
-→ explicit plan acceptance → BUILD in the same session
+DIRECT
+  - clear owning layer
+  - clear expected diff
+  - no material architecture choice
+  - no project-boundary risk
+  - known correction / execution / accepted-plan implementation
+
+PLAN_REQUIRED
+  - architecture or owning layer unclear
+  - public/domain/storage/runtime contract changes
+  - multiple architectural layers
+  - Vault / ToolExecutor / Source-of-Truth risk
+  - migration/refactor/removal uncertainty
+  - eval/scoring/measurement methodology changes
+  - repeated correction / root cause unclear
 ```
 
-PLAN is read-only and stops at the PLAN REPORT. A correction is a new Task ID,
-new session and new PLAN. Task size changes PLAN depth, not whether PLAN occurs.
-Detailed procedure: docs/development/task-workflow.md.
+`build` is the default agent. The `plan` primary agent is the explicit read-only
+agent for PLAN_REQUIRED work; PLAN never mutates repository state and never
+automatically transitions to BUILD. A correction does not automatically require
+PLAN: non-semantic corrections to an already accepted plan use DIRECT execution
+or a short revalidation. Detailed procedure: docs/development/task-workflow.md.
 
 ## Scope discipline
 
@@ -159,7 +177,7 @@ when its trigger applies:
 
 ```text
 docs/development/task-workflow.md
-  every development task (plan-first, session boundaries, Git finalization)
+  every development task (adaptive routing, session boundaries, Git finalization)
 
 docs/development/quality-and-evidence.md
   tests / evals / parity / acceptance evidence / quality-gate selection

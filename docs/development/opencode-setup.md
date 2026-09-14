@@ -32,6 +32,9 @@ behavior, so the baseline is pinned for reproducibility.
   ```
 
 - `deepseek/deepseek-flash` remains the canonical development model alias.
+- `build` (`default_agent`) is the default primary agent under adaptive task
+  routing. `plan` remains an explicit read-only primary agent reserved for
+  PLAN_REQUIRED work and never mutates repository state.
 - The current reasoning effort remains `low`. This setup does not change it, and
   reasoning effort must not be raised preemptively without project-local evidence
   of benefit.
@@ -80,14 +83,23 @@ Supported operations: `goToDefinition`, `findReferences`, `hover`,
 `documentSymbol`, `workspaceSymbol`, `goToImplementation`,
 `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`.
 
-## LSP is not a gate
+## Tooling roles and evidence
 
 ```text
-LSP    -> navigation / semantic code intelligence
-Ruff   -> lint / formatting checks
-pytest -> executable behavioral correctness
+LSP (agent tool)  -> semantic inspection / navigation
+Pyright command   -> reproducible type evidence
+pytest            -> executable behavioral correctness
+Ruff              -> lint / format
 contract/eval tests -> architecture/runtime evidence
 ```
 
-A successful LSP query does not prove runtime correctness, and a Pyright
-diagnostic is not a release blocker unless a separate project decision says so.
+- The agent LSP tool is read-only **semantic inspection**; it is not itself a
+  gate and a successful query proves nothing about runtime correctness.
+- `uv run pyright` is the **reproducible type-evidence** command for changed
+  typed boundaries.
+- `uv run pytest` provides behavioral evidence; `uv run ruff check` /
+  `uv run ruff format --check` provide lint/format evidence.
+- Relevant type errors on changed typed boundaries cannot be ignored merely
+  because pytest is green; pytest proves behavior, not type correctness.
+- Repository-wide Pyright is **not** yet a universal mandatory gate; PYR-01E
+  owns that final decision.

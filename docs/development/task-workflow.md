@@ -1,8 +1,8 @@
 # Task workflow
 
 Durable workflow contract for development tasks. Read this for **every**
-development task: plan-first procedure, session boundaries and Git
-finalization. Quality-gate selection and evidence rules live in
+development task: adaptive routing, session boundaries and Git finalization.
+Quality-gate selection and evidence rules live in
 [quality-and-evidence.md](quality-and-evidence.md).
 
 ## 1. Task kickoff and status authority
@@ -62,21 +62,50 @@ an unrelated defect or missing feature is discovered:
 
 Do not absorb unrelated work into the current task.
 
-## 5. Mandatory plan-first lifecycle
+## 5. Adaptive routing lifecycle
 
-Every development task uses the same lifecycle:
+Classify every task before editing. The routing decision is always made; task
+size changes depth, not whether the decision occurs.
+
+### DIRECT
+
+Proceed without a separate PLAN when all hold:
+
+- owning layer is clear;
+- expected diff is clear;
+- no material architecture choice;
+- no project-boundary risk;
+- known correction / execution task / accepted-plan implementation.
+
+DIRECT still follows the startup discipline (§2–§3): capture starting state,
+identify the owning layer and intended diff, map acceptance criteria to literal
+evidence, select gates and stay within scope. Non-semantic corrections to an
+already accepted plan may use DIRECT execution or a short revalidation instead
+of a new full PLAN.
 
 ```text
-new Task ID → new OpenCode session → PLAN → PLAN REPORT
-→ explicit plan acceptance → BUILD in the same session
-→ implementation → required gates/review
-→ commit + ordinary push when authorized
-→ Final Report → architect review
+new Task ID → classify → DIRECT → implement → gates/review
+→ commit + ordinary push when authorized → Final Report → architect review
 ```
 
-- A correction is a new Task ID → new session → PLAN again.
-- Task size changes PLAN depth, not whether PLAN occurs. A trivial task may have
-  a very short PLAN; PLAN is still mandatory.
+### PLAN_REQUIRED
+
+Produce a read-only PLAN and stop at a PLAN REPORT when any hold:
+
+- architecture or owning layer unclear;
+- public/domain/storage/runtime contract changes;
+- multiple architectural layers involved;
+- Vault / ToolExecutor / Source-of-Truth risk;
+- migration/refactor/removal uncertainty;
+- eval/scoring/measurement methodology changes;
+- repeated correction / root cause unclear.
+
+```text
+new Task ID → classify → PLAN → PLAN REPORT → explicit PLAN acceptance
+→ BUILD in the same session → implement → gates/review
+→ commit + ordinary push when authorized → Final Report → architect review
+```
+
 - **PLAN is read-only.** It must not edit/write/apply patches, stage, commit,
   push or otherwise mutate Git state, and must not begin implementation.
 
@@ -110,12 +139,15 @@ unless the user explicitly requests a safe configuration task.
 
 ## 6. Session boundaries and BUILD activation
 
-- Every new Task ID starts a new OpenCode session; a correction Task ID also
-  starts a new session. Fresh sessions prevent stale-context contamination
-  between tasks.
-- After explicit plan acceptance, BUILD runs in the same session as PLAN. The
-  original Task Contract and the accepted PLAN remain authoritative.
-- **BUILD begins only after explicit acceptance of the PLAN.**
+- A PLAN_REQUIRED Task ID starts a new OpenCode session; a fresh session is
+  recommended for substantial DIRECT work and for any correction that changes
+  root-cause understanding, to prevent stale-context contamination.
+- For PLAN_REQUIRED work, after explicit PLAN acceptance BUILD runs in the same
+  session as PLAN. The original Task Contract and the accepted PLAN remain
+  authoritative.
+- **PLAN_REQUIRED BUILD begins only after explicit acceptance of the PLAN.**
+  DIRECT work proceeds under its Task Contract without a separate acceptance
+  gate.
 - BUILD reuses the context already gathered during PLAN instead of repeating
   broad investigation.
 - If repository state materially changed between PLAN and BUILD: **STOP**,
@@ -138,7 +170,8 @@ BUILD never starts the next roadmap task automatically.
 
 ## 7. Two-phase task handoff
 
-Architect-generated development tasks are captured in two phases:
+For PLAN_REQUIRED work, architect-generated development tasks are captured in
+two phases:
 
 - **Phase 1 — PLAN Task Contract:** the problem, scope, acceptance criteria and
   evidence plan. Ends at the PLAN REPORT.
@@ -192,7 +225,12 @@ If an ordinary push is rejected, stop and report the reason.
 
 ## 9. Correction lifecycle
 
-- A correction is a new Task ID → new session → PLAN again; see §5–§6.
+- A correction does not automatically require PLAN. Classify it per §5: a
+  correction with a clear owning layer and bounded diff is DIRECT; a repeated
+  correction, unclear root cause or boundary-crossing correction is
+  PLAN_REQUIRED.
+- Non-semantic corrections to an already accepted plan may use DIRECT execution
+  or a short revalidation instead of a new full PLAN.
 - A correction pass fixes a confirmed defect in the owning layer and adds
   regression coverage where practical.
 - If the same task requires two or more correction passes for the same class of
