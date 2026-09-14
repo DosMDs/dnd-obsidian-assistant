@@ -10258,3 +10258,379 @@ Active next:
 ```text
 PAIM-13 — Execute measured real eval comparison (attempt #4)
 ```
+
+---
+
+## 74. PAIM-13 measured real-eval comparison — attempt #4
+
+Attempt #4 is the single canonical measured invocation authorized by the
+accepted PAIM-13 attempt #4 Task Contract and revalidation PLAN. It was
+executed after PAIM-C42/PAIM-C43 closed the pre-live evidence gaps.
+
+### Environment
+
+```text
+OS:            Windows (win32)
+Python:        3.12.11
+pytest:        9.1.1
+Pydantic AI:   (pinned by migration branch)
+Ollama:        0.34.0
+Model:         qwen3.5:9b
+Base URL:      http://localhost:11434
+Temperature:   0.0
+keep_alive:    None
+Profile name:  paim12-agent (machine-local, not committed)
+Config path:   machine-local DND_ASSISTANT_PAIM13_CONFIG (not committed)
+```
+
+Config was resolved from the existing machine-local developer file; it was
+not guessed. The profile resolved to `provider=ollama`, `role=agent`,
+`model=qwen3.5:9b`, `base_url=http://localhost:11434`, `temperature=0.0`,
+`keep_alive=None`, matching the accepted comparison setup exactly.
+
+### Timeout policy (PAIM-C38)
+
+```text
+connect timeout:     5.0s
+request/read ceiling: 120.0s
+transport retries:   none
+```
+
+Verified from the project-owned factory
+`src/dnd_assistant/models/transport.py` (`OLLAMA_CONNECT_TIMEOUT_SECONDS=5.0`,
+`OLLAMA_REQUEST_TIMEOUT_SECONDS=120.0`).
+
+### Non-generative preflight
+
+Only the existing non-generative environment probe was run before the
+measured pytest invocation (via `probe_ollama_environment`):
+
+```text
+provider:                ollama
+model:                   qwen3.5:9b
+base_url:                http://localhost:11434
+temperature:             0.0
+role:                    agent
+keep_alive:              None
+Ollama reachable:        True
+configured model exists: True
+/api/version:            0.34.0
+connect timeout:         5.0
+request timeout:         120.0
+```
+
+No `chat()`, `chat_with_tools()`, Pydantic Agent request, warm-up or other
+completion-generating request was executed before the measured invocation.
+
+### Measured invocation
+
+Executed exactly once:
+
+```text
+uv run pytest -s -vv --tb=short tests/integration/test_pydantic_ai_stage9_live_eval_decision.py tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+```
+
+```text
+Pytest result: 29 passed, 1 warning in 379.76s (0:06:19)
+```
+
+```text
+attempt #4 measured pytest invocations: 1
+attempt #4 measured reruns:            0
+standalone generative preflight:       0
+```
+
+### Frozen dataset geometry
+
+```text
+Layer A: 18 scenarios × 3 repetitions = 54 reference + 54 candidate
+Layer B:  9 scenarios × 3 repetitions = 27 reference + 27 candidate
+```
+
+Observations were collected exactly once; all scenario scoring, aggregate
+metrics, counters and this record reuse those frozen observations.
+
+### Layer A — Decision scenario comparisons (18 scenarios)
+
+| Scenario | REF | PYD | Classification |
+|---|---|---|---|
+| E13-D01 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D02 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D03 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D04 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D05 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D06 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D07 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D08 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D09 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D10 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D11 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D12 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D13 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D14 | 3/3 | 3/3 | BOTH_PASS |
+| E13-D15 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D16 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D17 | 0/3 | 0/3 | BOTH_FAIL |
+| E13-D18 | 0/3 | 0/3 | BOTH_FAIL |
+
+### Layer A — Emitted metrics
+
+```text
+SCENARIO_SUCCESS
+  REF: 0.2778 (5/18)
+  PYD: 0.2778 (5/18)
+  DELTA: +0.0000
+
+TOOL_NAME_ACCURACY
+  REF: 0.0000 (0/30)
+  PYD: 0.0000 (0/30)
+  DELTA: +0.0000
+
+ARGUMENT_EXACT
+  REF: 0.0000 (0/30)
+  PYD: 0.0000 (0/30)
+  DELTA: +0.0000
+
+SCHEMA_VALID
+  REF: 1.0000 (0/0)
+  PYD: 1.0000 (0/0)
+  DELTA: +0.0000
+
+FALSE_TOOL_CALL
+  REF: 0.0000 (0/24)
+  PYD: 0.0000 (0/24)
+  DELTA: +0.0000
+
+MISSED_TOOL_CALL
+  REF: 1.0000 (30/30)
+  PYD: 1.0000 (30/30)
+  DELTA: +0.0000
+
+CORRECT_ABSTENTION
+  REF: 0.6250 (15/24)
+  PYD: 0.6250 (15/24)
+  DELTA: +0.0000
+
+CLARIFICATION
+  REF: 1.0000 (6/6)
+  PYD: 1.0000 (6/6)
+  DELTA: +0.0000
+
+FALSE_WRITE
+  REF: 0.0000 (0/0)
+  PYD: 0.0000 (0/0)
+  DELTA: +0.0000
+
+HIDDEN_WRITE
+  REF: 0.0000 (0/6)
+  PYD: 0.0000 (0/6)
+  DELTA: +0.0000
+
+UNNECESSARY_CALLS
+  REF: 0.0000 (0/1)
+  PYD: 0.0000 (0/1)
+  DELTA: +0.0000
+```
+
+### Layer A — Latency
+
+```text
+REF_DECISION_P50_SECONDS=1.6701
+PYD_DECISION_P50_SECONDS=1.6442
+REF_DECISION_P95_SECONDS=4.5531
+PYD_DECISION_P95_SECONDS=3.1718
+DECISION_P50_RATIO=0.9845
+DECISION_P95_RATIO=0.6966
+```
+
+### Layer B — Full-turn scenario comparisons (9 scenarios)
+
+| Scenario | REF | PYD |
+|---|---|---|
+| E13-R01 | 3/3 | 3/3 |
+| E13-R02 | 3/3 | 3/3 |
+| E13-R03 | 3/3 | 3/3 |
+| E13-R04 | 0/3 | 0/3 |
+| E13-R05 | 3/3 | 3/3 |
+| E13-R06 | 3/3 | 3/3 |
+| E13-R07 | 3/3 | 3/3 |
+| E13-R08 | 3/3 | 3/3 |
+| E13-R09 | 3/3 | 3/3 |
+
+### Layer B — Emitted aggregate metrics
+
+```text
+SCENARIO_MAJORITY_SUCCESS
+  REF: 0.8888888888888888 (8/9)
+  PYD: 0.8888888888888888 (8/9)
+  DELTA: +0.0000
+
+TOTAL_MODEL_REQUESTS
+  REF: 42
+  PYD: 42
+  DELTA: +0.0000
+
+MEAN_MODEL_REQUESTS
+  REF: 1.5555555555555556
+  PYD: 1.5555555555555556
+  DELTA: +0.0000
+
+TOTAL_INITIAL_TOOL_CALLS
+  REF: 18
+  PYD: 18
+  DELTA: +0.0000
+
+MEAN_INITIAL_TOOL_CALLS
+  REF: 0.6666666666666666
+  PYD: 0.6666666666666666
+  DELTA: +0.0000
+
+TOTAL_EXECUTED_TOOL_CALLS
+  REF: 18
+  PYD: 18
+  DELTA: +0.0000
+
+MEAN_EXECUTED_TOOL_CALLS
+  REF: 0.6666666666666666
+  PYD: 0.6666666666666666
+  DELTA: +0.0000
+
+TOTAL_HANDLER_INVOCATIONS
+  REF: 18
+  PYD: 18
+  DELTA: +0.0000
+
+MEAN_HANDLER_INVOCATIONS
+  REF: 0.6666666666666666
+  PYD: 0.6666666666666666
+  DELTA: +0.0000
+
+UNAUTHORIZED_WRITE_HANDLER_COUNT
+  REF: 0
+  PYD: 0
+  DELTA: +0.0000
+
+TURNS_WITH_EXCESS_REQUESTS
+  REF: 0
+  PYD: 0
+  DELTA: +0.0000
+```
+
+### Layer B — Latency
+
+```text
+REF_FULL_TURN_P50_SECONDS=2.2353
+PYD_FULL_TURN_P50_SECONDS=2.9932
+REF_FULL_TURN_P95_SECONDS=5.0559
+PYD_FULL_TURN_P95_SECONDS=3.5160
+FULL_TURN_P50_RATIO=1.3391
+FULL_TURN_P95_RATIO=0.6954
+```
+
+### WRITE accounting
+
+Expected WRITE behavior is governed by the corrected expectation-aware
+PAIM-C39 accounting. `E13-R08` explicitly expects
+`write_quest_status(name="Moon Gate", status="completed")`; all three
+reference and all three candidate observations passed exact full-turn
+scoring, and the literal unauthorized-WRITE-handler count was `0` for both
+runtimes. The invalidated attempt-#3 aggregate WRITE blocker was not
+resurrected.
+
+### Enforced comparison gates
+
+The only gates enforced by the frozen live eval are the PAIM-C31 hard
+blockers:
+
+```text
+Layer A: candidate false WRITE; candidate critical REFERENCE_ONLY_PASS
+Layer B: candidate UNAUTHORIZED_WRITE_HANDLER_COUNT > 0;
+         candidate TURNS_WITH_EXCESS_REQUESTS > 0;
+         candidate critical REFERENCE_ONLY_PASS
+```
+
+No gate fired in attempt #4 (`29 passed`). Emitted metric deltas and
+latency ratios are informational and are not asserted by these gates.
+
+### Coverage and claim limits
+
+The outcome is parity of two runtimes on the frozen corpus, not a
+functional pass:
+
+```text
+Layer A, both runtimes: TOOL_NAME_ACCURACY 0/30, ARGUMENT_EXACT 0/30,
+                        MISSED_TOOL_CALL 30/30, 13/18 scenarios BOTH_FAIL
+SCHEMA_VALID denominator was 0/0 (no tool-call observation emitted)
+FALSE_WRITE denominator was 0/0 (no non-expected write-visible observation)
+Latency is ungated: full-turn p50 ratio 1.3391 (candidate slower),
+                    p95 ratio 0.6954
+```
+
+`E13-D15` (critical hidden-write abstention) and `E13-R04` (critical
+clarification) ended `BOTH_FAIL`. The critical-regression gate fires only
+when the candidate fails a scenario the reference passes, so coincident
+reference/candidate critical failures are parity and are not flagged.
+
+### Outcome
+
+```text
+VALID / passes comparison gates (PAIM-C31 hard blockers)
+```
+
+No gate regression was detected. Every emitted reference/candidate metric
+delta was `+0.0000`. No scenario expectation, scoring formula, metric
+threshold, WRITE accounting rule or measurement geometry was changed.
+
+### Gates (literal)
+
+```text
+uv run pytest tests/unit/test_pydantic_ai_eval_frozen_observations.py tests/unit/test_pydantic_ai_eval_model_counters.py tests/unit/test_pydantic_ai_eval_construction_preflight.py tests/unit/test_pydantic_ai_eval_live_harness.py tests/unit/test_pydantic_ai_eval.py tests/unit/test_pydantic_ai_eval_unauthorized_write.py tests/unit/test_model_gateway_contracts.py tests/unit/test_gateway_protocol.py
+212 passed, 1 warning
+
+uv run ruff check .
+All checks passed
+
+uv run ruff format --check .
+373 files already formatted
+
+git diff --check
+no whitespace errors
+
+uv run pytest   (DND_ASSISTANT_PAIM13_CONFIG / _AGENT_PROFILE unset)
+5256 passed, 143 skipped, 1 warning
+```
+
+No change in the tested diff introduced a new defect. The observations
+above (Layer A parity-only outcome, zero-denominator metrics, ungated
+latency, coincident critical failures) are pre-existing properties of the
+frozen eval, unchanged from attempt #3, and are recorded here as claim
+limits. Improving eval coverage or gate definitions is out of scope for
+attempt #4.
+
+### History integrity
+
+```text
+sections 1–73 unchanged:         YES
+section 74 appended:             YES
+PAIM-13 attempts #1–#3:          unchanged
+PAIM-C42 / PAIM-C43 evidence:    unchanged
+```
+
+### Final status
+
+```text
+PAIM-C42 — DONE
+PAIM-C43 — DONE
+PAIM-13 — DONE
+PAIM-13 attempt #1 — INCOMPLETE
+PAIM-13 attempt #2 — INCOMPLETE
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — VALID / passes comparison gates
+PAIM-14 — NOT STARTED
+```
+
+Active next:
+
+```text
+PAIM-14 — Remove superseded generic custom runtime code
+```

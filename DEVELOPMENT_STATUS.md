@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PAIM-C43)
+**Last updated:** 2026-09-14 (PAIM-13 attempt #4)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -135,7 +135,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C25 — Correct final PAIM-11 audit metadata | DONE |
 | PAIM-12 — Real Ollama smoke/performance | DONE |
 | PAIM-C26 — Seal PAIM-12 live runtime evidence | DONE |
-| PAIM-13 — Eval comparison against reference | IN PROGRESS |
+| PAIM-13 — Eval comparison against reference | DONE |
 | PAIM-C27 — Correct PAIM-13 reference/eval harness | DONE |
 | PAIM-C28 — Make PAIM-13 harness live-ready | DONE |
 | PAIM-C29 — Freeze and validate PAIM-13 measured harness | DONE |
@@ -184,11 +184,11 @@ PAIM-C40 — historical correction record retained
 PAIM-C41 — DONE
 PAIM-C42 — DONE
 PAIM-C43 — DONE
-PAIM-13 — IN PROGRESS
+PAIM-13 — DONE
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
 PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
-PAIM-13 measured attempt #4 — NOT RUN
+PAIM-13 measured attempt #4 — VALID / passes comparison gates
 PAIM-14 — NOT STARTED
 ```
 
@@ -232,17 +232,51 @@ executions.
 The measurement itself remains valid historical evidence. The blocker
 interpretation was invalid.
 
+### PAIM-13 attempt #4 result
+
+The single canonical measured invocation completed successfully:
+
+```text
+29 passed, 1 warning in 379.76s
+```
+
+All emitted reference/candidate metric deltas were `+0.0000`:
+
+```text
+Layer A: SCENARIO_SUCCESS 0.2778 vs 0.2778; CLARIFICATION 1.0000 vs 1.0000
+Layer B: SCENARIO_MAJORITY_SUCCESS 8/9 vs 8/9; TOTAL_MODEL_REQUESTS 42 vs 42;
+         UNAUTHORIZED_WRITE_HANDLER_COUNT 0 vs 0
+```
+
+`E13-R08` passed 3/3 for both runtimes under the corrected C39
+expectation-aware WRITE accounting. No scenario expectation, scoring
+formula, metric threshold, WRITE rule or measurement geometry was changed.
+
+The result is runtime parity, not a functional pass: the enforced PAIM-C31
+hard blockers did not fire, but both runtimes produced 0/30 Layer A tool
+selections and critical `E13-D15`/`E13-R04` failed on both sides. Section 74
+records the coverage/claim limits.
+
+Outcome:
+
+```text
+VALID / passes comparison gates (PAIM-C31 hard blockers)
+```
+
+Full literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 74.
+
 ## Current blockers
 
 ```text
 No confirmed PAIM-13 runtime regression blocker.
 Attempt #3 aggregate WRITE blocker was invalidated by PAIM-C39.
+Attempt #4 measured VALID / passes comparison gates.
 ```
 
 Active next:
 
 ```text
-PAIM-13 — Execute measured real eval comparison (attempt #4)
+PAIM-14 — Remove superseded generic custom runtime code
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
