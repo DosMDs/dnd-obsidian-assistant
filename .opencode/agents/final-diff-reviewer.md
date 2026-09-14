@@ -2,7 +2,6 @@
 description: Read-only final review of the complete diff, scope, file inventory and Git finalization readiness.
 mode: subagent
 model: deepseek/deepseek-flash
-temperature: 0.1
 permission:
   read: allow
   glob: allow

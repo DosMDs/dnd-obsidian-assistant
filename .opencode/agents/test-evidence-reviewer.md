@@ -2,7 +2,6 @@
 description: Read-only review of acceptance-to-evidence traceability, test quality and literal measurement integrity.
 mode: subagent
 model: deepseek/deepseek-flash
-temperature: 0.1
 permission:
   read: allow
   glob: allow

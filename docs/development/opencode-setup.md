@@ -3,6 +3,39 @@
 Developer-tooling setup for OpenCode. This does not change application or runtime
 behavior, and LSP is **not** a quality gate (see below).
 
+## Qualified tooling baseline
+
+```text
+OpenCode 1.18.30 : currently qualified repository tooling baseline
+```
+
+OpenCode **1.18.30** is the currently qualified repository tooling baseline. The
+repository's current LSP workflow depends on its narrow experimental LSP tool
+behavior, so the baseline is pinned for reproducibility.
+
+- OpenCode upgrades require **explicit qualification**, not incidental upgrade.
+- OpenCode V2 is **not** currently qualified for this repository and must not be
+  adopted until the repository workflow is revalidated, at minimum:
+  - config compatibility;
+  - PLAN read-only behavior;
+  - BUILD permissions;
+  - reviewer subagents;
+  - skill discovery;
+  - LSP / code-intelligence behavior;
+  - DeepSeek integration;
+  - Windows/macOS workflow.
+- Developer-tooling tasks must capture the literal `opencode --version` in their
+  baseline evidence:
+
+  ```text
+  opencode --version
+  ```
+
+- `deepseek/deepseek-flash` remains the canonical development model alias.
+- The current reasoning effort remains `low`. This setup does not change it, and
+  reasoning effort must not be raised preemptively without project-local evidence
+  of benefit.
+
 ## Python language server (Pyright)
 
 `pyright` is a reproducible project development dependency
