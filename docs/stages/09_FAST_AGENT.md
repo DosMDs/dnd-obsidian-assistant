@@ -1,8 +1,9 @@
 # Stage 9 — Fast Agent
 
-**Status:** IN PROGRESS
+**Status:** DONE
 
 **Pre-Stage-9 base:** `6af880e3f0fed39273c14c4acbfd4d98cd700a16`
+**Final accepted runtime:** Pydantic AI (`PydanticAIAgentRuntime`); custom reference runtime retired by `PAIM-RETIRE-01`.
 
 ## Previous stage
 
@@ -45,7 +46,7 @@
 | S9-04 — Bounded model→tool→model loop + clarification/final-response semantics | DONE | |
 | S9-05 — Agent safety/failure hardening + multi-tool-call semantics | DONE | |
 | S9-06 — CLI `dnd ask` + mocked end-to-end integration | DONE | |
-| S9-07 — Full Stage-9 historical review / completion | NOT STARTED | |
+| S9-07 — Full Stage-9 historical review / completion | DONE | See "S9-07 — Full Stage-9 historical review / completion" below |
 
 ### Correction passes
 
@@ -65,11 +66,14 @@
 | S9-C11 — Reconcile S9-C10 canonical test evidence | DONE |
 | S9-C00+ | Only when independent review finds actual defects |
 
-## PAIM-15 runtime status
+## PAIM-15 / PAIM-RETIRE-01 runtime status
 
 The PAIM-15 final architecture review recorded the migration verdict
-`ACCEPTED`. Since PAIM-14 the production `dnd ask` composition uses the
-project-owned Pydantic AI runtime boundary:
+`ACCEPTED`; `PAIM-RETIRE-01` subsequently completed the retirement of the
+executable custom reference runtime (`FastAgent`, `AgentLoop`,
+`AgentToolExecutionService` and their reference-only tests). Since PAIM-14
+the production `dnd ask` composition uses the project-owned Pydantic AI
+runtime boundary:
 
 ```text
 CLI (cli/ask.py)
@@ -82,15 +86,17 @@ CLI (cli/ask.py)
 ```
 
 The `FastAgent`, `AgentLoop` and `AgentToolExecutionService` implementations
-documented in this stage history are **TEST/REFERENCE ONLY** pending
-`PAIM-RETIRE-01`; production no longer instantiates them. The shared
-provider-neutral contracts (`AgentDecision`, `build_agent_request`,
-`AgentRunResult`, `AgentTextOutcome`, `AgentOutcomeKind`,
-`parse_agent_outcome`, `AgentToolExecutionResult`,
-`build_agent_tool_execution_result`) now live in
+documented in the earlier stage history were the custom behavioral reference
+for the migration. As of `PAIM-RETIRE-01` they are **REMOVED**: no executable
+or test consumer remains, and `tests/contract/test_boundaries.py` guards
+against reintroduction. The shared provider-neutral contracts
+(`AgentDecision`, `build_agent_request`, `AgentRunResult`, `AgentTextOutcome`,
+`AgentOutcomeKind`, `parse_agent_outcome`, `AgentToolExecutionResult`,
+`build_agent_tool_execution_result`) live in
 `dnd_assistant.application.agent_contracts`.
 
-Stage sequencing after PAIM-15: `PAIM-RETIRE-01` → `S9-07` → Stage 10.
+Stage sequencing after PAIM-15: `PAIM-RETIRE-01` (DONE) → `S9-07` (DONE) →
+Stage 10 (NOT STARTED).
 
 ## S9-02 — One-step FastAgent model decision boundary
 
@@ -2219,3 +2225,149 @@ docs/migrations/001_PYDANTIC_AI_RUNTIME.md
 This does not invalidate or rewrite S9-00…S9-06 history. The current Stage-9 implementation and tests define the behavioral/safety reference that the new runtime must preserve.
 
 Possible migration outcomes are `ACCEPTED`, `PARTIAL` or `REJECTED`. If rejected, custom Stage-9 runtime remains canonical and migration findings are retained as documentation.
+
+---
+
+## S9-07 — Full Stage-9 historical review / completion
+
+**Status:** DONE
+
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA (verified):** `f7e051baf12b29561ab31666ba4e229cd6cb5d06`
+**Reference main:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+**Verdict:** `STAGE9_READY_FOR_COMPLETION`
+
+### Purpose
+
+Final historical and architectural review of Stage 9 after the accepted
+Pydantic AI migration (`PAIM-15`, verdict `ACCEPTED`) and the retirement of the
+executable custom reference runtime (`PAIM-RETIRE-01`). Determine whether
+Stage 9 may transition `IN PROGRESS` → `DONE`.
+
+This task was a review/reconciliation gate. It changed documentation only; it
+did not modify source, tests, runtime architecture or history.
+
+### Final accepted architecture
+
+```text
+CLI (cli/ask.py, cli/agent_runtime.py)
+→ PydanticAIAgentRuntime
+→ DndAgentRunPreparer / DndAgentPolicy
+→ PydanticAIToolBridge
+→ ToolExecutor
+→ application/domain services
+→ VaultRepository
+```
+
+Provider-neutral/shared infrastructure remains where independently useful:
+`agent_contracts.py`, `ModelGateway`, native Ollama provider infrastructure,
+model profiles/types/transport, and general eval infrastructure.
+
+### S9-00..S9-06 responsibility mapping (current owners)
+
+| Stage responsibility | Current implementation owner |
+|---|---|
+| S9-00 deterministic tool exposure | `application/agent_tool_selection.py::select_agent_tools` |
+| S9-01 compact context | `application/agent_context.py::AgentContextBuilder` |
+| S9-02 one-step decision | `application/pydantic_ai_fast_agent.py::PydanticAIFastAgent.decide` |
+| S9-03 validated ToolExecutor + tool-result adaptation | `PydanticAIToolBridge.execute` + `agent_contracts.build_agent_tool_execution_result` |
+| S9-04 bounded model→tool→model + terminal semantics | `application/pydantic_ai_agent_runtime.py` + `agent_contracts.parse_agent_outcome` |
+| S9-05 multi-tool safety/failure hardening | `application/dnd_agent_policy.py::admit_tool_batch` + runtime deferred handler |
+| S9-06 CLI `dnd ask` | `cli/ask.py` + `cli/agent_runtime.py` (Pydantic runtime since PAIM-14) |
+
+### Runtime safety invariants → surviving executable evidence
+
+| Invariant | Implementation | Test evidence |
+|---|---|---|
+| Frozen turn-local exposure | `DndAgentRunPreparer.prepare` → `bridge.freeze` | `test_pydantic_ai_run_deps.py` (dep04/dep07); `test_pydantic_ai_agent_runtime.py::test_same_exposure` |
+| Unknown/hidden tool fail-close | `adapt_pydantic_tool_calls`; `policy._resolve_calls` | `test_pydantic_ai_agent_runtime_boundaries.py::test_unknown_tool_rejected/test_hidden_tool_rejected`; `test_pydantic_ai_fast_agent_boundaries.py::TestP7_11/12` |
+| Bounded model requests | `UsageLimits(request_limit=2)` | `test_pydantic_ai_agent_runtime_evidence.py::test_same_run_two_requests`; `_literal_evidence_p2` invocation-count tests |
+| Bounded tool calls | `MAX_TOOL_CALLS_PER_RUN=4` | `test_dnd_agent_policy.py::test_five_calls_rejected`; runtime `test_five_calls_rejected`, `test_four_read_maximum` |
+| Complete batch preflight | all calls converted before first `bridge.execute` | `evidence.py::test_single_non_finite_raises_model_error`; `literal_evidence.py::test_non_finite_batch_zero_bridge` |
+| Mixed/WRITE batch rejected before side effect | `policy._reject_multi_call_write` | `test_dnd_agent_policy.py::test_read_write_rejected/test_write_write_rejected`; runtime counterparts |
+| READ-only accepted multi-call | runtime deferred handler sequential loop | `test_pydantic_ai_agent_runtime.py::test_two_read_sequential/test_four_read_maximum` |
+| Sequential execution | ordered handler loop | `_literal_evidence_p2.py::test_two_read_replay_order/test_successful_event_order` |
+| Duplicate call-ID handling | `policy._reject_duplicate_call_ids` | `test_dnd_agent_policy.py::test_duplicate_id_rejected`; runtime `test_duplicate_id_rejected` |
+| WRITE permission/session/audit | `ToolExecutor` final authority | `test_pydantic_ai_tool_bridge.py` (br17–br20); `test_dnd_agent_policy.py::test_same_write_rejected_by_tool_executor_under_read_context` |
+| Terminal second-response rule | single `run_sync`; `output_type=str \| DeferredToolRequests` | `boundaries.py::test_malformed_post_tool_outcome/test_second_deferred_batch_rejected` |
+| Clarification over speculative write | `parse_agent_outcome` → `AgentTextOutcome.CLARIFY` | `test_agent_contracts.py::test_parses_clarify`; `test_cli_ask_mocked.py::test_direct_clarify` |
+| Explicit retry behavior (none) | `retries={"tools":0,"output":0}` | `evidence.py::test_schema_fail_fast` |
+| Malformed framework/model input fail-close | `response_adapter` + terminal validation | `boundaries.py::test_invalid_schema/test_malformed_direct_outcome`; `test_agent_contracts.py::test_rejects_invalid_json` |
+
+### ToolExecutor authority
+
+`PydanticAIToolBridge` exposes schema-only external tools and executes only
+through `ToolExecutor`. Guard evidence:
+`test_pydantic_ai_tool_bridge.py::test_no_framework_handler_in_bridge_source`,
+`test_executor_is_tool_executor`; `test_pydantic_ai_tool_bridge_authority.py`.
+No production framework callback bypasses `ToolExecutor`.
+
+### CLI / user path
+
+`cli/ask.py` invokes `runtime.agent_runtime.run(...)`; `cli/agent_runtime.py`
+composes the accepted Pydantic runtime. `tests/integration/test_cli_ask_mocked.py`
+drives the real Typer app through `CliRunner` with a scripted Pydantic AI
+`FunctionModel` over real repositories/registry/executor/bridge/runtime.
+
+### Retirement completeness
+
+`PAIM-RETIRE-01` removed the executable custom runtime
+(`FastAgent`, `AgentLoop`, `AgentToolExecutionService`) and its reference-only
+tests. `tests/contract/test_boundaries.py` asserts the retired modules are
+absent and that the CLI and production Pydantic runtime never import them or
+the native provider. Repository search finds no executable consumer; remaining
+textual references are append-only documentation/status only.
+
+### Documentation consistency
+
+`DEVELOPMENT_STATUS.md`, this stage document, `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`
+and `docs/adr/0003-pydantic-ai-runtime-migration.md` now tell a consistent
+chronological story (custom Stage-9 reference → controlled PAIM migration →
+`ACCEPTED` → production cutover → neutral contract extraction → reference
+runtime retired → final Stage-9 review). Historical correction records and
+append-only PAIM evidence were preserved unchanged.
+
+### Outstanding debt classification
+
+- Non-blocking: invalid historical PAIM-13 Layer-A `ToolCall` observations
+  (corrected by `PAIM-EVAL-CORR-01`); opt-in live Ollama tests skipped in the
+  normal suite with documented role + prior accepted live evidence.
+- Future stage: six calendar/world-time tools deferred from the CLI registry
+  pending a canonical calendar-definition startup source; retained eval
+  infrastructure is reusable for Stage 14.
+- Blocking: none.
+
+### Quality gates (literal)
+
+```text
+uv run ruff check .              All checks passed!
+uv run ruff format --check .     352 files already formatted
+uv run pyright                   0 errors, 0 warnings, 0 informations
+uv run pytest -q                 4932 passed, 114 skipped, 1 warning in 167.04s
+```
+
+### Changed files
+
+```text
+docs/stages/09_FAST_AGENT.md
+DEVELOPMENT_STATUS.md
+```
+
+Documentation only. No source/test/dependency/architecture change.
+
+### History integrity
+
+```text
+S9-00..S9-06 history unchanged:          YES
+S9-C00..S9-C11 correction records:       unchanged
+PAIM sections 1-77:                      unchanged
+S9-07 record appended:                   YES
+```
+
+### Final status
+
+```text
+S9-07 — DONE
+Stage 9 — DONE
+Stage 10 — NOT STARTED (do not begin without explicit authorization)
+```

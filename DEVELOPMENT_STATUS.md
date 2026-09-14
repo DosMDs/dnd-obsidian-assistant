@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PAIM-RETIRE-01)
+**Last updated:** 2026-09-14 (S9-07)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 in progress; Pydantic AI migration `ACCEPTED`; reference-runtime retirement (`PAIM-RETIRE-01`) `DONE`; next S9-07
-**Active stage:** Stage 9 — Fast Agent
+**Roadmap position:** Stage 9 `DONE` (Pydantic AI migration `ACCEPTED`; reference-runtime retirement `PAIM-RETIRE-01` `DONE`; S9-07 completion review `DONE`); next Stage 10
+**Active stage:** Stage 9 — Fast Agent `DONE`; next Stage 10 — ChangeSet (`NOT STARTED`)
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 
@@ -43,7 +43,7 @@ docs/adr/          architecture decisions
 | 6. Session Runtime without LLM | DONE | `docs/stages/06_SESSION_RUNTIME_WITHOUT_LLM.md` |
 | 7. Tool Registry / Executor | DONE | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` |
 | 8. Model Gateway / Ollama | DONE | `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` |
-| 9. Fast Agent | IN PROGRESS | `docs/stages/09_FAST_AGENT.md` |
+| 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
 | 10. ChangeSet | NOT STARTED | — |
 | 11. Post-session Processor | NOT STARTED | — |
 | 12. Campaign State | NOT STARTED | — |
@@ -61,11 +61,12 @@ docs/adr/          architecture decisions
 | S9-04 — Bounded model→tool→model loop + clarification/final semantics | DONE |
 | S9-05 — Agent safety/failure hardening + multi-tool semantics | DONE |
 | S9-06 — CLI `dnd ask` + mocked/parser-backed end-to-end integration | DONE |
-| S9-07 — Full Stage-9 historical review / completion | NOT STARTED |
+| S9-07 — Full Stage-9 historical review / completion | DONE |
 
-`S9-07` is intentionally deferred until the PAIM final architecture decision and the
-reference-runtime retirement task (`PAIM-RETIRE-01`) are accepted. Stage 10 must not
-start before S9-07 completes.
+`S9-07` completed the full Stage-9 historical/architectural review after the PAIM
+final architecture decision (`ACCEPTED`) and reference-runtime retirement
+(`PAIM-RETIRE-01`, `DONE`). Stage 9 is now `DONE`; Stage 10 remains `NOT STARTED`
+and must not begin until separately authorized.
 
 ## Accepted custom reference baseline
 
@@ -218,7 +219,7 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-S9-07 — Full Stage-9 historical review / completion (NOT STARTED)
+Stage 10 — ChangeSet (NOT STARTED; do not begin without explicit authorization)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -444,7 +445,27 @@ Literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 77.
 
 Full-suite result after retirement: 4932 passed, 114 skipped.
 
-Next task: `S9-07` (NOT STARTED).
+Next task after retirement was `S9-07` (now `DONE`; see Stage-9 completion record).
+Stage 10 (`NOT STARTED`) is the next roadmap stage.
+
+## S9-07 — Stage-9 completion DONE
+
+Completed 2026-09-14 on `feat/pydantic-ai-runtime`.
+
+S9-07 performed the full historical/architectural review of Stage 9 after the
+accepted Pydantic AI migration and reference-runtime retirement. Verdict:
+
+```text
+STAGE9_READY_FOR_COMPLETION
+```
+
+All Stage-9 responsibilities map to current owners on the accepted Pydantic AI
+runtime; every critical runtime safety invariant has literal surviving
+executable coverage; no production framework callback bypasses `ToolExecutor`;
+`dnd ask` composes the accepted runtime; the retired reference runtime has no
+executable consumer. No blocking Stage-9 defect was found.
+
+Detailed record: `docs/stages/09_FAST_AGENT.md` (S9-07 section).
 
 ## Current blockers
 
@@ -455,12 +476,13 @@ Attempt #4 Layer B measured VALID; Layer-A ToolCall-observation metrics invalid.
 PAIM-14 production cutover complete; no removable superseded runtime remained.
 PAIM-15 migration verdict ACCEPTED; shared contracts extracted to agent_contracts.
 PAIM-RETIRE-01 complete; executable reference agent runtime retired.
+S9-07 review complete; no blocking Stage-9 defect; Stage 9 DONE.
 ```
 
 Active next:
 
 ```text
-S9-07 — Full Stage-9 historical review / completion (NOT STARTED)
+Stage 10 — ChangeSet (NOT STARTED; do not begin without explicit authorization)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
