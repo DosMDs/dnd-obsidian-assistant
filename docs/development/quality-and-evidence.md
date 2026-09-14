@@ -57,6 +57,7 @@ or executable fixtures, use the normal relevant gates, typically:
 targeted tests
 → relevant contract/integration tests
 → full pytest when required by task/risk policy
+→ uv run pyright (repository-wide type gate)
 → Ruff check/format for Python changes
 → git diff --check
 ```
@@ -69,15 +70,20 @@ non-documentation reason, completion requires pytest exit code 0 with 0 failed
 and 0 errors. `"N passed, M skipped, K errors"` is not a passing gate for
 `K > 0`.
 
-### Typed-boundary Pyright policy
+### Repository-wide Pyright policy
 
-- Relevant type errors on changed typed boundaries must be resolved; they cannot
-  be ignored because pytest is green. pytest proves behavior, not type
-  correctness.
-- `uv run pyright` is the reproducible type-evidence command for changed typed
-  boundaries; LSP is semantic inspection, not reproducible type evidence.
-- Repository-wide Pyright is **not** yet a universal mandatory gate; PYR-01E owns
-  that final decision.
+- `uv run pyright` is the canonical **repository-wide type gate** for Python
+  code and test changes. It must complete with 0 errors. It is configured by
+  `pyrightconfig.json` (`pythonVersion` 3.12, `include` = `src`, `tests`).
+- LSP is semantic inspection/navigation, not reproducible type evidence; a
+  successful LSP query is not equivalent to `uv run pyright`.
+- pytest green does not override Pyright failure; pytest proves behavior, not
+  type correctness. Pyright green does not replace pytest or Ruff.
+- Relevant warnings, where enabled by configuration, must also be resolved or
+  explicitly classified by policy; diagnostics must not be hidden through
+  excludes, ignores or weakened rules.
+- Documentation-only tasks need not run Pyright unless their diff changes
+  Python/type configuration or the Task Contract requires it.
 
 ### Protected append-only migration history
 

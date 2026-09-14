@@ -97,6 +97,11 @@ the actual final Git diff, not the task title. Preserve literal measurements
 and separate measured results from historical claims. No findings is not proof
 of checks that were not run.
 
+`uv run pyright` is the canonical repository-wide type gate for Python code and
+test changes and must complete with 0 errors. Pytest green does not override
+Pyright failure, and Pyright green does not replace pytest or Ruff. Details:
+`docs/development/quality-and-evidence.md`.
+
 ## Source editing
 
 Mutate repository text through OpenCode's structured `edit` / `write` /
@@ -137,6 +142,7 @@ Shell is normal and expected for:
 ```text
 uv
 pytest
+pyright
 ruff
 git
 diagnostics

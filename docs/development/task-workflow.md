@@ -196,12 +196,13 @@ run gates
 
 - Before the task commit, run or follow the `pre-finalization-audit` skill. The
   final changed-file inventory must come from Git, not from memory. A mandatory
-  failed test or Ruff gate means no push.
+  failed test, Pyright or Ruff gate means no push.
 
 - An authorized Task Contract is the confirmation; ordinary `git commit` and
   `git push` do not require a second confirmation and do not require interactive
   approval merely because they are Git.
-- Do not push if required tests, Ruff or other mandatory checks have not passed.
+- Do not push if required tests, Pyright, Ruff or other mandatory checks have
+  not passed.
 - Keep all task changes (sources, tests, status, stage docs, ADRs) ready before
   the intended task commit.
 - After the task commit, do not edit docs to insert the new SHA, amend for a

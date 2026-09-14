@@ -64,10 +64,11 @@ search
 
 Prefer LSP definitions/references/symbols over broad code scanning, and read
 only the relevant sections of large files. Do not globally read large
-documents. LSP is navigation/semantic intelligence only, not a correctness gate
-(a successful LSP query does not prove runtime correctness, and a Pyright
-diagnostic is not a release blocker unless a separate project decision says
-so).
+documents. LSP is navigation/semantic intelligence only, not a correctness gate:
+a successful LSP query does not prove runtime correctness and is not equivalent
+to `uv run pyright`. Reproducible repository type checking is owned by the
+mandatory `uv run pyright` gate (see
+[quality-and-evidence.md](quality-and-evidence.md)).
 
 ## 4. Mandatory incremental-edit procedure
 

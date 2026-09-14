@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PAIM-14)
+**Last updated:** 2026-09-14 (PYR-01E)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -175,6 +175,24 @@ REJECTED
 ```
 
 `PARTIAL` is a valid successful outcome. Architecture is not weakened merely to achieve `ACCEPTED`.
+
+## Repository-wide Pyright gate (PYR-01)
+
+PYR-01 established reproducible repository-wide type checking and finalized it as
+a mandatory development gate.
+
+Canonical configuration: `pyrightconfig.json` (Python 3.12, `include` = `src`,
+`tests`). Canonical gate: `uv run pyright` — must complete with 0 errors.
+
+| Task | Status |
+|---|---|
+| PYR-01A — Remove production Pyright diagnostics | DONE |
+| PYR-01B — Remove tool/test Pyright diagnostics | DONE |
+| PYR-01C — Align repository/service test doubles with protocols | DONE |
+| PYR-01D — Remove PAIM/reference/support Pyright diagnostics | DONE |
+| PYR-01E — Final repository-wide Pyright gate and documentation | DONE |
+
+Repository-wide Pyright: 0 errors / 0 warnings (`src`: 0/0, `tests`: 0/0).
 
 ## Active next task
 

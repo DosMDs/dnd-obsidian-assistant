@@ -184,19 +184,22 @@ boundary:
 
 ```text
 LSP (agent tool)  -> semantic inspection / navigation
-Pyright command   -> reproducible type evidence
+Pyright command   -> canonical mandatory type gate
 pytest            -> executable behavioral correctness
 Ruff              -> lint / format
 contract/eval tests -> architecture/runtime evidence
 ```
 
 - The agent LSP tool is read-only **semantic inspection**; it is not itself a
-  gate and a successful query proves nothing about runtime correctness.
-- `uv run pyright` is the **reproducible type-evidence** command for changed
-  typed boundaries.
+  gate and a successful query proves nothing about runtime correctness. A
+  successful LSP query is not equivalent to `uv run pyright`.
+- `uv run pyright` is the canonical **repository-wide type gate** for Python
+  code and test changes; it must complete with 0 errors. Configuration lives in
+  `pyrightconfig.json`.
 - `uv run pytest` provides behavioral evidence; `uv run ruff check` /
   `uv run ruff format --check` provide lint/format evidence.
-- Relevant type errors on changed typed boundaries cannot be ignored merely
-  because pytest is green; pytest proves behavior, not type correctness.
-- Repository-wide Pyright is **not** yet a universal mandatory gate; PYR-01E
-  owns that final decision.
+- Pytest green does not override Pyright failure; Pyright green does not replace
+  pytest or Ruff. Relevant type errors cannot be ignored merely because pytest
+  is green; pytest proves behavior, not type correctness.
+- Repository-wide Pyright is a mandatory gate (finalized by PYR-01E); it is not
+  informational-only and its diagnostics are release blockers for Python changes.
