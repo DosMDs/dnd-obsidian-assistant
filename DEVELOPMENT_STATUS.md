@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (S10-00)
+**Last updated:** 2026-09-14 (S10-02)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`)
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`; S10-02 pure validation/preflight `DONE`)
 **Active stage:** Stage 10 — ChangeSet (`IN PROGRESS`)
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -73,7 +73,7 @@ final architecture decision (`ACCEPTED`) and reference-runtime retirement
 |---|---|
 | S10-00 — Architecture/domain contract and kickoff | DONE |
 | S10-01 — ChangeSet + operation domain schemas | DONE |
-| S10-02 — Pure validator / whole-batch preflight | NOT STARTED |
+| S10-02 — Pure validator / whole-batch preflight | DONE |
 | S10-03 — Review DTO + approval/rejection + fingerprint binding | NOT STARTED |
 | S10-04 — ChangeSetApplier + revision/conflict safety | NOT STARTED |
 | S10-05 — CLI review/apply workflow + proposal persistence decision | NOT STARTED |
@@ -94,9 +94,10 @@ Architecture baseline SHA:
 
 Detailed record: `docs/stages/10_CHANGESET.md`; decision:
 `docs/adr/0006-changeset-review-apply-boundary.md`. `S10-01` implemented the
-immutable domain proposal schemas only (`domain/changeset.py`); no validator,
-review, fingerprint or apply implementation exists yet, and `S10-02` remains
-`NOT STARTED`.
+immutable domain proposal schemas (`domain/changeset.py`); `S10-02` implemented
+the pure repository-backed validator / whole-batch preflight
+(`application/changeset_validation.py`). No review, fingerprint or apply
+implementation exists yet, and `S10-03` remains `NOT STARTED`.
 
 ## Accepted custom reference baseline
 
@@ -249,7 +250,7 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-02 — Pure validator / whole-batch preflight)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-03 — Review DTO + approval/rejection + fingerprint binding)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -509,13 +510,14 @@ PAIM-RETIRE-01 complete; executable reference agent runtime retired.
 S9-07 review complete; no blocking Stage-9 defect; Stage 9 DONE.
 S10-00 architecture/domain contract complete; verdict S10_ARCHITECTURE_READY.
 S10-01 immutable ChangeSet/operation domain schemas complete in domain/changeset.py.
-No confirmed Stage-10 blocker; no validator/review/fingerprint/apply exists yet.
+S10-02 pure validator/whole-batch preflight complete in application/changeset_validation.py.
+No confirmed Stage-10 blocker; no review/fingerprint/apply exists yet.
 ```
 
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-02 — Pure validator / whole-batch preflight)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-03 — Review DTO + approval/rejection + fingerprint binding)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)

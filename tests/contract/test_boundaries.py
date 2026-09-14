@@ -821,3 +821,54 @@ def test_domain_changeset_does_not_import_persistence_stdlib() -> None:
         target for target in targets if target.split(".")[0] in _FORBIDDEN_CHANGESET_STDLIB
     )
     assert not offending, f"domain.changeset imported persistence stdlib: {offending}"
+
+
+# ── application/changeset_validation must stay pure and provider-neutral ──
+# The S10-02 preflight validator may depend on domain, storage read contracts
+# and project errors only.  It must not pull in model/provider, tool, retrieval
+# or CLI layers, nor perform filesystem work through pathlib/os/hashlib.
+
+_FORBIDDEN_CHANGESET_VALIDATION_LAYERS: tuple[str, ...] = (
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.retrieval",
+    "dnd_assistant.cli",
+)
+
+_FORBIDDEN_CHANGESET_VALIDATION_STDLIB: tuple[str, ...] = ("pathlib", "os", "hashlib")
+
+
+def test_application_changeset_validation_does_not_import_upper_layers() -> None:
+    _clean_import("dnd_assistant.application.changeset_validation")
+    loaded = _modules_loaded()
+    offending = sorted(
+        module
+        for module in loaded
+        for layer in _FORBIDDEN_CHANGESET_VALIDATION_LAYERS
+        if module == layer or module.startswith(f"{layer}.")
+    )
+    assert not offending, f"application.changeset_validation imported forbidden layers: {offending}"
+
+
+def test_application_changeset_validation_does_not_import_persistence_stdlib() -> None:
+    targets = _module_import_targets("dnd_assistant.application.changeset_validation")
+    offending = sorted(
+        target
+        for target in targets
+        if target.split(".")[0] in _FORBIDDEN_CHANGESET_VALIDATION_STDLIB
+    )
+    assert not offending, (
+        f"application.changeset_validation imported persistence stdlib: {offending}"
+    )
+
+
+def test_application_changeset_validation_does_not_trigger_ollama() -> None:
+    _clean_import("dnd_assistant.application.changeset_validation")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"changeset_validation triggered ollama import: {mod_names}"
+
+
+def test_application_changeset_validation_does_not_import_pydantic_ai() -> None:
+    targets = _module_import_targets("dnd_assistant.application.changeset_validation")
+    offending = sorted(target for target in targets if target.split(".")[0] == "pydantic_ai")
+    assert not offending, f"changeset_validation imports pydantic_ai: {offending}"

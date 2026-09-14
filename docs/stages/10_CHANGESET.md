@@ -6,7 +6,7 @@
 Stage 10 — IN PROGRESS
 S10-00 — DONE
 S10-01 — DONE
-S10-02 — NOT STARTED
+S10-02 — DONE
 S10-03 — NOT STARTED
 S10-04 — NOT STARTED
 S10-05 — NOT STARTED
@@ -29,8 +29,9 @@ S10_ARCHITECTURE_READY
 
 This document is the canonical Stage-10 architecture record and task map. It
 describes **contracts and evidence plans**. `S10-01` implemented the immutable
-domain proposal schemas only; no validation/preflight, review, fingerprint or
-apply implementation exists yet, and `S10-02` onward remain `NOT STARTED`.
+domain proposal schemas; `S10-02` implemented the pure validation/preflight
+layer. No review/fingerprint (`S10-03`), applier (`S10-04`) or CLI (`S10-05`)
+implementation exists yet.
 
 ## 1. Purpose
 
@@ -462,4 +463,96 @@ CLI (S10-05) behavior was implemented. No `EntityIdAllocator` was introduced.
 
 ```text
 Next task:         S10-02 — Pure validator / whole-batch preflight (NOT STARTED)
+```
+
+## 19. S10-02 record
+
+```text
+Task:              S10-02 — Pure validator / whole-batch preflight
+Routing:           PLAN_REQUIRED
+Baseline:          feat/changeset @ 83415a5bfb892f9b260843bf32f8b4506c81e988
+                   upstream origin/feat/changeset, clean working tree
+```
+
+Implemented a pure, side-effect-free validation/preflight layer for an already
+structurally valid `ChangeSet`, in:
+
+```text
+src/dnd_assistant/application/changeset_validation.py
+```
+
+Contracts:
+
+```text
+ValidationIssueCode    language-neutral StrEnum codes
+                       create_target_exists | duplicate_create |
+                       target_not_found | revision_conflict
+ValidationIssue        frozen: code, operation_index (>=0), message, entity_id?
+ChangeSetValidationResult  frozen: issues tuple; valid derived as not issues
+validate_changeset(changeset, repository) -> ChangeSetValidationResult
+```
+
+Semantics:
+
+```text
+phase 1  repository.list_entities() -> single {entity_id: revision} snapshot
+phase 2  operations processed in order into an in-memory projection
+phase 3  create: created_in_batch -> duplicate_create
+                 existing in snapshot -> create_target_exists
+                 else projected at revision 1
+phase 4  update/append: absent from projection -> target_not_found
+                        expected_revision != projected -> revision_conflict
+                        else projected revision += 1
+phase 5  same-batch dependencies resolve via the projection (create X then
+         update/append X), mirroring the repository's canonical +1 rule
+phase 6  issues ordered deterministically by operation_index (one per op)
+phase 7  return frozen ChangeSetValidationResult
+```
+
+An invalid operation never mutates the projection, so later operations validate
+deterministically and independently of invalid predecessors.  Repository reads
+are the only repository interaction; the validator performs zero writes, zero
+audit writes and zero filesystem writes.  Repository/programmer failures
+(corrupt Vault, duplicate persisted IDs, I/O) propagate as existing project
+errors rather than being reported as proposal issues.
+
+The validator depends only on `domain.changeset`, the `storage.types`
+`VaultRepository` protocol (via a `TYPE_CHECKING`-only import) and Pydantic
+for its result models; repository/programmer errors propagate unchanged.  It
+does not import `models`, `tools`, `retrieval`, `cli`, `ollama`, `pydantic_ai`,
+`pathlib`, `os` or `hashlib`.
+
+Evidence:
+
+```text
+tests/unit/test_changeset_validation.py        semantics, projection chains,
+                                               all four issue codes, ordering,
+                                               frozen result/issue, I2 spy
+                                               (write-call count == 0)
+tests/contract/test_boundaries.py              application.changeset_validation
+                                               import-boundary AST/clean-import
+                                               guards
+tests/integration/test_changeset_validation.py real temp Vault + real
+                                               ObsidianVaultRepository; entire
+                                               Vault tree byte-identical before
+                                               and after validation
+```
+
+Gates:
+
+```text
+uv run pytest tests/unit/test_changeset_validation.py -q          23 passed
+uv run pytest tests/integration/test_changeset_validation.py -q    5 passed
+uv run pytest tests/contract/test_boundaries.py -q               108 passed
+uv run ruff check .                                              All checks passed
+uv run ruff format --check .                                     359 files already formatted
+uv run pyright                                                    0 errors, 0 warnings
+uv run pytest                                                    5117 passed, 114 skipped, 1 warning
+```
+
+No fingerprint/review (`S10-03`), applier (`S10-04`), CLI (`S10-05`) or
+`EntityIdAllocator` behavior was implemented, and no S10-01 schema was changed.
+
+```text
+Next task:         S10-03 — Review DTO + approval/rejection + fingerprint binding
 ```
