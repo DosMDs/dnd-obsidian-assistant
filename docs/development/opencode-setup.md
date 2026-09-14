@@ -83,6 +83,103 @@ Supported operations: `goToDefinition`, `findReferences`, `hover`,
 `documentSymbol`, `workspaceSymbol`, `goToImplementation`,
 `prepareCallHierarchy`, `incomingCalls`, `outgoingCalls`.
 
+## Permission model
+
+OpenCode agent permissions are developer-tooling policy, not application
+authorization. They do not change runtime, Vault, `ToolExecutor`, domain, storage
+or model permissions.
+
+Permission actions are `allow`, `ask` and `deny`. For object-valued permissions
+(`bash`, `read`, ...) rules are evaluated in declaration order and the **last
+matching rule wins**. Each object therefore places its catch-all `*` first, then
+the specific exceptions, with any `deny` override trailing the `allow` rules it
+constrains. JSON insertion order is load-bearing: reordering keys silently
+changes behavior.
+
+The `bash` permission matches each **parsed sub-command** of a shell string.
+OpenCode parses the command with tree-sitter (PowerShell for `pwsh` on Windows)
+and evaluates every sub-command independently: one `deny` sub-command denies the
+whole call, and a call runs without prompting only if every sub-command resolves
+to `allow`. Patterns are simple globs (`*` matches zero or more characters, `?`
+one); on Windows matching is case-insensitive. There is no alias or
+executable-path normalization, so `git.exe status`, `Remove-Item` aliases and
+`bash -c ...` payloads match only as written.
+
+`build` uses an explicit routine-development ALLOW set over an `ask` default:
+ordinary `git add`/`commit`/`push` stay automatic; state-changing operations
+(`checkout`/`switch`/`restore`/`stash`/non-ff `merge`/`rebase`) remain `ask`;
+force/history-rewriting forms spelled `--force`, `--force-with-lease`, `-f`,
+`--mirror`, `--prune`, refspec `+`/`:` deletes, `reset --hard`, `clean`,
+`filter-branch`, explicit branch/tag delete (`-d`/`-D`/`--delete`) and
+recursive/forced delete are `deny`. Branch list forms are allowed only without
+trailing arguments (`git branch`, `git branch -l`/`-a`/`-r`/`-v`,
+`git branch --list`/`--show-current`/`--merged`/`--no-merged`); any filtered or
+mutating form (including create, rename, copy and upstream) falls through to
+`ask` in `build`. `plan` and the three review subagents remain read-only: they use
+the same exact, argument-free `git branch` list set, and everything else is
+denied by their default `deny`; their read-only `git log`/`diff`/`show` allows
+carry an explicit `deny` for `--output` so those options cannot write
+working-tree files (shell redirection and external diff drivers are separate,
+inherent to permitting `bash`, and are not covered). A trailing wildcard was
+deliberately not used on the branch allows, because a deny-by-default agent can
+never be made truly read-only by adding denies to an extendable allow.
+
+The `bash` ALLOW set intentionally excludes `cat`, `type` and `Get-Content`,
+which stay `ask`.
+
+### Permission validation
+
+`opencode debug agent build` (and `plan`) prints the resolved agent ruleset in
+evaluation order. It is a safe, non-interactive way to confirm ordering, that
+`.env` read rules resolve to `ask`, and that `deny` overrides trail the `allow`
+rules they constrain. `opencode debug config` validates that the config parses.
+
+### Secrets limitation
+
+Do not rely on shell permission globs to protect secret paths. The built-in
+`read` protection (`*.env`, `*.env.*` -> `ask`, `*.env.example` -> `allow`)
+applies only to the `read` tool and only for the agents that do not override it:
+`build` and `plan` deliberately do not, while the three review subagents still
+set an explicit `read: allow` and therefore do not inherit it. Shell commands
+are matched by command text and are path-blind: `rg`,
+`git show`, `git log -p`, `bash -c "..."` and similar can expose `.env`,
+credential or key files regardless of `bash` patterns. The project rule "do not
+read `.env`/credential files unless explicitly authorized" therefore remains a
+policy, not an enforced shell boundary.
+
+### `git fetch`
+
+`git fetch` and its argument forms are allowed for normal synchronization;
+forced refspecs (`+...`), `--force`, `-f` and `--update-head-ok` are `deny`, and
+other short-option clusters containing `f` are downgraded to `ask`. Globs cannot
+distinguish a remote URL (`https://...`, `git@host:...`) from an explicit
+destination refspec, so an unforced destination refspec such as
+`git fetch origin main:main` remains allowed: it can only fast-forward local refs
+and is recoverable, the same class as the allowed `git pull --ff-only`.
+
+### Residual limitations
+
+The matcher is best-effort and fail-safe by default; it is not a security
+boundary:
+
+- `deny` patterns cannot see through wrappers or aliases. `sudo rm -rf`,
+  `/bin/rm -rf`, the PowerShell `ri`/`rd` aliases and `bash -c "..."` payloads do
+  not match the prefix-anchored rules and fall back to `ask` (or, for the
+  read-only agents whose default is `deny`, to `deny`). Combining CMD flags
+  (`del */s*`, `erase */s*`, `rd */s*`, `rmdir */s*`) is covered, but arbitrary
+  wrappers are not.
+- Glob patterns cannot distinguish a short-option cluster containing `f` from a
+  long option, so bundled force flags are handled heuristically: `git push` /
+  `git fetch` commands matching `*-?*f*` are downgraded to `ask` (e.g.
+  `git push -qf`, `git push -nqf`), at the cost of also asking for
+  `git push --follow-tags` and `git fetch --filter=...`. Plain `-f` is still
+  caught by the explicit `deny` rules. A short cluster where the only `f` is the
+  first flag, e.g. `-fq`, is caught by `git push -f*`.
+- `git commit --amend` is allowed and `git rebase` is `ask`; both rewrite local
+  history, which only matters once published. Publishing a rewrite is caught by
+  the push `deny` rules.
+- There is no path-aware shell protection (see Secrets limitation).
+
 ## Tooling roles and evidence
 
 ```text

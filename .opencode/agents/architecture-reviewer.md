@@ -22,9 +22,20 @@ permission:
     "git log*": allow
     "git show*": allow
     "git rev-parse*": allow
-    "git branch*": allow
+    "git branch": allow
+    "git branch --list": allow
+    "git branch --show-current": allow
+    "git branch --merged": allow
+    "git branch --no-merged": allow
+    "git branch -l": allow
+    "git branch -a": allow
+    "git branch -r": allow
+    "git branch -v": allow
     "git ls-files*": allow
     "git worktree list*": allow
+    "git log*--output*": deny
+    "git diff*--output*": deny
+    "git show*--output*": deny
 ---
 
 Act only as the architecture reviewer. Read `AGENTS.md`, `DEVELOPMENT_STATUS.md`
