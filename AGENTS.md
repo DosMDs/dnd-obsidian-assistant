@@ -83,6 +83,24 @@ base64 reconstruction
 
 as source editors.
 
+## Context and token economy
+
+Use the smallest sufficient context. This is a durable project rule, canonical
+form: **minimize context, not rigor**.
+
+- Search before reading large files.
+- Prefer LSP definitions/references/symbols over broad code scanning.
+- Read only relevant sections of large files where possible.
+- Do not repeatedly read unchanged files without a concrete reason.
+- Load detailed policies/skills only when relevant to the current task.
+- Do not globally load large development documents.
+- Pass subagents only the task, diff and evidence they need.
+- Reuse already collected literal evidence instead of rerunning expensive work.
+- Keep Final Reports concise and evidence-oriented.
+
+Token economy must never weaken architecture, safety, acceptance coverage, tests
+or evidence quality.
+
 ## Shell
 
 Shell is normal and expected for:
@@ -123,11 +141,37 @@ destructive rebase
 destructive branch deletion / git clean
 ```
 
+## Detailed policy documents
+
+Durable detail is lazy/on-demand, not always-on. Read the relevant document
+when its trigger applies:
+
+```text
+docs/development/task-workflow.md
+  stage / multi-file / migration / correction / Git-finalization task
+
+docs/development/quality-and-evidence.md
+  tests / evals / parity / acceptance evidence / quality-gate selection
+
+docs/development/editing-and-recovery.md
+  source mutation or an edit/write tool failure
+
+docs/development/untrusted-boundaries.md
+  untrusted input / provider / parser / numeric boundary
+
+docs/development/maintainability.md
+  large module or test growth / refactor / ratchet change
+
+docs/development/project-invariants.md
+  architecture / product scope / Vault write safety / platform / UI
+```
+
 ## Detailed project documents
 
 ```text
 DEVELOPMENT_STATUS.md   canonical current roadmap state
 GIGACODE.md             full legacy project instructions (migration reference)
+docs/development/       durable OpenCode-era development policies (lazy)
 docs/adr/               architecture decisions
 docs/stages/            detailed stage history and evidence
 docs/migrations/        detailed migration plan/history/evidence
