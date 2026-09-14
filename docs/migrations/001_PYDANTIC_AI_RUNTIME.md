@@ -9892,3 +9892,176 @@ Active next:
 ```text
 PAIM-13 — Execute measured real eval comparison (attempt #4)
 ```
+
+## 72. PAIM-C42 correction record — Seal PAIM-13 pre-live evidence boundaries
+
+PAIM-C42 is an evidence/test-harness correction. It closes three explicit
+pre-live evidence gaps identified by the accepted PAIM-13 attempt #4 PLAN.
+No production runtime behavior changed.
+
+### Evidence gaps closed
+
+Gap A — warm-up exclusion:
+Before this correction, the frozen fixtures called ``_warmup()`` before
+measured collection, but no deterministic test proved that warm-up requests
+are excluded from measured frozen observations. The warm-up preflight tests
+only asserted warm-up success/failure.
+
+Gap B — frozen consumers issue zero additional model calls:
+``summarize_metrics`` / ``summarize_full_turn_aggregate`` were covered only
+by DTO/value tests. No test snapshotted a literal model-request counter
+before/after the real consumers ran.
+
+Gap C — reference ``CountingModelGateway`` literal counting:
+The reference-side wrapper was used by live tests but had no unit regression
+proving that ``chat_with_tools`` counting occurs at the native
+``ModelGateway.chat_with_tools`` boundary.
+
+### Behavior-preserving testability seam
+
+The collection sequence existed only inside pytest fixtures and was not
+callable offline. Two module-level functions were extracted from the fixture
+bodies, and the fixtures now delegate to them:
+
+```text
+tests/integration/test_pydantic_ai_stage9_live_eval_decision.py
+  collect_decision_dataset(reference_runtime, candidate_runtime)
+  -> FrozenDecisionDataset
+
+tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+  collect_full_turn_dataset(reference_runtime, candidate_runtime)
+  -> FrozenFullTurnDataset
+```
+
+The extracted functions call the same ``_warmup()`` and ``_observe_*``
+functions with identical ordering and 3 repetitions. Live fixture behavior
+is unchanged.
+
+### New regression tests
+
+```text
+tests/unit/test_pydantic_ai_eval_frozen_observations.py   (9 tests)
+  Gap A:
+    test_warmup_request_is_counted_exactly_once
+    test_full_turn_warmup_request_is_counted_exactly_once
+    test_decision_warmup_precedes_and_is_distinct_from_measured_requests
+    test_full_turn_warmup_precedes_and_is_distinct_from_measured_requests
+    test_decision_dataset_contains_only_measured_keys
+    test_full_turn_dataset_contains_only_measured_keys
+    test_frozen_dataset_rejects_extra_warmup_observation
+  Gap B:
+    test_decision_consumers_issue_zero_model_calls
+    test_full_turn_consumers_issue_zero_model_calls
+
+tests/unit/test_pydantic_ai_eval_model_counters.py        (6 tests)
+  Gap C:
+    test_one_call_increments_once_and_preserves_response
+    test_multiple_calls_count_matches_literal_number
+    test_error_counted_once_and_propagates_unchanged
+    test_zero_tool_call_response_still_counts
+    test_tool_call_response_counts_exactly_once
+    test_other_operations_do_not_increment_chat_with_tools_count
+```
+
+The reference counter regression tests were placed in a new focused module
+rather than the already-~874-line ``test_pydantic_ai_eval_live_harness.py``,
+per maintainability review thresholds.
+
+### Acceptance → literal evidence
+
+```text
+Warm-up excluded:
+  warm-up counter delta == 1 per runtime
+  warm-up is the first recorded request and appears exactly once
+  every subsequent request is a distinct scenario prompt appearing 3 times
+  measured dataset == scenarios*3 with exact (scenario_id, repetition) keys
+  total counter == 1 + measured
+  frozen DTO rejects an extra warm-up observation (AssertionError)
+
+Frozen consumers zero calls:
+  CountingModelGateway.chat_with_tools delta == 0 across summarize_metrics,
+    classify_majority, nearest_rank_percentile, summarize_full_turn_aggregate,
+    score_full_turn, count_unauthorized_write_handler_executions
+  CountingPydanticModel.request delta == 0 across the same consumers
+  non-vacuous: 11 metrics consumed; summary total == sum(model_request_count)
+
+Reference counter literal:
+  N chat_with_tools calls -> count == N
+  delegate error counted once (count == 1) and same exception propagated
+  other gateway operations leave chat_with_tools_count == 0
+```
+
+### Semantic freeze
+
+```text
+src/** changed:                 NO
+scenario corpus changed:        NO
+scenario expectations changed:  NO
+scoring formulas changed:       NO
+metric thresholds changed:      NO
+WRITE authorization changed:    NO  (PAIM-C39 semantics unchanged)
+ToolExecutor changed:           NO
+DndAgentPolicy changed:         NO
+Ollama transport changed:       NO
+PAIM-13 measurement geometry:   unchanged
+PAIM-13 attempt #4 run:         NO
+```
+
+### Gates (literal)
+
+```text
+uv run pytest tests/unit/test_pydantic_ai_eval_frozen_observations.py \
+               tests/unit/test_pydantic_ai_eval_model_counters.py
+15 passed, 1 warning
+
+uv run pytest tests/unit/test_pydantic_ai_eval.py \
+               tests/unit/test_pydantic_ai_eval_live_harness.py \
+               tests/unit/test_pydantic_ai_eval_unauthorized_write.py \
+               tests/unit/test_pydantic_ai_eval_construction_preflight.py
+115 passed
+
+uv run pytest tests/integration/test_pydantic_ai_stage9_live_eval_decision.py \
+               tests/integration/test_pydantic_ai_stage9_live_eval_full_turn.py
+29 skipped (no PAIM-13 opt-in)
+
+uv run pytest   (DND_ASSISTANT_PAIM13_CONFIG explicitly unset)
+5250 passed, 143 skipped, 0 failed, 0 errors
+
+uv run ruff check .
+All checks passed
+
+uv run ruff format --check .
+373 files already formatted
+
+git diff --check
+no whitespace errors
+```
+
+### History integrity
+
+```text
+sections 1–71 unchanged:         YES
+section 72 appended:             YES
+PAIM-13 attempt #3 evidence:     unchanged
+```
+
+### Final status
+
+```text
+PAIM-C42 — DONE
+PAIM-C39 — DONE
+PAIM-C40 — historical correction record retained
+PAIM-C41 — DONE
+PAIM-13 — IN PROGRESS
+PAIM-13 attempt #1 — INCOMPLETE
+PAIM-13 attempt #2 — INCOMPLETE
+PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
+PAIM-13 measured attempt #4 — NOT RUN
+PAIM-14 — NOT STARTED
+```
+
+Active next:
+
+```text
+PAIM-13 — Execute measured real eval comparison (attempt #4)
+```

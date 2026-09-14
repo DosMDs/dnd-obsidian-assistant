@@ -257,16 +257,18 @@ def _warmup(fast_agent: FastAgent | PydanticAIFastAgent) -> None:
         raise RuntimeError("Warm-up produced no valid terminal outcome.")
 
 
-@pytest.fixture(scope="module")
-def frozen_full_turn_dataset(
-    reference_runtime,
-    candidate_runtime,
+def collect_full_turn_dataset(
+    reference_runtime: dict[str, Any],
+    candidate_runtime: dict[str, Any],
 ) -> FrozenFullTurnDataset:
     """Collect all Layer B observations exactly once with warm-up first.
 
     Warm-up runs before any measured observation.  The returned dataset
     is consumed by scenario tests and aggregate metrics — no additional
     model calls.
+
+    This is the callable testability seam shared by the live fixture and
+    by offline frozen-observation regression tests.
     """
     ref_runtime = reference_runtime
     cand_runtime = candidate_runtime
@@ -296,6 +298,19 @@ def frozen_full_turn_dataset(
         reference_observations=tuple(ref_observations),
         candidate_observations=tuple(cand_observations),
     )
+
+
+@pytest.fixture(scope="module")
+def frozen_full_turn_dataset(
+    reference_runtime,
+    candidate_runtime,
+) -> FrozenFullTurnDataset:
+    """Collect all Layer B observations exactly once with warm-up first.
+
+    Thin delegate to ``collect_full_turn_dataset`` so offline tests can
+    exercise the same collection path without Ollama.
+    """
+    return collect_full_turn_dataset(reference_runtime, candidate_runtime)
 
 
 # ── Layer B: Reference full-turn observer ─────────────────────────────────────

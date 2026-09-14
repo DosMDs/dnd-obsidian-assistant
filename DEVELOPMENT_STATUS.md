@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-11 (PAIM-C41)
+**Last updated:** 2026-09-14 (PAIM-C42)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -151,6 +151,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C39 — Correct unauthorized WRITE accounting and blocker evidence | DONE |
 | PAIM-C40 — Correct PAIM-C39 evidence bookkeeping | DONE |
 | PAIM-C41 — Restore green baseline and correct C40 evidence | DONE |
+| PAIM-C42 — Seal PAIM-13 pre-live evidence boundaries | DONE |
 | PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 
@@ -180,6 +181,7 @@ REJECTED
 PAIM-C39 — DONE
 PAIM-C40 — historical correction record retained
 PAIM-C41 — DONE
+PAIM-C42 — DONE
 PAIM-13 — IN PROGRESS
 PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PAIM-C37)
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)

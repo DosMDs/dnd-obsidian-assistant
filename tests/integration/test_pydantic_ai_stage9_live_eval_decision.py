@@ -224,16 +224,18 @@ def _warmup(runtime: dict[str, Any]) -> None:
     )
 
 
-@pytest.fixture(scope="module")
-def frozen_decision_dataset(
-    reference_runtime,
-    candidate_runtime,
+def collect_decision_dataset(
+    reference_runtime: dict[str, Any],
+    candidate_runtime: dict[str, Any],
 ) -> FrozenDecisionDataset:
     """Collect all Layer A observations exactly once with warm-up first.
 
     Warm-up runs before any measured observation.  The returned dataset
     is consumed by scenario tests and aggregate metrics — no additional
     model calls.
+
+    This is the callable testability seam shared by the live fixture and
+    by offline frozen-observation regression tests.
     """
     ref_runtime = reference_runtime
     cand_runtime = candidate_runtime
@@ -262,6 +264,19 @@ def frozen_decision_dataset(
         reference_observations=tuple(ref_observations),
         candidate_observations=tuple(cand_observations),
     )
+
+
+@pytest.fixture(scope="module")
+def frozen_decision_dataset(
+    reference_runtime,
+    candidate_runtime,
+) -> FrozenDecisionDataset:
+    """Collect all Layer A observations exactly once with warm-up first.
+
+    Thin delegate to ``collect_decision_dataset`` so offline tests can
+    exercise the same collection path without Ollama.
+    """
+    return collect_decision_dataset(reference_runtime, candidate_runtime)
 
 
 # ── Layer A: Reference decision observer ──────────────────────────────────────
