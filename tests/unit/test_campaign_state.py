@@ -384,10 +384,7 @@ class TestRevision:
 class TestExtraFields:
     def test_rejects_unknown_field(self) -> None:
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            CampaignState(  # type: ignore[call-arg]
-                **_CANONICAL_KWARGS,
-                world_tick=100,
-            )
+            CampaignState.model_validate({**_CANONICAL_KWARGS, "world_tick": 100})
 
 
 # ── serialisation ───────────────────────────────────────────────────────────

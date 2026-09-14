@@ -34,7 +34,7 @@ from dnd_assistant.tools.types import (
 )
 
 if TYPE_CHECKING:
-    from dnd_assistant.application.session_runtime import SessionRuntimeService
+    from dnd_assistant.application.session_runtime import SessionRuntime
     from dnd_assistant.storage.types import (
         SessionEventRepository,
         SessionMetadataRepository,
@@ -296,7 +296,7 @@ def _get_active_session_handler(
     input_model: GetActiveSessionInput,  # noqa: ARG001
     context: ExecutionContext,  # noqa: ARG001
     *,
-    runtime_service: SessionRuntimeService,
+    runtime_service: SessionRuntime,
 ) -> GetActiveSessionOutput:
     """Return the active session, or None if no session is active.
 
@@ -386,7 +386,7 @@ def _list_session_events_handler(
 def register_session_read_tools(
     registry: ToolRegistry,
     *,
-    runtime_service: SessionRuntimeService,
+    runtime_service: SessionRuntime,
     session_repository: SessionMetadataRepository,
     event_repository: SessionEventRepository,
 ) -> None:

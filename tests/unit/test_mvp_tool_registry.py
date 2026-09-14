@@ -18,99 +18,12 @@ Verifies:
 
 from __future__ import annotations
 
-from typing import Any
-
 import pytest
 
 from dnd_assistant.tools.mvp_registry import build_mvp_tool_registry
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import Permission, SessionMode, SideEffect
-
-# ── Fakes ─────────────────────────────────────────────────────────────────────────
-
-
-class _FakeSearchService:
-    def search(self, *args: Any, **kwargs: Any) -> list[Any]:
-        return []
-
-    def get_by_id(self, *args: Any, **kwargs: Any) -> None:
-        return None
-
-
-class _FakeRepository:
-    def get_entity(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def patch_entity(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def append_entity_fact(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-
-class _FakeRuntimeService:
-    def get_active_session(self, *args: Any, **kwargs: Any) -> None:
-        return None
-
-    def start_session(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def record_event(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def record_note(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def end_session(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-
-class _FakeRecoveryService:
-    def inspect_runtime(self, *args: Any, **kwargs: Any) -> Any:
-        return type("Report", (), {"has_issues": False})()
-
-
-class _FakeSessionRepo:
-    def get_session_metadata(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def list_session_metadata(self, *args: Any, **kwargs: Any) -> list[Any]:
-        return []
-
-
-class _FakeEventRepo:
-    def list_events(self, *args: Any, **kwargs: Any) -> list[Any]:
-        return []
-
-
-class _FakeWorldTimeRepo:
-    def get_current_world_time(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def initialize_current_world_time(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def set_current_world_time(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-
-class _FakeCalendarService:
-    @property
-    def definition(self) -> Any:
-        return type("Def", (), {"calendar_id": "test_calendar"})()
-
-    def tick_to_date(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def date_to_tick(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def advance_world_time(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
-    def time_until(self, *args: Any, **kwargs: Any) -> Any:
-        raise NotImplementedError("Unit test must not execute handlers")
-
+from tests.support.tool_registry_fakes import build_registry_with_fakes
 
 # ── Fixture ───────────────────────────────────────────────────────────────────────
 
@@ -118,16 +31,7 @@ class _FakeCalendarService:
 @pytest.fixture(name="mvp_registry")
 def _mvp_registry_fixture() -> ToolRegistry:
     """Build and return the complete MVP ToolRegistry with fakes."""
-    return build_mvp_tool_registry(
-        search_service=_FakeSearchService(),
-        repository=_FakeRepository(),
-        runtime_service=_FakeRuntimeService(),
-        recovery_service=_FakeRecoveryService(),
-        session_repository=_FakeSessionRepo(),
-        event_repository=_FakeEventRepo(),
-        world_time_repository=_FakeWorldTimeRepo(),
-        calendar_service=_FakeCalendarService(),
-    )
+    return build_registry_with_fakes()
 
 
 # ── Registry shape tests ──────────────────────────────────────────────────────────

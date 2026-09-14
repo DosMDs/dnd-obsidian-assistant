@@ -540,11 +540,13 @@ class TestCalendarDefinition:
 
     def test_extra_field_rejected(self) -> None:
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            CalendarDefinition(
-                calendar_id="test",
-                epoch=GameDate(year=1, month="Hammer", day=1),
-                months=self._MINIMAL_MONTHS,
-                unknown="x",
+            CalendarDefinition.model_validate(
+                {
+                    "calendar_id": "test",
+                    "epoch": GameDate(year=1, month="Hammer", day=1),
+                    "months": self._MINIMAL_MONTHS,
+                    "unknown": "x",
+                }
             )
 
     def test_frozen(self) -> None:
@@ -670,13 +672,15 @@ class TestStage2Compatibility:
         from datetime import UTC, datetime
 
         with pytest.raises(ValidationError):
-            Session(
-                id="S100",
-                type="session",
-                status="completed",
-                real_started_at=datetime(2026, 8, 27, 17, 0, 0, tzinfo=UTC),
-                world_tick_start="123",
-                revision=1,
+            Session.model_validate(
+                {
+                    "id": "S100",
+                    "type": "session",
+                    "status": "completed",
+                    "real_started_at": datetime(2026, 8, 27, 17, 0, 0, tzinfo=UTC),
+                    "world_tick_start": "123",
+                    "revision": 1,
+                }
             )
 
     def test_timeline_event_world_tick_serializes_as_int(self) -> None:
@@ -725,16 +729,18 @@ class TestStage2Compatibility:
 
     def test_timeline_event_string_tick_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            TimelineEvent(
-                id="evt_001",
-                type="timeline_event",
-                name="Test Event",
-                status="historical",
-                certainty=TemporalCertainty.EXACT,
-                importance="minor",
-                world_tick="123",
-                visibility=Visibility.PLAYER,
-                revision=1,
+            TimelineEvent.model_validate(
+                {
+                    "id": "evt_001",
+                    "type": "timeline_event",
+                    "name": "Test Event",
+                    "status": "historical",
+                    "certainty": TemporalCertainty.EXACT,
+                    "importance": "minor",
+                    "world_tick": "123",
+                    "visibility": Visibility.PLAYER,
+                    "revision": 1,
+                }
             )
 
     def test_timeline_event_tick_min_serializes_as_int(self) -> None:

@@ -37,8 +37,8 @@ from dnd_assistant.tools.world_time_mutations import (
 from dnd_assistant.tools.world_time_reads import register_world_time_read_tools
 
 if TYPE_CHECKING:
-    from dnd_assistant.application.session_recovery import SessionRecoveryService
-    from dnd_assistant.application.session_runtime import SessionRuntimeService
+    from dnd_assistant.application.session_recovery import SessionRecovery
+    from dnd_assistant.application.session_runtime import SessionRuntime
     from dnd_assistant.domain.calendar import CalendarService
     from dnd_assistant.retrieval.service import SearchService
     from dnd_assistant.storage.types import (
@@ -53,8 +53,8 @@ def build_mvp_tool_registry(
     *,
     search_service: SearchService,
     repository: VaultRepository,
-    runtime_service: SessionRuntimeService,
-    recovery_service: SessionRecoveryService,
+    runtime_service: SessionRuntime,
+    recovery_service: SessionRecovery,
     session_repository: SessionMetadataRepository,
     event_repository: SessionEventRepository,
     world_time_repository: WorldTimeRepository,
@@ -69,8 +69,8 @@ def build_mvp_tool_registry(
     Args:
         search_service: Player-visibility gate for entity tools.
         repository: ``VaultRepository`` for entity persistence.
-        runtime_service: ``SessionRuntimeService`` for session mutations.
-        recovery_service: ``SessionRecoveryService`` for preflight checks.
+    runtime_service: A ``SessionRuntime`` implementation for session mutations.
+    recovery_service: A ``SessionRecovery`` implementation for preflight checks.
         session_repository: ``SessionMetadataRepository`` for session reads.
         event_repository: ``SessionEventRepository`` for event reads.
         world_time_repository: ``WorldTimeRepository`` for world-time persistence.

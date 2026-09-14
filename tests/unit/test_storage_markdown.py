@@ -19,7 +19,13 @@ from typing import cast
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Revision
+from dnd_assistant.domain.types import (
+    EntityId,
+    EntityType,
+    KnowledgeStatus,
+    Revision,
+    Visibility,
+)
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.storage import VaultDocument, parse, serialize
 from dnd_assistant.storage.markdown import _find_frontmatter
@@ -33,8 +39,8 @@ def _make_entity(
     entity_type: EntityType = EntityType.NPC,
     name: str = "Gandalf",
     status: str = "alive",
-    visibility: str = "player",
-    knowledge_status: str = "confirmed",
+    visibility: Visibility = Visibility.PLAYER,
+    knowledge_status: KnowledgeStatus = KnowledgeStatus.CONFIRMED,
     revision: int = 1,
     tags: list[str] | None = None,
 ) -> Entity:

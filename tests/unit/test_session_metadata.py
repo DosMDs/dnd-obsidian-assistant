@@ -141,7 +141,7 @@ class TestRawSessionMetadataValue:
 
     def test_extra_fields_copy(self) -> None:
         session = _canonical_session()
-        extras = {"key": "value"}
+        extras: dict[str, object] = {"key": "value"}
         meta = RawSessionMetadata(session=session, extra_fields=extras)
         extras["key"] = "mutated"
         assert meta.extra_fields["key"] == "value"

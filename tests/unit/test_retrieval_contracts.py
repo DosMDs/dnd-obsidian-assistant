@@ -42,6 +42,7 @@ from dnd_assistant.retrieval import (
     VaultSearchService,
 )
 from dnd_assistant.storage.types import VaultDocument
+from tests.support.repository_doubles import VaultRepositoryWriteStubs
 
 
 class TestImports:
@@ -113,7 +114,7 @@ class TestPublicExports:
         # Must work with VaultSearchService
         from dnd_assistant.storage.types import VaultRepository
 
-        class FakeRepo:
+        class FakeRepo(VaultRepositoryWriteStubs):
             def get_entity(self, entity_id: EntityId) -> VaultDocument:
                 from dnd_assistant.errors import NotFoundError
 

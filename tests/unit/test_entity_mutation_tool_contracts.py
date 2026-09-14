@@ -11,19 +11,25 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
 import pytest
 
 from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.types import (
+    EntityId,
     EntityType,
     KnowledgeStatus,
+    Revision,
     Visibility,
     make_revision,
 )
-from dnd_assistant.errors import ValidationError
+from dnd_assistant.errors import NotFoundError, ValidationError
+from dnd_assistant.retrieval.types import SearchHit, SearchQuery
+from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.storage.patch import EntityPatch
+from dnd_assistant.storage.types import VaultDocument
 from dnd_assistant.tools.entity_mutations import (
     AppendEntityFactInput,
     AppendEntityFactOutput,
@@ -69,15 +75,15 @@ class FakeSearchService:
     """Minimal fake implementing SearchService protocol for registration tests."""
 
     def __init__(self) -> None:
-        self._by_id: dict[str, object] = {}
+        self._by_id: dict[str, SearchHit | None] = {}
 
-    def set_get_by_id(self, entity_id: str, hit: object) -> None:
+    def set_get_by_id(self, entity_id: str, hit: SearchHit | None) -> None:
         self._by_id[entity_id] = hit
 
-    def search(self, query: object, *, limit: int = 20) -> list[object]:
+    def search(self, query: SearchQuery, *, limit: int = 20) -> Sequence[SearchHit]:
         return []
 
-    def get_by_id(self, entity_id: str) -> object:
+    def get_by_id(self, entity_id: EntityId) -> SearchHit | None:
         return self._by_id.get(entity_id)
 
 
@@ -85,33 +91,42 @@ class FakeRepository:
     """Minimal fake implementing VaultRepository protocol for registration tests."""
 
     def __init__(self) -> None:
-        self._entities: dict[str, object] = {}
+        self._entities: dict[str, VaultDocument] = {}
 
-    def get_entity(self, entity_id: str) -> object:
-        return self._entities.get(entity_id)
+    def get_entity(self, entity_id: EntityId) -> VaultDocument:
+        doc = self._entities.get(entity_id)
+        if doc is None:
+            raise NotFoundError(f"Entity '{entity_id}' not found")
+        return doc
 
-    def list_entities(self, entity_type: object = None) -> list[object]:
-        return []
+    def list_entities(self, entity_type: EntityType | None = None) -> list[VaultDocument]:
+        return list(self._entities.values())
+
+    def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
     def patch_entity(
         self,
-        entity_id: str,
-        patch: object,
+        entity_id: EntityId,
+        patch: EntityPatch,
         *,
-        expected_revision: object,
-        audit: object,
-    ) -> object:
-        return object()
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
     def append_entity_fact(
         self,
-        entity_id: str,
+        entity_id: EntityId,
         *,
-        expected_revision: object,
+        expected_revision: Revision,
         fact: str,
-        audit: object,
-    ) -> object:
-        return object()
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────

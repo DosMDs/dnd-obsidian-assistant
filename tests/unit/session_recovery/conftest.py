@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from dnd_assistant.domain.session import Session
-from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditPhase, AuditRecord, AuditService
 from dnd_assistant.storage.session_metadata import (
     ObsidianSessionMetadataRepository,
 )
@@ -93,7 +93,7 @@ def make_audit_record(
     entity_id: str | None = None,
     before_hash: str | None = None,
     after_hash: str | None = None,
-    phase: str = "committed",
+    phase: AuditPhase = "committed",
 ) -> AuditRecord:
     """Build an AuditRecord from an AuditContext."""
     return AuditRecord(

@@ -37,11 +37,11 @@ class TestEntityPatchAllowedFields:
         assert patch.status == "retired"
 
     def test_visibility_accepted(self) -> None:
-        patch = EntityPatch(visibility="dm")
+        patch = EntityPatch(visibility=Visibility.DM)
         assert patch.visibility == Visibility.DM
 
     def test_knowledge_status_accepted(self) -> None:
-        patch = EntityPatch(knowledge_status="inferred")
+        patch = EntityPatch(knowledge_status=KnowledgeStatus.INFERRED)
         assert patch.knowledge_status == KnowledgeStatus.INFERRED
 
     def test_created_session_accepted(self) -> None:
@@ -60,8 +60,8 @@ class TestEntityPatchAllowedFields:
         patch = EntityPatch(
             name="Gandalf the White",
             status="active",
-            visibility="player",
-            knowledge_status="confirmed",
+            visibility=Visibility.PLAYER,
+            knowledge_status=KnowledgeStatus.CONFIRMED,
             tags=["wizard"],
         )
         assert patch.name == "Gandalf the White"
@@ -217,11 +217,11 @@ class TestEntityPatchCanonicalValidation:
 
     def test_invalid_visibility_rejected(self) -> None:
         with pytest.raises(PydanticValidationError):
-            EntityPatch(visibility="invalid")
+            EntityPatch.model_validate({"visibility": "invalid"})
 
     def test_invalid_knowledge_status_rejected(self) -> None:
         with pytest.raises(PydanticValidationError):
-            EntityPatch(knowledge_status="invalid")
+            EntityPatch.model_validate({"knowledge_status": "invalid"})
 
     def test_unicode_accepted(self) -> None:
         patch = EntityPatch(name="Гэндальф Белый")

@@ -9,7 +9,7 @@ This module belongs to the application layer and must not import from:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from dnd_assistant.storage.audit import AuditContext
@@ -18,6 +18,18 @@ if TYPE_CHECKING:
         SessionRecoveryReport,
         SessionRecoveryRepository,
     )
+
+
+@runtime_checkable
+class SessionRecovery(Protocol):
+    """Structural contract for the session recovery service.
+
+    ``SessionRecoveryService`` satisfies this protocol.  Tools depend on the
+    protocol so that deterministic test doubles can stand in for the
+    application service without inheriting from the concrete class.
+    """
+
+    def inspect_runtime(self) -> SessionRecoveryReport: ...
 
 
 class SessionRecoveryService:

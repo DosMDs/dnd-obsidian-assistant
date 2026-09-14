@@ -24,9 +24,9 @@ from unittest import mock
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Revision
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Revision, Visibility
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
-from dnd_assistant.storage.audit import AuditContext, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.paths import entity_directory
 from dnd_assistant.storage.types import VaultDocument
@@ -45,8 +45,8 @@ def _make_entity(
         type=entity_type,
         name=name,
         status="alive",
-        visibility="player",
-        knowledge_status="confirmed",
+        visibility=Visibility.PLAYER,
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=ts,
         updated_at=ts,
         revision=cast(Revision, revision),
@@ -283,7 +283,7 @@ class TestPatchEntityFieldChanges:
         )
         result = repo.patch_entity(
             "npc-gandalf",
-            EntityPatch(visibility="dm"),
+            EntityPatch(visibility=Visibility.DM),
             expected_revision=1,
             audit=_make_audit_context("op-002"),
         )
@@ -297,7 +297,7 @@ class TestPatchEntityFieldChanges:
         )
         result = repo.patch_entity(
             "npc-gandalf",
-            EntityPatch(knowledge_status="inferred"),
+            EntityPatch(knowledge_status=KnowledgeStatus.INFERRED),
             expected_revision=1,
             audit=_make_audit_context("op-002"),
         )
@@ -453,8 +453,8 @@ class TestPatchEntityImmutableFields:
                 type=EntityType.NPC,
                 name="Gandalf",
                 status="alive",
-                visibility="player",
-                knowledge_status="confirmed",
+                visibility=Visibility.PLAYER,
+                knowledge_status=KnowledgeStatus.CONFIRMED,
                 created_at=created,
                 updated_at=created,
                 revision=cast(Revision, 1),
@@ -951,7 +951,7 @@ class TestPatchEntityFailureSemantics:
         )
         original_append = audit_service.append
 
-        def _fail_on_patch_committed(record: object) -> None:
+        def _fail_on_patch_committed(record: AuditRecord) -> None:
             if (
                 getattr(record, "phase", None) == "committed"
                 and getattr(record, "operation", None) == "patch_entity"
@@ -979,7 +979,7 @@ class TestPatchEntityFailureSemantics:
         original_append = audit_service.append
         original_storage_error = StorageError("committed append failed")
 
-        def _fail_on_committed(record: object) -> None:
+        def _fail_on_committed(record: AuditRecord) -> None:
             if (
                 getattr(record, "phase", None) == "committed"
                 and getattr(record, "operation", None) == "patch_entity"
@@ -1018,7 +1018,7 @@ class TestPatchEntityConcurrentEdit:
         # by intercepting the second append call (intent is first patch append)
         original_append = audit_service.append
 
-        def _intercept_and_edit(record: object) -> None:
+        def _intercept_and_edit(record: AuditRecord) -> None:
             original_append(record)
             if (
                 getattr(record, "phase", None) == "intent"
@@ -1049,7 +1049,7 @@ class TestPatchEntityConcurrentEdit:
         entity_file = next(npc_dir.iterdir())
         original_append = audit_service.append
 
-        def _intercept_and_edit(record: object) -> None:
+        def _intercept_and_edit(record: AuditRecord) -> None:
             original_append(record)
             if (
                 getattr(record, "phase", None) == "intent"

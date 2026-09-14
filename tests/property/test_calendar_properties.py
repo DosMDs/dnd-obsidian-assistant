@@ -97,8 +97,9 @@ def calendar_strategy(draw: st.DrawFn) -> CalendarDefinition:
 # =============================================================================
 
 
-def draw_valid_date(draw: st.DrawFn, cal: CalendarDefinition) -> GameDate:
-    """Draw a GameDate valid for the given CalendarDefinition."""
+@st.composite
+def valid_date_strategy(draw: st.DrawFn, cal: CalendarDefinition) -> GameDate:
+    """Strategy drawing a GameDate valid for the given CalendarDefinition."""
     year = draw(st.integers(min_value=-10000, max_value=10000))
     hour = draw(st.integers(min_value=0, max_value=cal.hours_per_day - 1))
     minute = draw(st.integers(min_value=0, max_value=cal.minutes_per_hour - 1))
@@ -123,7 +124,7 @@ def test_p1_date_round_trip(data: st.DataObject) -> None:
     """tick_to_date(date_to_tick(date)) == date for every valid date."""
     cal = data.draw(calendar_strategy())
     svc = DeterministicCalendarService(cal)
-    date = draw_valid_date(data.draw, cal)
+    date = data.draw(valid_date_strategy(cal))
     tick = svc.date_to_tick(date)
     restored = svc.tick_to_date(tick)
     assert restored == date
@@ -245,7 +246,7 @@ def test_p7_one_year_translation(data: st.DataObject) -> None:
     minutes_per_day = cal.hours_per_day * cal.minutes_per_hour
     expected = days_per_year * minutes_per_day
 
-    date = draw_valid_date(data.draw, cal)
+    date = data.draw(valid_date_strategy(cal))
     assume(date.year < 10000)
     if date.intercalary_day is not None:
         d_plus = GameDate(
@@ -324,5 +325,5 @@ def test_p8b_holidays_no_effect_dates(data: st.DataObject) -> None:
     )
     svc_with = DeterministicCalendarService(cal_with_holiday)
 
-    date = draw_valid_date(data.draw, cal)
+    date = data.draw(valid_date_strategy(cal))
     assert svc_with.date_to_tick(date) == svc_no_holiday.date_to_tick(date)

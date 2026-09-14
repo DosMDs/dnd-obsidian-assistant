@@ -576,8 +576,8 @@ class TestAllowlist:
 
 
 _MALFORMED_CASES = [
-    ("tool_calls_not_a_list", _tool_resp(content="", tool_calls="not a list")),  # type: ignore[arg-type]
-    ("entry_not_an_object", _tool_resp(content="", tool_calls=["not an object"])),
+    ("tool_calls_not_a_list", {"message": {"role": "assistant", "tool_calls": "not a list"}}),
+    ("entry_not_an_object", {"message": {"role": "assistant", "tool_calls": ["not an object"]}}),
     ("missing_function", _tool_resp(content="", tool_calls=[{"no_function": True}])),
     ("function_not_object", _tool_resp(content="", tool_calls=[{"function": "not an object"}])),
     ("missing_name", _tool_resp(content="", tool_calls=[{"function": {"no_name": True}}])),

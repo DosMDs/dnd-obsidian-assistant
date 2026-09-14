@@ -11,7 +11,7 @@ This module belongs to the application layer and must not import from:
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.types import EntityId
@@ -25,6 +25,37 @@ if TYPE_CHECKING:
         SessionMetadataRepository,
         WorldTimeRepository,
     )
+
+
+@runtime_checkable
+class SessionRuntime(Protocol):
+    """Structural contract for the session lifecycle service.
+
+    ``SessionRuntimeService`` satisfies this protocol.  Tools depend on the
+    protocol so that deterministic test doubles can stand in for the
+    application service without inheriting from the concrete class.
+    """
+
+    def get_active_session(self) -> Session | None: ...
+
+    def start_session(self, *, audit: AuditContext) -> Session: ...
+
+    def record_event(
+        self,
+        event_type: str,
+        *,
+        extra_fields: Mapping[str, object] | None = None,
+        audit: AuditContext,
+    ) -> RawSessionEvent: ...
+
+    def record_note(self, text: str, *, audit: AuditContext) -> RawSessionEvent: ...
+
+    def end_session(
+        self,
+        *,
+        touched_entity_ids: Sequence[EntityId] = (),
+        audit: AuditContext,
+    ) -> Session: ...
 
 
 class SessionRuntimeService:

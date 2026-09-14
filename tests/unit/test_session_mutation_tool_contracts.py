@@ -11,14 +11,18 @@ Covers:
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 import pytest
 
 from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
+from dnd_assistant.domain.types import EntityId
 from dnd_assistant.errors import DndAssistantError, ValidationError
+from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.session_events import RawSessionEvent
+from dnd_assistant.storage.session_recovery import RecoveryIssue, SessionRecoveryReport
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.session_mutations import (
     EndSessionInput,
@@ -69,7 +73,7 @@ class FakeRuntimeService:
     def get_active_session(self) -> Session | None:
         return self._active
 
-    def start_session(self, *, audit: object) -> Session:
+    def start_session(self, *, audit: AuditContext) -> Session:
         return _make_session()
 
     def record_event(
@@ -77,22 +81,27 @@ class FakeRuntimeService:
         event_type: str,
         *,
         extra_fields: Mapping[str, object] | None = None,
-        audit: object = None,
-    ) -> object:
+        audit: AuditContext,
+    ) -> RawSessionEvent:
         return _make_raw_event(event_type, extra_fields)
 
-    def record_note(self, text: str, *, audit: object = None) -> object:
+    def record_note(self, text: str, *, audit: AuditContext) -> RawSessionEvent:
         return _make_raw_event("note", {"text": text})
 
-    def end_session(self, *, touched_entity_ids: object = (), audit: object = None) -> Session:
+    def end_session(
+        self,
+        *,
+        touched_entity_ids: Sequence[EntityId] = (),
+        audit: AuditContext,
+    ) -> Session:
         return _make_session(status="completed")
 
 
-def _make_raw_event(event_type: str, extra_fields: Mapping[str, object] | None = None) -> object:
-    """Create a minimal RawSessionEvent-like object."""
-    from types import SimpleNamespace
-
-    return SimpleNamespace(
+def _make_raw_event(
+    event_type: str, extra_fields: Mapping[str, object] | None = None
+) -> RawSessionEvent:
+    """Create a minimal RawSessionEvent for tests."""
+    return RawSessionEvent(
         event_id="evt_001",
         real_time=_NOW,
         world_tick=make_world_tick(1000),
@@ -130,11 +139,10 @@ class FakeRecoveryService:
     def repair_event_calls(self) -> int:
         return self._repair_event_calls
 
-    def inspect_runtime(self) -> object:
+    def inspect_runtime(self) -> SessionRecoveryReport:
         self._inspect_calls += 1
-        from types import SimpleNamespace
-
-        return SimpleNamespace(has_issues=self._has_issues, issues=[])
+        issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
+        return SessionRecoveryReport(issues)
 
     def repair_audit_tail(self, *, audit: object = None) -> object:
         self._repair_audit_calls += 1

@@ -437,10 +437,7 @@ class TestTags:
 class TestExtraFields:
     def test_rejects_unknown_field(self) -> None:
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            Entity(  # type: ignore[call-arg]
-                **_CANONICAL_KWARGS,
-                current_location="Waterdeep",
-            )
+            Entity.model_validate({**_CANONICAL_KWARGS, "current_location": "Waterdeep"})
 
 
 # ── serialisation ──────────────────────────────────────────────────────────

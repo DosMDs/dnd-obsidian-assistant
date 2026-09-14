@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from collections.abc import Sequence
-from dataclasses import dataclass
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 import pytest
+from pydantic.types import AwareDatetime
 
 from dnd_assistant.application.agent_context import (
     _MAX_RELEVANT_ENTITIES,
@@ -31,12 +31,17 @@ from dnd_assistant.application.agent_context import (
 )
 from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Visibility
+from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
-from dnd_assistant.retrieval.types import MatchKind, SearchHit
+from dnd_assistant.retrieval.types import MatchKind, SearchHit, SearchQuery
 from dnd_assistant.storage.types import VaultDocument
 
 if TYPE_CHECKING:
-    from dnd_assistant.domain.types import EntityId
+    from dnd_assistant.domain.calendar import WorldTick
+    from dnd_assistant.domain.session import Session
+    from dnd_assistant.domain.types import EntityId, Revision
+    from dnd_assistant.storage.audit import AuditContext
+    from dnd_assistant.storage.patch import EntityPatch
     from dnd_assistant.storage.session_events import RawSessionEvent
     from dnd_assistant.storage.session_metadata import RawSessionMetadata
 
@@ -164,7 +169,7 @@ class FakeSearchService:
         self.last_limit: int | None = None
         self.search_call_count: int = 0
 
-    def search(self, query: object, *, limit: int = 20) -> Sequence[SearchHit]:
+    def search(self, query: SearchQuery, *, limit: int = 20) -> Sequence[SearchHit]:
         self.last_query = query
         self.last_limit = limit
         self.search_call_count += 1
@@ -193,6 +198,29 @@ class FakeVaultRepository:
     def list_entities(self, entity_type: EntityType | None = None) -> list[VaultDocument]:
         raise NotImplementedError("not needed for S9-01")
 
+    def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        raise NotImplementedError("not needed for S9-01")
+
+    def patch_entity(
+        self,
+        entity_id: EntityId,
+        patch: EntityPatch,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        raise NotImplementedError("not needed for S9-01")
+
+    def append_entity_fact(
+        self,
+        entity_id: EntityId,
+        *,
+        expected_revision: Revision,
+        fact: str,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        raise NotImplementedError("not needed for S9-01")
+
 
 class FakeSessionMetadataRepository:
     """Minimal SessionMetadataRepository fake for testing."""
@@ -209,7 +237,7 @@ class FakeSessionMetadataRepository:
     def allocate_next_session_id(self) -> str:
         raise NotImplementedError
 
-    def create_session(self, session: object, *, audit: object) -> object:
+    def create_session(self, session: Session, *, audit: AuditContext) -> RawSessionMetadata:
         raise NotImplementedError
 
     def get_session_metadata(self, session_id: str) -> RawSessionMetadata:
@@ -218,7 +246,15 @@ class FakeSessionMetadataRepository:
     def list_session_metadata(self) -> list[RawSessionMetadata]:
         raise NotImplementedError
 
-    def close_session(self, session_id: str, *, world_tick_end: object, audit: object) -> object:
+    def close_session(
+        self,
+        session_id: str,
+        *,
+        expected_revision: Revision,
+        world_tick_end: WorldTick,
+        touched_entity_ids: Sequence[EntityId],
+        audit: AuditContext,
+    ) -> RawSessionMetadata:
         raise NotImplementedError
 
 
@@ -239,21 +275,13 @@ class FakeSessionEventRepository:
         self,
         session_id: str,
         *,
-        event_type: object,
-        real_time: object,
-        world_tick: object,
-        extra_fields: object,
-        audit: object,
-    ) -> object:
+        event_type: str,
+        real_time: AwareDatetime,
+        world_tick: WorldTick,
+        extra_fields: Mapping[str, object] | None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
         raise NotImplementedError
-
-
-@dataclass(frozen=True, slots=True)
-class _FakeCurrentWorldTime:
-    """Minimal test-only CurrentWorldTime stand-in."""
-
-    current_world_tick: int
-    revision: int = 1
 
 
 class FakeWorldTimeRepository:
@@ -263,18 +291,24 @@ class FakeWorldTimeRepository:
         self._world_tick = world_tick
         self.get_current_world_time_call_count: int = 0
 
-    def get_current_world_time(self) -> _FakeCurrentWorldTime:
+    def get_current_world_time(self) -> CurrentWorldTime:
         self.get_current_world_time_call_count += 1
         if self._world_tick is None:
             raise NotFoundError("World time not initialised")
-        return _FakeCurrentWorldTime(current_world_tick=self._world_tick, revision=1)
+        return CurrentWorldTime(current_world_tick=self._world_tick, revision=1)
 
-    def initialize_current_world_time(self, world_tick: object, *, audit: object) -> object:
+    def initialize_current_world_time(
+        self, world_tick: WorldTick, *, audit: AuditContext
+    ) -> CurrentWorldTime:
         raise NotImplementedError
 
     def set_current_world_time(
-        self, world_tick: object, *, expected_revision: object, audit: object
-    ) -> object:
+        self,
+        world_tick: WorldTick,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> CurrentWorldTime:
         raise NotImplementedError
 
 
@@ -599,7 +633,7 @@ class TestWorldTime:
 
     def test_storage_error_propagated(self) -> None:
         class _FailingWT(FakeWorldTimeRepository):
-            def get_current_world_time(self) -> object:
+            def get_current_world_time(self) -> CurrentWorldTime:
                 raise StorageError("Corrupt world time file")
 
         with pytest.raises(StorageError):

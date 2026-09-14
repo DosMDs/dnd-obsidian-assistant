@@ -402,10 +402,11 @@ class TestGoldenFuzzyRetrieval:
     def test_fuzzy_score_is_finite(self, search_service: VaultSearchService) -> None:
         """All fuzzy scores are finite floats."""
         hits = search_service.search(SearchQuery(text="Эндр"))
+        import math
+
         for h in hits:
             assert h.match_kind == MatchKind.FUZZY_NAME
-            import math
-
+            assert h.score is not None
             assert math.isfinite(h.score)
 
     def test_fuzzy_ordering_score_desc_then_id(self, search_service: VaultSearchService) -> None:
@@ -414,10 +415,14 @@ class TestGoldenFuzzyRetrieval:
         hits = search_service.search(SearchQuery(text="Эндр"))
         fuzzy_hits = [h for h in hits if h.match_kind == MatchKind.FUZZY_NAME]
         for i in range(len(fuzzy_hits) - 1):
-            if fuzzy_hits[i].score == fuzzy_hits[i + 1].score:
+            current = fuzzy_hits[i].score
+            following = fuzzy_hits[i + 1].score
+            assert current is not None
+            assert following is not None
+            if current == following:
                 assert fuzzy_hits[i].entity_id < fuzzy_hits[i + 1].entity_id
             else:
-                assert fuzzy_hits[i].score > fuzzy_hits[i + 1].score
+                assert current > following
 
     def test_no_arbitrary_fuzzy_threshold(
         self, search_service: VaultSearchService, repo: ObsidianVaultRepository
@@ -578,6 +583,7 @@ class TestGoldenFts:
 
         for h in hits:
             assert h.match_kind == MatchKind.FTS
+            assert h.score is not None
             assert math.isfinite(h.score)
 
     def test_fts_resolver_ambiguous(

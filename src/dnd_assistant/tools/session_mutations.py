@@ -37,8 +37,8 @@ from dnd_assistant.tools.types import (
 )
 
 if TYPE_CHECKING:
-    from dnd_assistant.application.session_recovery import SessionRecoveryService
-    from dnd_assistant.application.session_runtime import SessionRuntimeService
+    from dnd_assistant.application.session_recovery import SessionRecovery
+    from dnd_assistant.application.session_runtime import SessionRuntime
 
 
 # ── Shared string validation ────────────────────────────────────────────────
@@ -68,7 +68,7 @@ def _validate_strict_string(value: str, field_name: str) -> str:
 
 
 def _check_recovery_preflight(
-    recovery_service: SessionRecoveryService,
+    recovery_service: SessionRecovery,
 ) -> None:
     """Perform a read-only recovery preflight before mutation.
 
@@ -299,8 +299,8 @@ def _start_session_handler(
     input_model: StartSessionInput,  # noqa: ARG001
     context: ExecutionContext,
     *,
-    runtime_service: SessionRuntimeService,
-    recovery_service: SessionRecoveryService,
+    runtime_service: SessionRuntime,
+    recovery_service: SessionRecovery,
 ) -> StartSessionOutput:
     """Start a new session after recovery preflight.
 
@@ -318,8 +318,8 @@ def _record_event_handler(
     input_model: RecordEventInput,
     context: ExecutionContext,
     *,
-    runtime_service: SessionRuntimeService,
-    recovery_service: SessionRecoveryService,
+    runtime_service: SessionRuntime,
+    recovery_service: SessionRecovery,
 ) -> RecordEventOutput:
     """Record a generic event after recovery preflight.
 
@@ -348,8 +348,8 @@ def _record_note_handler(
     input_model: RecordNoteInput,
     context: ExecutionContext,
     *,
-    runtime_service: SessionRuntimeService,
-    recovery_service: SessionRecoveryService,
+    runtime_service: SessionRuntime,
+    recovery_service: SessionRecovery,
 ) -> RecordNoteOutput:
     """Record a note after recovery preflight.
 
@@ -377,8 +377,8 @@ def _end_session_handler(
     input_model: EndSessionInput,
     context: ExecutionContext,
     *,
-    runtime_service: SessionRuntimeService,
-    recovery_service: SessionRecoveryService,
+    runtime_service: SessionRuntime,
+    recovery_service: SessionRecovery,
 ) -> EndSessionOutput:
     """End the active session after recovery preflight.
 
@@ -401,8 +401,8 @@ def _end_session_handler(
 def register_session_mutation_tools(
     registry: ToolRegistry,
     *,
-    runtime_service: SessionRuntimeService,
-    recovery_service: SessionRecoveryService,
+    runtime_service: SessionRuntime,
+    recovery_service: SessionRecovery,
 ) -> None:
     """Register session mutation tools on a ``ToolRegistry``.
 

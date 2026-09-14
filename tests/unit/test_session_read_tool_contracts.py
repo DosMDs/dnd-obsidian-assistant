@@ -12,13 +12,16 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
 
 from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
-from dnd_assistant.errors import DndAssistantError, ValidationError
+from dnd_assistant.domain.types import EntityId, Revision
+from dnd_assistant.errors import DndAssistantError, NotFoundError, ValidationError
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.session_reads import (
     GetActiveSessionInput,
@@ -36,6 +39,14 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+
+if TYPE_CHECKING:
+    from pydantic.types import AwareDatetime
+
+    from dnd_assistant.domain.calendar import WorldTick
+    from dnd_assistant.storage.audit import AuditContext
+    from dnd_assistant.storage.session_events import RawSessionEvent
+    from dnd_assistant.storage.session_metadata import RawSessionMetadata
 
 # ── Shared test data ──────────────────────────────────────────────────────
 
@@ -61,7 +72,7 @@ def _make_session(session_id: str = "S001", status: str = "active") -> Session:
 
 
 class FakeRuntimeService:
-    """Minimal fake implementing SessionRuntimeService protocol."""
+    """Minimal fake implementing SessionRuntime protocol."""
 
     def __init__(self) -> None:
         self._active: Session | None = None
@@ -72,28 +83,54 @@ class FakeRuntimeService:
     def get_active_session(self) -> Session | None:
         return self._active
 
+    def start_session(self, *, audit: AuditContext) -> Session:
+        msg = "FakeRuntimeService does not support start_session"
+        raise NotImplementedError(msg)
+
+    def record_event(
+        self,
+        event_type: str,
+        *,
+        extra_fields: Mapping[str, object] | None = None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
+        msg = "FakeRuntimeService does not support record_event"
+        raise NotImplementedError(msg)
+
+    def record_note(self, text: str, *, audit: AuditContext) -> RawSessionEvent:
+        msg = "FakeRuntimeService does not support record_note"
+        raise NotImplementedError(msg)
+
+    def end_session(
+        self,
+        *,
+        touched_entity_ids: Sequence[EntityId] = (),
+        audit: AuditContext,
+    ) -> Session:
+        msg = "FakeRuntimeService does not support end_session"
+        raise NotImplementedError(msg)
+
 
 class FakeSessionRepository:
     """Minimal fake implementing SessionMetadataRepository protocol."""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, object] = {}
+        self._sessions: dict[str, RawSessionMetadata] = {}
 
-    def add_session(self, session: Session) -> None:
-        self._sessions[session.id] = session
+    def add_session(self, metadata: RawSessionMetadata) -> None:
+        self._sessions[metadata.session.id] = metadata
 
-    def get_session_metadata(self, session_id: str) -> object:
-        return self._sessions.get(session_id)
+    def get_session_metadata(self, session_id: str) -> RawSessionMetadata:
+        metadata = self._sessions.get(session_id)
+        if metadata is None:
+            raise NotFoundError(f"Session '{session_id}' not found")
+        return metadata
 
-    def list_session_metadata(self) -> list[object]:
+    def list_session_metadata(self) -> list[RawSessionMetadata]:
         return list(self._sessions.values())
 
-    def get_active_session(self) -> object | None:
-        active = [
-            s for s in self._sessions.values() if isinstance(s, Session) and s.status == "active"
-        ]
-        if len(active) == 0:
-            return None
+    def get_active_session(self) -> RawSessionMetadata | None:
+        active = [m for m in self._sessions.values() if m.session.status == "active"]
         if len(active) == 1:
             return active[0]
         return None
@@ -101,20 +138,50 @@ class FakeSessionRepository:
     def allocate_next_session_id(self) -> str:
         return "S999"
 
+    def create_session(
+        self,
+        session: Session,
+        *,
+        audit: AuditContext,
+    ) -> RawSessionMetadata:
+        msg = "FakeSessionRepository does not support create_session"
+        raise NotImplementedError(msg)
+
+    def close_session(
+        self,
+        session_id: str,
+        *,
+        expected_revision: Revision,
+        world_tick_end: WorldTick,
+        touched_entity_ids: Sequence[EntityId],
+        audit: AuditContext,
+    ) -> RawSessionMetadata:
+        msg = "FakeSessionRepository does not support close_session"
+        raise NotImplementedError(msg)
+
 
 class FakeEventRepository:
     """Minimal fake implementing SessionEventRepository protocol."""
 
     def __init__(self) -> None:
-        self._events: list[object] = []
+        self._events: dict[str, list[RawSessionEvent]] = {}
 
-    def set_events(self, events: list[object]) -> None:
-        self._events = events
+    def set_events(self, session_id: str, events: list[RawSessionEvent]) -> None:
+        self._events[session_id] = events
 
-    def list_events(self, session_id: str) -> list[object]:
-        return self._events
+    def list_events(self, session_id: str) -> list[RawSessionEvent]:
+        return list(self._events.get(session_id, []))
 
-    def append_event(self, *args: object, **kwargs: object) -> object:
+    def append_event(
+        self,
+        session_id: str,
+        *,
+        event_type: str,
+        real_time: AwareDatetime,
+        world_tick: WorldTick,
+        extra_fields: Mapping[str, object] | None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
         msg = "FakeEventRepository does not support writes"
         raise NotImplementedError(msg)
 

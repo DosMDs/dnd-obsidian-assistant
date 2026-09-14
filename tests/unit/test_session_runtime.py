@@ -13,16 +13,29 @@ Tests cover:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING
 
 import pytest
+from pydantic.types import AwareDatetime
 
 from dnd_assistant.application.session_runtime import SessionRuntimeService
+from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.domain.session import Session
+from dnd_assistant.domain.types import EntityId, Revision
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.storage.session_events import RawSessionEvent
+from dnd_assistant.storage.session_metadata import RawSessionMetadata
+
+if TYPE_CHECKING:
+    from dnd_assistant.storage.types import (
+        SessionEventRepository,
+        SessionMetadataRepository,
+        WorldTimeRepository,
+    )
 
 # ── Fakes / stubs ──────────────────────────────────────────────────────────────
 
@@ -34,7 +47,7 @@ class FakeSessionMetadataRepo:
     """
 
     def __init__(self) -> None:
-        self._sessions: dict[str, _FakeMetadata] = {}
+        self._sessions: dict[str, RawSessionMetadata] = {}
         self._next_id: str | None = None
 
     def set_next_id(self, session_id: str) -> None:
@@ -52,14 +65,14 @@ class FakeSessionMetadataRepo:
         session: Session,
         *,
         audit: AuditContext,
-    ) -> _FakeMetadata:
+    ) -> RawSessionMetadata:
         if session.id in self._sessions:
             raise ConflictError(f"Session {session.id} already exists")
-        meta = _FakeMetadata(session=session)
+        meta = RawSessionMetadata(session=session)
         self._sessions[session.id] = meta
         return meta
 
-    def get_active_session(self) -> _FakeMetadata | None:
+    def get_active_session(self) -> RawSessionMetadata | None:
         active = [m for m in self._sessions.values() if m.session.status == "active"]
         if len(active) == 0:
             return None
@@ -67,20 +80,23 @@ class FakeSessionMetadataRepo:
             return active[0]
         raise ConflictError(f"Multiple active sessions: {[m.session.id for m in active]}")
 
-    def get_session_metadata(self, session_id: str) -> _FakeMetadata:
+    def get_session_metadata(self, session_id: str) -> RawSessionMetadata:
         if session_id not in self._sessions:
             raise NotFoundError(f"Session {session_id} not found")
         return self._sessions[session_id]
+
+    def list_session_metadata(self) -> list[RawSessionMetadata]:
+        return list(self._sessions.values())
 
     def close_session(
         self,
         session_id: str,
         *,
-        expected_revision: int,
-        world_tick_end: int,
-        touched_entity_ids: list[str],
+        expected_revision: Revision,
+        world_tick_end: WorldTick,
+        touched_entity_ids: Sequence[EntityId],
         audit: AuditContext,
-    ) -> _FakeMetadata:
+    ) -> RawSessionMetadata:
         if session_id not in self._sessions:
             raise NotFoundError(f"Session {session_id} not found")
         meta = self._sessions[session_id]
@@ -100,19 +116,8 @@ class FakeSessionMetadataRepo:
             processed_model_profile=None,
             revision=meta.session.revision + 1,
         )
-        self._sessions[session_id] = _FakeMetadata(session=new_session)
+        self._sessions[session_id] = RawSessionMetadata(session=new_session)
         return self._sessions[session_id]
-
-
-class _FakeMetadata:
-    """Minimal stand-in for RawSessionMetadata."""
-
-    def __init__(self, session: Session) -> None:
-        self._session = session
-
-    @property
-    def session(self) -> Session:
-        return self._session
 
 
 class FakeWorldTimeRepo:
@@ -125,6 +130,22 @@ class FakeWorldTimeRepo:
         if self._tick is None:
             raise NotFoundError("World time not initialized")
         return CurrentWorldTime(current_world_tick=self._tick, revision=1)
+
+    def initialize_current_world_time(
+        self, world_tick: WorldTick, *, audit: AuditContext
+    ) -> CurrentWorldTime:
+        self._tick = world_tick
+        return CurrentWorldTime(current_world_tick=world_tick, revision=1)
+
+    def set_current_world_time(
+        self,
+        world_tick: WorldTick,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> CurrentWorldTime:
+        self._tick = world_tick
+        return CurrentWorldTime(current_world_tick=world_tick, revision=expected_revision + 1)
 
 
 class FakeSessionEventRepo:
@@ -141,9 +162,9 @@ class FakeSessionEventRepo:
         session_id: str,
         *,
         event_type: str,
-        real_time: datetime,
-        world_tick: int,
-        extra_fields: dict | None,
+        real_time: AwareDatetime,
+        world_tick: WorldTick,
+        extra_fields: Mapping[str, object] | None,
         audit: AuditContext,
     ) -> RawSessionEvent:
         events = self._events.setdefault(session_id, [])
@@ -172,9 +193,9 @@ def _make_audit_context(
 
 
 def _make_service(
-    session_repo=None,
-    world_repo=None,
-    event_repo=None,
+    session_repo: SessionMetadataRepository | None = None,
+    world_repo: WorldTimeRepository | None = None,
+    event_repo: SessionEventRepository | None = None,
 ) -> SessionRuntimeService:
     if session_repo is None:
         session_repo = FakeSessionMetadataRepo()
@@ -294,7 +315,7 @@ class TestGetActiveSession:
         service = _make_service(session_repo=session_repo, world_repo=world_repo)
         service.start_session(audit=_make_audit_context(operation_id="first"))
         # Manually inject a second active session into the fake repo
-        session_repo._sessions["S002"] = _FakeMetadata(
+        session_repo._sessions["S002"] = RawSessionMetadata(
             Session(
                 id="S002",
                 type="session",
@@ -359,7 +380,7 @@ class TestNoInMemoryActiveSession:
         # Start a session
         service.start_session(audit=_make_audit_context(operation_id="first"))
         # Manually change the repo state (simulating external mutation)
-        session_repo._sessions["S001"] = _FakeMetadata(
+        session_repo._sessions["S001"] = RawSessionMetadata(
             Session(
                 id="S001",
                 type="session",
@@ -404,7 +425,7 @@ class TestRecordEvent:
         session_repo = FakeSessionMetadataRepo()
         service = _make_service(session_repo=session_repo)
         service.start_session(audit=_make_audit_context(operation_id="first"))
-        session_repo._sessions["S002"] = _FakeMetadata(
+        session_repo._sessions["S002"] = RawSessionMetadata(
             Session(
                 id="S002",
                 type="session",
@@ -547,7 +568,7 @@ class TestEndSession:
         session_repo = FakeSessionMetadataRepo()
         service = _make_service(session_repo=session_repo)
         service.start_session(audit=_make_audit_context(operation_id="first"))
-        session_repo._sessions["S002"] = _FakeMetadata(
+        session_repo._sessions["S002"] = RawSessionMetadata(
             Session(
                 id="S002",
                 type="session",
@@ -677,11 +698,11 @@ class TestCloseDelegation:
                 self,
                 session_id: str,
                 *,
-                expected_revision: int,
-                world_tick_end: int,
-                touched_entity_ids: list[str],
+                expected_revision: Revision,
+                world_tick_end: WorldTick,
+                touched_entity_ids: Sequence[EntityId],
                 audit: AuditContext,
-            ) -> _FakeMetadata:
+            ) -> RawSessionMetadata:
                 self.close_calls.append(
                     {
                         "session_id": session_id,

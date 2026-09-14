@@ -110,7 +110,7 @@ class FakeSearchService:
     def get_by_id_calls(self) -> list[str]:
         return list(self._get_by_id_calls)
 
-    def search(self, query: object, *, limit: int = 20) -> list[object]:
+    def search(self, query: object, *, limit: int = 20) -> list[SearchHit]:
         return []
 
     def get_by_id(self, entity_id: str) -> SearchHit | None:
@@ -146,8 +146,12 @@ class FakeRepository:
             raise NotFoundError(f"Entity '{entity_id}' not found")
         return doc
 
-    def list_entities(self, entity_type: object = None) -> list[object]:
+    def list_entities(self, entity_type: object = None) -> list[VaultDocument]:
         return list(self._entities.values())
+
+    def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
     def patch_entity(
         self,

@@ -11,14 +11,19 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
 
 import pytest
+from pydantic.types import AwareDatetime
 
-from dnd_assistant.domain.calendar import make_world_tick
+from dnd_assistant.domain.calendar import WorldTick, make_world_tick
 from dnd_assistant.domain.session import Session
+from dnd_assistant.domain.types import EntityId
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.session_events import RawSessionEvent
+from dnd_assistant.storage.session_metadata import RawSessionMetadata
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.session_reads import (
@@ -61,65 +66,6 @@ def _make_session(
     )
 
 
-# ── RawSessionEvent-like fake DTO ─────────────────────────────────────────
-
-
-class FakeRawEvent:
-    """Minimal fake resembling RawSessionEvent for testing."""
-
-    def __init__(
-        self,
-        event_id: str = "evt_001",
-        real_time=_NOW,
-        world_tick: int = 1000,
-        type: str = "note",
-        extra_fields: dict[str, object] | None = None,
-    ) -> None:
-        self._event_id = event_id
-        self._real_time = real_time
-        self._world_tick = world_tick
-        self._type = type
-        self._extra_fields = dict(extra_fields) if extra_fields else {}
-
-    @property
-    def event_id(self) -> str:
-        return self._event_id
-
-    @property
-    def real_time(self):
-        return self._real_time
-
-    @property
-    def world_tick(self) -> int:
-        return self._world_tick
-
-    @property
-    def type(self) -> str:
-        return self._type
-
-    @property
-    def extra_fields(self) -> dict[str, object]:
-        return dict(self._extra_fields)
-
-
-# ── RawSessionMetadata-like fake ──────────────────────────────────────────
-
-
-class FakeRawMetadata:
-    """Minimal fake resembling RawSessionMetadata for testing."""
-
-    def __init__(self, session: Session) -> None:
-        self._session = session
-
-    @property
-    def session(self) -> Session:
-        return self._session
-
-    @property
-    def extra_fields(self) -> dict[str, object]:
-        return {}
-
-
 # ── Fake SessionRuntimeService ────────────────────────────────────────────
 
 
@@ -138,6 +84,37 @@ class FakeRuntimeService:
 
     def get_active_session(self) -> Session | None:
         return self._active
+
+    def start_session(self, *, audit: AuditContext) -> Session:
+        self._start_called = True
+        msg = "FakeRuntimeService does not support start_session"
+        raise NotImplementedError(msg)
+
+    def record_event(
+        self,
+        event_type: str,
+        *,
+        extra_fields: Mapping[str, object] | None = None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
+        self._record_event_called = True
+        msg = "FakeRuntimeService does not support record_event"
+        raise NotImplementedError(msg)
+
+    def record_note(self, text: str, *, audit: AuditContext) -> RawSessionEvent:
+        self._record_note_called = True
+        msg = "FakeRuntimeService does not support record_note"
+        raise NotImplementedError(msg)
+
+    def end_session(
+        self,
+        *,
+        touched_entity_ids: Sequence[EntityId] = (),
+        audit: AuditContext,
+    ) -> Session:
+        self._end_called = True
+        msg = "FakeRuntimeService does not support end_session"
+        raise NotImplementedError(msg)
 
     @property
     def start_called(self) -> bool:
@@ -163,14 +140,14 @@ class FakeSessionRepository:
     """Minimal fake implementing SessionMetadataRepository protocol."""
 
     def __init__(self) -> None:
-        self._sessions: dict[str, FakeRawMetadata] = {}
+        self._sessions: dict[str, RawSessionMetadata] = {}
         self._get_calls: list[str] = []
         self._list_calls: int = 0
         self._allocate_called: bool = False
         self._create_called: bool = False
         self._close_called: bool = False
 
-    def add_metadata(self, metadata: FakeRawMetadata) -> None:
+    def add_metadata(self, metadata: RawSessionMetadata) -> None:
         self._sessions[metadata.session.id] = metadata
 
     @property
@@ -193,18 +170,18 @@ class FakeSessionRepository:
     def close_called(self) -> bool:
         return self._close_called
 
-    def get_session_metadata(self, session_id: str) -> FakeRawMetadata:
+    def get_session_metadata(self, session_id: str) -> RawSessionMetadata:
         self._get_calls.append(session_id)
         meta = self._sessions.get(session_id)
         if meta is None:
             raise NotFoundError(f"Session metadata not found for {session_id}")
         return meta
 
-    def list_session_metadata(self) -> list[FakeRawMetadata]:
+    def list_session_metadata(self) -> list[RawSessionMetadata]:
         self._list_calls += 1
         return list(self._sessions.values())
 
-    def get_active_session(self) -> FakeRawMetadata | None:
+    def get_active_session(self) -> RawSessionMetadata | None:
         active = [m for m in self._sessions.values() if m.session.status == "active"]
         if len(active) == 0:
             return None
@@ -216,13 +193,13 @@ class FakeSessionRepository:
         self._allocate_called = True
         return "S999"
 
-    def create_session(self, session: Session, *, audit: AuditContext) -> FakeRawMetadata:
+    def create_session(self, session: Session, *, audit: AuditContext) -> RawSessionMetadata:
         self._create_called = True
-        return FakeRawMetadata(session)
+        return RawSessionMetadata(session)
 
-    def close_session(self, session_id: str, **kwargs: object) -> FakeRawMetadata:
+    def close_session(self, session_id: str, **kwargs: object) -> RawSessionMetadata:
         self._close_called = True
-        return FakeRawMetadata(_make_session(session_id, "completed"))
+        return RawSessionMetadata(_make_session(session_id, "completed"))
 
 
 # ── Fake SessionEventRepository ───────────────────────────────────────────
@@ -232,11 +209,11 @@ class FakeEventRepository:
     """Minimal fake implementing SessionEventRepository protocol."""
 
     def __init__(self) -> None:
-        self._events: dict[str, list[FakeRawEvent]] = {}
+        self._events: dict[str, list[RawSessionEvent]] = {}
         self._list_calls: list[str] = []
         self._append_called: bool = False
 
-    def set_events(self, session_id: str, events: list[FakeRawEvent]) -> None:
+    def set_events(self, session_id: str, events: list[RawSessionEvent]) -> None:
         self._events[session_id] = events
 
     @property
@@ -247,11 +224,20 @@ class FakeEventRepository:
     def append_called(self) -> bool:
         return self._append_called
 
-    def list_events(self, session_id: str) -> list[FakeRawEvent]:
+    def list_events(self, session_id: str) -> list[RawSessionEvent]:
         self._list_calls.append(session_id)
         return self._events.get(session_id, [])
 
-    def append_event(self, *args: object, **kwargs: object) -> object:
+    def append_event(
+        self,
+        session_id: str,
+        *,
+        event_type: str,
+        real_time: AwareDatetime,
+        world_tick: WorldTick,
+        extra_fields: Mapping[str, object] | None,
+        audit: AuditContext,
+    ) -> RawSessionEvent:
         self._append_called = True
         msg = "FakeEventRepository does not support writes"
         raise NotImplementedError(msg)
@@ -372,8 +358,8 @@ class TestListSessionsHandler:
     ) -> None:
         s1 = _make_session("S001")
         s2 = _make_session("S002")
-        session_repository.add_metadata(FakeRawMetadata(s1))
-        session_repository.add_metadata(FakeRawMetadata(s2))
+        session_repository.add_metadata(RawSessionMetadata(s1))
+        session_repository.add_metadata(RawSessionMetadata(s2))
         result = executor.execute(
             "list_sessions",
             input_data={},
@@ -390,8 +376,8 @@ class TestListSessionsHandler:
     ) -> None:
         s_b = _make_session("S002")
         s_a = _make_session("S001")
-        session_repository.add_metadata(FakeRawMetadata(s_b))
-        session_repository.add_metadata(FakeRawMetadata(s_a))
+        session_repository.add_metadata(RawSessionMetadata(s_b))
+        session_repository.add_metadata(RawSessionMetadata(s_a))
         result = executor.execute(
             "list_sessions",
             input_data={},
@@ -480,8 +466,8 @@ class TestListSessionEventsHandler:
         event_repository: FakeEventRepository,
         read_context: ExecutionContext,
     ) -> None:
-        ev_b = FakeRawEvent("evt_002", _NOW, 1001, "note", {"text": "B"})
-        ev_a = FakeRawEvent("evt_001", _NOW, 1000, "note", {"text": "A"})
+        ev_b = RawSessionEvent("evt_002", _NOW, 1001, "note", {"text": "B"})
+        ev_a = RawSessionEvent("evt_001", _NOW, 1000, "note", {"text": "A"})
         event_repository.set_events("S001", [ev_b, ev_a])
         result = executor.execute(
             "list_session_events",
@@ -499,7 +485,7 @@ class TestListSessionEventsHandler:
         event_repository: FakeEventRepository,
         read_context: ExecutionContext,
     ) -> None:
-        ev = FakeRawEvent("evt_001", _NOW, 1000, "note", {"text": "Hello"})
+        ev = RawSessionEvent("evt_001", _NOW, 1000, "note", {"text": "Hello"})
         event_repository.set_events("S001", [ev])
         result = executor.execute(
             "list_session_events",
@@ -520,7 +506,7 @@ class TestListSessionEventsHandler:
         event_repository: FakeEventRepository,
         read_context: ExecutionContext,
     ) -> None:
-        ev = FakeRawEvent("evt_001", _NOW, 1000, "note", {"text": "Hello", "tags": ["a", "b"]})
+        ev = RawSessionEvent("evt_001", _NOW, 1000, "note", {"text": "Hello", "tags": ["a", "b"]})
         event_repository.set_events("S001", [ev])
         result = executor.execute(
             "list_session_events",
@@ -536,7 +522,7 @@ class TestListSessionEventsHandler:
         event_repository: FakeEventRepository,
         read_context: ExecutionContext,
     ) -> None:
-        ev = FakeRawEvent(
+        ev = RawSessionEvent(
             "evt_001",
             _NOW,
             1000,
@@ -565,7 +551,7 @@ class TestListSessionEventsHandler:
         event_repository: FakeEventRepository,
         read_context: ExecutionContext,
     ) -> None:
-        ev = FakeRawEvent("evt_001", _NOW, 1000, "note", {"text": "Important note"})
+        ev = RawSessionEvent("evt_001", _NOW, 1000, "note", {"text": "Important note"})
         event_repository.set_events("S001", [ev])
         result = executor.execute(
             "list_session_events",
@@ -581,7 +567,7 @@ class TestListSessionEventsHandler:
         event_repository: FakeEventRepository,
         read_context: ExecutionContext,
     ) -> None:
-        ev = FakeRawEvent("evt_001", _NOW, 1000, "note")
+        ev = RawSessionEvent("evt_001", _NOW, 1000, "note")
         event_repository.set_events("S001", [ev])
         result = executor.execute(
             "list_session_events",
@@ -779,7 +765,7 @@ class TestNoMutation:
         read_context: ExecutionContext,
     ) -> None:
         session = _make_session("S001")
-        session_repository.add_metadata(FakeRawMetadata(session))
+        session_repository.add_metadata(RawSessionMetadata(session))
         executor.execute(
             "get_session",
             input_data={"session_id": "S001"},
@@ -826,7 +812,7 @@ class TestGetSessionHandler:
         read_context: ExecutionContext,
     ) -> None:
         session = _make_session("S001")
-        session_repository.add_metadata(FakeRawMetadata(session))
+        session_repository.add_metadata(RawSessionMetadata(session))
         result = executor.execute(
             "get_session",
             input_data={"session_id": "S001"},
@@ -842,7 +828,7 @@ class TestGetSessionHandler:
         read_context: ExecutionContext,
     ) -> None:
         session = _make_session("S001")
-        session_repository.add_metadata(FakeRawMetadata(session))
+        session_repository.add_metadata(RawSessionMetadata(session))
         executor.execute(
             "get_session",
             input_data={"session_id": "S001"},
@@ -871,7 +857,7 @@ class TestGetSessionHandler:
         """Requested S001, but stored metadata has id=S002 -> StorageError."""
         session = _make_session("S002")
         # Store under key "S001" so the lookup succeeds but ID mismatches
-        session_repository._sessions["S001"] = FakeRawMetadata(session)
+        session_repository._sessions["S001"] = RawSessionMetadata(session)
         with pytest.raises(StorageError, match="Session read consistency check failed"):
             executor.execute(
                 "get_session",
@@ -887,7 +873,7 @@ class TestGetSessionHandler:
     ) -> None:
         """Error must not reveal the alternate session ID."""
         session = _make_session("S002")
-        session_repository._sessions["S001"] = FakeRawMetadata(session)
+        session_repository._sessions["S001"] = RawSessionMetadata(session)
         with pytest.raises(StorageError) as exc_info:
             executor.execute(
                 "get_session",
@@ -904,7 +890,7 @@ class TestGetSessionHandler:
         read_context: ExecutionContext,
     ) -> None:
         session = _make_session("S001")
-        session_repository.add_metadata(FakeRawMetadata(session))
+        session_repository.add_metadata(RawSessionMetadata(session))
         result = executor.execute(
             "get_session",
             input_data={"session_id": "S001"},

@@ -16,7 +16,7 @@ from typing import cast
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Visibility
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Revision, Visibility
 from dnd_assistant.errors import StorageError
 from dnd_assistant.retrieval import (
     MatchKind,
@@ -24,6 +24,8 @@ from dnd_assistant.retrieval import (
     VaultSearchService,
 )
 from dnd_assistant.retrieval.index import SqliteFtsIndex
+from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.types import VaultDocument, VaultRepository
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -41,7 +43,7 @@ def _make_entity(
         name=name,
         status="active",
         visibility=visibility,
-        knowledge_status="confirmed",
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         revision=1,
@@ -85,6 +87,32 @@ class FakeRepository:
         if entity_type is None:
             return list(self._docs.values())
         return [d for d in self._docs.values() if d.entity.type == entity_type]
+
+    def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def patch_entity(
+        self,
+        entity_id: EntityId,
+        patch: EntityPatch,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def append_entity_fact(
+        self,
+        entity_id: EntityId,
+        *,
+        expected_revision: Revision,
+        fact: str,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
 
 def _create_index_dir(tmp_path: Path) -> Path:

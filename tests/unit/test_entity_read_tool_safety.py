@@ -17,14 +17,17 @@ import pytest
 
 from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.types import (
+    EntityId,
     EntityType,
     KnowledgeStatus,
+    Revision,
     Visibility,
     make_revision,
 )
 from dnd_assistant.errors import NotFoundError, StorageError
 from dnd_assistant.retrieval.types import MatchKind, SearchHit
 from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.types import VaultDocument
 from dnd_assistant.tools.entity_reads import (
     GetEntityOutput,
@@ -135,6 +138,28 @@ class FakeRepository:
         return list(self._entities.values())
 
     def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def patch_entity(
+        self,
+        entity_id: EntityId,
+        patch: EntityPatch,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def append_entity_fact(
+        self,
+        entity_id: EntityId,
+        *,
+        expected_revision: Revision,
+        fact: str,
+        audit: AuditContext,
+    ) -> VaultDocument:
         msg = "FakeRepository does not support writes"
         raise NotImplementedError(msg)
 

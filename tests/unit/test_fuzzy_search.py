@@ -28,13 +28,15 @@ import pytest
 from rapidfuzz import fuzz
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Visibility
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Revision, Visibility
 from dnd_assistant.errors import StorageError
 from dnd_assistant.retrieval import (
     MatchKind,
     SearchQuery,
     VaultSearchService,
 )
+from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.types import VaultDocument, VaultRepository
 
 # ── Fake repository (reused from test_exact_search.py pattern) ───────────────
@@ -54,7 +56,7 @@ def _make_entity(
         name=name,
         status="active",
         visibility=visibility,
-        knowledge_status="confirmed",
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         revision=1,
@@ -104,6 +106,32 @@ class FakeRepository:
         if entity_type is None:
             return list(self._docs.values())
         return [d for d in self._docs.values() if d.entity.type == entity_type]
+
+    def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def patch_entity(
+        self,
+        entity_id: EntityId,
+        patch: EntityPatch,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def append_entity_fact(
+        self,
+        entity_id: EntityId,
+        *,
+        expected_revision: Revision,
+        fact: str,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
 
 # ── Normalisation helper ─────────────────────────────────────────────────────
@@ -183,7 +211,11 @@ class TestRanking:
         results = svc.search(SearchQuery(text="Маги"))
         assert len(results) >= 2
         for i in range(len(results) - 1):
-            assert results[i].score >= results[i + 1].score
+            left = results[i].score
+            right = results[i + 1].score
+            assert left is not None
+            assert right is not None
+            assert left >= right
 
     def test_tie_break_by_entity_id(self) -> None:
         """Equal scores must be ordered by EntityId ascending."""

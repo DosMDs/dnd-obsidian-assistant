@@ -30,7 +30,7 @@ from typing import cast
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Visibility
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Visibility
 from dnd_assistant.errors import StorageError
 from dnd_assistant.retrieval.index import (
     SCHEMA_VERSION,
@@ -57,7 +57,7 @@ def _make_entity(
         name=name,
         status="active",
         visibility=visibility,
-        knowledge_status="confirmed",
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         revision=revision,

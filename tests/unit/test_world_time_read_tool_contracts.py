@@ -17,10 +17,13 @@ from dnd_assistant.domain.calendar import (
     CalendarDefinition,
     CalendarMonth,
     GameDate,
+    WorldTick,
     make_world_tick,
 )
+from dnd_assistant.domain.types import Revision
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, ValidationError
+from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import Permission, SessionMode
 from dnd_assistant.tools.world_time_reads import (
@@ -53,11 +56,19 @@ class FakeWorldTimeRepository:
             raise LookupError(msg)
         return self._state
 
-    def initialize_current_world_time(self, *args: object, **kwargs: object) -> object:
+    def initialize_current_world_time(
+        self, world_tick: WorldTick, *, audit: AuditContext
+    ) -> CurrentWorldTime:
         msg = "FakeWorldTimeRepository does not support initialize"
         raise NotImplementedError(msg)
 
-    def set_current_world_time(self, *args: object, **kwargs: object) -> object:
+    def set_current_world_time(
+        self,
+        world_tick: WorldTick,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> CurrentWorldTime:
         msg = "FakeWorldTimeRepository does not support set"
         raise NotImplementedError(msg)
 

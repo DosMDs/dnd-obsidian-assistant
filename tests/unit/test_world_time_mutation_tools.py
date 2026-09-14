@@ -916,22 +916,22 @@ class TestCalendarValidationFailure:
             def date_to_tick(self, date: GameDate) -> int:
                 return 0
 
-            def time_until(self, start: int, end: int) -> int:
-                return end - start
+            def time_until(self, start_tick: int, end_tick: int) -> int:
+                return end_tick - start_tick
 
-            def events_between(self, events, start, end):
+            def events_between(self, events, start_tick, end_tick):
                 return ()
 
             def events_near(self, events, event, *, radius):
                 return ()
 
-            def upcoming(self, events, current, *, days):
+            def upcoming(self, events, current_tick, *, days):
                 return ()
 
-            def overdue_events(self, events, current):
+            def overdue_events(self, events, current_tick):
                 return ()
 
-            def time_until_event(self, current, event):
+            def time_until_event(self, current_tick, event):
                 return None
 
         register_world_time_mutation_tools(
@@ -967,22 +967,22 @@ class TestCalendarValidationFailure:
             def date_to_tick(self, date: GameDate) -> int:
                 return 0
 
-            def time_until(self, start: int, end: int) -> int:
-                return end - start
+            def time_until(self, start_tick: int, end_tick: int) -> int:
+                return end_tick - start_tick
 
-            def events_between(self, events, start, end):
+            def events_between(self, events, start_tick, end_tick):
                 return ()
 
             def events_near(self, events, event, *, radius):
                 return ()
 
-            def upcoming(self, events, current, *, days):
+            def upcoming(self, events, current_tick, *, days):
                 return ()
 
-            def overdue_events(self, events, current):
+            def overdue_events(self, events, current_tick):
                 return ()
 
-            def time_until_event(self, current, event):
+            def time_until_event(self, current_tick, event):
                 return None
 
         register_world_time_mutation_tools(

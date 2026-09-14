@@ -20,9 +20,9 @@ from unittest import mock
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Revision
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Revision, Visibility
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
-from dnd_assistant.storage.audit import AuditContext, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.markdown import serialize
 from dnd_assistant.storage.paths import entity_directory
 from dnd_assistant.storage.types import VaultDocument
@@ -41,8 +41,8 @@ def _make_entity(
         type=entity_type,
         name=name,
         status="alive",
-        visibility="player",
-        knowledge_status="confirmed",
+        visibility=Visibility.PLAYER,
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=datetime(2026, 8, 30, 10, 0, 0, tzinfo=UTC),
         updated_at=datetime(2026, 8, 30, 10, 0, 0, tzinfo=UTC),
         revision=cast(Revision, 1),
@@ -1011,7 +1011,7 @@ class TestCreateEntityFailureSemantics:
         call_count = 0
         original_append = audit_service.append
 
-        def _fail_on_second_append(record: object) -> None:
+        def _fail_on_second_append(record: AuditRecord) -> None:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
@@ -1047,7 +1047,7 @@ class TestCreateEntityFailureSemantics:
         original_append = audit_service.append
         original_storage_error = StorageError("committed append failed")
 
-        def _fail_on_second_append(record: object) -> None:
+        def _fail_on_second_append(record: AuditRecord) -> None:
             if getattr(record, "phase", None) == "committed":
                 raise original_storage_error
             original_append(record)

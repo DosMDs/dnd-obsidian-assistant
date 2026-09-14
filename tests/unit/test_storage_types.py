@@ -17,7 +17,13 @@ from typing import cast
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Revision
+from dnd_assistant.domain.types import (
+    EntityId,
+    EntityType,
+    KnowledgeStatus,
+    Revision,
+    Visibility,
+)
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
 from dnd_assistant.storage import EntityDirectory, VaultDocument, VaultRepository
 
@@ -31,8 +37,8 @@ def sample_entity() -> Entity:
         type=EntityType.NPC,
         name="Gandalf",
         status="alive",
-        visibility="player",
-        knowledge_status="confirmed",
+        visibility=Visibility.PLAYER,
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=datetime(2026, 8, 30, 10, 0, 0, tzinfo=UTC),
         updated_at=datetime(2026, 8, 30, 10, 0, 0, tzinfo=UTC),
         revision=cast(Revision, 1),

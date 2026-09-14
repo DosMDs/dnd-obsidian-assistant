@@ -324,9 +324,11 @@ class TestChatRequest:
 
     def test_extra_fields_forbidden(self) -> None:
         with pytest.raises(ValidationError, match="extra"):
-            ChatRequest(  # type: ignore[call-arg]
-                messages=(ChatMessage(role=MessageRole.USER, content="Hi"),),
-                extra="x",
+            ChatRequest.model_validate(
+                {
+                    "messages": (ChatMessage(role=MessageRole.USER, content="Hi"),),
+                    "extra": "x",
+                }
             )
 
     def test_frozen(self) -> None:
@@ -365,9 +367,11 @@ class TestChatResponse:
 
     def test_extra_fields_forbidden(self) -> None:
         with pytest.raises(ValidationError, match="extra"):
-            ChatResponse(  # type: ignore[call-arg]
-                message=ChatMessage(role=MessageRole.ASSISTANT, content="Hi"),
-                unknown="x",
+            ChatResponse.model_validate(
+                {
+                    "message": ChatMessage(role=MessageRole.ASSISTANT, content="Hi"),
+                    "unknown": "x",
+                }
             )
 
     # ── S8-C00 regression: plain chat must not contain tool calls ──────────
@@ -433,9 +437,11 @@ class TestToolAwareResponse:
 
     def test_extra_fields_forbidden(self) -> None:
         with pytest.raises(ValidationError, match="extra"):
-            ToolAwareResponse(  # type: ignore[call-arg]
-                message=ChatMessage(role=MessageRole.ASSISTANT, content="Hi"),
-                unknown="x",
+            ToolAwareResponse.model_validate(
+                {
+                    "message": ChatMessage(role=MessageRole.ASSISTANT, content="Hi"),
+                    "unknown": "x",
+                }
             )
 
 

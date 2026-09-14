@@ -25,9 +25,9 @@ from unittest import mock
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Revision
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Revision, Visibility
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
-from dnd_assistant.storage.audit import AuditContext, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.paths import entity_directory
 from dnd_assistant.storage.types import VaultDocument, VaultRepository
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
@@ -47,8 +47,8 @@ def _make_entity(
         type=entity_type,
         name=name,
         status="alive",
-        visibility="player",
-        knowledge_status="confirmed",
+        visibility=Visibility.PLAYER,
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=ts,
         updated_at=ts,
         revision=cast(Revision, revision),
@@ -549,8 +549,8 @@ class TestAppendFactEntityMetadata:
                 type=EntityType.NPC,
                 name="Gandalf",
                 status="alive",
-                visibility="player",
-                knowledge_status="confirmed",
+                visibility=Visibility.PLAYER,
+                knowledge_status=KnowledgeStatus.CONFIRMED,
                 created_at=created,
                 updated_at=created,
                 revision=cast(Revision, 1),
@@ -1042,7 +1042,7 @@ class TestAppendFactFailureSemantics:
         repo.create_entity(_make_document(), audit=_make_audit_context("op-001"))
         original_append = audit_service.append
 
-        def _fail_on_append_committed(record: object) -> None:
+        def _fail_on_append_committed(record: AuditRecord) -> None:
             if (
                 getattr(record, "phase", None) == "committed"
                 and getattr(record, "operation", None) == "append_entity_fact"
@@ -1069,7 +1069,7 @@ class TestAppendFactFailureSemantics:
         original_append = audit_service.append
         original_storage_error = StorageError("committed append failed")
 
-        def _fail_on_committed(record: object) -> None:
+        def _fail_on_committed(record: AuditRecord) -> None:
             if (
                 getattr(record, "phase", None) == "committed"
                 and getattr(record, "operation", None) == "append_entity_fact"
@@ -1104,7 +1104,7 @@ class TestAppendFactConcurrentEdit:
         entity_file = next(npc_dir.iterdir())
         original_append = audit_service.append
 
-        def _intercept_and_edit(record: object) -> None:
+        def _intercept_and_edit(record: AuditRecord) -> None:
             original_append(record)
             if (
                 getattr(record, "phase", None) == "intent"
@@ -1132,7 +1132,7 @@ class TestAppendFactConcurrentEdit:
         entity_file = next(npc_dir.iterdir())
         original_append = audit_service.append
 
-        def _intercept_and_edit(record: object) -> None:
+        def _intercept_and_edit(record: AuditRecord) -> None:
             original_append(record)
             if (
                 getattr(record, "phase", None) == "intent"

@@ -12,6 +12,7 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -22,8 +23,10 @@ from dnd_assistant.domain.calendar import (
     DeterministicCalendarService,
     GameDate,
     IntercalaryDay,
+    WorldTick,
     make_world_tick,
 )
+from dnd_assistant.domain.events import TimelineEvent
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
 from dnd_assistant.tools.executor import ToolExecutor
@@ -416,34 +419,44 @@ class TestGameDateToWorldTickBehaviour:
     ) -> None:
         class BrokenCalendar:
             @property
-            def definition(self):
+            def definition(self) -> CalendarDefinition:
                 return _HARNER_CALENDAR
 
-            def date_to_tick(self, date: GameDate) -> int:
+            def date_to_tick(self, date: GameDate) -> WorldTick:
                 raise RuntimeError("internal error")
 
-            def tick_to_date(self, tick: int) -> GameDate:
+            def tick_to_date(self, tick: WorldTick) -> GameDate:
                 return GameDate(year=0, month="Hammer", day=1)
 
-            def time_until(self, start: int, end: int) -> int:
-                return end - start
+            def time_until(self, start_tick: WorldTick, end_tick: WorldTick) -> int:
+                return end_tick - start_tick
 
-            def advance_world_time(self, current: int, *, minutes: int) -> int:
-                return current + minutes
+            def advance_world_time(self, current_tick: WorldTick, *, minutes: int) -> WorldTick:
+                return current_tick + minutes
 
-            def events_between(self, events, start, end):
+            def events_between(
+                self, events: Sequence[TimelineEvent], start_tick: WorldTick, end_tick: WorldTick
+            ) -> tuple[TimelineEvent, ...]:
                 return ()
 
-            def events_near(self, events, event, *, radius):
+            def events_near(
+                self, events: Sequence[TimelineEvent], event: TimelineEvent, *, radius: int
+            ) -> tuple[TimelineEvent, ...]:
                 return ()
 
-            def upcoming(self, events, current, *, days):
+            def upcoming(
+                self, events: Sequence[TimelineEvent], current_tick: WorldTick, *, days: int
+            ) -> tuple[TimelineEvent, ...]:
                 return ()
 
-            def overdue_events(self, events, current):
+            def overdue_events(
+                self, events: Sequence[TimelineEvent], current_tick: WorldTick
+            ) -> tuple[TimelineEvent, ...]:
                 return ()
 
-            def time_until_event(self, current, event):
+            def time_until_event(
+                self, current_tick: WorldTick, event: TimelineEvent
+            ) -> tuple[int, int] | None:
                 return None
 
         register_world_time_read_tools(

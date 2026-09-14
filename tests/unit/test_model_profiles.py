@@ -447,22 +447,26 @@ class TestModelProfileStrictSchema:
 
     def test_typo_in_field_name_rejected(self) -> None:
         with pytest.raises(PydanticValidationError, match="Extra inputs are not permitted"):
-            ModelProfile(
-                provider="ollama",
-                model="m",
-                base_url="http://localhost",
-                role=ModelProfileRole.AGENT,
-                temperatur=0.2,
+            ModelProfile.model_validate(
+                {
+                    "provider": "ollama",
+                    "model": "m",
+                    "base_url": "http://localhost",
+                    "role": ModelProfileRole.AGENT,
+                    "temperatur": 0.2,
+                }
             )
 
     def test_completely_unknown_field_rejected(self) -> None:
         with pytest.raises(PydanticValidationError, match="Extra inputs are not permitted"):
-            ModelProfile(
-                provider="ollama",
-                model="m",
-                base_url="http://localhost",
-                role=ModelProfileRole.AGENT,
-                unknown_field="value",
+            ModelProfile.model_validate(
+                {
+                    "provider": "ollama",
+                    "model": "m",
+                    "base_url": "http://localhost",
+                    "role": ModelProfileRole.AGENT,
+                    "unknown_field": "value",
+                }
             )
 
 

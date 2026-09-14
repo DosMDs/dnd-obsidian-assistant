@@ -217,12 +217,14 @@ class TestAuditRecordValidation:
 
     def test_unknown_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            AuditRecord(
-                operation_id="op-001",
-                real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
-                operation="create",
-                source="model_tool",
-                unknown_field="should fail",
+            AuditRecord.model_validate(
+                {
+                    "operation_id": "op-001",
+                    "real_time": datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+                    "operation": "create",
+                    "source": "model_tool",
+                    "unknown_field": "should fail",
+                }
             )
 
     def test_source_not_restricted_to_provenance(self) -> None:
@@ -715,11 +717,13 @@ class TestAuditContext:
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
-            AuditContext(
-                operation_id="op-001",
-                real_time=datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
-                source="model_tool",
-                unknown_field="bad",
+            AuditContext.model_validate(
+                {
+                    "operation_id": "op-001",
+                    "real_time": datetime(2026, 8, 30, 12, 0, 0, tzinfo=UTC),
+                    "source": "model_tool",
+                    "unknown_field": "bad",
+                }
             )
 
     def test_frozen_immutable(self) -> None:

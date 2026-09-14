@@ -115,8 +115,8 @@ def _invoke_ask_direct(
     stdout_capture = StringIO()
     stderr_capture = StringIO()
 
-    exit_code = 0
-    exception = None
+    exit_code: int | str = 0
+    exception: BaseException | None = None
 
     try:
         with redirect_stdout(stdout_capture), redirect_stderr(stderr_capture):
@@ -134,14 +134,25 @@ def _invoke_ask_direct(
         exit_code = 1
 
     class _Result:
-        pass
+        def __init__(
+            self,
+            *,
+            exit_code: int | str,
+            stdout: str,
+            stderr: str,
+            exception: BaseException | None,
+        ) -> None:
+            self.exit_code = exit_code
+            self.stdout = stdout
+            self.stderr = stderr
+            self.exception = exception
 
-    result = _Result()
-    result.exit_code = exit_code
-    result.stdout = stdout_capture.getvalue()
-    result.stderr = stderr_capture.getvalue()
-    result.exception = exception
-    return result
+    return _Result(
+        exit_code=exit_code,
+        stdout=stdout_capture.getvalue(),
+        stderr=stderr_capture.getvalue(),
+        exception=exception,
+    )
 
 
 # ── Tests ──────────────────────────────────────────────────────────────────

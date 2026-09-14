@@ -57,17 +57,19 @@ class TestValidConstruction:
 
     def test_canonical_from_iso_strings(self) -> None:
         """Build the canonical example using ISO-8601 strings for timestamps."""
-        session = Session(
-            id="S014",
-            type="session",
-            status="completed",
-            real_started_at="2026-08-27T17:00:00Z",
-            real_finished_at="2026-08-27T21:20:00Z",
-            world_tick_start=15739200,
-            world_tick_end=15741120,
-            processed=True,
-            processed_model_profile="post_session",
-            revision=2,
+        session = Session.model_validate(
+            {
+                "id": "S014",
+                "type": "session",
+                "status": "completed",
+                "real_started_at": "2026-08-27T17:00:00Z",
+                "real_finished_at": "2026-08-27T21:20:00Z",
+                "world_tick_start": 15739200,
+                "world_tick_end": 15741120,
+                "processed": True,
+                "processed_model_profile": "post_session",
+                "revision": 2,
+            }
         )
         assert session.real_started_at == datetime(2026, 8, 27, 17, 0, 0, tzinfo=UTC)
         assert session.real_finished_at == datetime(2026, 8, 27, 21, 20, 0, tzinfo=UTC)
@@ -261,13 +263,15 @@ class TestTimestamps:
 
     def test_real_finished_at_omitted(self) -> None:
         """Omitting real_finished_at defaults to None."""
-        session = Session(
-            id="S015",
-            type="session",
-            status="active",
-            real_started_at="2026-08-28T18:00:00Z",
-            world_tick_start=15742000,
-            revision=1,
+        session = Session.model_validate(
+            {
+                "id": "S015",
+                "type": "session",
+                "status": "active",
+                "real_started_at": "2026-08-28T18:00:00Z",
+                "world_tick_start": 15742000,
+                "revision": 1,
+            }
         )
         assert session.real_finished_at is None
 
@@ -299,13 +303,15 @@ class TestWorldTicks:
         assert session.world_tick_end is None
 
     def test_world_tick_end_omitted(self) -> None:
-        session = Session(
-            id="S015",
-            type="session",
-            status="active",
-            real_started_at="2026-08-28T18:00:00Z",
-            world_tick_start=15742000,
-            revision=1,
+        session = Session.model_validate(
+            {
+                "id": "S015",
+                "type": "session",
+                "status": "active",
+                "real_started_at": "2026-08-28T18:00:00Z",
+                "world_tick_start": 15742000,
+                "revision": 1,
+            }
         )
         assert session.world_tick_end is None
 
@@ -315,13 +321,15 @@ class TestWorldTicks:
 
 class TestProcessed:
     def test_default_is_false(self) -> None:
-        session = Session(
-            id="S015",
-            type="session",
-            status="active",
-            real_started_at="2026-08-28T18:00:00Z",
-            world_tick_start=15742000,
-            revision=1,
+        session = Session.model_validate(
+            {
+                "id": "S015",
+                "type": "session",
+                "status": "active",
+                "real_started_at": "2026-08-28T18:00:00Z",
+                "world_tick_start": 15742000,
+                "revision": 1,
+            }
         )
         assert session.processed is False
 
@@ -355,13 +363,15 @@ class TestProcessed:
 
 class TestProcessedModelProfile:
     def test_default_is_none(self) -> None:
-        session = Session(
-            id="S015",
-            type="session",
-            status="active",
-            real_started_at="2026-08-28T18:00:00Z",
-            world_tick_start=15742000,
-            revision=1,
+        session = Session.model_validate(
+            {
+                "id": "S015",
+                "type": "session",
+                "status": "active",
+                "real_started_at": "2026-08-28T18:00:00Z",
+                "world_tick_start": 15742000,
+                "revision": 1,
+            }
         )
         assert session.processed_model_profile is None
 
@@ -441,10 +451,7 @@ class TestRevision:
 class TestExtraFields:
     def test_rejects_unknown_field(self) -> None:
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
-            Session(  # type: ignore[call-arg]
-                **_CANONICAL_KWARGS,
-                unknown_field="test",
-            )
+            Session.model_validate({**_CANONICAL_KWARGS, "unknown_field": "test"})
 
 
 # ── serialisation ──────────────────────────────────────────────────────────

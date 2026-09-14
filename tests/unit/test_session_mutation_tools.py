@@ -13,15 +13,18 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
-from types import SimpleNamespace
 
 import pytest
 
 from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
+from dnd_assistant.domain.types import EntityId
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
 from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.session_events import RawSessionEvent
+from dnd_assistant.storage.session_recovery import RecoveryIssue, SessionRecoveryReport
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.session_mutations import (
@@ -66,9 +69,9 @@ def _make_session(
 def _make_raw_event(
     event_id: str = "evt_001",
     event_type: str = "note",
-    extra_fields: dict[str, object] | None = None,
-) -> SimpleNamespace:
-    return SimpleNamespace(
+    extra_fields: Mapping[str, object] | None = None,
+) -> RawSessionEvent:
+    return RawSessionEvent(
         event_id=event_id,
         real_time=_NOW,
         world_tick=make_world_tick(1000),
@@ -123,16 +126,16 @@ class TrackingRuntimeService:
         self,
         event_type: str,
         *,
-        extra_fields: dict[str, object] | None = None,
+        extra_fields: Mapping[str, object] | None = None,
         audit: AuditContext,
-    ) -> SimpleNamespace:
+    ) -> RawSessionEvent:
         self.calls.append(f"record_event:{event_type}")
         self._received_audit = audit
         if self._event_side_effect:
             raise self._event_side_effect
         return _make_raw_event("evt_001", event_type, extra_fields)
 
-    def record_note(self, text: str, *, audit: AuditContext) -> SimpleNamespace:
+    def record_note(self, text: str, *, audit: AuditContext) -> RawSessionEvent:
         self.calls.append(f"record_note:{text}")
         self._received_audit = audit
         if self._note_side_effect:
@@ -142,7 +145,7 @@ class TrackingRuntimeService:
     def end_session(
         self,
         *,
-        touched_entity_ids: tuple = (),
+        touched_entity_ids: Sequence[EntityId] = (),
         audit: AuditContext,
     ) -> Session:
         self.calls.append("end_session")
@@ -166,11 +169,12 @@ class TrackingRecoveryService:
     def set_inspect_side_effect(self, exc: Exception) -> None:
         self._inspect_side_effect = exc
 
-    def inspect_runtime(self) -> SimpleNamespace:
+    def inspect_runtime(self) -> SessionRecoveryReport:
         self.calls.append("inspect_runtime")
         if self._inspect_side_effect:
             raise self._inspect_side_effect
-        return SimpleNamespace(has_issues=self._has_issues, issues=[])
+        issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
+        return SessionRecoveryReport(issues)
 
     def repair_audit_tail(self, *, audit: object = None) -> None:
         self.calls.append("repair_audit_tail")

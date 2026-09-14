@@ -210,7 +210,7 @@ class TestRawSessionEventValue:
 
     def test_extra_fields_copy(self) -> None:
         dt = datetime(2026, 8, 31, 18, 0, 0, tzinfo=UTC)
-        extras = {"text": "hello"}
+        extras: dict[str, object] = {"text": "hello"}
         ev = RawSessionEvent("evt_001", dt, 13800, "note", extra_fields=extras)
         extras["text"] = "modified"
         assert ev.extra_fields == {"text": "hello"}

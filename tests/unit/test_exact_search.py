@@ -29,7 +29,7 @@ from typing import cast
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Visibility
+from dnd_assistant.domain.types import EntityId, EntityType, KnowledgeStatus, Revision, Visibility
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
 from dnd_assistant.retrieval import (
     MatchKind,
@@ -37,6 +37,8 @@ from dnd_assistant.retrieval import (
     SearchService,
     VaultSearchService,
 )
+from dnd_assistant.storage.audit import AuditContext
+from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.types import VaultDocument, VaultRepository
 
 # ── Fake repository for unit tests ──────────────────────────────────────────
@@ -56,7 +58,7 @@ def _make_entity(
         name=name,
         status="active",
         visibility=visibility,
-        knowledge_status="confirmed",
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=datetime(2026, 1, 1, tzinfo=UTC),
         updated_at=datetime(2026, 1, 1, tzinfo=UTC),
         revision=1,
@@ -108,6 +110,32 @@ class FakeRepository:
         if entity_type is None:
             return list(self._docs.values())
         return [d for d in self._docs.values() if d.entity.type == entity_type]
+
+    def create_entity(self, document: VaultDocument, *, audit: AuditContext) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def patch_entity(
+        self,
+        entity_id: EntityId,
+        patch: EntityPatch,
+        *,
+        expected_revision: Revision,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
+
+    def append_entity_fact(
+        self,
+        entity_id: EntityId,
+        *,
+        expected_revision: Revision,
+        fact: str,
+        audit: AuditContext,
+    ) -> VaultDocument:
+        msg = "FakeRepository does not support writes"
+        raise NotImplementedError(msg)
 
 
 # ── Protocol conformance ────────────────────────────────────────────────────
@@ -180,7 +208,35 @@ class TestGetById:
             def list_entities(self, entity_type: EntityType | None = None) -> list[VaultDocument]:
                 return []
 
-        repo: VaultRepository = BrokenRepo()  # type: ignore[type-abstract]
+            def create_entity(
+                self, document: VaultDocument, *, audit: AuditContext
+            ) -> VaultDocument:
+                msg = "BrokenRepo does not support writes"
+                raise NotImplementedError(msg)
+
+            def patch_entity(
+                self,
+                entity_id: EntityId,
+                patch: EntityPatch,
+                *,
+                expected_revision: Revision,
+                audit: AuditContext,
+            ) -> VaultDocument:
+                msg = "BrokenRepo does not support writes"
+                raise NotImplementedError(msg)
+
+            def append_entity_fact(
+                self,
+                entity_id: EntityId,
+                *,
+                expected_revision: Revision,
+                fact: str,
+                audit: AuditContext,
+            ) -> VaultDocument:
+                msg = "BrokenRepo does not support writes"
+                raise NotImplementedError(msg)
+
+        repo: VaultRepository = BrokenRepo()
         svc = VaultSearchService(repository=repo)
         with pytest.raises(StorageError, match="Disk failure"):
             svc.get_by_id(cast(EntityId, "npc_varos"))
@@ -540,7 +596,7 @@ class TestLimit:
         repo: VaultRepository = FakeRepository([doc])
         svc = VaultSearchService(repository=repo)
         with pytest.raises(ValidationError):
-            svc.search(SearchQuery(text="npc_varos"), limit=bad_limit)
+            svc.search(SearchQuery(text="npc_varos"), limit=cast(int, bad_limit))
 
 
 # ── Alias metadata edge cases ───────────────────────────────────────────────
@@ -701,6 +757,34 @@ class TestRepositoryErrors:
 
             def list_entities(self, entity_type: EntityType | None = None) -> list[VaultDocument]:
                 raise StorageError("List failure")
+
+            def create_entity(
+                self, document: VaultDocument, *, audit: AuditContext
+            ) -> VaultDocument:
+                msg = "BrokenRepo does not support writes"
+                raise NotImplementedError(msg)
+
+            def patch_entity(
+                self,
+                entity_id: EntityId,
+                patch: EntityPatch,
+                *,
+                expected_revision: Revision,
+                audit: AuditContext,
+            ) -> VaultDocument:
+                msg = "BrokenRepo does not support writes"
+                raise NotImplementedError(msg)
+
+            def append_entity_fact(
+                self,
+                entity_id: EntityId,
+                *,
+                expected_revision: Revision,
+                fact: str,
+                audit: AuditContext,
+            ) -> VaultDocument:
+                msg = "BrokenRepo does not support writes"
+                raise NotImplementedError(msg)
 
         repo: VaultRepository = BrokenRepo()
         svc = VaultSearchService(repository=repo)
