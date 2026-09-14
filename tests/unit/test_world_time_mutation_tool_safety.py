@@ -22,7 +22,7 @@ from dnd_assistant.domain.calendar import (
     CalendarMonth,
     GameDate,
     IntercalaryDay,
-    WorldTick,
+    make_world_tick,
 )
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
@@ -83,7 +83,7 @@ class FakeWorldTimeRepository:
             self._call_log.record("initialize_current_world_time")
         if self._state is not None:
             raise ConflictError("world_time.json already exists")
-        self._state = CurrentWorldTime(current_world_tick=WorldTick(world_tick), revision=1)
+        self._state = CurrentWorldTime(current_world_tick=make_world_tick(world_tick), revision=1)
         return self._state
 
     def set_current_world_time(
@@ -99,7 +99,7 @@ class FakeWorldTimeRepository:
             )
         new_revision = self._state.revision + 1
         self._state = CurrentWorldTime(
-            current_world_tick=WorldTick(world_tick), revision=new_revision
+            current_world_tick=make_world_tick(world_tick), revision=new_revision
         )
         return self._state
 
@@ -158,7 +158,7 @@ def call_log() -> _CallLog:
 @pytest.fixture
 def initialized_repo() -> FakeWorldTimeRepository:
     return FakeWorldTimeRepository(
-        state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+        state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
     )
 
 
@@ -249,7 +249,8 @@ class TestPermissionGating:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3), call_log=call_log
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
+            call_log=call_log,
         )
         register_world_time_mutation_tools(
             registry, world_time_repository=repo, calendar_service=fake_calendar
@@ -292,7 +293,8 @@ class TestAuditGating:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3), call_log=call_log
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
+            call_log=call_log,
         )
         register_world_time_mutation_tools(
             registry, world_time_repository=repo, calendar_service=fake_calendar
@@ -323,7 +325,8 @@ class TestInvalidInputBeforeHandler:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3), call_log=call_log
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
+            call_log=call_log,
         )
         register_world_time_mutation_tools(
             registry, world_time_repository=repo, calendar_service=fake_calendar
@@ -343,7 +346,8 @@ class TestInvalidInputBeforeHandler:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3), call_log=call_log
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
+            call_log=call_log,
         )
         register_world_time_mutation_tools(
             registry, world_time_repository=repo, calendar_service=fake_calendar
@@ -365,7 +369,8 @@ class TestInvalidInputBeforeHandler:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3), call_log=call_log
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
+            call_log=call_log,
         )
         register_world_time_mutation_tools(
             registry, world_time_repository=repo, calendar_service=fake_calendar

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dnd_assistant.domain.calendar import WorldTick
+from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
@@ -53,7 +53,7 @@ def _make_session(
         status=status,
         real_started_at=_NOW,
         real_finished_at=None,
-        world_tick_start=WorldTick(world_tick_start),
+        world_tick_start=make_world_tick(world_tick_start),
         world_tick_end=None,
         processed=False,
         processed_model_profile=None,
@@ -488,6 +488,7 @@ class TestListSessionEventsHandler:
             input_data={"session_id": "S001"},
             context=read_context,
         )
+        assert isinstance(result, ListSessionEventsOutput)
         assert len(result.events) == 2
         assert result.events[0].event_id == "evt_002"
         assert result.events[1].event_id == "evt_001"
@@ -505,6 +506,7 @@ class TestListSessionEventsHandler:
             input_data={"session_id": "S001"},
             context=read_context,
         )
+        assert isinstance(result, ListSessionEventsOutput)
         assert len(result.events) == 1
         r = result.events[0]
         assert r.event_id == "evt_001"
@@ -525,6 +527,7 @@ class TestListSessionEventsHandler:
             input_data={"session_id": "S001"},
             context=read_context,
         )
+        assert isinstance(result, ListSessionEventsOutput)
         assert result.events[0].extra_fields == {"text": "Hello", "tags": ["a", "b"]}
 
     def test_nested_json_extra_fields_preserved(
@@ -550,6 +553,7 @@ class TestListSessionEventsHandler:
             input_data={"session_id": "S001"},
             context=read_context,
         )
+        assert isinstance(result, ListSessionEventsOutput)
         extra = result.events[0].extra_fields
         assert extra["damage"] == 15
         assert extra["targets"] == ["goblin"]
@@ -568,6 +572,7 @@ class TestListSessionEventsHandler:
             input_data={"session_id": "S001"},
             context=read_context,
         )
+        assert isinstance(result, ListSessionEventsOutput)
         assert result.events[0].extra_fields["text"] == "Important note"
 
     def test_output_does_not_expose_raw_event_object(
@@ -583,6 +588,7 @@ class TestListSessionEventsHandler:
             input_data={"session_id": "S001"},
             context=read_context,
         )
+        assert isinstance(result, ListSessionEventsOutput)
         assert isinstance(result.events[0], SessionEventResult)
         assert not isinstance(result.events[0], type(ev))
 

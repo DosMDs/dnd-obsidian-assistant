@@ -16,7 +16,12 @@ from datetime import UTC, datetime
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Revision, Visibility
+from dnd_assistant.domain.types import (
+    EntityType,
+    KnowledgeStatus,
+    Visibility,
+    make_revision,
+)
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.tools.entity_mutations import (
@@ -53,7 +58,7 @@ def _make_entity(
         knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=_NOW,
         updated_at=_NOW,
-        revision=Revision(1),
+        revision=make_revision(1),
     )
 
 
@@ -189,7 +194,7 @@ class TestPatchEntityInputValidation:
         patch = EntityPatch(name="New Name")
         inp = PatchEntityInput(
             entity_id="npc--gandalf",
-            expected_revision=Revision(1),
+            expected_revision=make_revision(1),
             patch=patch,
         )
         assert inp.entity_id == "npc--gandalf"
@@ -201,7 +206,7 @@ class TestPatchEntityInputValidation:
         with pytest.raises(ValidationError, match="must not be empty"):
             PatchEntityInput(
                 entity_id="",
-                expected_revision=Revision(1),
+                expected_revision=make_revision(1),
                 patch=patch,
             )
 
@@ -255,7 +260,7 @@ class TestPatchEntityInputValidation:
         with pytest.raises(ValidationError):
             PatchEntityInput(  # type: ignore[call-arg]
                 entity_id="npc--gandalf",
-                expected_revision=Revision(1),
+                expected_revision=make_revision(1),
                 patch=patch,
                 unknown="x",
             )
@@ -267,7 +272,7 @@ class TestPatchEntityInputValidation:
             PatchEntityInput(  # type: ignore[call-arg]
                 name="Gandalf",
                 entity_id="npc--gandalf",
-                expected_revision=Revision(1),
+                expected_revision=make_revision(1),
                 patch=patch,
             )
 
@@ -278,7 +283,7 @@ class TestPatchEntityInputValidation:
             PatchEntityInput(  # type: ignore[call-arg]
                 entity_name="Gandalf",
                 entity_id="npc--gandalf",
-                expected_revision=Revision(1),
+                expected_revision=make_revision(1),
                 patch=patch,
             )
 
@@ -288,7 +293,7 @@ class TestPatchEntityInputValidation:
         with pytest.raises(ValidationError):
             PatchEntityInput(  # type: ignore[call-arg]
                 entity_id="npc--gandalf",
-                expected_revision=Revision(1),
+                expected_revision=make_revision(1),
                 patch=patch,
                 audit={"operation_id": "x"},
             )

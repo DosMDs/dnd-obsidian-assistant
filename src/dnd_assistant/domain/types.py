@@ -122,3 +122,20 @@ Revision = Annotated[
 - Strict mode: ``True`` and ``False`` are rejected (Python bool is int).
 - Coercion from strings (e.g. ``"1"``) is rejected.
 """
+
+
+def make_revision(value: object) -> Revision:
+    """Validate a ``Revision`` value.
+
+    ``Revision`` is an ``Annotated`` alias and therefore not directly
+    callable.  This domain-owned constructor preserves the canonical
+    validation semantics (strict ``int`` >= 1, ``bool`` rejected) so that
+    callers can construct a typed revision without repeating the rules.
+    """
+    if isinstance(value, bool):
+        raise ValueError("Revision must not be a bool")
+    if not isinstance(value, int):
+        raise ValueError(f"Revision must be an int, got {type(value).__name__}")
+    if value < 1:
+        raise ValueError(f"Revision must be >= 1, got {value}")
+    return value

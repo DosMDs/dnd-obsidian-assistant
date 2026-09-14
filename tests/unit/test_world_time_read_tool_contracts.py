@@ -13,7 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from dnd_assistant.domain.calendar import CalendarDefinition, CalendarMonth, GameDate, WorldTick
+from dnd_assistant.domain.calendar import (
+    CalendarDefinition,
+    CalendarMonth,
+    GameDate,
+    make_world_tick,
+)
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, ValidationError
 from dnd_assistant.tools.registry import ToolRegistry
@@ -236,7 +241,7 @@ class TestGetWorldTimeInputValidation:
 class TestGetWorldTimeOutputValidation:
     def test_valid_output(self) -> None:
         world_time = CurrentWorldTime(
-            current_world_tick=WorldTick(1000),
+            current_world_tick=make_world_tick(1000),
             revision=1,
         )
         game_date = GameDate(year=0, month="Hammer", day=1)
@@ -250,7 +255,7 @@ class TestGetWorldTimeOutputValidation:
         assert output.calendar_id == "test_calendar"
 
     def test_extra_fields_rejected(self) -> None:
-        world_time = CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+        world_time = CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
         game_date = GameDate(year=0, month="Hammer", day=1)
         with pytest.raises(ValidationError):
             GetWorldTimeOutput(  # type: ignore[call-arg]
@@ -270,7 +275,7 @@ class TestGetWorldTimeOutputValidation:
             )
 
     def test_game_date_string_rejected(self) -> None:
-        world_time = CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+        world_time = CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
         with pytest.raises(ValidationError):
             GetWorldTimeOutput(  # type: ignore[arg-type]
                 world_time=world_time,
@@ -367,18 +372,18 @@ class TestGameDateToWorldTickInputValidation:
 
 class TestGameDateToWorldTickOutputValidation:
     def test_valid_output(self) -> None:
-        output = GameDateToWorldTickOutput(world_tick=WorldTick(500), calendar_id="test")
+        output = GameDateToWorldTickOutput(world_tick=make_world_tick(500), calendar_id="test")
         assert output.world_tick == 500
         assert output.calendar_id == "test"
 
     def test_negative_tick_valid(self) -> None:
-        output = GameDateToWorldTickOutput(world_tick=WorldTick(-100), calendar_id="test")
+        output = GameDateToWorldTickOutput(world_tick=make_world_tick(-100), calendar_id="test")
         assert output.world_tick == -100
 
     def test_extra_fields_rejected(self) -> None:
         with pytest.raises(ValidationError):
             GameDateToWorldTickOutput(  # type: ignore[call-arg]
-                world_tick=WorldTick(0), calendar_id="test", unknown="x"
+                world_tick=make_world_tick(0), calendar_id="test", unknown="x"
             )
 
     def test_bool_rejected(self) -> None:

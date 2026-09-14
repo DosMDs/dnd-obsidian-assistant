@@ -13,7 +13,12 @@ from __future__ import annotations
 
 import pytest
 
-from dnd_assistant.domain.calendar import CalendarDefinition, CalendarMonth, GameDate, WorldTick
+from dnd_assistant.domain.calendar import (
+    CalendarDefinition,
+    CalendarMonth,
+    GameDate,
+    make_world_tick,
+)
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, ValidationError
 from dnd_assistant.tools.registry import ToolRegistry
@@ -229,7 +234,7 @@ class TestSetWorldTimeInputValidation:
 class TestSetWorldTimeOutputValidation:
     def test_valid_output(self) -> None:
         world_time = CurrentWorldTime(
-            current_world_tick=WorldTick(1000),
+            current_world_tick=make_world_tick(1000),
             revision=1,
         )
         game_date = GameDate(year=0, month="Hammer", day=1)
@@ -243,7 +248,7 @@ class TestSetWorldTimeOutputValidation:
         assert output.calendar_id == "test_calendar"
 
     def test_extra_fields_rejected(self) -> None:
-        world_time = CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+        world_time = CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
         game_date = GameDate(year=0, month="Hammer", day=1)
         with pytest.raises(ValidationError):
             SetWorldTimeOutput(  # type: ignore[call-arg]
@@ -263,7 +268,7 @@ class TestSetWorldTimeOutputValidation:
             )
 
     def test_game_date_string_rejected(self) -> None:
-        world_time = CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+        world_time = CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
         with pytest.raises(ValidationError):
             SetWorldTimeOutput(  # type: ignore[arg-type]
                 world_time=world_time,
@@ -342,7 +347,7 @@ class TestAdvanceWorldTimeInputValidation:
 class TestAdvanceWorldTimeOutputValidation:
     def test_valid_output(self) -> None:
         world_time = CurrentWorldTime(
-            current_world_tick=WorldTick(1000),
+            current_world_tick=make_world_tick(1000),
             revision=2,
         )
         game_date = GameDate(year=0, month="Hammer", day=1)
@@ -356,7 +361,7 @@ class TestAdvanceWorldTimeOutputValidation:
         assert output.calendar_id == "test_calendar"
 
     def test_extra_fields_rejected(self) -> None:
-        world_time = CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+        world_time = CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
         game_date = GameDate(year=0, month="Hammer", day=1)
         with pytest.raises(ValidationError):
             AdvanceWorldTimeOutput(  # type: ignore[call-arg]
@@ -376,7 +381,7 @@ class TestAdvanceWorldTimeOutputValidation:
             )
 
     def test_game_date_string_rejected(self) -> None:
-        world_time = CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+        world_time = CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
         with pytest.raises(ValidationError):
             AdvanceWorldTimeOutput(  # type: ignore[arg-type]
                 world_time=world_time,

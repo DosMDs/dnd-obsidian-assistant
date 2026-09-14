@@ -18,7 +18,12 @@ from datetime import UTC, datetime
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Revision, Visibility
+from dnd_assistant.domain.types import (
+    EntityType,
+    KnowledgeStatus,
+    Visibility,
+    make_revision,
+)
 from dnd_assistant.errors import NotFoundError
 from dnd_assistant.retrieval.types import MatchKind, SearchHit
 from dnd_assistant.storage.audit import AuditContext
@@ -64,7 +69,7 @@ def _make_entity(
         knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=_NOW,
         updated_at=_NOW,
-        revision=Revision(revision),
+        revision=make_revision(revision),
     )
 
 
@@ -417,6 +422,7 @@ class TestPatchEntityHandler:
             },
             context=write_context,
         )
+        assert isinstance(result, PatchEntityOutput)
         assert result.body == "# Gandalf the Grey"
 
     def test_authorization_before_mutation(
@@ -638,4 +644,5 @@ class TestAppendEntityFactHandler:
             },
             context=write_context,
         )
+        assert isinstance(result, AppendEntityFactOutput)
         assert result.body == "# Gandalf the Grey"

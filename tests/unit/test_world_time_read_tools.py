@@ -22,7 +22,7 @@ from dnd_assistant.domain.calendar import (
     DeterministicCalendarService,
     GameDate,
     IntercalaryDay,
-    WorldTick,
+    make_world_tick,
 )
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
@@ -150,7 +150,7 @@ def registry() -> ToolRegistry:
 @pytest.fixture
 def fake_repo() -> FakeWorldTimeRepository:
     return FakeWorldTimeRepository(
-        state=CurrentWorldTime(current_world_tick=WorldTick(1000), revision=3)
+        state=CurrentWorldTime(current_world_tick=make_world_tick(1000), revision=3)
     )
 
 
@@ -238,6 +238,7 @@ class TestGetWorldTimeBehaviour:
         read_context: ExecutionContext,
     ) -> None:
         result = executor.execute("get_world_time", input_data={}, context=read_context)
+        assert isinstance(result, GetWorldTimeOutput)
         assert result.game_date.month == "Hammer"
         assert result.game_date.day == 15
 
@@ -396,7 +397,7 @@ class TestGameDateToWorldTickBehaviour:
         register_world_time_read_tools(
             registry,
             world_time_repository=FakeWorldTimeRepository(
-                state=CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+                state=CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
             ),
             calendar_service=real_calendar,
         )
@@ -448,7 +449,7 @@ class TestGameDateToWorldTickBehaviour:
         register_world_time_read_tools(
             registry,
             world_time_repository=FakeWorldTimeRepository(
-                state=CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+                state=CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
             ),
             calendar_service=BrokenCalendar(),
         )
@@ -494,6 +495,7 @@ class TestTimeBetweenWorldTicksBehaviour:
             input_data={"start_tick": 200, "end_tick": 100},
             context=read_context,
         )
+        assert isinstance(result, TimeBetweenWorldTicksOutput)
         assert result.minutes == -58
 
     def test_zero_delta(
@@ -507,6 +509,7 @@ class TestTimeBetweenWorldTicksBehaviour:
             input_data={"start_tick": 100, "end_tick": 100},
             context=read_context,
         )
+        assert isinstance(result, TimeBetweenWorldTicksOutput)
         assert result.minutes == 42
 
     def test_repository_not_called(
@@ -611,7 +614,7 @@ class TestCalendarRoundTrip:
         register_world_time_read_tools(
             registry,
             world_time_repository=FakeWorldTimeRepository(
-                state=CurrentWorldTime(current_world_tick=WorldTick(0), revision=1)
+                state=CurrentWorldTime(current_world_tick=make_world_tick(0), revision=1)
             ),
             calendar_service=real_calendar,
         )
@@ -630,6 +633,7 @@ class TestCalendarRoundTrip:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(tick_result, GameDateToWorldTickOutput)
         date_result = executor.execute(
             "world_tick_to_date",
             input_data={"world_tick": tick_result.world_tick},
@@ -638,6 +642,7 @@ class TestCalendarRoundTrip:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(date_result, WorldTickToDateOutput)
         return date_result.game_date
 
     def test_regular_date_round_trip(self, real_executor: ToolExecutor) -> None:

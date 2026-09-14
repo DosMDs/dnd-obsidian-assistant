@@ -16,7 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dnd_assistant.domain.calendar import WorldTick
+from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import ConflictError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
@@ -44,7 +44,7 @@ def _make_session() -> Session:
         status="active",
         real_started_at=_NOW,
         real_finished_at=None,
-        world_tick_start=WorldTick(1000),
+        world_tick_start=make_world_tick(1000),
         world_tick_end=None,
         processed=False,
         processed_model_profile=None,
@@ -73,7 +73,7 @@ class TrackingRuntimeService:
         return SimpleNamespace(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type=event_type,
             extra_fields={},
         )
@@ -83,7 +83,7 @@ class TrackingRuntimeService:
         return SimpleNamespace(
             event_id="evt_002",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={"text": text},
         )

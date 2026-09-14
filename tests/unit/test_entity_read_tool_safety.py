@@ -16,7 +16,12 @@ from datetime import UTC, datetime
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Revision, Visibility
+from dnd_assistant.domain.types import (
+    EntityType,
+    KnowledgeStatus,
+    Visibility,
+    make_revision,
+)
 from dnd_assistant.errors import NotFoundError, StorageError
 from dnd_assistant.retrieval.types import MatchKind, SearchHit
 from dnd_assistant.storage.audit import AuditContext
@@ -54,7 +59,7 @@ def _make_entity(
         knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=_NOW,
         updated_at=_NOW,
-        revision=Revision(1),
+        revision=make_revision(1),
     )
 
 

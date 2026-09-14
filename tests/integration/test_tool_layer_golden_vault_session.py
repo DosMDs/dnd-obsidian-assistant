@@ -19,6 +19,16 @@ from dnd_assistant.storage.world_time import (
     ObsidianWorldTimeRepository,
 )
 from dnd_assistant.tools.executor import ToolExecutor
+from dnd_assistant.tools.session_mutations import (
+    EndSessionOutput,
+    RecordNoteOutput,
+    StartSessionOutput,
+)
+from dnd_assistant.tools.session_reads import (
+    GetActiveSessionOutput,
+    GetSessionOutput,
+    ListSessionEventsOutput,
+)
 from dnd_assistant.tools.types import (
     ExecutionContext,
     Permission,
@@ -50,6 +60,7 @@ class TestGoldenSession:
                 audit=make_audit_context(operation_id="start-s006-s707"),
             ),
         )
+        assert isinstance(result, StartSessionOutput)
         assert result.session.id == "S006"
         assert result.session.status == "active"
         assert result.session.world_tick_start == 13800
@@ -74,6 +85,7 @@ class TestGoldenSession:
                 audit=make_audit_context(operation_id="note-s006-s707", session="S006"),
             ),
         )
+        assert isinstance(result, RecordNoteOutput)
         assert result.event.type == "note"
         assert result.event.extra_fields["text"] == "Тестовая заметка во время сессии"
 
@@ -105,6 +117,7 @@ class TestGoldenSession:
                 session_mode=SessionMode.ACTIVE_SESSION,
             ),
         )
+        assert isinstance(result, ListSessionEventsOutput)
         assert len(result.events) >= 1
         note_events = [e for e in result.events if e.type == "note"]
         assert len(note_events) >= 1
@@ -129,6 +142,7 @@ class TestGoldenSession:
                 audit=make_audit_context(operation_id="end-s006-s707", session="S006"),
             ),
         )
+        assert isinstance(result, EndSessionOutput)
         assert result.session.id == "S006"
         assert result.session.status == "completed"
         assert result.session.world_tick_end == 13800
@@ -161,6 +175,7 @@ class TestGoldenSession:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(result, GetSessionOutput)
         assert result.session.id == "S006"
         assert result.session.status == "completed"
         assert result.session.world_tick_end == 13800
@@ -193,6 +208,7 @@ class TestGoldenSession:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(result, GetActiveSessionOutput)
         assert result.session is None
 
 

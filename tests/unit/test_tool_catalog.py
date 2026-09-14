@@ -345,7 +345,9 @@ class TestBuildToolRegistrySchema:
         input_schema = schema.tools[0].input_schema
         assert isinstance(input_schema, dict)
         assert "properties" in input_schema
-        assert "x" in input_schema["properties"]
+        properties = input_schema["properties"]
+        assert isinstance(properties, dict)
+        assert "x" in properties
 
     def test_output_json_schema_from_model_json_schema(self) -> None:
         registry = _make_registry(
@@ -357,7 +359,9 @@ class TestBuildToolRegistrySchema:
         output_schema = schema.tools[0].output_schema
         assert isinstance(output_schema, dict)
         assert "properties" in output_schema
-        assert "result" in output_schema["properties"]
+        properties = output_schema["properties"]
+        assert isinstance(properties, dict)
+        assert "result" in properties
 
     def test_serialized_model_dump_is_json_serializable(self) -> None:
         registry = _make_registry(

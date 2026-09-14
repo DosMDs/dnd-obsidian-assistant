@@ -20,7 +20,7 @@ from dnd_assistant.domain.calendar import (
     CalendarMonth,
     GameDate,
     IntercalaryDay,
-    WorldTick,
+    make_world_tick,
 )
 from dnd_assistant.domain.world_time import CurrentWorldTime
 from dnd_assistant.errors import ConflictError, NotFoundError, ValidationError
@@ -88,7 +88,7 @@ class FakeWorldTimeRepository:
         if self._state is not None:
             raise ConflictError("world_time.json already exists")
         self._state = CurrentWorldTime(
-            current_world_tick=WorldTick(world_tick),
+            current_world_tick=make_world_tick(world_tick),
             revision=1,
         )
         return self._state
@@ -109,7 +109,7 @@ class FakeWorldTimeRepository:
             )
         new_revision = self._state.revision + 1
         self._state = CurrentWorldTime(
-            current_world_tick=WorldTick(world_tick),
+            current_world_tick=make_world_tick(world_tick),
             revision=new_revision,
         )
         return self._state
@@ -180,7 +180,7 @@ def call_log() -> _CallLog:
 @pytest.fixture
 def initialized_repo() -> FakeWorldTimeRepository:
     return FakeWorldTimeRepository(
-        state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+        state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
     )
 
 
@@ -342,9 +342,8 @@ class TestSetWorldTimeInitialize:
             input_data={"world_tick": 500},
             context=write_context,
         )
-        assert result.game_date.month == "Hammer"
-        assert result.game_date.day == 15
-        assert result.calendar_id == "harner"
+        assert isinstance(result, SetWorldTimeOutput) and result.game_date.month == "Hammer"
+        assert result.game_date.day == 15 and result.calendar_id == "harner"
 
     def test_initialize_existing_state_raises_conflict(
         self,
@@ -406,7 +405,7 @@ class TestSetWorldTimeUpdate:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
             call_log=call_log,
         )
         register_world_time_mutation_tools(
@@ -431,7 +430,7 @@ class TestSetWorldTimeUpdate:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
             call_log=call_log,
         )
         register_world_time_mutation_tools(
@@ -456,7 +455,7 @@ class TestSetWorldTimeUpdate:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -479,7 +478,7 @@ class TestSetWorldTimeUpdate:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -502,7 +501,7 @@ class TestSetWorldTimeUpdate:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -575,9 +574,8 @@ class TestSetWorldTimeUpdate:
             input_data={"world_tick": 200, "expected_revision": 3},
             context=write_context,
         )
-        assert result.game_date.month == "Hammer"
-        assert result.game_date.day == 15
-        assert result.calendar_id == "harner"
+        assert isinstance(result, SetWorldTimeOutput) and result.game_date.month == "Hammer"
+        assert result.game_date.day == 15 and result.calendar_id == "harner"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -596,7 +594,7 @@ class TestAdvanceWorldTimeBehaviour:
         call_log: _CallLog,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
             call_log=call_log,
         )
         register_world_time_mutation_tools(
@@ -623,7 +621,7 @@ class TestAdvanceWorldTimeBehaviour:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -647,7 +645,7 @@ class TestAdvanceWorldTimeBehaviour:
     ) -> None:
         """Prove handler uses CalendarService result, not current+minutes."""
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -671,7 +669,7 @@ class TestAdvanceWorldTimeBehaviour:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=8),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=8),
         )
         register_world_time_mutation_tools(
             registry,
@@ -696,7 +694,7 @@ class TestAdvanceWorldTimeBehaviour:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -718,7 +716,7 @@ class TestAdvanceWorldTimeBehaviour:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -755,7 +753,7 @@ class TestAdvanceSignedMinutes:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -768,6 +766,7 @@ class TestAdvanceSignedMinutes:
             input_data={"minutes": 10, "expected_revision": 3},
             context=write_context,
         )
+        assert isinstance(result, AdvanceWorldTimeOutput)
         assert result.world_time.current_world_tick == 152  # 100 + 10 + 42
 
     def test_negative_minutes(
@@ -777,7 +776,7 @@ class TestAdvanceSignedMinutes:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -790,6 +789,7 @@ class TestAdvanceSignedMinutes:
             input_data={"minutes": -10, "expected_revision": 3},
             context=write_context,
         )
+        assert isinstance(result, AdvanceWorldTimeOutput)
         assert result.world_time.current_world_tick == 132  # 100 + (-10) + 42
 
     def test_zero_minutes(
@@ -799,7 +799,7 @@ class TestAdvanceSignedMinutes:
         write_context: ExecutionContext,
     ) -> None:
         repo = FakeWorldTimeRepository(
-            state=CurrentWorldTime(current_world_tick=WorldTick(100), revision=3),
+            state=CurrentWorldTime(current_world_tick=make_world_tick(100), revision=3),
         )
         register_world_time_mutation_tools(
             registry,
@@ -812,6 +812,7 @@ class TestAdvanceSignedMinutes:
             input_data={"minutes": 0, "expected_revision": 3},
             context=write_context,
         )
+        assert isinstance(result, AdvanceWorldTimeOutput)
         assert result.world_time.current_world_tick == 142  # 100 + 0 + 42
 
 

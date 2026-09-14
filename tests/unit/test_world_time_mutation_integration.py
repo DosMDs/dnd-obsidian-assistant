@@ -22,7 +22,11 @@ from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
-from dnd_assistant.tools.world_time_mutations import register_world_time_mutation_tools
+from dnd_assistant.tools.world_time_mutations import (
+    AdvanceWorldTimeOutput,
+    SetWorldTimeOutput,
+    register_world_time_mutation_tools,
+)
 
 _HARNER_CALENDAR = CalendarDefinition(
     calendar_id="harner",
@@ -67,6 +71,7 @@ class TestRealRepositoryIntegration:
         set_result = executor.execute(
             "set_world_time", input_data={"world_tick": 1000}, context=ctx
         )
+        assert isinstance(set_result, SetWorldTimeOutput)
         assert set_result.world_time.current_world_tick == 1000
         assert set_result.world_time.revision == 1
 
@@ -79,6 +84,7 @@ class TestRealRepositoryIntegration:
         advance_result = executor.execute(
             "advance_world_time", input_data={"minutes": 120, "expected_revision": 1}, context=ctx
         )
+        assert isinstance(advance_result, AdvanceWorldTimeOutput)
         assert advance_result.world_time.current_world_tick == 1120
         assert advance_result.world_time.revision == 2
 

@@ -11,7 +11,13 @@ from pathlib import Path
 from typing import cast
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityId, EntityType, Revision
+from dnd_assistant.domain.types import (
+    EntityId,
+    EntityType,
+    KnowledgeStatus,
+    Revision,
+    Visibility,
+)
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.storage.types import VaultDocument
 
@@ -39,8 +45,8 @@ def make_entity(
         type=entity_type,
         name=name,
         status="alive",
-        visibility="player",
-        knowledge_status="confirmed",
+        visibility=Visibility.PLAYER,
+        knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=BASE_TIME,
         updated_at=BASE_TIME,
         revision=cast(Revision, revision),

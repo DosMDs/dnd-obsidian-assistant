@@ -11,11 +11,12 @@ Covers:
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from datetime import UTC, datetime
 
 import pytest
 
-from dnd_assistant.domain.calendar import WorldTick
+from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import DndAssistantError, ValidationError
 from dnd_assistant.tools.registry import ToolRegistry
@@ -45,7 +46,7 @@ def _make_session(session_id: str = "S001", status: str = "active") -> Session:
         status=status,
         real_started_at=_NOW,
         real_finished_at=None,
-        world_tick_start=WorldTick(1000),
+        world_tick_start=make_world_tick(1000),
         world_tick_end=None,
         processed=False,
         processed_model_profile=None,
@@ -72,7 +73,11 @@ class FakeRuntimeService:
         return _make_session()
 
     def record_event(
-        self, event_type: str, *, extra_fields: object = None, audit: object = None
+        self,
+        event_type: str,
+        *,
+        extra_fields: Mapping[str, object] | None = None,
+        audit: object = None,
     ) -> object:
         return _make_raw_event(event_type, extra_fields)
 
@@ -83,14 +88,14 @@ class FakeRuntimeService:
         return _make_session(status="completed")
 
 
-def _make_raw_event(event_type: str, extra_fields: object = None) -> object:
+def _make_raw_event(event_type: str, extra_fields: Mapping[str, object] | None = None) -> object:
     """Create a minimal RawSessionEvent-like object."""
     from types import SimpleNamespace
 
     return SimpleNamespace(
         event_id="evt_001",
         real_time=_NOW,
-        world_tick=WorldTick(1000),
+        world_tick=make_world_tick(1000),
         type=event_type,
         extra_fields=dict(extra_fields) if extra_fields else {},
     )
@@ -356,6 +361,7 @@ class TestRecordEventInputValidation:
                 "null": None,
             },
         )
+        assert inp.extra_fields is not None
         assert inp.extra_fields["bool"] is True
         assert inp.extra_fields["int"] == 42
 
@@ -381,7 +387,7 @@ class TestRecordEventOutputValidation:
         event = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="item_acquired",
             extra_fields={"item": "sword"},
         )
@@ -392,7 +398,7 @@ class TestRecordEventOutputValidation:
         event = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="test",
             extra_fields={},
         )
@@ -453,7 +459,7 @@ class TestRecordNoteOutputValidation:
         event = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={"text": "Hello"},
         )
@@ -464,7 +470,7 @@ class TestRecordNoteOutputValidation:
         event = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={},
         )

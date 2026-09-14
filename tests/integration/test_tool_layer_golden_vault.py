@@ -47,6 +47,11 @@ from dnd_assistant.storage.world_time import (
     ObsidianWorldTimeRepository,
 )
 from dnd_assistant.tools.catalog import build_tool_registry_schema
+from dnd_assistant.tools.entity_mutations import (
+    AppendEntityFactOutput,
+    PatchEntityOutput,
+)
+from dnd_assistant.tools.entity_reads import GetEntityOutput
 from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.mvp_registry import build_mvp_tool_registry
 from dnd_assistant.tools.types import (
@@ -54,6 +59,8 @@ from dnd_assistant.tools.types import (
     Permission,
     SessionMode,
 )
+from dnd_assistant.tools.world_time_mutations import AdvanceWorldTimeOutput
+from dnd_assistant.tools.world_time_reads import GetWorldTimeOutput
 
 # -- Fixture source path ----------------------------------------------------------
 
@@ -333,6 +340,7 @@ class TestGoldenEntityRead:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(result, GetEntityOutput)
         assert result.entity.id == "npc_varos"
         assert result.entity.visibility == Visibility.PLAYER
         assert result.entity.revision == 4
@@ -363,6 +371,7 @@ class TestGoldenEntityMutation:
                 audit=make_audit_context(operation_id="patch-varos-s707"),
             ),
         )
+        assert isinstance(result, PatchEntityOutput)
         assert result.entity.id == "npc_varos"
         assert result.entity.revision == 5
         assert result.entity.name == "Магистр Варос Обновлённый"
@@ -380,6 +389,7 @@ class TestGoldenEntityMutation:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(read_result, GetEntityOutput)
         original_body = read_result.body
 
         executor.execute(
@@ -404,6 +414,7 @@ class TestGoldenEntityMutation:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(read_again, GetEntityOutput)
         assert read_again.body == original_body
 
     def test_patch_preserves_extra_frontmatter(self, stack: dict[str, Any]) -> None:
@@ -447,6 +458,7 @@ class TestGoldenEntityMutation:
                 audit=make_audit_context(operation_id="append-fact-s707"),
             ),
         )
+        assert isinstance(result, AppendEntityFactOutput)
         assert result.entity.id == "npc_varos"
         assert result.entity.revision == 5
         assert result.body is not None
@@ -463,6 +475,7 @@ class TestGoldenEntityMutation:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(read_result, GetEntityOutput)
         original_body = read_result.body
 
         executor.execute(
@@ -486,6 +499,7 @@ class TestGoldenEntityMutation:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(read_again, GetEntityOutput)
         assert read_again.body.startswith(original_body)
 
     def test_entity_state_survives_reconstruction(self, stack: dict[str, Any]) -> None:
@@ -567,6 +581,7 @@ class TestGoldenWorldTime:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(result, GetWorldTimeOutput)
         assert result.world_time.current_world_tick == 13800
         assert result.world_time.revision == 1
 
@@ -584,6 +599,7 @@ class TestGoldenWorldTime:
                 audit=make_audit_context(operation_id="advance-wt-s707"),
             ),
         )
+        assert isinstance(result, AdvanceWorldTimeOutput)
         assert result.world_time.current_world_tick == 13920
         assert result.world_time.revision == 2
 
@@ -610,6 +626,7 @@ class TestGoldenWorldTime:
                 session_mode=SessionMode.NO_ACTIVE_SESSION,
             ),
         )
+        assert isinstance(result, GetWorldTimeOutput)
         assert result.world_time.current_world_tick == 13920
         assert result.world_time.revision == 2
 

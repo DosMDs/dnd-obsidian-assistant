@@ -18,7 +18,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dnd_assistant.domain.calendar import WorldTick
+from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
 from dnd_assistant.storage.audit import AuditContext
@@ -55,7 +55,7 @@ def _make_session(
         status=status,
         real_started_at=_NOW,
         real_finished_at=None,
-        world_tick_start=WorldTick(world_tick_start),
+        world_tick_start=make_world_tick(world_tick_start),
         world_tick_end=None,
         processed=False,
         processed_model_profile=None,
@@ -71,7 +71,7 @@ def _make_raw_event(
     return SimpleNamespace(
         event_id=event_id,
         real_time=_NOW,
-        world_tick=WorldTick(1000),
+        world_tick=make_world_tick(1000),
         type=event_type,
         extra_fields=dict(extra_fields) if extra_fields else {},
     )
@@ -381,6 +381,7 @@ class TestRecordEventDelegation:
             input_data={"event_type": "test"},
             context=write_context_active,
         )
+        assert isinstance(result, RecordEventOutput)
         event = result.event
         assert event.event_id == "evt_001"
         assert event.real_time == _NOW
@@ -413,6 +414,7 @@ class TestRecordEventDelegation:
             input_data={"event_type": "test"},
             context=write_context_active,
         )
+        assert isinstance(result, RecordEventOutput)
         assert isinstance(result.event, SessionEventResult)
 
 
@@ -478,6 +480,7 @@ class TestRecordNoteDelegation:
             input_data={"text": "A note"},
             context=write_context_active,
         )
+        assert isinstance(result, RecordNoteOutput)
         assert result.event.type == "note"
 
     def test_note_output_has_text_in_extra_fields(
@@ -491,6 +494,7 @@ class TestRecordNoteDelegation:
             input_data={"text": "My note text"},
             context=write_context_active,
         )
+        assert isinstance(result, RecordNoteOutput)
         assert result.event.extra_fields.get("text") == "My note text"
 
     def test_runtime_not_found_propagates(

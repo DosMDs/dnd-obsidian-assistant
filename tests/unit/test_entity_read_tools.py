@@ -16,7 +16,12 @@ from datetime import UTC, datetime
 import pytest
 
 from dnd_assistant.domain.entity import Entity
-from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Revision, Visibility
+from dnd_assistant.domain.types import (
+    EntityType,
+    KnowledgeStatus,
+    Visibility,
+    make_revision,
+)
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
 from dnd_assistant.retrieval.types import MatchKind, SearchHit, SearchQuery
 from dnd_assistant.storage.audit import AuditContext
@@ -56,7 +61,7 @@ def _make_entity(
         knowledge_status=KnowledgeStatus.CONFIRMED,
         created_at=_NOW,
         updated_at=_NOW,
-        revision=Revision(1),
+        revision=make_revision(1),
     )
 
 
@@ -299,6 +304,7 @@ class TestSearchEntitiesHandler:
             input_data={"text": "test"},
             context=read_context,
         )
+        assert isinstance(result, SearchEntitiesOutput)
         assert len(result.results) == 2
         assert result.results[0].entity_id == "npc--b"
         assert result.results[1].entity_id == "npc--a"
@@ -321,6 +327,7 @@ class TestSearchEntitiesHandler:
             input_data={"text": "Gandalf"},
             context=read_context,
         )
+        assert isinstance(result, SearchEntitiesOutput)
         assert len(result.results) == 1
         r = result.results[0]
         assert r.entity_id == "npc--gandalf"
@@ -443,6 +450,7 @@ class TestGetEntityHandler:
             input_data={"entity_id": "npc--gandalf"},
             context=read_context,
         )
+        assert isinstance(result, GetEntityOutput)
         assert result.entity.id == "npc--gandalf"
         assert result.entity.name == "Test Entity"
         assert result.body == "# Gandalf the Grey"

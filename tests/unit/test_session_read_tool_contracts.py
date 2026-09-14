@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dnd_assistant.domain.calendar import WorldTick
+from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import DndAssistantError, ValidationError
 from dnd_assistant.tools.registry import ToolRegistry
@@ -49,7 +49,7 @@ def _make_session(session_id: str = "S001", status: str = "active") -> Session:
         status=status,
         real_started_at=_NOW,
         real_finished_at=None,
-        world_tick_start=WorldTick(1000),
+        world_tick_start=make_world_tick(1000),
         world_tick_end=None,
         processed=False,
         processed_model_profile=None,
@@ -90,7 +90,7 @@ class FakeSessionRepository:
 
     def get_active_session(self) -> object | None:
         active = [
-            s for s in self._sessions.values() if hasattr(s, "status") and s.status == "active"
+            s for s in self._sessions.values() if isinstance(s, Session) and s.status == "active"
         ]
         if len(active) == 0:
             return None
@@ -432,7 +432,7 @@ class TestSessionEventResultValidation:
         result = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={"text": "Hello"},
         )
@@ -445,7 +445,7 @@ class TestSessionEventResultValidation:
         result = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={},
         )
@@ -455,7 +455,7 @@ class TestSessionEventResultValidation:
         result = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="combat",
             extra_fields={"damage": 15, "targets": ["goblin", "orc"], "critical": True},
         )
@@ -468,7 +468,7 @@ class TestSessionEventResultValidation:
             SessionEventResult(  # type: ignore[call-arg]
                 event_id="evt_001",
                 real_time=_NOW,
-                world_tick=WorldTick(1000),
+                world_tick=make_world_tick(1000),
                 type="note",
                 extra_fields={},
                 unknown="x",
@@ -480,7 +480,7 @@ class TestSessionEventResultValidation:
             SessionEventResult(
                 event_id="evt_001",
                 real_time=naive,  # type: ignore[arg-type]
-                world_tick=WorldTick(1000),
+                world_tick=make_world_tick(1000),
                 type="note",
                 extra_fields={},
             )
@@ -490,7 +490,7 @@ class TestSessionEventResultValidation:
         result = SessionEventResult(
             event_id="evt_001",
             real_time="2026-09-02T12:00:00Z",  # type: ignore[arg-type]
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={},
         )
@@ -502,7 +502,7 @@ class TestSessionEventResultValidation:
         result = SessionEventResult(
             event_id="evt_001",
             real_time=1234567890,  # type: ignore[arg-type]
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={},
         )
@@ -514,7 +514,7 @@ class TestSessionEventResultValidation:
         result = SessionEventResult(
             event_id="evt_001",
             real_time=aware,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={},
         )
@@ -536,14 +536,14 @@ class TestListSessionEventsOutputValidation:
         e1 = SessionEventResult(
             event_id="evt_001",
             real_time=_NOW,
-            world_tick=WorldTick(1000),
+            world_tick=make_world_tick(1000),
             type="note",
             extra_fields={"text": "A"},
         )
         e2 = SessionEventResult(
             event_id="evt_002",
             real_time=_NOW,
-            world_tick=WorldTick(1001),
+            world_tick=make_world_tick(1001),
             type="note",
             extra_fields={"text": "B"},
         )
