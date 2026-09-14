@@ -1,8 +1,8 @@
 """Contract tests: test-harness isolation and fixture policy.
 
 These tests enforce invariants from:
-  - .gigacode/rules/37-test-harness-isolation.md
-  - .gigacode/rules/36-maintainability-ratchets.md
+  - docs/development/quality-and-evidence.md
+  - docs/development/maintainability.md
 
 All checks are read-only: no Git, no shell, no network.
 """

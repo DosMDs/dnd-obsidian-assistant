@@ -279,5 +279,6 @@ Known risks documented in PAIM-02 evidence (unchanged):
 | `docs/stages/09_FAST_AGENT.md` | Detailed Stage-9 history/reference behavior |
 | `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` | PAIM task plan/history/evidence |
 | `docs/adr/0003-pydantic-ai-runtime-migration.md` | Migration architecture/rollback decision |
-| `.gigacode/rules/40-pydantic-ai-migration.md` | Always-on migration boundary rule |
-| `.gigacode/skills/pydantic-ai-migration/SKILL.md` | PAIM implementation/review workflow |
+| `AGENTS.md` | Always-on OpenCode development invariants |
+| `.opencode/skills/pydantic-ai-migration/SKILL.md` | PAIM implementation/review workflow |
+| `docs/migrations/002_OPENCODE_DEVELOPMENT_TOOLING.md` | OpenCode development-tooling cutover record |

@@ -17,9 +17,10 @@ runtime behavior or architecture.
 - This document is the canonical status/history record for the separate
   developer-tooling migration. The plan is to keep OC status here rather than in
   `DEVELOPMENT_STATUS.md` until cutover.
-- Legacy GigaCode artifacts (`.gigacode/`, `.gigacode_vsc/`, `GIGACODE.md`,
-  `README_GIGACODE_SETUP.md`) remain in place as source/reference material until
-  cutover.
+- At cutover (OC-05), all tracked legacy GigaCode artifacts (`.gigacode/`,
+  `.gigacode_vsc/gigacode.jsonc`, `GIGACODE.md`, `README_GIGACODE_SETUP.md`)
+  were retired; current canonical surfaces no longer reference them. Untracked
+  local GigaCode session state remains on disk intentionally (see §10).
 
 ## 3. Branch and base
 
@@ -46,8 +47,8 @@ OC foundation commits:
 | OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | DONE |
 | OC-03A | Remove or isolate legacy development-agent artifacts | DONE |
 | OC-04 | DeepSeek V4.1 Flash development-agent qualification | DONE |
-| OC-05 | (planned; defined by its Task Contract) | PLANNED |
-| OC-06 | (planned; defined by its Task Contract) | PLANNED |
+| OC-05 | Complete cutover; retire tracked GigaCode tooling | DONE |
+| OC-06 | (planned; defined by its Task Contract) | FUTURE / PLANNED |
 
 ## 5. OC-02 scope
 
@@ -129,3 +130,28 @@ Detailed Final Reports are intentionally not duplicated here.
 - `opencode.json`, `AGENTS.md`, `.opencode/skills/*` and `.opencode/agents/*`
   were not modified; the qualification ran in a disposable system-temp worktree
   that was removed afterward.
+
+## 10. OC-05 scope
+
+- Retired **42 tracked GigaCode artifacts**: the `.gigacode/` tree (21 rules, 17
+  skills, local-instruction example), `.gigacode_vsc/gigacode.jsonc`,
+  `GIGACODE.md` and `README_GIGACODE_SETUP.md`. Every deletion was mapped to a
+  canonical replacement (AGENTS.md, `docs/development/*`, `.opencode/skills/*`,
+  `opencode.json`) before removal.
+- Reconciled current references: replaced the deleted-GigaCode PAIM guidance
+  pointers in `DEVELOPMENT_STATUS.md` with canonical OpenCode-era references, and
+  retargeted the test-policy docstring citations in
+  `tests/contract/test_test_harness_policy.py` to
+  `docs/development/quality-and-evidence.md` and
+  `docs/development/maintainability.md` (docstrings only; assertions unchanged).
+- The canonical OpenCode developer surface is `AGENTS.md`, `opencode.json`,
+  `.opencode/skills/` (17 skills), `.opencode/agents/` (3 agents),
+  `docs/development/` and vendor-neutral `.vscode/` configuration.
+- Historical references to deleted `.gigacode/*` paths in `docs/adr/*`,
+  `docs/stages/*`, `docs/maintenance/*` and `docs/migrations/001_*` were
+  preserved unchanged; Git history retains the retired artifacts.
+- User-local untracked/ignored GigaCode state (`.gigacode/.gitignore`,
+  `.gigacode_vsc/.gitignore`, `.gigacode_vsc/agent-manager.json`,
+  `.gigacode_vsc/plans/*`) and the root `.gitignore` legacy protections were
+  intentionally left untouched; they are session state, not active tooling, and
+  do not influence OpenCode discovery.
