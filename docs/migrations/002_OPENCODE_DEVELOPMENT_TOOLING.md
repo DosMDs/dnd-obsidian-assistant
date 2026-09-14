@@ -46,9 +46,9 @@ OC foundation commits:
 | OC-02C | Correction: make plan-first workflow mandatory | DONE |
 | OC-03 | Migrate `.gigacode/skills/*` to OpenCode-era skills | DONE |
 | OC-03A | Remove or isolate legacy development-agent artifacts | DONE |
-| OC-04 | DeepSeek V4.1 Flash development-agent qualification | DONE |
+| OC-04 | DeepSeek V4.1 Flash development-agent qualification | DONE / ACCEPTED |
 | OC-05 | Complete cutover; retire tracked GigaCode tooling | DONE |
-| OC-06 | (planned; defined by its Task Contract) | FUTURE / PLANNED |
+| OC-06 | Final OpenCode migration review and closure | DONE |
 
 ## 5. OC-02 scope
 
@@ -155,3 +155,72 @@ Detailed Final Reports are intentionally not duplicated here.
   `.gigacode_vsc/plans/*`) and the root `.gitignore` legacy protections were
   intentionally left untouched; they are session state, not active tooling, and
   do not influence OpenCode discovery.
+
+## 11. OC-06 scope (final review and closure)
+
+OC-06 is a verification-first, documentation-only closeout. It reviewed the
+migration range `ef38f08..HEAD`, current tracked tooling state, OpenCode
+fresh-process discovery, permissions, policy hierarchy and runtime independence.
+No application/runtime, config or test file was changed.
+
+### Verified current surface (fresh process)
+
+```text
+opencode --version         : 1.18.30
+model                      : deepseek/deepseek-flash
+default_agent              : build
+subagent_depth             : 1
+lsp                        : true
+project skills             : 17  (.opencode/skills/*/SKILL.md)
+project reviewer agents    : 3   (.opencode/agents/*.md)
+project-local legacy       : none (no .gigacode/.gigacode_vsc/GIGACODE.md/
+                                  README_GIGACODE_SETUP.md/.agents/.codex tracked)
+```
+
+`opencode debug skill` also surfaces one global external skill
+(`~/.claude/skills/python-project`) and one built-in skill
+(`customize-opencode`); these are not project surface. `opencode debug config`
+confirms the values above and shows no `instructions` injection.
+
+### Qualification and independence
+
+- DeepSeek V4.1 Flash qualification (003) remains valid: `opencode.json`,
+  `AGENTS.md`, `.opencode/skills/*` and `.opencode/agents/*` are unchanged since
+  before OC-04; no post-qualification model/config change occurred, so no
+  requalification is required.
+- Runtime independence confirmed from Git: the migration range changed only
+  `opencode.json`, `AGENTS.md`, `.opencode/*`, `docs/*`, `DEVELOPMENT_STATUS.md`,
+  the test-policy docstring and (OC-01LSP) the `pyright` dev dependency in
+  `pyproject.toml`/`uv.lock`. No `src/` or `prompts/` change.
+- No active legacy tooling dependency remains; historical GigaCode/Codex
+  references survive only in dated ADRs, stage/maintenance history, migration
+  001 and earlier sections of this record.
+
+### Known limitations (non-blocking)
+
+1. OC-04 Q8 skill-selection weakness — one sub-run selected a related but
+   non-designated skill; documented operational limitation, not a safety or
+   architecture failure.
+2. Reviewer Task-tool visibility/session-surface anomaly observed earlier — a
+   session/tool-surface limitation; the reviewer definitions and their bounded
+   permissions are correct in configuration.
+3. Host OpenCode bundled-ripgrep extraction issue (missing
+   `Microsoft.PowerShell.Archive`) — environmental; repaired during OC-04 and
+   not a config defect.
+4. Ignored local legacy GigaCode state still on disk — harmless local residue
+   that does not influence OpenCode discovery.
+5. OpenCode's narrow experimental LSP agent tool is not exposed in a session
+   started without `OPENCODE_EXPERIMENTAL_LSP_TOOL=true`; the `lsp: true` config,
+   per-agent `lsp: allow` and the installed `pyright` dev dependency are
+   confirmed, so this is a documented operational setting, not a defect.
+
+None of these are unresolved architecture defects.
+
+### Classification
+
+```text
+OC-06 result: COMPLETE_WITH_KNOWN_LIMITATIONS
+```
+
+The OpenCode development-tooling migration is complete and the branch is ready
+for normal merge/closure, subject to the known non-blocking limitations above.
