@@ -28,6 +28,13 @@ Tool Layer handshake
 via a ``TYPE_CHECKING``-only import.  This keeps the gateway module
 lightweight — importing ``dnd_assistant.models.gateway`` must not eagerly
 load storage, retrieval, application, CLI, or Ollama.
+
+PAIM-14 status
+──────────────
+The production ``dnd ask`` composition now uses the Pydantic AI ``Model``
+boundary.  This Protocol and its native ``OllamaModelProvider`` are retained
+as explicit test/reference infrastructure only (PAIM-11 parity, PAIM-13 live
+comparison).  Production composition must not import them.
 """
 
 from __future__ import annotations

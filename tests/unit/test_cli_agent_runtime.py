@@ -22,12 +22,14 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic_ai.models.test import TestModel
+from pydantic_ai.models.wrapper import WrapperModel
 
 from dnd_assistant.cli.agent_runtime import (
     AskRuntime,
+    _build_agent_model,
     _build_ask_audit_context,
     _build_ask_tool_registry,
-    _build_model_provider,
     _derive_session_context,
     _load_profile,
     _new_operation_id,
@@ -137,23 +139,23 @@ class TestLoadProfile:
 # ── Provider selection tests ───────────────────────────────────────────────
 
 
-class TestBuildModelProvider:
-    """Provider construction."""
+class TestBuildAgentModel:
+    """Pydantic AI model construction."""
 
-    def test_ollama_provider_created(self, valid_agent_profile: ModelProfile) -> None:
-        """An Ollama provider is created for an ollama profile."""
-        provider = _build_model_provider(valid_agent_profile)
-        from dnd_assistant.models.ollama import OllamaModelProvider
+    def test_ollama_model_created(self, valid_agent_profile: ModelProfile) -> None:
+        """A Pydantic AI OllamaModel is created for an ollama profile."""
+        from pydantic_ai.models.ollama import OllamaModel
 
-        assert isinstance(provider, OllamaModelProvider)
-        provider.close()
+        model = _build_agent_model(valid_agent_profile)
+
+        assert isinstance(model, OllamaModel)
 
     def test_unsupported_provider_raises_error(
         self, unsupported_provider_profile: ModelProfile
     ) -> None:
         """An unsupported provider raises ValidationError."""
         with pytest.raises(ValidationError, match="Unsupported"):
-            _build_model_provider(unsupported_provider_profile)
+            _build_agent_model(unsupported_provider_profile)
 
 
 # ── ExecutionContext construction tests ────────────────────────────────────
@@ -266,8 +268,8 @@ class TestAskRuntimeClose:
         provider = MagicMock()
         runtime = AskRuntime(
             MagicMock(
-                model_gateway=provider,
-                agent_loop=MagicMock(),
+                model=provider,
+                agent_runtime=MagicMock(),
                 recovery_service=MagicMock(),
                 vault_root=MagicMock(),
                 audit_service=None,
@@ -282,8 +284,8 @@ class TestAskRuntimeClose:
         provider = MagicMock()
         runtime = AskRuntime(
             MagicMock(
-                model_gateway=provider,
-                agent_loop=MagicMock(),
+                model=provider,
+                agent_runtime=MagicMock(),
                 recovery_service=MagicMock(),
                 vault_root=MagicMock(),
                 audit_service=None,
@@ -302,8 +304,8 @@ class TestAskRuntimeClose:
         agent_loop.run.return_value = MagicMock()
         runtime = AskRuntime(
             MagicMock(
-                model_gateway=provider,
-                agent_loop=agent_loop,
+                model=provider,
+                agent_runtime=agent_loop,
                 recovery_service=MagicMock(),
                 vault_root=MagicMock(),
                 audit_service=None,
@@ -320,8 +322,8 @@ class TestAskRuntimeClose:
         agent_loop.run.side_effect = DndAssistantError("Model error")
         runtime = AskRuntime(
             MagicMock(
-                model_gateway=provider,
-                agent_loop=agent_loop,
+                model=provider,
+                agent_runtime=agent_loop,
                 recovery_service=MagicMock(),
                 vault_root=MagicMock(),
                 audit_service=None,
@@ -426,14 +428,27 @@ class TestTimeAndIdHelpers:
 # ── Composition-failure cleanup tests ──────────────────────────────────────
 
 
-class TestComposeAskRuntimeCleanup:
-    """Provider cleanup when composition fails after provider creation."""
+class _ClosableTestModel(WrapperModel):
+    """Deterministic Pydantic AI model with an observable ``close()`` hook.
 
-    def _fake_provider(self) -> MagicMock:
-        """Create a fake provider with observable close count."""
-        provider = MagicMock()
-        provider.close = MagicMock()  # type: ignore[method-assign]
-        return provider
+    Wraps ``TestModel`` so composition accepts it as a real Pydantic AI
+    ``Model`` while allowing composition-failure cleanup assertions.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(wrapped=TestModel())
+        self.close_calls = 0
+
+    def close(self) -> None:
+        self.close_calls += 1
+
+
+class TestComposeAskRuntimeCleanup:
+    """Model cleanup when composition fails after model creation."""
+
+    def _fake_model(self) -> _ClosableTestModel:
+        """Create a deterministic Pydantic AI model with a close counter."""
+        return _ClosableTestModel()
 
     def _minimal_vault(self, tmp_path: Path) -> Path:
         """Create a minimal Vault with required directories."""
@@ -459,13 +474,13 @@ class TestComposeAskRuntimeCleanup:
         )
         return config_path
 
-    def test_provider_closed_on_storage_composition_failure(
+    def test_model_closed_on_storage_composition_failure(
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:
-        """Provider.close called once when AuditService composition fails."""
+        """Model.close called once when AuditService composition fails."""
         vault_root = self._minimal_vault(tmp_path)
         config_path = self._write_config(tmp_path)
-        provider = self._fake_provider()
+        model = self._fake_model()
 
         # Make AuditService raise StorageError on construction
         from dnd_assistant.errors import StorageError
@@ -485,18 +500,16 @@ class TestComposeAskRuntimeCleanup:
                 vault_root=vault_root,
                 config_path=config_path,
                 profile_name="test-agent",
-                model_provider_factory=lambda p: provider,
+                model_factory=lambda p: model,
             )
 
-        provider.close.assert_called_once()
+        assert model.close_calls == 1
 
-    def test_provider_closed_on_session_state_failure(
-        self, tmp_path: Path, monkeypatch: Any
-    ) -> None:
-        """Provider.close called once when session-state read raises StorageError."""
+    def test_model_closed_on_session_state_failure(self, tmp_path: Path, monkeypatch: Any) -> None:
+        """Model.close called once when session-state read raises StorageError."""
         vault_root = self._minimal_vault(tmp_path)
         config_path = self._write_config(tmp_path)
-        provider = self._fake_provider()
+        model = self._fake_model()
 
         from dnd_assistant.errors import StorageError
 
@@ -515,25 +528,25 @@ class TestComposeAskRuntimeCleanup:
                 vault_root=vault_root,
                 config_path=config_path,
                 profile_name="test-agent",
-                model_provider_factory=lambda p: provider,
+                model_factory=lambda p: model,
             )
 
-        provider.close.assert_called_once()
+        assert model.close_calls == 1
 
-    def test_provider_closed_on_unexpected_runtime_error(
+    def test_model_closed_on_unexpected_runtime_error(
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:
-        """Provider.close called once when an unexpected RuntimeError occurs during composition."""
+        """Model.close called once when an unexpected RuntimeError occurs during composition."""
         vault_root = self._minimal_vault(tmp_path)
         config_path = self._write_config(tmp_path)
-        provider = self._fake_provider()
+        model = self._fake_model()
 
-        def _broken_agent_loop(*args: Any, **kwargs: Any) -> None:
+        def _broken_agent_runtime(*args: Any, **kwargs: Any) -> None:
             raise RuntimeError("Unexpected composition error")
 
         monkeypatch.setattr(
-            "dnd_assistant.cli.agent_runtime.AgentLoop.__init__",
-            _broken_agent_loop,
+            "dnd_assistant.cli.agent_runtime.PydanticAIAgentRuntime.__init__",
+            _broken_agent_runtime,
         )
 
         with pytest.raises(RuntimeError, match="Unexpected composition error"):
@@ -543,18 +556,18 @@ class TestComposeAskRuntimeCleanup:
                 vault_root=vault_root,
                 config_path=config_path,
                 profile_name="test-agent",
-                model_provider_factory=lambda p: provider,
+                model_factory=lambda p: model,
             )
 
-        provider.close.assert_called_once()
+        assert model.close_calls == 1
 
-    def test_provider_closed_on_active_session_storage_error_write(
+    def test_model_closed_on_active_session_storage_error_write(
         self, tmp_path: Path, monkeypatch: Any
     ) -> None:
-        """Provider.close called once when get_active_session raises StorageError with --allow-write."""
+        """Model.close called once when get_active_session raises StorageError with --allow-write."""
         vault_root = self._minimal_vault(tmp_path)
         config_path = self._write_config(tmp_path)
-        provider = self._fake_provider()
+        model = self._fake_model()
 
         from dnd_assistant.errors import StorageError
 
@@ -574,10 +587,10 @@ class TestComposeAskRuntimeCleanup:
                 config_path=config_path,
                 profile_name="test-agent",
                 allow_write=True,
-                model_provider_factory=lambda p: provider,
+                model_factory=lambda p: model,
             )
 
-        provider.close.assert_called_once()
+        assert model.close_calls == 1
 
 
 # ── Import-time side-effect test ───────────────────────────────────────────

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-14 (PAIM-13 attempt #4)
+**Last updated:** 2026-09-14 (PAIM-14)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 in progress; Pydantic AI migration gate before S9-07
 **Active stage:** Stage 9 — Fast Agent
@@ -153,7 +153,7 @@ ac9fd4c7e19475adb2331eb010ce8c78af98b309
 | PAIM-C41 — Restore green baseline and correct C40 evidence | DONE |
 | PAIM-C42 — Seal PAIM-13 pre-live evidence boundaries | DONE |
 | PAIM-C43 — Restore CountingModelGateway Protocol compatibility | DONE |
-| PAIM-14 — Remove superseded generic custom runtime code | NOT STARTED |
+| PAIM-14 — Remove superseded generic custom runtime code | DONE |
 | PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED | NOT STARTED |
 
 ## PAIM outcome policy
@@ -189,8 +189,37 @@ PAIM-13 attempt #1 — INCOMPLETE (fixture construction failure, corrected by PA
 PAIM-13 attempt #2 — INCOMPLETE (tool chat timeout, corrected by PAIM-C38)
 PAIM-13 attempt #3 — COMPLETE MEASUREMENT / VERDICT INVALIDATED
 PAIM-13 measured attempt #4 — VALID / passes comparison gates
-PAIM-14 — NOT STARTED
+PAIM-14 — DONE
 ```
+
+### PAIM-14 production cutover and reference classification
+
+The production `dnd ask` CLI composition was cut over to the project-owned
+Pydantic AI runtime boundary:
+
+```text
+cli/ask.py → AskRuntime.agent_runtime
+cli/agent_runtime.py
+  → build_pydantic_ai_ollama_model(profile)
+  → PydanticAIToolBridge(registry=tool_registry)
+  → DndAgentRunPreparer(context_builder, tool_catalog, bridge)
+  → PydanticAIAgentRuntime(run_preparer, model)
+```
+
+`ToolExecutor`, `DndAgentPolicy`, tool exposure policy and READ/WRITE
+authorization remain project-owned and unchanged.
+
+Post-cutover reference re-inspection found **no** superseded generic runtime
+component with zero remaining consumers. The custom `FastAgent`, `AgentLoop`,
+`ModelGateway` and native `OllamaModelProvider` are retained as explicit
+`KEEP_FOR_TEST_REFERENCE` infrastructure because PAIM-11 parity and the
+PAIM-13 live-eval reference side still require them. Cleanup of that
+reference surface is deferred to the PAIM-15 final architecture review.
+
+A contract boundary guard now prevents production CLI composition from
+re-importing the retained reference runtime (`tests/contract/test_boundaries.py`).
+
+Full literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 75.
 
 ### PAIM-C43 typed-contract correction
 
@@ -271,12 +300,13 @@ Full literal evidence: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 74.
 No confirmed PAIM-13 runtime regression blocker.
 Attempt #3 aggregate WRITE blocker was invalidated by PAIM-C39.
 Attempt #4 measured VALID / passes comparison gates.
+PAIM-14 production cutover complete; no removable superseded runtime remained.
 ```
 
 Active next:
 
 ```text
-PAIM-14 — Remove superseded generic custom runtime code
+PAIM-15 — Final architecture review: ACCEPTED/PARTIAL/REJECTED
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)

@@ -1544,6 +1544,14 @@ second `ModelGateway` calls.
 - `src/dnd_assistant/cli/ask.py` — Typer command declaration, CLI options, rendering, error mapping
 - `src/dnd_assistant/cli/agent_runtime.py` — dependency composition, provider lifetime, AskRuntime
 
+> **PAIM-14 update (2026-09-14):** `cli/agent_runtime.py` now composes the
+> project-owned Pydantic AI runtime boundary
+> (`build_pydantic_ai_ollama_model` → `PydanticAIToolBridge` →
+> `DndAgentRunPreparer` → `PydanticAIAgentRuntime`) and `cli/ask.py` invokes
+> `runtime.agent_runtime`. The custom `AgentLoop` / `FastAgent` / native
+> `OllamaModelProvider` are retained only as test/reference infrastructure.
+> See `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` section 75.
+
 ### Modified production modules
 
 - `src/dnd_assistant/cli/main.py` — registered `ask` root command
@@ -2017,6 +2025,12 @@ Every scenario exercises the real Typer/Click parser, routing through
 `_ask_command`, `compose_ask_runtime`, real repositories, real
 `SearchService`, real `ToolRegistry`, real `ToolExecutor`, real
 `AgentToolExecutionService`, real `AgentLoop`, and a fake `ModelGateway`.
+
+> **PAIM-14 update (2026-09-14):** the production composition now routes
+> through `DndAgentRunPreparer` → `PydanticAIAgentRuntime` → `PydanticAIToolBridge`
+> → `ToolExecutor`, injecting a deterministic Pydantic AI `FunctionModel`
+> instead of a fake `ModelGateway`. The scenario matrix and assertions are
+> unchanged.
 
 ### Semantic audit evidence
 

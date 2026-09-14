@@ -10634,3 +10634,153 @@ Active next:
 ```text
 PAIM-14 — Remove superseded generic custom runtime code
 ```
+
+## 75. PAIM-14 completion record — production cutover + reference classification
+
+**Status:** DONE
+**Completed:** 2026-09-14
+**Branch:** `feat/pydantic-ai-runtime`
+**Starting SHA:** `33b9d6de050bd586482cd0203dea0833887a5fe7`
+**Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+
+### Reason
+
+PAIM-13 measured parity while the production `dnd ask` CLI still composed the
+custom runtime (`AgentLoop` + `FastAgent` + native `OllamaModelProvider`). The
+CLI cutover had been explicitly deferred to PAIM-14 (section 46). PAIM-14
+performs the cutover and then re-inspects the **post-cutover** repository for
+superseded generic runtime code.
+
+### Production cutover
+
+```text
+before
+  cli/ask.py           → runtime.agent_loop (AgentLoop)
+  cli/agent_runtime.py → OllamaModelProvider → FastAgent → AgentLoop
+
+after
+  cli/ask.py           → runtime.agent_runtime (PydanticAIAgentRuntime)
+  cli/agent_runtime.py → build_pydantic_ai_ollama_model(profile)
+                       → PydanticAIToolBridge(registry=tool_registry)
+                       → DndAgentRunPreparer(context_builder, catalog, bridge)
+                       → PydanticAIAgentRuntime(run_preparer, model)
+```
+
+Unchanged project-owned boundaries: `ToolExecutor`, `DndAgentPolicy`, tool
+exposure policy, READ/WRITE authorization, Vault/domain/storage. The Pydantic
+path still routes every side effect through `DndAgentPolicy` admission and
+`ToolExecutor`.
+
+### Post-cutover reference re-inspection
+
+Every candidate was re-checked against actual `src` + `tests` + CLI + docs
+consumers. Result: **no superseded generic runtime component has zero
+remaining consumers**, so no file/symbol was removed. No dead-code claim was
+made from filename or architecture intent.
+
+| Symbol/file | Remaining consumer(s) | Classification |
+|---|---|---|
+| `application/fast_agent.py::FastAgent` | `tests/unit/test_fast_agent*.py`, `tests/unit/test_agent_loop*.py`, `tests/support/stage9_parity.py`, `tests/support/paim13_live_harness.py`, PAIM-13 live eval, PAIM-11 parity | KEEP_FOR_TEST_REFERENCE |
+| `application/agent_loop.py::AgentLoop` (+ `_validate_exposed_snapshot`, `_reject_duplicate_call_ids`, `_resolve_multi_call_read_tool`, `_reject_multi_call_containing_write`) | `tests/unit/test_agent_loop*.py`, `tests/integration/test_pydantic_ai_agent_runtime_parity.py`, `tests/support/stage9_parity.py`, PAIM-13 live eval | KEEP_FOR_TEST_REFERENCE |
+| `agent_loop.py` shared DTOs (`AgentRunResult`, `AgentTextOutcome`, `AgentOutcomeKind`, `_parse_agent_outcome`, `MAX_TOOL_CALLS_PER_RUN`) | production `PydanticAIAgentRuntime` / `PydanticAIFastAgent`; many tests | KEEP (shared production contract) |
+| `fast_agent.py` shared `AgentDecision`, `build_agent_request` | production Pydantic runtime; Pydantic tests | KEEP (shared production contract) |
+| `models/gateway.py::ModelGateway` | `tests/unit/test_gateway_protocol.py`, `tests/unit/test_model_gateway_contracts.py`, `tests/support/stage9_parity.py`, `paim13_live_harness.py`, `tests/contract/test_boundaries.py` | KEEP_FOR_TEST_REFERENCE |
+| `models/ollama.py::OllamaModelProvider` + `ollama_chat_adapter` / `ollama_tool_adapter` / `ollama_embedding_adapter` | `tests/integration/test_ollama_provider_integration.py`, `tests/integration/test_ollama_smoke.py`, `tests/unit/test_ollama_embeddings.py`, `tests/unit/test_ollama_cross_operation_hardening.py`, PAIM-13 live-eval reference side | KEEP_FOR_TEST_REFERENCE |
+| `application/agent_tool_execution.py::AgentToolExecutionService` | reference `AgentLoop` and its tests | KEEP_FOR_TEST_REFERENCE |
+| `application/agent_tool_execution.py::build_agent_tool_execution_result` | production `PydanticAIAgentRuntime` | KEEP (shared) |
+
+### Removed superseded code
+
+```text
+none
+```
+
+### Boundary guard
+
+`tests/contract/test_boundaries.py` adds:
+
+- `test_cli_agent_runtime_does_not_import_reference_runtime`
+- `test_cli_ask_does_not_import_reference_runtime`
+
+Both clean-import the production composition module and assert that none of
+`application.agent_loop`, `application.fast_agent`, `models.ollama`,
+`models.ollama_chat_adapter`, `models.ollama_tool_adapter`,
+`models.ollama_embedding_adapter` is loaded.
+
+Documented nuance for PAIM-15: the production Pydantic runtime imports the
+shared DTOs from `application.agent_loop` at call time
+(`_map_to_agent_run_result`), so the module is loaded during a run, but the
+reference `AgentLoop` class itself is never used by production. Relocating
+the shared DTOs out of `agent_loop.py` is a candidate PAIM-15 refactor.
+
+### Changed files
+
+```text
+src/dnd_assistant/cli/agent_runtime.py                       (production cutover)
+src/dnd_assistant/cli/ask.py                                 (production cutover)
+src/dnd_assistant/application/agent_loop.py                  (classification docstring)
+src/dnd_assistant/application/fast_agent.py                  (classification docstring)
+src/dnd_assistant/models/gateway.py                          (classification docstring)
+src/dnd_assistant/models/ollama.py                           (classification docstring)
+tests/unit/test_cli_agent_runtime.py
+tests/unit/test_cli_ask.py
+tests/integration/test_cli_ask_mocked.py
+tests/contract/test_boundaries.py
+DEVELOPMENT_STATUS.md
+docs/migrations/001_PYDANTIC_AI_RUNTIME.md
+docs/stages/09_FAST_AGENT.md
+```
+
+No `pyproject.toml` / `uv.lock` change. No PAIM-13 scoring, corpus, threshold
+or measurement change. No Vault/domain/storage change.
+
+### Quality gates (literal)
+
+```text
+uv run pytest tests/unit/test_cli_agent_runtime.py tests/unit/test_cli_ask.py
+  tests/integration/test_cli_ask_mocked.py tests/contract/test_boundaries.py -q
+  172 passed, 1 warning
+
+uv run pytest tests/unit/test_tool_executor.py tests/unit/test_dnd_agent_policy.py
+  tests/unit/test_pydantic_ai_tool_bridge.py tests/unit/test_pydantic_ai_tool_bridge_authority.py
+  tests/integration/test_pydantic_ai_agent_runtime.py tests/integration/test_pydantic_ai_fast_agent.py
+  tests/integration/test_pydantic_ai_stage9_parity.py tests/integration/test_pydantic_ai_agent_runtime_parity.py -q
+  168 passed, 1 warning
+
+uv run pyright src/dnd_assistant/cli/agent_runtime.py src/dnd_assistant/cli/ask.py
+  src/dnd_assistant/models/gateway.py src/dnd_assistant/models/ollama.py
+  src/dnd_assistant/application/agent_loop.py src/dnd_assistant/application/fast_agent.py
+  18 errors, 0 warnings — all pre-existing in lines unchanged by PAIM-14:
+    15 in application/fast_agent.py _serialize_* helpers (typed as object)
+    3  in cli/agent_runtime.py ObsidianSessionEventRepository ↔ SessionEventRepository
+       Protocol mismatch, also present at cli/session.py:80
+  0 new relevant type errors from the cutover.
+
+uv run ruff check .            all checks passed
+uv run ruff format --check .   373 files already formatted
+git diff --check               no whitespace errors
+uv run pytest                  5258 passed, 143 skipped, 1 warning
+```
+
+Baseline at PAIM-13 attempt #4 was 5256 passed, 143 skipped; the +2 are the new
+boundary guards. PAIM-13 live measurement was not rerun (PAIM-13 env unset).
+
+### Architecture confirmation
+
+- production CLI uses `PydanticAIAgentRuntime`
+- no safely-removable superseded generic runtime remained
+- all remaining legacy runtime has literal KEEP_FOR_TEST_REFERENCE consumers
+- no production composition path depends on the reference runtime classes
+- `ToolExecutor` / `DndAgentPolicy` / READ-WRITE authorization unchanged
+- no PAIM-15 work started
+
+### PAIM-15 review questions
+
+1. Whether to physically delete the reference `AgentLoop` / `FastAgent` /
+   `ModelGateway` / `OllamaModelProvider` surface (and retire the PAIM-11
+   parity + PAIM-13 comparison tests) or keep a minimal frozen reference.
+2. Whether to relocate the shared DTOs (`AgentRunResult`, `AgentTextOutcome`,
+   `AgentOutcomeKind`, `_parse_agent_outcome`, `AgentDecision`,
+   `build_agent_request`) out of the reference modules so `agent_loop.py` /
+   `fast_agent.py` become reference-only.
+3. Final outcome classification `ACCEPTED` / `PARTIAL` / `REJECTED`.

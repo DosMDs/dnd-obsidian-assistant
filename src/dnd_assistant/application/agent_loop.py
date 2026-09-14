@@ -27,6 +27,15 @@ Importing this module must NOT eagerly load::
     dnd_assistant.storage
     dnd_assistant.retrieval
     dnd_assistant.cli
+
+PAIM-14 status
+──────────────
+The production ``dnd ask`` composition now uses ``PydanticAIAgentRuntime``.
+The ``AgentLoop`` class and its private multi-call helpers are retained as
+explicit test/reference infrastructure only (PAIM-11 parity, PAIM-13 live
+comparison).  The shared DTOs (``AgentRunResult``, ``AgentTextOutcome``,
+``AgentOutcomeKind``, ``_parse_agent_outcome``, ``MAX_TOOL_CALLS_PER_RUN``)
+remain part of the production Pydantic runtime contract.
 """
 
 from __future__ import annotations

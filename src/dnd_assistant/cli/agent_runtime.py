@@ -1,14 +1,24 @@
-"""S9-06 agent runtime composition — dependency wiring and provider lifetime.
+"""S9-06 agent runtime composition — dependency wiring and model lifetime.
 
-This module owns S9-06-specific dependency composition and provider lifetime
+This module owns S9-06-specific dependency composition and model lifetime
 management for the ``dnd ask`` CLI command.  It is NOT a general Bootstrap
 framework (Stage 13 remains separate).
 
-It composes the accepted concrete repositories, services, and tool layers
-needed by the Fast Agent loop, then constructs the ``AgentLoop``.
+Since PAIM-14 it composes the accepted concrete repositories, services, and
+tool layers into the project-owned Pydantic AI runtime boundary:
 
-Provider cleanup is guaranteed through a small context-manager runtime
-object (``AskRuntime``) and ``contextlib.ExitStack`` during composition.
+::
+
+    build_pydantic_ai_ollama_model(profile)          # framework model
+    PydanticAIToolBridge(registry=tool_registry)     # ToolRegistry → ToolExecutor
+    DndAgentRunPreparer(context_builder, catalog, bridge)
+    PydanticAIAgentRuntime(run_preparer, model)      # Pydantic AI run loop
+
+Authorization and policy remain project-owned: every side effect still flows
+through ``DndAgentPolicy`` admission and ``ToolExecutor``.
+
+Model cleanup is guaranteed through a small context-manager runtime object
+(``AskRuntime``) and ``contextlib.ExitStack`` during composition.
 """
 
 from __future__ import annotations
@@ -19,13 +29,17 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
+from pydantic_ai.models import Model
+
 from dnd_assistant.application.agent_context import AgentContextBuilder
-from dnd_assistant.application.agent_loop import AgentLoop
-from dnd_assistant.application.agent_tool_execution import AgentToolExecutionService
+from dnd_assistant.application.pydantic_ai_agent_runtime import PydanticAIAgentRuntime
+from dnd_assistant.application.pydantic_ai_run_deps import DndAgentRunPreparer
+from dnd_assistant.application.pydantic_ai_tool_bridge import PydanticAIToolBridge
 from dnd_assistant.application.session_recovery import SessionRecoveryService
 from dnd_assistant.application.session_runtime import SessionRuntimeService
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, load_model_profiles
+from dnd_assistant.models.pydantic_ai_ollama import build_pydantic_ai_ollama_model
 from dnd_assistant.retrieval.index import SqliteFtsIndex
 from dnd_assistant.retrieval.search import VaultSearchService
 from dnd_assistant.storage.audit import AuditContext, AuditService
@@ -37,7 +51,6 @@ from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
 from dnd_assistant.tools.catalog import build_tool_registry_schema
 from dnd_assistant.tools.entity_mutations import register_entity_mutation_tools
 from dnd_assistant.tools.entity_reads import register_entity_read_tools
-from dnd_assistant.tools.executor import ToolExecutor
 from dnd_assistant.tools.registry import ToolRegistry
 from dnd_assistant.tools.session_mutations import register_session_mutation_tools
 from dnd_assistant.tools.session_reads import register_session_read_tools
@@ -60,33 +73,44 @@ def _new_operation_id() -> str:
     return f"model-{uuid4().hex}"
 
 
-# ── Provider factory seam (testable) ───────────────────────────────────────
+# ── Model factory seam (testable) ──────────────────────────────────────────
 
 
-def _build_model_provider(profile: ModelProfile) -> Any:
-    """Construct a concrete ModelGateway provider from a profile.
+def _build_agent_model(profile: ModelProfile) -> Model:
+    """Construct a Pydantic AI ``Model`` from a profile.
 
     This is a narrow factory seam for testing — automated tests replace
-    this function to inject a fake ``ModelGateway`` without changing the
-    production composition.
+    this function to inject a deterministic Pydantic AI ``Model`` without
+    changing the production composition.
 
     Args:
         profile: A validated ``ModelProfile`` with ``provider == "ollama"``.
 
     Returns:
-        An ``OllamaModelProvider`` instance.
+        A configured Pydantic AI ``OllamaModel`` instance.
 
     Raises:
         ValidationError: If the profile's provider is not supported.
     """
     if profile.provider == "ollama":
-        from dnd_assistant.models.ollama import OllamaModelProvider
-
-        return OllamaModelProvider(profile)
+        return build_pydantic_ai_ollama_model(profile)
 
     raise ValidationError(
         f"Unsupported model provider '{profile.provider}'. Currently only 'ollama' is supported."
     )
+
+
+def _close_model(model: Model) -> None:
+    """Release model resources if the concrete model exposes a close hook.
+
+    Pydantic AI's ``OllamaModel`` has no project-owned synchronous close
+    contract, so this is normally a no-op.  It still releases test-injected
+    models that expose ``close()`` and keeps composition-failure cleanup
+    observable.
+    """
+    close = getattr(model, "close", None)
+    if callable(close):
+        close()
 
 
 # ── AskRuntime ─────────────────────────────────────────────────────────────
@@ -96,11 +120,11 @@ class AskRuntime:
     """Composed runtime for one ``dnd ask`` invocation.
 
     Owns the lifetime of all composed dependencies.  ``close()`` must be
-    called after the command completes to release provider resources.
+    called after the command completes to release model resources.
 
     Attributes:
-        agent_loop: The fully wired ``AgentLoop``.
-        model_gateway: The concrete ``ModelGateway`` provider.
+        agent_runtime: The fully wired ``PydanticAIAgentRuntime``.
+        model: The Pydantic AI ``Model`` used by the runtime.
         recovery_service: The ``SessionRecoveryService`` for preflight.
         vault_root: The resolved Vault root path.
         audit_service: The audit service (may be ``None`` for READ-only).
@@ -108,17 +132,18 @@ class AskRuntime:
     """
 
     def __init__(self, runtime: _RuntimeComponents) -> None:
-        self._model_gateway = runtime.model_gateway
-        self.agent_loop = runtime.agent_loop
+        self._model = runtime.model
+        self._model_closed = False
+        self.agent_runtime = runtime.agent_runtime
         self.recovery_service = runtime.recovery_service
         self.vault_root = runtime.vault_root
         self.audit_service = runtime.audit_service
         self._execution_context: ExecutionContext | None = None
 
     @property
-    def model_gateway(self) -> Any:
-        """The concrete ModelGateway provider instance."""
-        return self._model_gateway
+    def model(self) -> Model:
+        """The Pydantic AI ``Model`` instance backing the agent runtime."""
+        return self._model
 
     @property
     def execution_context(self) -> ExecutionContext:
@@ -132,14 +157,13 @@ class AskRuntime:
         return self._execution_context
 
     def close(self) -> None:
-        """Release provider resources.
+        """Release model resources.
 
         Safe to call multiple times — only the first call has an effect.
         """
-        if self._model_gateway is not None:
-            gw = self._model_gateway
-            self._model_gateway = None  # type: ignore[assignment]
-            gw.close()
+        if not self._model_closed:
+            self._model_closed = True
+            _close_model(self._model)
 
 
 # ── Internal component bundle ──────────────────────────────────────────────
@@ -149,8 +173,8 @@ class _RuntimeComponents:
     """Internal bundle of composed components before AskRuntime wrapping."""
 
     def __init__(self, **kwargs: Any) -> None:
-        self.model_gateway: Any = kwargs["model_gateway"]
-        self.agent_loop: AgentLoop = kwargs["agent_loop"]
+        self.model: Model = kwargs["model"]
+        self.agent_runtime: PydanticAIAgentRuntime = kwargs["agent_runtime"]
         self.recovery_service: SessionRecoveryService = kwargs["recovery_service"]
         self.vault_root: Path = kwargs["vault_root"]
         self.audit_service: AuditService | None = kwargs.get("audit_service")
@@ -303,7 +327,7 @@ def compose_ask_runtime(
     config_path: Path,
     profile_name: str,
     allow_write: bool = False,
-    model_provider_factory: Any = None,
+    model_factory: Any = None,
 ) -> AskRuntime:
     """Compose the full ``AskRuntime`` for one ``dnd ask`` invocation.
 
@@ -313,28 +337,28 @@ def compose_ask_runtime(
         profile_name: The exact model profile name to select.
         allow_write: If ``True``, grant WRITE permission and build an
             AuditContext.  Default is READ-only.
-        model_provider_factory: Optional override for the model provider
-            factory (used in tests to inject a fake ``ModelGateway``).
-            Defaults to ``_build_model_provider``.
+        model_factory: Optional override for the agent model factory (used
+            in tests to inject a deterministic Pydantic AI ``Model``).
+            Defaults to ``_build_agent_model``.
 
     Returns:
         A fully wired ``AskRuntime``.  Caller must call ``.close()`` after
         use.
 
     Raises:
-        DndAssistantError: Profile loading, composition, or provider
+        DndAssistantError: Profile loading, composition, or model
             construction fails.
     """
     # 1. Load and validate profile
     profile = _load_profile(config_path, profile_name)
 
-    # 2. Build model provider with ExitStack for deterministic cleanup
-    #    before AskRuntime is returned.
-    factory = model_provider_factory or _build_model_provider
-    model_gateway = factory(profile)
+    # 2. Build the Pydantic AI model with ExitStack for deterministic
+    #    cleanup before AskRuntime is returned.
+    factory = model_factory or _build_agent_model
+    model = factory(profile)
 
     with ExitStack() as stack:
-        stack.callback(model_gateway.close)
+        stack.callback(_close_model, model)
 
         # 3. Compose storage/repository layer
         audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
@@ -375,10 +399,11 @@ def compose_ask_runtime(
             event_repository=event_repository,
         )
 
-        # 7. Build tool catalog and executor
+        # 7. Build tool catalog and project-owned Pydantic bridge.
+        #    The bridge owns ToolExecutor; every side effect still flows
+        #    through DndAgentPolicy admission and ToolExecutor.
         tool_catalog = build_tool_registry_schema(tool_registry)
-        tool_executor = ToolExecutor(tool_registry)
-        tool_execution_service = AgentToolExecutionService(tool_executor=tool_executor)
+        tool_bridge = PydanticAIToolBridge(registry=tool_registry)
 
         # 8. Build context builder
         context_builder = AgentContextBuilder(
@@ -389,12 +414,15 @@ def compose_ask_runtime(
             world_time_repository=world_time_repository,
         )
 
-        # 9. Build AgentLoop
-        agent_loop = AgentLoop(
+        # 9. Build the project-owned Pydantic AI run boundary
+        run_preparer = DndAgentRunPreparer(
             context_builder=context_builder,
-            model_gateway=model_gateway,
             tool_catalog=tool_catalog,
-            tool_execution_service=tool_execution_service,
+            tool_bridge=tool_bridge,
+        )
+        agent_runtime = PydanticAIAgentRuntime(
+            run_preparer=run_preparer,
+            model=model,
         )
 
         # 10. Determine session context from one trusted read.
@@ -425,8 +453,8 @@ def compose_ask_runtime(
 
         # 11. Store execution context on runtime for later use
         components = _RuntimeComponents(
-            model_gateway=model_gateway,
-            agent_loop=agent_loop,
+            model=model,
+            agent_runtime=agent_runtime,
             recovery_service=recovery_service,
             vault_root=vault_root,
             audit_service=audit_service if allow_write else None,
@@ -436,8 +464,8 @@ def compose_ask_runtime(
         runtime._execution_context = execution_context
         runtime._profile_name = profile_name  # type: ignore[attr-defined]
 
-        # Transfer provider ownership to AskRuntime — ExitStack will NOT
-        # close the provider on normal exit.
+        # Transfer model ownership to AskRuntime — ExitStack will NOT
+        # close the model on normal exit.
         stack.pop_all()
 
     return runtime

@@ -121,6 +121,41 @@ def test_gateway_does_not_import_tools() -> None:
     assert not mod_names, f"gateway imported tool modules: {mod_names}"
 
 
+# ── production CLI composition must not import the reference runtime ──────
+# PAIM-14 cut the production ``dnd ask`` composition over to the Pydantic AI
+# runtime.  The custom ``AgentLoop`` / ``FastAgent`` / native
+# ``OllamaModelProvider`` are retained only as explicit test/reference
+# infrastructure (PAIM-11 parity, PAIM-13 live comparison).  Production
+# composition must never re-import them.
+
+_REFERENCE_RUNTIME_MODULES: tuple[str, ...] = (
+    "dnd_assistant.application.agent_loop",
+    "dnd_assistant.application.fast_agent",
+    "dnd_assistant.models.ollama",
+    "dnd_assistant.models.ollama_chat_adapter",
+    "dnd_assistant.models.ollama_tool_adapter",
+    "dnd_assistant.models.ollama_embedding_adapter",
+)
+
+
+def test_cli_agent_runtime_does_not_import_reference_runtime() -> None:
+    _clean_import("dnd_assistant.cli.agent_runtime")
+    loaded = _modules_loaded()
+    offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in loaded)
+    assert not offending, (
+        f"production CLI composition imported retained reference-only runtime modules: {offending}"
+    )
+
+
+def test_cli_ask_does_not_import_reference_runtime() -> None:
+    _clean_import("dnd_assistant.cli.ask")
+    loaded = _modules_loaded()
+    offending = sorted(m for m in _REFERENCE_RUNTIME_MODULES if m in loaded)
+    assert not offending, (
+        f"production CLI ask command imported retained reference-only runtime modules: {offending}"
+    )
+
+
 # ── tools/registry must not depend on storage or models ─────────────────
 
 

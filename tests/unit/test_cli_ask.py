@@ -83,7 +83,7 @@ def _make_fake_ask_runtime(
     run_result.outcome = outcome
 
     runtime = MagicMock()
-    runtime.agent_loop.run.return_value = run_result
+    runtime.agent_runtime.run.return_value = run_result
     runtime.execution_context = MagicMock()
 
     def _close() -> None:
@@ -700,7 +700,7 @@ class TestAskClose:
             outcome_kind="respond",
             close_called=close_track,
         )
-        runtime.agent_loop.run.side_effect = DndAssistantError("Ошибка")
+        runtime.agent_runtime.run.side_effect = DndAssistantError("Ошибка")
         mock_compose.return_value = runtime
 
         _invoke_ask_direct("Тест", vault_root, config_path)

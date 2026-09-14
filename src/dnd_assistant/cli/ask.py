@@ -96,8 +96,8 @@ def _ask_command(
             allow_write=allow_write,
         )
 
-        # Execute AgentLoop
-        result = runtime.agent_loop.run(
+        # Execute the Pydantic AI agent runtime
+        result = runtime.agent_runtime.run(
             query,
             execution_context=runtime.execution_context,
         )

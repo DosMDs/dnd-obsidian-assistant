@@ -30,6 +30,14 @@ Importing this module must NOT eagerly load::
     dnd_assistant.storage
     dnd_assistant.retrieval
     dnd_assistant.cli
+
+PAIM-14 status
+──────────────
+The production ``dnd ask`` composition now uses ``PydanticAIFastAgent`` /
+``PydanticAIAgentRuntime``.  The ``FastAgent`` class is retained as explicit
+test/reference infrastructure only (PAIM-11 parity, PAIM-13 live comparison).
+The shared ``AgentDecision`` DTO and ``build_agent_request()`` projection
+remain part of the production Pydantic runtime contract.
 """
 
 from __future__ import annotations

@@ -1,7 +1,8 @@
 """Mocked end-to-end integration tests for ``dnd ask``.
 
 These tests use a real temporary Vault, real Python layers (repositories,
-services, tool registry, executor, agent loop), and a fake ``ModelGateway``.
+services, tool registry, executor, Pydantic AI agent runtime), and a
+deterministic scripted Pydantic AI ``FunctionModel``.
 
 No live Ollama, no network, no GPU, no model download.
 
@@ -12,7 +13,7 @@ which causes ``typer.main.get_command()`` to produce a ``TyperGroup``.  In
 this configuration, ``typer.testing.CliRunner`` correctly handles positional
 arguments in named subcommands.  All E2E integration scenarios use
 ``CliRunner.invoke(app, ...)`` with ``unittest.mock.patch`` on
-``_build_model_provider`` to inject a fake ``ModelGateway``.
+``_build_agent_model`` to inject a scripted Pydantic AI ``FunctionModel``.
 
 Direct-call tests
 ─────────────────
@@ -32,101 +33,85 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
+from pydantic_ai.models import Model
+from pydantic_ai.models.function import AgentInfo, FunctionModel
 from typer.testing import CliRunner
 
 from dnd_assistant.cli.ask import _ask_command
 from dnd_assistant.cli.main import app as dnd_app
 from dnd_assistant.errors import DndAssistantError
-from dnd_assistant.models.profiles import ModelProfile
-from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole, ToolAwareResponse
 from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
-from dnd_assistant.tools.catalog import ToolPublicDefinition
 
-# ── Fake ModelGateway ──────────────────────────────────────────────────────
+# ── Scripted Pydantic AI model ──────────────────────────────────────────────
 
 
-class FakeModelGateway:
-    """Deterministic fake ``ModelGateway`` for testing.
+class ScriptedPydanticModel:
+    """Deterministic scripted Pydantic AI model for CLI integration tests.
 
-    Returns pre-configured responses in sequence.  Tracks calls for
-    verification.
+    Builds a ``FunctionModel`` that returns pre-configured ``ModelResponse``
+    objects in order and tracks the number of model requests.
     """
 
     def __init__(self) -> None:
-        self.responses: list[ToolAwareResponse] = []
-        self.call_count = 0
-        self.last_request: ChatRequest | None = None
-        self.last_tools: list[ToolPublicDefinition] | None = None
+        self.responses: list[ModelResponse] = []
+        self.request_count = 0
 
-    def add_response(self, response: ToolAwareResponse) -> None:
-        """Add a response to the sequence."""
+    def add_response(self, response: ModelResponse) -> None:
+        """Append a scripted model response."""
         self.responses.append(response)
 
-    def chat_with_tools(
-        self,
-        request: ChatRequest,
-        tools: list[ToolPublicDefinition],
-    ) -> ToolAwareResponse:
-        """Return the next pre-configured response."""
-        self.call_count += 1
-        self.last_request = request
-        self.last_tools = tools
+    def build(self) -> Model:
+        """Return a fresh ``FunctionModel`` bound to this script."""
 
-        if self.call_count > len(self.responses):
-            raise DndAssistantError("FakeModelGateway: no more responses configured")
+        def _response_fn(
+            messages: list[ModelMessage],
+            info: AgentInfo,
+        ) -> ModelResponse:
+            index = self.request_count
+            self.request_count += 1
+            if index >= len(self.responses):
+                raise DndAssistantError("ScriptedPydanticModel: no more responses configured")
+            return self.responses[index]
 
-        return self.responses[self.call_count - 1]
-
-    def close(self) -> None:
-        """Fake close — no-op."""
-        pass
+        return FunctionModel(_response_fn)
 
 
 # ── Response builders ──────────────────────────────────────────────────────
 
 
-def _respond(message: str) -> ToolAwareResponse:
-    """Build a terminal RESPOND response."""
+def _respond(message: str) -> ModelResponse:
+    """Build a terminal RESPOND model response."""
     content = json.dumps(
         {"kind": "respond", "message": message},
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    return ToolAwareResponse(
-        message=ChatMessage(role=MessageRole.ASSISTANT, content=content),
-    )
+    return ModelResponse(parts=[TextPart(content=content)])
 
 
-def _clarify(message: str) -> ToolAwareResponse:
-    """Build a terminal CLARIFY response."""
+def _clarify(message: str) -> ModelResponse:
+    """Build a terminal CLARIFY model response."""
     content = json.dumps(
         {"kind": "clarify", "message": message},
         ensure_ascii=False,
         separators=(",", ":"),
     )
-    return ToolAwareResponse(
-        message=ChatMessage(role=MessageRole.ASSISTANT, content=content),
-    )
+    return ModelResponse(parts=[TextPart(content=content)])
 
 
-def _tool_call_response(tool_name: str, arguments: dict[str, Any]) -> ToolAwareResponse:
-    """Build a response with a tool call."""
-    from dnd_assistant.models.types import ToolCall
-
-    return ToolAwareResponse(
-        message=ChatMessage(
-            role=MessageRole.ASSISTANT,
-            content=None,
-            tool_calls=(
-                ToolCall(
-                    name=tool_name,
-                    arguments=arguments,
-                    call_id="call_001",
-                ),
-            ),
-        ),
+def _tool_call_response(tool_name: str, arguments: dict[str, Any]) -> ModelResponse:
+    """Build a model response with a single tool call."""
+    return ModelResponse(
+        parts=[
+            ToolCallPart(
+                tool_name=tool_name,
+                args=arguments,
+                tool_call_id="call_001",
+            )
+        ]
     )
 
 
@@ -225,11 +210,11 @@ def _write_test_config(tmp_path: Path, profile_name: str = "test-agent") -> Path
     return config_path
 
 
-def _fake_provider_factory(fake_gateway: FakeModelGateway) -> Any:
-    """Return a factory function that returns the given fake gateway."""
+def _fake_model_factory(scripted: ScriptedPydanticModel) -> Any:
+    """Return a ``_build_agent_model`` replacement returning a scripted model."""
 
-    def factory(profile: ModelProfile) -> FakeModelGateway:
-        return fake_gateway
+    def factory(profile: Any) -> Model:
+        return scripted.build()
 
     return factory
 
@@ -288,12 +273,12 @@ class TestAskDirectRespond:
         """A direct respond returns exit 0 with the message on stdout."""
         vault_root = _build_minimal_vault(tmp_path)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
-        fake_gateway.add_response(_respond("Варос — опытный следопыт."))
+        scripted = ScriptedPydanticModel()
+        scripted.add_response(_respond("Варос — опытный следопыт."))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Кто такой Варос?", vault_root, config_path)
 
@@ -308,12 +293,12 @@ class TestAskDirectClarify:
         """A direct clarify returns exit 0 with the clarification on stdout."""
         vault_root = _build_minimal_vault(tmp_path)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
-        fake_gateway.add_response(_clarify("Какого именно Вароса вы имеете в виду?"))
+        scripted = ScriptedPydanticModel()
+        scripted.add_response(_clarify("Какого именно Вароса вы имеете в виду?"))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Обнови Вароса", vault_root, config_path)
 
@@ -329,20 +314,20 @@ class TestAskReadTool:
         vault_root = _build_minimal_vault(tmp_path)
         _start_test_session(vault_root)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
+        scripted = ScriptedPydanticModel()
 
-        fake_gateway.add_response(_tool_call_response("get_active_session", {}))
-        fake_gateway.add_response(_respond("Сессия активна."))
+        scripted.add_response(_tool_call_response("get_active_session", {}))
+        scripted.add_response(_respond("Сессия активна."))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Какая сессия активна?", vault_root, config_path)
 
         assert result.exit_code == 0
         assert "Сессия активна." in result.stdout
-        assert fake_gateway.call_count == 2
+        assert scripted.request_count == 2
 
 
 class TestAskReadOnlyBlocksWrite:
@@ -353,13 +338,13 @@ class TestAskReadOnlyBlocksWrite:
         vault_root = _build_minimal_vault(tmp_path)
         _start_test_session(vault_root)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
+        scripted = ScriptedPydanticModel()
 
-        fake_gateway.add_response(_tool_call_response("record_note", {"text": "Test note"}))
+        scripted.add_response(_tool_call_response("record_note", {"text": "Test note"}))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Запиши заметку", vault_root, config_path)
 
@@ -375,16 +360,16 @@ class TestAskWriteTool:
         vault_root = _build_minimal_vault(tmp_path)
         session_id = _start_test_session(vault_root)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
+        scripted = ScriptedPydanticModel()
 
-        fake_gateway.add_response(
+        scripted.add_response(
             _tool_call_response("record_note", {"text": "Варос упомянул древний артефакт."})
         )
-        fake_gateway.add_response(_respond("Заметка сохранена."))
+        scripted.add_response(_respond("Заметка сохранена."))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct(
                 "Запиши: Варос упомянул древний артефакт.",
@@ -536,25 +521,27 @@ class TestAskCliRunnerParserBacked:
     """Parser-backed mocked E2E integration tests.
 
     These tests use ``CliRunner.invoke(dnd_app, ...)`` with
-    ``unittest.mock.patch`` on ``_build_model_provider`` to inject a fake
-    ``ModelGateway``.  Every scenario exercises the real Typer/Click parser:
-    positional QUERY, ``--vault``, ``--config``, ``--profile``, and
-    ``--allow-write`` are all parsed by the generated command, then routed
-    through the real ``_ask_command``, ``compose_ask_runtime``, repositories,
-    services, ``ToolRegistry``, ``ToolExecutor``, and ``AgentLoop``.
+    ``unittest.mock.patch`` on ``_build_agent_model`` to inject a scripted
+    Pydantic AI ``FunctionModel``.  Every scenario exercises the real
+    Typer/Click parser: positional QUERY, ``--vault``, ``--config``,
+    ``--profile``, and ``--allow-write`` are all parsed by the generated
+    command, then routed through the real ``_ask_command``,
+    ``compose_ask_runtime``, repositories, services, ``ToolRegistry``,
+    ``PydanticAIToolBridge``, ``DndAgentRunPreparer``,
+    ``PydanticAIAgentRuntime`` and ``ToolExecutor``.
     """
 
     def test_respond_through_real_parser(self, tmp_path: Path) -> None:
         """RESPOND outcome: exit 0, correct stdout, 1 fake model call."""
         vault_root = _build_minimal_vault(tmp_path)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
-        fake_gateway.add_response(_respond("Ответ через реальный парсер."))
+        scripted = ScriptedPydanticModel()
+        scripted.add_response(_respond("Ответ через реальный парсер."))
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
                 dnd_app,
@@ -572,19 +559,19 @@ class TestAskCliRunnerParserBacked:
 
         assert result.exit_code == 0
         assert "Ответ через реальный парсер." in result.stdout
-        assert fake_gateway.call_count == 1
+        assert scripted.request_count == 1
 
     def test_clarify_through_real_parser(self, tmp_path: Path) -> None:
         """CLARIFY outcome: exit 0, correct stdout, 1 fake model call."""
         vault_root = _build_minimal_vault(tmp_path)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
-        fake_gateway.add_response(_clarify("Какого именно Вароса?"))
+        scripted = ScriptedPydanticModel()
+        scripted.add_response(_clarify("Какого именно Вароса?"))
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
                 dnd_app,
@@ -602,22 +589,22 @@ class TestAskCliRunnerParserBacked:
 
         assert result.exit_code == 0
         assert "Какого именно Вароса?" in result.stdout
-        assert fake_gateway.call_count == 1
+        assert scripted.request_count == 1
 
     def test_read_tool_through_real_parser(self, tmp_path: Path) -> None:
         """READ tool executes, final respond printed, 2 fake model calls."""
         vault_root = _build_minimal_vault(tmp_path)
         _start_test_session(vault_root)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
+        scripted = ScriptedPydanticModel()
 
-        fake_gateway.add_response(_tool_call_response("get_active_session", {}))
-        fake_gateway.add_response(_respond("Сессия активна."))
+        scripted.add_response(_tool_call_response("get_active_session", {}))
+        scripted.add_response(_respond("Сессия активна."))
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
                 dnd_app,
@@ -635,21 +622,21 @@ class TestAskCliRunnerParserBacked:
 
         assert result.exit_code == 0
         assert "Сессия активна." in result.stdout
-        assert fake_gateway.call_count == 2
+        assert scripted.request_count == 2
 
     def test_read_only_blocks_write_through_real_parser(self, tmp_path: Path) -> None:
         """Without --allow-write, WRITE tool raises error -> exit 1."""
         vault_root = _build_minimal_vault(tmp_path)
         _start_test_session(vault_root)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
+        scripted = ScriptedPydanticModel()
 
-        fake_gateway.add_response(_tool_call_response("record_note", {"text": "Test note"}))
+        scripted.add_response(_tool_call_response("record_note", {"text": "Test note"}))
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
                 dnd_app,
@@ -677,17 +664,17 @@ class TestAskCliRunnerParserBacked:
         vault_root = _build_minimal_vault(tmp_path)
         session_id = _start_test_session(vault_root)
         config_path = _write_test_config(tmp_path)
-        fake_gateway = FakeModelGateway()
+        scripted = ScriptedPydanticModel()
 
-        fake_gateway.add_response(
+        scripted.add_response(
             _tool_call_response("record_note", {"text": "Варос упомянул древний артефакт."})
         )
-        fake_gateway.add_response(_respond("Заметка сохранена."))
+        scripted.add_response(_respond("Заметка сохранена."))
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_model_provider",
-            side_effect=_fake_provider_factory(fake_gateway),
+            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
                 dnd_app,
@@ -706,7 +693,7 @@ class TestAskCliRunnerParserBacked:
 
         assert result.exit_code == 0
         assert "Заметка сохранена." in result.stdout
-        assert fake_gateway.call_count == 2
+        assert scripted.request_count == 2
 
         # Semantic audit evidence
         audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"

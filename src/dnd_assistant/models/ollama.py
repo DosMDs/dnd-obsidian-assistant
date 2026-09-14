@@ -18,6 +18,13 @@ domain, or tools (runtime).
 Provider-specific DTOs and Ollama JSON shapes live here or in sibling
 adapter modules (``ollama_tool_adapter.py``, ``ollama_embedding_adapter.py``)
 — not in ``models/types.py`` or ``models/gateway.py``.
+
+PAIM-14 status
+──────────────
+The production ``dnd ask`` composition now uses the Pydantic AI ``OllamaModel``
+built by ``models/pydantic_ai_ollama.py``.  This native provider and its
+adapter modules are retained as explicit test/reference infrastructure only
+(PAIM-11 parity, PAIM-13 live comparison, Stage-8 provider tests).
 """
 
 from __future__ import annotations
