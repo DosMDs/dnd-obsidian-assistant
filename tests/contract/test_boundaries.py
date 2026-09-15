@@ -872,3 +872,65 @@ def test_application_changeset_validation_does_not_import_pydantic_ai() -> None:
     targets = _module_import_targets("dnd_assistant.application.changeset_validation")
     offending = sorted(target for target in targets if target.split(".")[0] == "pydantic_ai")
     assert not offending, f"changeset_validation imports pydantic_ai: {offending}"
+
+
+# ── application/changeset_review must stay provider-neutral and write-free ──
+# S10-03 owns canonical serialization/fingerprint/approval in the application
+# layer.  It may depend on domain.changeset, application.changeset_validation,
+# project errors, pydantic and the ``hashlib``/``json`` stdlib.  ``hashlib`` is
+# an intentional application review concern and is NOT forbidden here.  The
+# ``VaultRepository`` read contract may be referenced only under ``TYPE_CHECKING``
+# so no storage module is imported at runtime.
+
+_FORBIDDEN_CHANGESET_REVIEW_LAYERS: tuple[str, ...] = (
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.retrieval",
+    "dnd_assistant.cli",
+)
+
+_FORBIDDEN_CHANGESET_REVIEW_STDLIB: tuple[str, ...] = ("pathlib", "os")
+
+
+def test_application_changeset_review_does_not_import_upper_layers() -> None:
+    _clean_import("dnd_assistant.application.changeset_review")
+    loaded = _modules_loaded()
+    offending = sorted(
+        module
+        for module in loaded
+        for layer in _FORBIDDEN_CHANGESET_REVIEW_LAYERS
+        if module == layer or module.startswith(f"{layer}.")
+    )
+    assert not offending, f"application.changeset_review imported forbidden layers: {offending}"
+
+
+def test_application_changeset_review_does_not_import_storage_at_runtime() -> None:
+    _clean_import("dnd_assistant.application.changeset_review")
+    loaded = _modules_loaded()
+    offending = sorted(module for module in loaded if module.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.changeset_review imported storage at runtime: {offending}"
+
+
+def test_application_changeset_review_does_not_import_persistence_stdlib() -> None:
+    targets = _module_import_targets("dnd_assistant.application.changeset_review")
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_CHANGESET_REVIEW_STDLIB
+    )
+    assert not offending, f"application.changeset_review imported persistence stdlib: {offending}"
+
+
+def test_application_changeset_review_allows_hashlib() -> None:
+    targets = _module_import_targets("dnd_assistant.application.changeset_review")
+    assert "hashlib" in targets, "changeset_review should own SHA-256 hashing via hashlib"
+
+
+def test_application_changeset_review_does_not_trigger_ollama() -> None:
+    _clean_import("dnd_assistant.application.changeset_review")
+    mod_names = {m for m in sys.modules if m.startswith("ollama")}
+    assert not mod_names, f"changeset_review triggered ollama import: {mod_names}"
+
+
+def test_application_changeset_review_does_not_import_pydantic_ai() -> None:
+    targets = _module_import_targets("dnd_assistant.application.changeset_review")
+    offending = sorted(target for target in targets if target.split(".")[0] == "pydantic_ai")
+    assert not offending, f"changeset_review imports pydantic_ai: {offending}"

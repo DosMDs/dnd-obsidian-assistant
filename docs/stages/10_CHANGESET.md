@@ -7,7 +7,7 @@ Stage 10 — IN PROGRESS
 S10-00 — DONE
 S10-01 — DONE
 S10-02 — DONE
-S10-03 — NOT STARTED
+S10-03 — DONE
 S10-04 — NOT STARTED
 S10-05 — NOT STARTED
 S10-06 — NOT STARTED
@@ -30,8 +30,8 @@ S10_ARCHITECTURE_READY
 This document is the canonical Stage-10 architecture record and task map. It
 describes **contracts and evidence plans**. `S10-01` implemented the immutable
 domain proposal schemas; `S10-02` implemented the pure validation/preflight
-layer. No review/fingerprint (`S10-03`), applier (`S10-04`) or CLI (`S10-05`)
-implementation exists yet.
+layer; `S10-03` implemented the application review/fingerprint/approval
+contracts. No applier (`S10-04`) or CLI (`S10-05`) implementation exists yet.
 
 ## 1. Purpose
 
@@ -555,4 +555,94 @@ No fingerprint/review (`S10-03`), applier (`S10-04`), CLI (`S10-05`) or
 
 ```text
 Next task:         S10-03 — Review DTO + approval/rejection + fingerprint binding
+```
+
+## 20. S10-03 record
+
+```text
+Task:              S10-03 — Review DTO + approval/rejection + fingerprint binding
+Routing:           BUILD (accepted PLAN)
+Baseline:          feat/changeset @ 420ef08b7dcd80335323804e2c0e419fbf6eca57
+                   upstream origin/feat/changeset, clean working tree
+```
+
+Implemented the application-layer human review, canonical serialization,
+fingerprint and approval/rejection contracts, in:
+
+```text
+src/dnd_assistant/application/changeset_review.py
+```
+
+Contracts:
+
+```text
+ChangeSetFingerprint           frozen: algorithm="sha256", digest (lowercase 64-hex)
+canonical_changeset_bytes(changeset) -> bytes
+compute_changeset_fingerprint(changeset) -> ChangeSetFingerprint
+ReviewDecision                 StrEnum: approved | rejected (no default)
+ReviewerId                     validated opaque non-empty printable string
+ChangeSetApproval              frozen: changeset_id, fingerprint, decision,
+                               reviewer, optional reason;
+                               matches_approved_changeset(changeset)
+ReviewItem                     frozen: operation_index + typed ChangeOperation;
+                               derived kind/entity_id/expected_revision
+ChangeSetReview                frozen: changeset_id, fingerprint, provenance,
+                               session_ref, ordered non-empty items
+build_changeset_review(changeset, repository) -> ChangeSetReview
+```
+
+Semantics:
+
+```text
+canonical bytes = json.dumps(
+    changeset.model_dump(mode="json", exclude_unset=False),
+    sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False,
+).encode("utf-8");  fingerprint = SHA-256 over those bytes
+EntityFieldUpdate's own serializer still omits unset fields, so explicit None
+vs omitted remains fingerprint-distinct and survives python and JSON round-trips
+build_changeset_review calls validate_changeset exactly once; an invalid
+proposal raises dnd_assistant.errors.ValidationError and yields no review
+matches_approved_changeset checks CONTENT BINDING ONLY (decision APPROVED +
+changeset_id + fingerprint); it is not apply authority and reads no repository
+state.  Vault-state drift after review remains S10-04's responsibility via
+fresh preflight + repository optimistic revisions
+review content is proposal-only (no current-value / old->new snapshot); Russian
+CLI rendering and proposal/approval persistence are deferred to S10-05
+no formatter, no Vault writes, no apply orchestration, no persistence
+```
+
+Evidence:
+
+```text
+tests/unit/test_changeset_review.py   canonical determinism (independent
+                                      construction, dict-order, compact/UTF-8),
+                                      python + JSON round-trip stability,
+                                      explicit-None vs omitted (blocking), full
+                                      fingerprint sensitivity, digest format,
+                                      reviewer validation, approval/rejection
+                                      binding, immutability, item ordering,
+                                      invalid-proposal guard, zero-write spy +
+                                      AST guard, content-binding signature
+tests/contract/test_boundaries.py     application.changeset_review import and
+                                      AST boundary guards (no models/tools/
+                                      retrieval/cli/pathlib/os/pydantic_ai/ollama;
+                                      no runtime storage; hashlib allowed)
+```
+
+Gates:
+
+```text
+uv run pytest tests/unit/test_changeset_review.py -q     70 passed
+uv run pytest tests/contract/test_boundaries.py -q       114 passed
+uv run ruff check .                                      All checks passed
+uv run ruff format --check .                             361 files already formatted
+uv run pyright                                            0 errors, 0 warnings
+uv run pytest                                            5199 passed, 114 skipped, 1 warning
+```
+
+No domain/storage/CLI/model/tool change, no apply orchestration and no
+persistence were introduced. S10-04 remains NOT STARTED.
+
+```text
+Next task:         S10-04 — ChangeSetApplier + revision/conflict safety (NOT STARTED)
 ```
