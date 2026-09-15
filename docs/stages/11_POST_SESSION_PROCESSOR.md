@@ -496,7 +496,7 @@ S11-01  post-session input + durable processing schemas    DONE
         (domain schemas, eligibility, fingerprint, append-only ledger
          repository; smallest first BUILD increment)
 S11-02  deterministic context assembly + entity resolution DONE
-S11-03  heavy-model structured extraction mechanism        NOT STARTED
+S11-03  heavy-model structured extraction mechanism        DONE
 S11-04  Summary/Recap production + visibility filtering    DONE
 S11-05  ChangeSet producer integration + ambiguity policy  NOT STARTED
 S11-06  persistence/rerun/failure semantics (incl. decision NOT STARTED
