@@ -8,7 +8,8 @@ Ownership
 ─────────
 
 Owned here:
-    ``build_pydantic_ai_ollama_model()`` — factory function.
+    ``build_pydantic_ai_ollama_model()`` — AGENT-role factory function.
+    ``build_pydantic_ai_post_session_model()`` — POST_SESSION-role factory.
     ``_normalize_openai_compatible_base_url()`` — private URL helper.
 
 Owned elsewhere (unchanged):
@@ -51,7 +52,7 @@ from dnd_assistant.models.transport import build_ollama_http_timeout
 def build_pydantic_ai_ollama_model(
     profile: ModelProfile,
 ) -> OllamaModel:
-    """Construct a Pydantic AI ``OllamaModel`` from a project ``ModelProfile``.
+    """Construct a Pydantic AI ``OllamaModel`` for the AGENT role.
 
     The builder is intended exclusively for the ``PydanticAIAgentRuntime``
     agent model transport.  It validates the profile's provider, role, and
@@ -70,6 +71,45 @@ def build_pydantic_ai_ollama_model(
             or has a non-ollama provider, a non-AGENT role, or a non-None
             ``keep_alive`` value.
     """
+    return _build_ollama_model(profile, required_role=ModelProfileRole.AGENT)
+
+
+def build_pydantic_ai_post_session_model(
+    profile: ModelProfile,
+) -> OllamaModel:
+    """Construct a Pydantic AI ``OllamaModel`` for the POST_SESSION role.
+
+    The heavy post-session extraction/summarization transport uses the same
+    provider, URL, timeout and ``keep_alive`` policy as the agent transport,
+    but is selected by a distinct ``POST_SESSION`` role so operator model
+    selection never accidentally alters ``dnd ask`` configuration.
+
+    Args:
+        profile: A project ``ModelProfile`` whose ``provider`` must be
+            ``"ollama"`` and ``role`` must be ``POST_SESSION``.
+
+    Returns:
+        A configured ``OllamaModel`` instance with the framework
+        ``OllamaProvider``.
+
+    Raises:
+        ValidationError: If ``profile`` is not a ``ModelProfile`` instance,
+            or has a non-ollama provider, a non-POST_SESSION role, or a
+            non-None ``keep_alive`` value.
+    """
+    return _build_ollama_model(profile, required_role=ModelProfileRole.POST_SESSION)
+
+
+def _build_ollama_model(
+    profile: ModelProfile,
+    *,
+    required_role: ModelProfileRole,
+) -> OllamaModel:
+    """Shared role-aware Pydantic AI ``OllamaModel`` construction.
+
+    Validates the profile's provider, required role, and ``keep_alive``
+    semantics before constructing framework objects.
+    """
     # ── Runtime type check ──────────────────────────────────────────────
     if not isinstance(profile, ModelProfile):
         raise ValidationError(
@@ -84,9 +124,10 @@ def build_pydantic_ai_ollama_model(
         )
 
     # ── Role validation ─────────────────────────────────────────────────
-    if profile.role is not ModelProfileRole.AGENT:
+    if profile.role is not required_role:
         raise ValidationError(
-            f"Pydantic AI Ollama model requires role=AGENT, got role={profile.role!r}"
+            f"Pydantic AI Ollama model requires role="
+            f"{required_role.value.upper()}, got role={profile.role!r}"
         )
 
     # ── keep_alive fail-closed ──────────────────────────────────────────

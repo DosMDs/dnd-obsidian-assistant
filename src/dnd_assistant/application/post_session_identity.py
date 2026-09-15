@@ -30,6 +30,9 @@ from dnd_assistant.domain.post_session import (
     Sha256Fingerprint,
 )
 from dnd_assistant.errors import ValidationError
+from dnd_assistant.prompts.post_session_extraction_v1 import (
+    POST_SESSION_EXTRACTION_PROMPT_ID,
+)
 
 # ── Version constants ─────────────────────────────────────────────────────
 
@@ -47,10 +50,19 @@ Version history:
         eligibility-revision binding.
 """
 
-POST_SESSION_PROMPT_VERSION = "1"
+POST_SESSION_PROMPT_VERSION = POST_SESSION_EXTRACTION_PROMPT_ID
 """Prompt-material contract version included in the fingerprint.
 
-Bump it whenever the prepared prompt material changes.
+Since S11-03 this denotes the **extraction-stage** prepared prompt material:
+the deterministic context rendering plus the fixed extraction instruction
+owned by ``prompts/post_session_extraction_v1``.  It is bound to the prompt
+resource id (not a free string) so an instruction change cannot silently
+reuse an old prepared-input fingerprint.  Summary/Recap rendering (S11-04) is
+a separate prompt contract and does not participate in this fingerprint.
+
+Version history:
+    1 — S11-01/S11-02 placeholder with no extraction prompt defined.
+    post-session-extraction-v1 — S11-03 extraction instruction defined.
 """
 
 # ── Attempt identity ──────────────────────────────────────────────────────

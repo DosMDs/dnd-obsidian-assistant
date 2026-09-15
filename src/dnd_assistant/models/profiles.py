@@ -43,6 +43,7 @@ class ModelProfileRole(StrEnum):
     AGENT = "agent"
     SUMMARIZER = "summarizer"
     EMBEDDING = "embedding"
+    POST_SESSION = "post_session"
 
 
 # ── HTTP/HTTPS URL validation ─────────────────────────────────────────────

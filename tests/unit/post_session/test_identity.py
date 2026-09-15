@@ -202,7 +202,7 @@ def test_unicode_canonicalization_golden_value() -> None:
         entities=(_entity(entity_id="npc-Éowyn"),),
     )
     assert compute_input_fingerprint(identity).digest == (
-        "2bbefea960438b40517707125af6a7dd50bf8b936c0447293c76513867223d89"
+        "ebd9110efb2aa2dac4e9c8a394d6c952a20eb306b130ee2300de5a3b8af8574e"
     )
 
 

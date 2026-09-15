@@ -16,6 +16,7 @@ from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
 from dnd_assistant.models.pydantic_ai_ollama import (
     _normalize_openai_compatible_base_url,
     build_pydantic_ai_ollama_model,
+    build_pydantic_ai_post_session_model,
 )
 
 # ==============================================================================
@@ -366,6 +367,54 @@ class TestNormalizeBaseUrl:
         assert _normalize_openai_compatible_base_url("http://my-ollama:11434") == (
             "http://my-ollama:11434/v1"
         )
+
+
+# ==============================================================================
+# S11-03 — POST_SESSION role-aware factory
+# ==============================================================================
+
+
+def test_post_session_factory_returns_ollama_model() -> None:
+    profile = _make_profile(role=ModelProfileRole.POST_SESSION, model="heavy")
+    model = build_pydantic_ai_post_session_model(profile)
+    assert type(model) is OllamaModel
+    assert model.model_name == "heavy"
+
+
+def test_post_session_factory_accepts_keep_alive_none() -> None:
+    profile = _make_profile(role=ModelProfileRole.POST_SESSION, keep_alive=None)
+    assert type(build_pydantic_ai_post_session_model(profile)) is OllamaModel
+
+
+def test_post_session_factory_rejects_agent_role() -> None:
+    profile = _make_profile(role=ModelProfileRole.AGENT)
+    with pytest.raises(ValidationError, match="role=POST_SESSION"):
+        build_pydantic_ai_post_session_model(profile)
+
+
+def test_post_session_factory_rejects_summarizer_role() -> None:
+    profile = _make_profile(role=ModelProfileRole.SUMMARIZER)
+    with pytest.raises(ValidationError, match="role=POST_SESSION"):
+        build_pydantic_ai_post_session_model(profile)
+
+
+def test_post_session_factory_rejects_wrong_provider() -> None:
+    profile = _make_profile(role=ModelProfileRole.POST_SESSION, provider="openai")
+    with pytest.raises(ValidationError, match="provider='ollama'"):
+        build_pydantic_ai_post_session_model(profile)
+
+
+def test_agent_factory_still_rejects_post_session_role() -> None:
+    profile = _make_profile(role=ModelProfileRole.POST_SESSION)
+    with pytest.raises(ValidationError, match="role=AGENT"):
+        build_pydantic_ai_ollama_model(profile)
+
+
+def test_agent_factory_behavior_unchanged_for_agent() -> None:
+    profile = _make_profile(role=ModelProfileRole.AGENT, model="agent-model")
+    model = build_pydantic_ai_ollama_model(profile)
+    assert type(model) is OllamaModel
+    assert model.model_name == "agent-model"
 
 
 # ==============================================================================

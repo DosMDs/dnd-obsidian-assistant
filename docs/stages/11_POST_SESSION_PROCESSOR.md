@@ -7,7 +7,7 @@ Stage 11 — IN PROGRESS
 S11-00 — DONE
 S11-01 — DONE
 S11-02 — DONE
-S11-03 — NOT STARTED
+S11-03 — DONE
 S11-04 — NOT STARTED
 S11-05 — NOT STARTED
 S11-06 — NOT STARTED
@@ -780,3 +780,125 @@ filtering (S11-04), ChangeSet producer + canonical binding/ambiguity and
 alias resolution (S11-05), full attempt-state folding, tail repair and the
 legacy-field sync decision (S11-06), CLI (S11-07), hardening (S11-08),
 Stage-12.
+
+## 25. S11-03 record
+
+```text
+Task:              S11-03 — Heavy-model Structured Extraction Mechanism
+Routing:           PLAN_REQUIRED -> accepted PLAN (2 corrections) -> BUILD
+Baseline:          feat/post-session-processor @
+                   2c1b75f50902a2d9c74345d716593e8ae41531c6
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             bounded heavy-model structured-extraction boundary:
+                   trusted request construction, application-owned protocol,
+                   untrusted versioned extraction schema, Python semantic
+                   validation, Pydantic AI structured-output adapter with zero
+                   project tools, POST_SESSION model role/factory; no Summary/
+                   Recap, no ChangeSet, no persistence/ledger/CLI
+Deliverable:       4 production modules + profile/factory + prompt-version
+                   rebinding + focused unit/integration/contract tests + this
+                   record + DEVELOPMENT_STATUS reconciliation
+Next task:         S11-04 — Summary/Recap production + visibility filtering
+```
+
+### 25.1 Implemented modules
+
+```text
+domain/post_session_extraction.py
+    PostSessionExtraction + ExtractedClaim / ExtractedEntityMention /
+    ExtractedEntityCandidate / ExtractedAttribute,
+    ExtractionVisibilityHint / ExtractionKnowledgeHint / ClaimKind,
+    project-owned structural bounds, POST_SESSION_EXTRACTION_SCHEMA_VERSION
+prompts/post_session_extraction_v1.py
+    POST_SESSION_EXTRACTION_PROMPT_ID + fixed extraction instruction
+application/post_session_extraction.py
+    PostSessionExtractionRequest + ExpectedEntityBinding,
+    build_post_session_extraction_request(), PostSessionExtractionModel
+    protocol, ExtractionFailureReason / PostSessionExtractionError,
+    validate_post_session_extraction(), run_post_session_extraction(),
+    ExtractionProvenance / AcceptedPostSessionExtraction
+application/pydantic_ai_post_session.py
+    PydanticAIPostSessionExtractionModel (zero project tools,
+    retries={"tools": 0, "output": 0}, UsageLimits(request_limit=1))
+models/profiles.py
+    ModelProfileRole.POST_SESSION
+models/pydantic_ai_ollama.py
+    shared role-aware _build_ollama_model() +
+    build_pydantic_ai_post_session_model() (AGENT factory unchanged)
+```
+
+### 25.2 Trusted request construction (Correction 1)
+
+The public entrypoint `run_post_session_extraction(model, prepared, ...)`
+accepts only the accepted `PreparedPostSessionInput` and derives the request
+internally through `build_post_session_extraction_request`.  `session_ref`,
+`input_fingerprint`, `context_text`, expected event ids, expected entity
+bindings and version fields all originate from the same fingerprinted input;
+no caller parameter can substitute them.  `ExpectedEntityBinding`
+(`entity_id`, `entity_type`) replaces a bare id set so semantic validation can
+prove canonical type binding.  The adapter still uses `context_text` as the
+model-visible context; the structured binding snapshot is Python-owned only.
+
+### 25.3 Schema, visibility, knowledge, candidates
+
+The extraction is an untrusted semantic representation, not a ChangeSet.
+Evidence event ids are mandatory (min 1) on every claim, mention and candidate.
+Visibility and knowledge are distinct untrusted hint enums, never canonical
+`Visibility`/`KnowledgeStatus`.  New-entity candidates carry no final
+`EntityId` and no create operation.  `extra="forbid"` structurally excludes
+`expected_revision`/operation fields.  Unsupported entity types are rejected at
+schema level.
+
+### 25.4 Semantic binding policy
+
+Unknown evidence ids fail closed (`INVALID_EVIDENCE_REFERENCE`).  A claimed
+existing entity id is trusted only when selected in the prepared input **and**
+the declared type matches the canonical prepared type; otherwise it is cleared
+from the sanitized extraction and recorded as an `UnresolvedEntityReference`
+(`NOT_IN_PREPARED_INPUT` / `TYPE_MISMATCH` / `NO_CANDIDATE_ID`) for S11-05.
+Duplicate claim/mention/candidate ids and total-size/mention-count bounds fail
+closed.
+
+### 25.5 Error mapping (observed Pydantic AI 2.39 path)
+
+`UnexpectedModelBehavior` (output retries exhausted) -> `INVALID_STRUCTURED_OUTPUT`.
+`ModelHTTPError` -> `MODEL_INVOCATION_FAILED`.  `ModelAPIError` is classified
+by its observed public cause chain: `openai.APITimeoutError` -> `MODEL_TIMEOUT`,
+`openai.APIConnectionError` -> `MODEL_UNAVAILABLE`, otherwise
+`MODEL_INVOCATION_FAILED`.  Any other `AgentRunError` ->
+`MODEL_INVOCATION_FAILED`, preserving `__cause__`.  `PostSessionExtractionError`
+subclasses `ModelError` and maps `reason` to the durable `FailureCategory`.
+No broad `OSError` classification is used.
+
+### 25.6 Prompt-version rebinding
+
+`POST_SESSION_PROMPT_VERSION` is now bound to `POST_SESSION_EXTRACTION_PROMPT_ID`
+(`post-session-extraction-v1`): the extraction-stage prepared prompt material
+(context rendering + fixed instruction) participating in the prepared-input
+fingerprint.  The golden fingerprint literal in
+`tests/unit/post_session/test_identity.py` was re-pinned.  Summary/Recap
+rendering prompts (S11-04) remain a separate contract.
+
+### 25.7 Evidence
+
+```text
+schema / bounds / extra-forbid     tests/unit/post_session/test_extraction_domain.py
+request binding / semantic rules   tests/unit/post_session/test_extraction_policy.py
+adapter zero-tools / retries / err tests/unit/post_session/test_pydantic_ai_post_session.py
+POST_SESSION role / factory        tests/unit/test_model_profiles.py,
+                                   tests/unit/test_pydantic_ai_ollama.py
+real-Vault zero-write              tests/integration/test_post_session_extraction.py
+dependency boundaries              tests/contract/test_post_session_boundaries.py
+```
+
+Observed adapter facts: `info.function_tools == ()`, one output-tool
+(`final_result`), exactly one model request under an output-validation failure.
+No Ollama is required.  Quality gates: focused suites, `ruff check`,
+`ruff format --check`, `pyright` (0 errors), full `pytest`, `git diff --check`.
+
+### 25.8 Deferred (S11-04+)
+
+Summary/Recap artifacts and visibility filtering (S11-04), ChangeSet producer +
+canonical binding/ambiguity and alias resolution (S11-05), full attempt-state
+folding, tail repair and the legacy-field sync decision (S11-06), CLI (S11-07),
+hardening (S11-08), Stage-12.

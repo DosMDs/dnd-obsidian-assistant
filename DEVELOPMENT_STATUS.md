@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (Stage-11 kickoff)
+**Last updated:** 2026-09-15 (S11-03 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
 **Active stage:** Stage 11 — Post-session Processor
@@ -100,11 +100,16 @@ identity, append-only processing-ledger schemas/storage, deterministic
 model-free eligibility. S11-02 `DONE` — deterministic context assembly:
 touched-only selection, exact-ID entity resolution, current canonical entity
 projection (schema v2, adds `type`), eligibility-revision binding, centralized
-fail-closed context bounds. The ledger is unaudited durable workflow evidence
-under `_system/raw/sessions/<id>/processing/` and does not participate in global
+fail-closed context bounds. S11-03 `DONE` — bounded heavy-model structured
+extraction: trusted request derivation from prepared input, application-owned
+`PostSessionExtractionModel` protocol, untrusted versioned extraction schema,
+Python semantic evidence/entity binding, Pydantic AI adapter with zero project
+tools and output/tool retries 0, `POST_SESSION` model role/factory. The ledger
+is unaudited durable workflow evidence under
+`_system/raw/sessions/<id>/processing/` and does not participate in global
 `unresolved_audit_intent` recovery. Detailed architecture, invariants, task map
 and evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-03 — heavy-model structured extraction mechanism`.
+`S11-04 — Summary/Recap production + visibility filtering`.
 
 ## Accepted reference baseline
 
@@ -141,7 +146,7 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
 No model-generated ChangeSet producer exists yet (Stage 11 does not start it).
-Stage 11 is in progress; S11-02 is DONE; next task is S11-03.
+Stage 11 is in progress; S11-03 is DONE; next task is S11-04.
 ```
 
 ## Known limitations affecting future work
@@ -161,7 +166,8 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-00 DONE — architecture/contracts/kickoff
   S11-01 DONE — post-session input + durable processing schemas
   S11-02 DONE — deterministic context assembly + entity resolution
-  S11-03 NOT STARTED — heavy-model structured extraction mechanism
+  S11-03 DONE — heavy-model structured extraction mechanism
+  S11-04 NOT STARTED — Summary/Recap production + visibility filtering
 ```
 
 ## Operational invariants

@@ -61,17 +61,22 @@ class TestModelProfileRole:
     def test_embedding_value(self) -> None:
         assert ModelProfileRole.EMBEDDING.value == "embedding"
 
+    def test_post_session_value(self) -> None:
+        assert ModelProfileRole.POST_SESSION.value == "post_session"
+
     def test_all_roles_defined(self) -> None:
         assert set(ModelProfileRole) == {
             ModelProfileRole.AGENT,
             ModelProfileRole.SUMMARIZER,
             ModelProfileRole.EMBEDDING,
+            ModelProfileRole.POST_SESSION,
         }
 
     def test_role_from_string(self) -> None:
         assert ModelProfileRole("agent") is ModelProfileRole.AGENT
         assert ModelProfileRole("summarizer") is ModelProfileRole.SUMMARIZER
         assert ModelProfileRole("embedding") is ModelProfileRole.EMBEDDING
+        assert ModelProfileRole("post_session") is ModelProfileRole.POST_SESSION
 
     def test_invalid_role_rejected(self) -> None:
         with pytest.raises(ValueError, match="'invalid'"):

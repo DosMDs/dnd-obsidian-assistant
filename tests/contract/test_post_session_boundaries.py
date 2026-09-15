@@ -245,6 +245,123 @@ def test_application_context_is_provider_neutral() -> None:
     _assert_provider_neutral(_CONTEXT_MODULE)
 
 
+# ── domain/post_session_extraction (S11-03) ────────────────────────────────
+
+_EXTRACTION_DOMAIN_MODULE = "dnd_assistant.domain.post_session_extraction"
+
+
+def test_extraction_domain_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_EXTRACTION_DOMAIN_MODULE)
+
+
+def test_extraction_domain_does_not_import_storage_or_application() -> None:
+    _clean_import(_EXTRACTION_DOMAIN_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(
+        m
+        for m in loaded
+        if m.startswith("dnd_assistant.storage") or m.startswith("dnd_assistant.application")
+    )
+    assert not offending, (
+        f"domain.post_session_extraction imported storage/application: {offending}"
+    )
+
+
+def test_extraction_domain_has_no_persistence_stdlib() -> None:
+    targets = _module_import_targets(_EXTRACTION_DOMAIN_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_DOMAIN_STDLIB
+    )
+    assert not offending, f"domain.post_session_extraction imported persistence stdlib: {offending}"
+
+
+def test_extraction_domain_is_provider_neutral() -> None:
+    _assert_provider_neutral(_EXTRACTION_DOMAIN_MODULE)
+
+
+# ── application/post_session_extraction (S11-03) ──────────────────────────
+
+_EXTRACTION_POLICY_MODULE = "dnd_assistant.application.post_session_extraction"
+
+
+def test_extraction_policy_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_EXTRACTION_POLICY_MODULE)
+
+
+def test_extraction_policy_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_EXTRACTION_POLICY_MODULE)
+    offending = sorted(m for m in _modules_loaded() if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.post_session_extraction imported storage: {offending}"
+
+
+def test_extraction_policy_names_no_concrete_storage_class() -> None:
+    names = _module_name_nodes(_EXTRACTION_POLICY_MODULE)
+    assert "ObsidianVaultRepository" not in names
+    assert "ObsidianChangeSetStore" not in names
+    assert "ToolExecutor" not in names
+
+
+def test_extraction_policy_is_provider_neutral() -> None:
+    _assert_provider_neutral(_EXTRACTION_POLICY_MODULE)
+
+
+def test_extraction_policy_imports_no_tools_cli_retrieval() -> None:
+    targets = _module_import_targets(_EXTRACTION_POLICY_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.models")
+        or target.startswith("dnd_assistant.tools")
+        or target.startswith("dnd_assistant.cli")
+        or target.startswith("dnd_assistant.retrieval")
+    )
+    assert not offending, (
+        f"application.post_session_extraction imported forbidden deps: {offending}"
+    )
+
+
+# ── application/pydantic_ai_post_session adapter (S11-03) ─────────────────
+
+_EXTRACTION_ADAPTER_MODULE = "dnd_assistant.application.pydantic_ai_post_session"
+
+
+def test_extraction_adapter_does_not_import_storage_tools_cli_retrieval() -> None:
+    targets = _module_import_targets(_EXTRACTION_ADAPTER_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.storage")
+        or target.startswith("dnd_assistant.tools")
+        or target.startswith("dnd_assistant.cli")
+        or target.startswith("dnd_assistant.retrieval")
+    )
+    assert not offending, f"pydantic_ai_post_session imported forbidden deps: {offending}"
+
+
+def test_extraction_adapter_does_not_import_vault_repository_or_models_layer() -> None:
+    names = _module_name_nodes(_EXTRACTION_ADAPTER_MODULE)
+    for forbidden in ("ToolExecutor", "ToolRegistry", "ExternalToolset", "VaultRepository"):
+        assert forbidden not in names, f"pydantic_ai_post_session references {forbidden}"
+
+
+def test_extraction_modules_do_not_import_tool_executor() -> None:
+    for module_path in (
+        "dnd_assistant.domain.post_session_extraction",
+        "dnd_assistant.application.post_session_extraction",
+        "dnd_assistant.application.pydantic_ai_post_session",
+        "dnd_assistant.prompts.post_session_extraction_v1",
+    ):
+        targets = _module_import_targets(module_path)
+        offending = sorted(target for target in targets if target == "dnd_assistant.tools.executor")
+        assert not offending, f"{module_path} imported ToolExecutor"
+
+
+def test_extraction_prompt_is_provider_neutral() -> None:
+    _assert_provider_neutral("dnd_assistant.prompts.post_session_extraction_v1")
+
+
+# ── storage/post_session_processing ───────────────────────────────────────
+
 _STORAGE_MODULE = "dnd_assistant.storage.post_session_processing"
 
 
