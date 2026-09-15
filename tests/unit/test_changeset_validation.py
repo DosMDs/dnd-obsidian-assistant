@@ -214,6 +214,38 @@ class TestCreateSemantics:
         assert result.issues[0].operation_index == 1
         assert result.issues[0].entity_id == "npc_a"
 
+    def test_existing_target_then_duplicate_create_reports_both(self) -> None:
+        repo = SpyVaultRepository([_document("npc_a", 7)])
+        result = validate_changeset(_changeset(_create("npc_a"), _create("npc_a")), repo)
+        assert [issue.code for issue in result.issues] == [
+            ValidationIssueCode.CREATE_TARGET_EXISTS,
+            ValidationIssueCode.DUPLICATE_CREATE,
+        ]
+        assert [issue.operation_index for issue in result.issues] == [0, 1]
+        assert [issue.entity_id for issue in result.issues] == ["npc_a", "npc_a"]
+
+    def test_invalid_create_does_not_project_batch_revision(self) -> None:
+        repo = SpyVaultRepository([_document("npc_a", 7)])
+        changeset = _changeset(
+            _create("npc_a"),
+            _create("npc_a"),
+            _update("npc_a", 7),
+        )
+        result = validate_changeset(changeset, repo)
+        assert [issue.code for issue in result.issues] == [
+            ValidationIssueCode.CREATE_TARGET_EXISTS,
+            ValidationIssueCode.DUPLICATE_CREATE,
+        ]
+
+    def test_duplicate_create_in_empty_repo_does_not_project_revision(self) -> None:
+        changeset = _changeset(
+            _create("npc_a"),
+            _create("npc_a"),
+            _update("npc_a", 1),
+        )
+        result = validate_changeset(changeset, SpyVaultRepository())
+        assert [issue.code for issue in result.issues] == [ValidationIssueCode.DUPLICATE_CREATE]
+
     def test_distinct_batch_creates_are_valid(self) -> None:
         changeset = _changeset(_create("npc_a"), _create("npc_b"))
         result = validate_changeset(changeset, SpyVaultRepository())

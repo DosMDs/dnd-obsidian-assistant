@@ -48,7 +48,8 @@ class ValidationIssueCode(StrEnum):
     """A ``create_entity`` targets an EntityId already present in the Vault."""
 
     DUPLICATE_CREATE = "duplicate_create"
-    """A ``create_entity`` repeats an EntityId created earlier in the batch."""
+    """A ``create_entity`` repeats an EntityId already targeted by an earlier
+    create command in the batch, whether or not that earlier command succeeded."""
 
     TARGET_NOT_FOUND = "target_not_found"
     """An ``update_entity``/``append_fact`` target does not exist in repository
@@ -114,18 +115,26 @@ def _validate_create(
     operation: CreateEntityOperation,
     index: int,
     projection: dict[str, int],
-    created_in_batch: set[str],
+    seen_create_ids: set[str],
 ) -> ValidationIssue | None:
-    """Validate a create against repository snapshot and batch creates."""
+    """Validate a create against repository snapshot and batch creates.
+
+    Command history (``seen_create_ids``) is independent of the projected
+    entity/revision state: an invalid create does not advance ``projection``,
+    but it still counts as a previous create command for later duplicate
+    diagnosis in the same ChangeSet.
+    """
     entity_id = operation.entity_id
 
-    if entity_id in created_in_batch:
+    if entity_id in seen_create_ids:
         return ValidationIssue(
             code=ValidationIssueCode.DUPLICATE_CREATE,
             operation_index=index,
             message=f"Entity {entity_id!r} is created more than once in this ChangeSet",
             entity_id=entity_id,
         )
+
+    seen_create_ids.add(entity_id)
 
     if entity_id in projection:
         return ValidationIssue(
@@ -135,7 +144,6 @@ def _validate_create(
             entity_id=entity_id,
         )
 
-    created_in_batch.add(entity_id)
     projection[entity_id] = 1
     return None
 
@@ -197,12 +205,12 @@ def validate_changeset(
         ordered by ``operation_index``.
     """
     projection = _base_projection(repository)
-    created_in_batch: set[str] = set()
+    seen_create_ids: set[str] = set()
 
     issues: list[ValidationIssue] = []
     for index, operation in enumerate(changeset.operations):
         if isinstance(operation, CreateEntityOperation):
-            issue = _validate_create(operation, index, projection, created_in_batch)
+            issue = _validate_create(operation, index, projection, seen_create_ids)
         else:
             issue = _validate_revision_guarded(operation, index, projection)
 
