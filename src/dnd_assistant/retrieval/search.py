@@ -11,7 +11,6 @@ This module depends on storage read contracts (``VaultRepository``,
 
 from __future__ import annotations
 
-import unicodedata
 from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
@@ -19,6 +18,10 @@ from rapidfuzz import fuzz
 
 from dnd_assistant.domain.types import EntityId, EntityType, Visibility
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
+from dnd_assistant.retrieval.exact_matching import (
+    extract_exact_aliases,
+    normalize_exact_text,
+)
 from dnd_assistant.retrieval.types import MatchKind, SearchHit, SearchQuery
 from dnd_assistant.storage.types import VaultDocument, VaultRepository
 
@@ -32,16 +35,13 @@ def _normalize_text(text: str) -> str:
     """Normalise text for exact name/alias comparison and fuzzy
     canonical-name comparison.
 
-    Applies, in order:
-    1. Strip surrounding whitespace.
-    2. Unicode NFC normalisation.
-    3. Unicode ``casefold()``.
-
-    This is a conservative deterministic policy.
-    It does **not** implement transliteration, punctuation stripping,
-    accent stripping, token sorting, or word reordering.
+    Delegates to the shared canonical policy in
+    :mod:`dnd_assistant.retrieval.exact_matching`: strip -> Unicode NFC ->
+    ``casefold()``.  It deliberately does not implement transliteration,
+    punctuation stripping, accent stripping, token sorting, or word
+    reordering.
     """
-    return unicodedata.normalize("NFC", text.strip()).casefold()
+    return normalize_exact_text(text)
 
 
 # ── Alias extraction ────────────────────────────────────────────────────────
@@ -50,40 +50,14 @@ def _normalize_text(text: str) -> str:
 def _extract_aliases(document: VaultDocument) -> list[str]:
     """Extract eligible alias strings from a ``VaultDocument``.
 
-    Reads ``extra_frontmatter["aliases"]`` with fail-closed parsing:
-
-    * ``aliases`` missing or ``None`` → no aliases.
-    * ``aliases`` is a ``list`` / ``tuple`` → inspect each entry:
-      - strict ``str`` entry, printable, non-empty after strip → eligible.
-      - non-string, non-printable, empty/whitespace-only → ignored.
-    * ``aliases`` is a scalar ``str`` → malformed, no aliases (do NOT
-      iterate characters).
-    * ``aliases`` is a ``dict`` / other mapping → malformed, no aliases.
-
-    Duplicate alias values for a single entity are collapsed.
+    Delegates to the shared canonical alias grammar in
+    :mod:`dnd_assistant.retrieval.exact_matching`, which reads
+    ``extra_frontmatter["aliases"]`` fail-closed (list/tuple of strict,
+    printable, non-empty-after-strip strings; scalar/mapping/other malformed
+    values yield no aliases) and collapses duplicates preserving first
+    occurrence.
     """
-    raw = document.extra_frontmatter.get("aliases")
-    if raw is None:
-        return []
-
-    if isinstance(raw, (list, tuple)):
-        seen: set[str] = set()
-        result: list[str] = []
-        for entry in raw:
-            if not isinstance(entry, str):
-                continue
-            if not entry.isprintable():
-                continue
-            stripped = entry.strip()
-            if not stripped:
-                continue
-            if stripped not in seen:
-                seen.add(stripped)
-                result.append(stripped)
-        return result
-
-    # Scalar string, dict, or other unexpected type → malformed
-    return []
+    return list(extract_exact_aliases(document.extra_frontmatter.get("aliases")))
 
 
 # ── Eligibility helpers ─────────────────────────────────────────────────────

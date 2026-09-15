@@ -9,7 +9,7 @@ S11-01 — DONE
 S11-02 — DONE
 S11-03 — DONE
 S11-04 — DONE
-S11-05 — NOT STARTED
+S11-05 — DONE
 S11-06 — NOT STARTED
 S11-07 — NOT STARTED
 S11-08 — NOT STARTED
@@ -498,7 +498,7 @@ S11-01  post-session input + durable processing schemas    DONE
 S11-02  deterministic context assembly + entity resolution DONE
 S11-03  heavy-model structured extraction mechanism        DONE
 S11-04  Summary/Recap production + visibility filtering    DONE
-S11-05  ChangeSet producer integration + ambiguity policy  NOT STARTED
+S11-05  ChangeSet producer integration + ambiguity policy  DONE
 S11-06  persistence/rerun/failure semantics (incl. decision NOT STARTED
         on whether to sync legacy session fields)
 S11-07  CLI orchestration / end-to-end flow                NOT STARTED
@@ -1048,5 +1048,172 @@ errors), full `pytest`, `git diff --check`.
 
 ChangeSet producer + canonical binding/ambiguity and alias resolution (S11-05),
 artifact/ledger persistence + durable EMPTY representation + attempt-state
+folding + legacy-field sync decision (S11-06), CLI orchestration (S11-07),
+hardening (S11-08), Stage-11 review (S11-09), Stage-12.
+
+## 27. S11-05 record
+
+```text
+Task:              S11-05 — ChangeSet Producer Integration + Ambiguity Policy
+Routing:           PLAN_REQUIRED -> accepted PLAN (2 correction rounds) -> BUILD
+Baseline:          feat/post-session-processor @
+                   91922cc945160ee2c7a6fd57335e592b69999d0f
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             deterministic, model-free post-session ChangeSet production
+                   over the accepted S11-03 extraction: create_entity (Python
+                   defaults + deterministic candidate EntityId) and append_fact
+                   (whole-claim exact binding), type-aware exact name/alias
+                   resolution, full prepared-vs-current stale detection,
+                   whole-Vault duplicate prevention, final Stage-10 preflight;
+                   no update_entity, no persistence/ledger/review/apply/CLI
+Deliverable:       5 production modules + 1 retrieval helper extraction + focused
+                   unit/integration/contract tests + this record +
+                   DEVELOPMENT_STATUS reconciliation
+Next task:         S11-06 — persistence/rerun/failure semantics
+```
+
+### 27.1 Implemented modules
+
+```text
+retrieval/exact_matching.py
+    normalize_exact_text (strip -> NFC -> casefold) and fail-closed
+    extract_exact_aliases; the single shared exact-text/alias grammar
+retrieval/search.py (refactor, behavior-preserving)
+    _normalize_text / _extract_aliases delegate to the shared helper
+application/entity_id_allocator.py
+    CANDIDATE_ENTITY_ID_ALLOCATOR_VERSION, candidate_identity_material,
+    canonical_candidate_identity_bytes, allocate_candidate_entity_id
+application/post_session_provenance.py
+    extraction_binding_mismatches (shared S11-04/S11-05 binding policy)
+application/post_session_binding.py
+    ExactMatchIndex, build_exact_index, resolve_mention_targets,
+    any_type_exact_matches, prepared_projection_matches
+application/post_session_changeset.py
+    PostSessionChangeFailureReason / PostSessionChangeError,
+    PostSessionChangeUnresolvedReason / PostSessionChangeUnresolved,
+    PostSessionOperationProvenance, PostSessionChangeOutcome,
+    PostSessionChangePlanResult, produce_post_session_changeset
+application/post_session_rendering.py (refactor, behavior-preserving)
+    _verify_provenance delegates to the shared binding helper
+```
+
+### 27.2 Operation support matrix
+
+```text
+create_entity   YES  genuine ExtractedEntityCandidate
+append_fact     YES  existing prepared entity, whole-claim exact binding
+update_entity   NO   no typed canonical field-update semantic in S11-03;
+                     deriving it from prose is forbidden
+```
+
+### 27.3 Finalized create/default policy
+
+`create_entity` is emitted only for a genuine candidate after duplicate
+prevention. The only model-derived fields are `display_name` and `entity_type`;
+every other field is Python-owned:
+
+```text
+status="unknown"      Visibility.DM      KnowledgeStatus.INFERRED
+created_session = last_seen_session = real session_ref      tags=()
+```
+
+`candidate.attributes`, `candidate.summary`, `visibility_hint` and
+`knowledge_hint` never influence any emitted field. `update_entity` semantics
+(e.g. converting "became hostile" into `status=...`) are not implemented.
+
+### 27.4 EntityId allocator policy
+
+```text
+material = {allocator_version="post-session-entity-id-v1", session_ref,
+            entity_type.value, normalize_exact_text(display_name)}
+bytes    = compact key-sorted UTF-8 JSON, allow_nan=False
+entity_id= "ent_" + sha256(bytes).hexdigest()[:32]
+```
+
+Evidence event refs and model `candidate_id` are excluded, so the same semantic
+candidate over the same session allocates the same `EntityId` across attempts
+regardless of the evidence the model selected. Identity is candidate-scoped
+(not attempt-scoped). Two distinct candidates in one extraction producing the
+same allocation identity fail closed (`entity_id_collision`); neither create is
+emitted. No randomness exists in the allocator.
+
+### 27.5 Internal exact resolver and alias policy
+
+Binding uses `VaultRepository` reads only (`list_entities`), builds a type-aware
+exact index (`(entity_type, normalized name)`, `(entity_type, normalized
+alias)`), and resolves `exact stable ID -> exact canonical name -> exact
+canonical alias`. Name tier outranks alias tier. A name/alias belonging only to
+another `EntityType` stays unresolved. No fuzzy/FTS/substring binding. The
+player-only `SearchService` / `EntityResolver` / `VaultSearchService` are not
+imported or used; only the pure `retrieval.exact_matching` helper is shared.
+Aliases come from canonical `extra_frontmatter["aliases"]` under the existing
+fail-closed grammar. A resolved target outside the prepared entity set is
+rejected (`target_not_in_prepared_context`).
+
+### 27.6 Whole-claim ambiguity policy
+
+```text
+0 unique canonical targets                 -> omit claim (no_canonical_target)
+1 unique target + any unresolved mention   -> omit WHOLE claim (unresolved_reference)
+>1 distinct target ids                     -> omit WHOLE claim (unsupported_multi_target)
+1 unique target + zero unresolved mentions -> append eligible
+```
+
+Multiple mentions resolving to the same `EntityId` remain one valid target. A
+claim is never appended to one entity while another mention is unresolved. A
+`FACT`/`EVENT` claim is appendable; `RELATIONSHIP`/`OTHER` are omitted with
+`unsupported_claim_kind`.
+
+### 27.7 Stale / duplicate / revision policy
+
+For every mutation target, current canonical state is compared field-by-field
+against the prepared projection: `id`, `type`, `revision`, `name`, `status`,
+`visibility`, `knowledge_status`, `tags`, and the **full body**. Any difference
+is `stale_prepared_entity` and is never rebased, even when the numeric revision
+is unchanged by an external editor. `PLAYER` and `DM` targets may receive
+proposals; `SYSTEM` targets cannot (`system_entity_excluded`). Exact
+duplicate facts already present in the body (or already emitted in the batch)
+are suppressed with `duplicate_fact`; no fuzzy/semantic comparison is used.
+Same-entity append expected revisions are `R, R+1, ...` in final order.
+
+Candidate duplicate prevention scans the whole current Vault including SYSTEM
+and all entity types: an existing allocated id (same vs different identity),
+any exact normalized name/alias match, and multiple matches respectively yield
+`duplicate_existing_entity` / `entity_id_collision` / `ambiguous_exact_match`;
+no fuzzy create decision exists.
+
+### 27.8 Ordering, preflight, NO_CHANGES and persistence
+
+```text
+order            create_entity (candidate order), then append_fact (claim order)
+final gate       every non-empty ChangeSet passes validate_changeset(changeset, repository)
+failure          invalid preflight fails closed (CHANGESET_PREFLIGHT_FAILED)
+zero operations  NO_CHANGES, changeset=None, never an empty ChangeSet
+provenance       Provenance.MODEL_INFERENCE + extraction model_profile/prompt_version
+identity         changeset_id = cs_<session_ref>_<attempt_id>
+persistence      S11-05 writes nothing; Stage-10 persist_proposal is S11-06
+```
+
+S11-05 calls only `list_entities` (binding) plus the read-only preflight. It
+creates no approval, applies nothing, mutates no canonical entity, writes no
+audit or ledger record, and therefore introduces no R1-style recovery wedge.
+
+### 27.9 Evidence
+
+```text
+shared helper + retrieval delegation  tests/unit/post_session/test_retrieval_exact_matching.py
+allocator determinism/material         tests/unit/post_session/test_entity_id_allocator.py
+type-aware exact binding + stale       tests/unit/post_session/test_changeset_binding.py
+producer policy/idempotency/preflight  tests/unit/post_session/test_changeset_producer.py
+real-Vault zero-write/stale/ambiguity  tests/integration/test_post_session_changeset.py
+dependency boundaries                  tests/contract/test_post_session_boundaries.py
+```
+
+No Ollama is required. Quality gates: focused suites, `ruff check`,
+`ruff format --check`, `pyright` (0 errors), full `pytest`, `git diff --check`.
+
+### 27.10 Deferred (S11-06+)
+
+Artifact/ledger persistence + durable EMPTY representation + attempt-state
 folding + legacy-field sync decision (S11-06), CLI orchestration (S11-07),
 hardening (S11-08), Stage-11 review (S11-09), Stage-12.

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (S11-04 completion)
+**Last updated:** 2026-09-15 (S11-05 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
 **Active stage:** Stage 11 — Post-session Processor
@@ -111,12 +111,20 @@ authorization requiring a PLAYER hint plus at least one player-visible
 canonical binding, whole-claim exclusion of non-player/unresolved/SYSTEM
 material, SYSTEM exclusion from Summary, complete provenance binding before any
 model call, deterministic EMPTY outcome with zero model calls, Pydantic AI
-rendering adapter with zero project tools and retries 0. The ledger
+rendering adapter with zero project tools and retries 0. S11-05 `DONE` —
+deterministic, model-free post-session ChangeSet production over the accepted
+extraction: `create_entity` (Python-owned defaults + deterministic
+candidate-scoped `EntityId` allocator) and `append_fact` (whole-claim exact
+binding), type-aware exact name/alias resolution over canonical Vault data,
+full prepared-vs-current stale detection (never rebased), whole-Vault duplicate
+prevention including SYSTEM, exact duplicate-fact suppression, final Stage-10
+`validate_changeset` preflight, explicit NO_CHANGES, and zero writes (no
+persistence/review/apply). The ledger
 is unaudited durable workflow evidence under
 `_system/raw/sessions/<id>/processing/` and does not participate in global
 `unresolved_audit_intent` recovery. Detailed architecture, invariants, task map
 and evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-05 — ChangeSet producer integration + ambiguity policy`.
+`S11-06 — persistence/rerun/failure semantics`.
 
 ## Accepted reference baseline
 
@@ -152,8 +160,8 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ```text
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
-No model-generated ChangeSet producer exists yet (Stage 11 does not start it).
-Stage 11 is in progress; S11-04 is DONE; next task is S11-05.
+The model-generated ChangeSet producer now exists (S11-05, deterministic and
+read-only). Stage 11 is in progress; S11-05 is DONE; next task is S11-06.
 ```
 
 ## Known limitations affecting future work
@@ -175,7 +183,8 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-02 DONE — deterministic context assembly + entity resolution
   S11-03 DONE — heavy-model structured extraction mechanism
   S11-04 DONE — Summary/Recap production + visibility filtering
-  S11-05 NOT STARTED — ChangeSet producer integration + ambiguity policy
+  S11-05 DONE — ChangeSet producer integration + ambiguity policy
+  S11-06 NOT STARTED — persistence/rerun/failure semantics
 ```
 
 ## Operational invariants

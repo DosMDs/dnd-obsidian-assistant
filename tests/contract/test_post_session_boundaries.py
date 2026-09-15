@@ -531,3 +531,103 @@ def test_shared_error_classifier_is_provider_adjacent_only() -> None:
 def test_rendering_prompts_are_provider_neutral() -> None:
     _assert_provider_neutral("dnd_assistant.prompts.post_session_summary_v1")
     _assert_provider_neutral("dnd_assistant.prompts.post_session_recap_v1")
+
+
+# ── S11-05 producer / binding / allocator / shared provenance ──────────────
+
+_S11_05_APP_MODULES: tuple[str, ...] = (
+    "dnd_assistant.application.post_session_changeset",
+    "dnd_assistant.application.post_session_binding",
+    "dnd_assistant.application.entity_id_allocator",
+    "dnd_assistant.application.post_session_provenance",
+)
+
+_PLAYER_RETRIEVAL_SYMBOLS: frozenset[str] = frozenset(
+    {
+        "SearchService",
+        "EntityResolver",
+        "VaultSearchService",
+        "SearchHit",
+        "SearchQuery",
+        "MatchKind",
+    }
+)
+
+_PLAYER_RETRIEVAL_MODULES: frozenset[str] = frozenset(
+    {
+        "dnd_assistant.retrieval.search",
+        "dnd_assistant.retrieval.service",
+        "dnd_assistant.retrieval.resolver",
+        "dnd_assistant.retrieval.index",
+        "dnd_assistant.retrieval.lexical",
+    }
+)
+
+
+def test_s11_05_modules_do_not_use_player_resolver_or_service() -> None:
+    for module_path in _S11_05_APP_MODULES:
+        names = _module_name_nodes(module_path)
+        offending = sorted(names & _PLAYER_RETRIEVAL_SYMBOLS)
+        assert not offending, f"{module_path} references player retrieval symbols: {offending}"
+
+        targets = _module_import_targets(module_path)
+        offending_modules = sorted(
+            target for target in targets if target in _PLAYER_RETRIEVAL_MODULES
+        )
+        assert not offending_modules, (
+            f"{module_path} imports player retrieval modules: {offending_modules}"
+        )
+
+
+def test_s11_05_modules_name_no_concrete_storage_or_write_method() -> None:
+    for module_path in _S11_05_APP_MODULES:
+        names = _module_name_nodes(module_path)
+        assert "ObsidianVaultRepository" not in names, module_path
+        assert "ObsidianChangeSetStore" not in names, module_path
+        assert "ToolExecutor" not in names, module_path
+        offending = sorted(names & _WRITE_CAPABLE_METHOD_NAMES)
+        assert not offending, f"{module_path} references writes: {offending}"
+
+
+def test_s11_05_modules_import_no_tools_cli_or_models() -> None:
+    for module_path in _S11_05_APP_MODULES:
+        targets = _module_import_targets(module_path)
+        offending = sorted(
+            target
+            for target in targets
+            if target.startswith("dnd_assistant.models")
+            or target.startswith("dnd_assistant.tools")
+            or target.startswith("dnd_assistant.cli")
+        )
+        assert not offending, f"{module_path} imported forbidden deps: {offending}"
+
+
+def test_s11_05_producer_has_no_apply_or_persistence_authority() -> None:
+    module_path = "dnd_assistant.application.post_session_changeset"
+    targets = _module_import_targets(module_path)
+    offending = sorted(
+        target
+        for target in targets
+        if target
+        in {
+            "dnd_assistant.application.changeset_apply",
+            "dnd_assistant.application.changeset_store",
+        }
+    )
+    assert not offending, f"{module_path} imported apply/store authority: {offending}"
+
+    names = _module_name_nodes(module_path)
+    for forbidden in ("apply_changeset", "ChangeSetApproval", "persist_proposal"):
+        assert forbidden not in names, f"{module_path} references {forbidden}"
+
+
+def test_s11_05_modules_are_provider_neutral() -> None:
+    for module_path in _S11_05_APP_MODULES:
+        _assert_provider_neutral(module_path)
+
+
+def test_exact_matching_helper_is_pure_and_provider_neutral() -> None:
+    targets = _module_import_targets("dnd_assistant.retrieval.exact_matching")
+    offending = sorted(target for target in targets if target.startswith("dnd_assistant"))
+    assert not offending, f"exact_matching imported dnd_assistant modules: {offending}"
+    _assert_provider_neutral("dnd_assistant.retrieval.exact_matching")

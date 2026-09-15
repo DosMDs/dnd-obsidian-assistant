@@ -40,6 +40,9 @@ from dnd_assistant.application.post_session_extraction import (
     AcceptedPostSessionExtraction,
     ModelExecutionIdentity,
 )
+from dnd_assistant.application.post_session_provenance import (
+    extraction_binding_mismatches,
+)
 from dnd_assistant.application.post_session_visibility import (
     RecapClaimProjection,
     RecapEntityRef,
@@ -63,9 +66,6 @@ from dnd_assistant.domain.post_session_artifacts import (
     POST_SESSION_RENDER_SCHEMA_VERSION,
     PostSessionRenderOutput,
     RenderOutcome,
-)
-from dnd_assistant.domain.post_session_extraction import (
-    POST_SESSION_EXTRACTION_SCHEMA_VERSION,
 )
 from dnd_assistant.errors import ModelError
 from dnd_assistant.prompts.post_session_recap_v1 import POST_SESSION_RECAP_PROMPT_ID
@@ -328,26 +328,11 @@ def _verify_provenance(
 ) -> None:
     """Fail closed unless the accepted extraction belongs to this input.
 
-    Verifies session identity, input fingerprint, processor version,
-    extraction prompt version and both extraction schema-version declarations.
+    Delegates to the shared prepared/accepted binding policy, which verifies
+    session identity, input fingerprint, processor version, extraction prompt
+    version and both extraction schema-version declarations.
     """
-    provenance = accepted.provenance
-    identity = prepared.identity
-
-    mismatches: list[str] = []
-    if provenance.session_ref != identity.session.id:
-        mismatches.append("session_ref")
-    if provenance.input_fingerprint != prepared.fingerprint:
-        mismatches.append("input_fingerprint")
-    if provenance.processor_version != identity.processor_version:
-        mismatches.append("processor_version")
-    if provenance.prompt_version != identity.prompt_version:
-        mismatches.append("prompt_version")
-    if provenance.extraction_schema_version != POST_SESSION_EXTRACTION_SCHEMA_VERSION:
-        mismatches.append("extraction_schema_version")
-    if accepted.validated.extraction.schema_version != POST_SESSION_EXTRACTION_SCHEMA_VERSION:
-        mismatches.append("extraction.schema_version")
-
+    mismatches = extraction_binding_mismatches(prepared, accepted)
     if mismatches:
         raise PostSessionRenderingError(
             RenderingFailureReason.PROVENANCE_MISMATCH,
