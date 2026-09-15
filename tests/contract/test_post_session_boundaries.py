@@ -192,7 +192,58 @@ def test_application_ledger_is_provider_neutral() -> None:
     _assert_provider_neutral(_LEDGER_MODULE)
 
 
-# ── storage processing ─────────────────────────────────────────────────────
+# ── application context (S11-02) ───────────────────────────────────────────
+
+_CONTEXT_MODULE = "dnd_assistant.application.post_session_context"
+
+_WRITE_CAPABLE_METHOD_NAMES = {
+    "create_entity",
+    "patch_entity",
+    "append_entity_fact",
+}
+
+
+def test_application_context_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_CONTEXT_MODULE)
+
+
+def test_application_context_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_CONTEXT_MODULE)
+    offending = sorted(m for m in _modules_loaded() if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.post_session_context imported storage: {offending}"
+
+
+def test_application_context_names_no_concrete_storage_class() -> None:
+    names = _module_name_nodes(_CONTEXT_MODULE)
+    assert "ObsidianVaultRepository" not in names
+    assert "ObsidianSessionMetadataRepository" not in names
+    assert "ObsidianSessionEventRepository" not in names
+    assert "ObsidianPostSessionProcessingStore" not in names
+
+
+def test_application_context_names_no_write_capable_repository_method() -> None:
+    names = _module_name_nodes(_CONTEXT_MODULE)
+    offending = sorted(names & _WRITE_CAPABLE_METHOD_NAMES)
+    assert not offending, f"application.post_session_context references writes: {offending}"
+
+
+def test_application_context_imports_no_model_or_ledger_or_retrieval() -> None:
+    targets = _module_import_targets(_CONTEXT_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.models")
+        or target.startswith("dnd_assistant.tools")
+        or target.startswith("dnd_assistant.cli")
+        or target.startswith("dnd_assistant.retrieval")
+        or target == "dnd_assistant.application.post_session_ledger"
+    )
+    assert not offending, f"application.post_session_context imported forbidden deps: {offending}"
+
+
+def test_application_context_is_provider_neutral() -> None:
+    _assert_provider_neutral(_CONTEXT_MODULE)
+
 
 _STORAGE_MODULE = "dnd_assistant.storage.post_session_processing"
 

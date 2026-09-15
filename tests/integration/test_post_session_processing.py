@@ -33,7 +33,7 @@ from dnd_assistant.domain.post_session import (
     PreparedInputIdentity,
     PreparedSessionProjection,
 )
-from dnd_assistant.domain.types import KnowledgeStatus, Visibility
+from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Visibility
 from dnd_assistant.storage.audit import AuditService
 from dnd_assistant.storage.post_session_processing import (
     ObsidianPostSessionProcessingStore,
@@ -67,6 +67,7 @@ def _identity() -> PreparedInputIdentity:
         entities=(
             PreparedEntityProjection(
                 id="npc-a",
+                type=EntityType.NPC,
                 revision=3,
                 name="Aria",
                 status="alive",

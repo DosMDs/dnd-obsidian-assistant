@@ -80,6 +80,20 @@ def test_completed_valid_session_accepted(vault_root, audit_service) -> None:
     assert result.touched_entity_ids == ("npc-a", "loc-b")
 
 
+def test_eligible_result_binds_observed_session_revision(vault_root, audit_service) -> None:
+    create_completed_session(vault_root, audit_service)
+    result = _evaluate(vault_root, audit_service)
+    assert result.eligible is True
+    # close_session increments the active-session revision 1 -> 2.
+    assert result.session_revision == 2
+
+
+def test_ineligible_result_has_no_session_revision(vault_root, audit_service) -> None:
+    result = _evaluate(vault_root, audit_service, "S999")
+    assert result.eligible is False
+    assert result.session_revision is None
+
+
 def test_active_session_rejected(vault_root, audit_service) -> None:
     repo = ObsidianSessionMetadataRepository(vault_root, audit_service)
     repo.create_session(

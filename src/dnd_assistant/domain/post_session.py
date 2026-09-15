@@ -32,6 +32,7 @@ from pydantic.types import AwareDatetime
 from dnd_assistant.domain.calendar import WorldTick
 from dnd_assistant.domain.types import (
     EntityId,
+    EntityType,
     KnowledgeStatus,
     Revision,
     Visibility,
@@ -271,11 +272,13 @@ class PreparedRawEvent(BaseModel):
 class PreparedEntityProjection(BaseModel):
     """Deterministic projection of one referenced entity snapshot.
 
-    ``body_projection`` is a bounded deterministic body projection supplied
-    by the assembler; no filesystem path is present.
+    ``body_projection`` is the complete canonical body supplied by the
+    assembler; the assembler fails closed rather than truncating a body, so
+    no lossy marker is produced here.  No filesystem path is present.
     """
 
     id: EntityId
+    type: EntityType
     revision: Revision
     name: NonEmptyStr
     status: NonEmptyStr
@@ -331,7 +334,7 @@ class PreparedInputIdentity(BaseModel):
     model output, model profile or framework state is present.
     """
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     processor_version: NonEmptyStr
     prompt_version: NonEmptyStr
     session: PreparedSessionProjection

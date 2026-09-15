@@ -23,7 +23,7 @@ from dnd_assistant.domain.post_session import (
     PreparedRawEvent,
     PreparedSessionProjection,
 )
-from dnd_assistant.domain.types import KnowledgeStatus, Visibility
+from dnd_assistant.domain.types import EntityType, KnowledgeStatus, Visibility
 from dnd_assistant.errors import ValidationError
 
 _START = datetime(2026, 8, 31, 14, 0, 0, tzinfo=UTC)
@@ -60,6 +60,7 @@ def _entity(
 ) -> PreparedEntityProjection:
     return PreparedEntityProjection(
         id=entity_id,
+        type=EntityType.NPC,
         revision=revision,
         name="Aria",
         status="alive",
@@ -201,7 +202,7 @@ def test_unicode_canonicalization_golden_value() -> None:
         entities=(_entity(entity_id="npc-Éowyn"),),
     )
     assert compute_input_fingerprint(identity).digest == (
-        "653c70d565928c589d99b1f695f7af93138ee197b6d013e323171bf759792487"
+        "2bbefea960438b40517707125af6a7dd50bf8b936c0447293c76513867223d89"
     )
 
 

@@ -6,7 +6,7 @@
 Stage 11 — IN PROGRESS
 S11-00 — DONE
 S11-01 — DONE
-S11-02 — NOT STARTED
+S11-02 — DONE
 S11-03 — NOT STARTED
 S11-04 — NOT STARTED
 S11-05 — NOT STARTED
@@ -487,7 +487,7 @@ S11-00  Post-session architecture/contracts/kickoff        DONE
 S11-01  post-session input + durable processing schemas    DONE
         (domain schemas, eligibility, fingerprint, append-only ledger
          repository; smallest first BUILD increment)
-S11-02  deterministic context assembly + entity resolution NOT STARTED
+S11-02  deterministic context assembly + entity resolution DONE
 S11-03  heavy-model structured extraction mechanism        NOT STARTED
 S11-04  Summary/Recap production + visibility filtering    NOT STARTED
 S11-05  ChangeSet producer integration + ambiguity policy  NOT STARTED
@@ -654,3 +654,129 @@ Entity/context projection assembly and resolution (S11-02), model adapter and
 extraction (S11-03), Summary/Recap artifacts and visibility filtering (S11-04),
 ChangeSet producer (S11-05), full attempt-state folding, tail repair and the
 legacy-field sync decision (S11-06), CLI (S11-07), hardening (S11-08), Stage-12.
+
+## 24. S11-02 record
+
+```text
+Task:              S11-02 — Deterministic Context Assembly + Entity Resolution
+Routing:           PLAN_REQUIRED -> accepted PLAN (2 corrections) -> BUILD
+Baseline:          feat/post-session-processor @
+                   2dba067677c545aa9bd9ea18ad5b6e8067e126d1
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             deterministic, model-free completed-session context assembly:
+                   touched-only selection, exact-ID entity resolution, current
+                   canonical entity projection, bounded prepared-input identity
+                   and fingerprint; no model/Summary/Recap/ChangeSet/CLI work
+Deliverable:       application assembler module + schema v2 + focused
+                   unit/integration/contract tests + this record +
+                   DEVELOPMENT_STATUS reconciliation
+Next task:         S11-03 — heavy-model structured extraction mechanism
+```
+
+### 24.1 Implemented module
+
+```text
+application/post_session_context.py
+    ContextFailureReason / PostSessionContextError,
+    PreparedPostSessionInput,
+    centralized Stage-11 context bounds (MAX_*),
+    render_prepared_context(),
+    build_post_session_input()
+domain/post_session.py
+    PreparedEntityProjection + type (EntityType)
+    PreparedInputIdentity.schema_version 1 -> 2
+application/post_session_identity.py
+    POST_SESSION_PROCESSOR_VERSION "1" -> "2"
+application/post_session_eligibility.py
+    EligibilityResult.session_revision (observed canonical Session.revision)
+```
+
+### 24.2 Accepted selection policy
+
+Selection is **trusted structured evidence only**: the validated
+`touched_entities` accepted by S11-01 eligibility, normalized by
+order-preserving first-occurrence deduplication. There is **no** event-extra
+entity-reference field in the current runtime (the allowlist is empty), **no**
+inference of `EntityId` from arbitrary strings, and **no** free-text/name/alias
+resolution. The player-only `SearchService` / `EntityResolver` contracts are
+deliberately not reused for internal DM context. Entity references resolve by
+exact stable `EntityId` via `VaultRepository.get_entity`. A missing touched
+entity fails closed; a corrupt entity propagates `StorageError`. Each read is
+individually revision-consistent; there is no global snapshot, mixed-time
+multi-entity reads are accepted, and the fingerprint binds the exact
+projections actually read.
+
+### 24.3 Eligibility-revision binding (Correction 2)
+
+A successful `EligibilityResult` now carries the canonical `Session.revision`
+observed during eligibility. The builder re-reads session metadata and fails
+closed with `STALE_ELIGIBILITY_EVIDENCE` when the revision no longer matches,
+when status is no longer `completed`, or when normalized `touched_entities`
+differ from the eligibility result. Session-id mismatch and a missing observed
+revision fail with `ELIGIBILITY_MISMATCH`; an ineligible result fails with
+`SESSION_INELIGIBLE`. The builder does not re-run the eligibility algorithm.
+Raw events remain protected by the accepted completed-session immutability
+contract; no new locking or snapshot mechanism is introduced.
+
+### 24.4 Prepared-input schema v2
+
+The old contract was insufficient because canonical entity `type` was absent
+from `PreparedEntityProjection`, making typed later extraction/binding
+impossible. The projection now includes `type (EntityType)` and the prepared
+input is `schema_version = 2`; `processor_version` was bumped to `"2"`.
+Golden fingerprint evidence in `tests/unit/post_session/test_identity.py` was
+re-pinned. Ledger `schema_version` is untouched.
+
+`PreparedEntityProjection` fields: `id, type, revision, name, status,
+visibility, knowledge_status, tags, body_projection`. Deferred deliberately:
+`created_session`, `last_seen_session`, `created_at`, `updated_at`, and
+storage-level `extra_frontmatter`/`aliases` (needed only by S11-05 binding).
+
+### 24.5 Context bounds (Correction 1)
+
+One centralized, project-owned, character/count-based policy in
+`application/post_session_context.py`:
+
+```text
+MAX_RAW_EVENTS              = 2000
+MAX_RAW_EVENT_EXTRA_CHARS   = 8000
+MAX_TOTAL_RAW_EVENT_CHARS   = 2_000_000
+MAX_ENTITY_PROJECTIONS      = 200
+MAX_ENTITY_BODY_CHARS       = 4000
+MAX_TOTAL_CONTEXT_CHARS     = 4_000_000
+```
+
+Every ceiling is explicit fail-closed `INPUT_TOO_LARGE`. **Entity bodies are
+never truncated**: an over-limit body is rejected, never sliced, and no
+truncation marker exists. Canonical evidence is never silently discarded.
+Changing any bound is processor semantics and must trigger a
+`processor_version` review/bump.
+
+### 24.6 Rendering and calendar policy
+
+`PreparedContextProjection.text` is a pure derived rendering of the structured
+session/event/entity/calendar projections, computed in the same pass, so it
+cannot diverge from what the fingerprint binds. Only raw `world_tick` start/end
+are projected; the current world tick is deliberately not read (a moving clock
+must not re-key identical session evidence) and no game dates are fabricated.
+
+### 24.7 Evidence
+
+```text
+assembler / bounds / determinism   tests/unit/post_session/test_context.py
+eligibility revision binding       tests/unit/post_session/test_eligibility.py
+schema v2 + golden fingerprint     tests/unit/post_session/test_identity.py
+real-Vault end-to-end/no mutation  tests/integration/test_post_session_context.py
+read-only / no-model boundaries    tests/contract/test_post_session_boundaries.py
+```
+
+No Ollama is required. Quality gates: focused suites, `ruff check`,
+`ruff format --check`, `pyright` (0 errors), full `pytest`, `git diff --check`.
+
+### 24.8 Deferred (S11-03+)
+
+Heavy-model adapter/extraction (S11-03), Summary/Recap artifacts and visibility
+filtering (S11-04), ChangeSet producer + canonical binding/ambiguity and
+alias resolution (S11-05), full attempt-state folding, tail repair and the
+legacy-field sync decision (S11-06), CLI (S11-07), hardening (S11-08),
+Stage-12.

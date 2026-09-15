@@ -26,7 +26,7 @@ from dnd_assistant.application.post_session_ledger import (
     load_ledger_events,
 )
 from dnd_assistant.domain.post_session import PostSessionAttemptId
-from dnd_assistant.domain.types import EntityId
+from dnd_assistant.domain.types import EntityId, Revision
 from dnd_assistant.errors import ConflictError, NotFoundError, StorageError
 
 if TYPE_CHECKING:
@@ -69,11 +69,17 @@ class EligibilityResult(BaseModel):
     ``eligible`` is the decision; ``reason`` is the deterministic explanation.
     ``touched_entity_ids`` is populated only for an eligible completed session
     and is a convenience projection of already-validated canonical evidence.
+
+    ``session_revision`` is the canonical ``Session.revision`` observed while
+    evaluating eligibility.  Context assembly (S11-02) uses it as a TOCTOU
+    guard: it re-reads session metadata and fails closed if the revision no
+    longer matches, without re-running the full eligibility algorithm.
     """
 
     eligible: bool
     reason: EligibilityReason
     session_id: str
+    session_revision: Revision | None = None
     touched_entity_ids: tuple[str, ...] = ()
 
     model_config = {
@@ -86,11 +92,16 @@ def _ineligible(session_id: str, reason: EligibilityReason) -> EligibilityResult
     return EligibilityResult(eligible=False, reason=reason, session_id=session_id)
 
 
-def _eligible(session_id: str, touched_entity_ids: tuple[str, ...]) -> EligibilityResult:
+def _eligible(
+    session_id: str,
+    session_revision: Revision,
+    touched_entity_ids: tuple[str, ...],
+) -> EligibilityResult:
     return EligibilityResult(
         eligible=True,
         reason=EligibilityReason.ELIGIBLE,
         session_id=session_id,
+        session_revision=session_revision,
         touched_entity_ids=touched_entity_ids,
     )
 
@@ -192,7 +203,7 @@ def evaluate_processing_eligibility(
         if attempt_has_terminal_event(ledger_events, attempt_id):
             return _ineligible(session_id, EligibilityReason.ATTEMPT_ALREADY_TERMINAL)
 
-    return _eligible(session_id, touched)
+    return _eligible(session_id, session.revision, touched)
 
 
 __all__ = [

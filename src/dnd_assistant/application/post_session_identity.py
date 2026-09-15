@@ -33,12 +33,18 @@ from dnd_assistant.errors import ValidationError
 
 # ── Version constants ─────────────────────────────────────────────────────
 
-POST_SESSION_PROCESSOR_VERSION = "1"
+POST_SESSION_PROCESSOR_VERSION = "2"
 """Deterministic processor/assembler version included in the fingerprint.
 
 This is an explicit contract constant, never an implicit package version.
 Bump it whenever prepared-input assembly semantics change so that a changed
 input cannot silently reuse an old fingerprint.
+
+Version history:
+    1 — S11-01 foundational prepared-input identity.
+    2 — S11-02 deterministic context assembler: entity ``type`` projection,
+        prepared-input schema v2, centralized Stage-11 context bounds and
+        eligibility-revision binding.
 """
 
 POST_SESSION_PROMPT_VERSION = "1"
