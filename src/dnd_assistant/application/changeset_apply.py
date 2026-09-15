@@ -125,14 +125,39 @@ class ApplyFailureCategory(StrEnum):
 class ChangeSetApplyOutcome(StrEnum):
     """Truthful whole-batch outcome.
 
-    ``APPLIED``  every operation was written;
-    ``PARTIAL``  at least one operation was written, then apply stopped;
-    ``FAILED``   the first operation failed before any write.
+    ``APPLIED``  every operation is confirmed applied;
+    ``PARTIAL``  at least one operation is confirmed applied, then apply stopped;
+    ``FAILED``   no operation is **confirmed** applied.
+
+    ``FAILED`` deliberately does not claim that no Vault write could have
+    persisted: a ``STORAGE``-category failure can occur *after* the repository
+    committed an entity write (for example when the committed audit record
+    itself cannot be appended).  ``failing_operation_commit_state`` carries that
+    uncertainty explicitly.
     """
 
     APPLIED = "applied"
     PARTIAL = "partial"
     FAILED = "failed"
+
+
+class ApplyCommitState(StrEnum):
+    """Commit certainty for a single operation at the repository boundary.
+
+    ``COMMITTED``     the repository returned success; the mutation is durably
+                      committed (intent + committed audit + verified file);
+    ``NOT_WRITTEN``   the repository raised before the atomic entity write, so
+                      no Vault write for this operation can have persisted;
+    ``UNCONFIRMED``   the repository raised a storage-boundary failure, so the
+                      operation may or may not have persisted; must not be
+                      presented as "not written";
+    ``NOT_ATTEMPTED`` the operation was never attempted by the applier.
+    """
+
+    COMMITTED = "committed"
+    NOT_WRITTEN = "not_written"
+    UNCONFIRMED = "unconfirmed"
+    NOT_ATTEMPTED = "not_attempted"
 
 
 class ApplyFailure(BaseModel):
@@ -155,6 +180,15 @@ class ChangeSetApplyResult(BaseModel):
     ``remaining_operation_indices`` contains only operations that were never
     attempted (the failing operation is excluded and identified by
     ``failure.operation_index``).
+
+    ``failing_operation_commit_state`` is derived from the typed failure
+    category, never from parsing an exception message:
+
+    - ``APPLIED``                         -> ``None``;
+    - ``VALIDATION``/``NOT_FOUND``/``CONFLICT`` -> ``NOT_WRITTEN``
+      (the repository raises these before the atomic entity write);
+    - ``STORAGE``                         -> ``UNCONFIRMED``
+      (the failure may have occurred after the entity write).
     """
 
     changeset_id: ChangeSetId
@@ -162,6 +196,7 @@ class ChangeSetApplyResult(BaseModel):
     applied_operation_indices: tuple[int, ...]
     remaining_operation_indices: tuple[int, ...]
     failure: ApplyFailure | None = None
+    failing_operation_commit_state: ApplyCommitState | None = None
 
     model_config = {
         "frozen": True,
@@ -293,6 +328,20 @@ def _categorize(error: Exception) -> ApplyFailureCategory:
     return ApplyFailureCategory.VALIDATION
 
 
+def _commit_state_for_category(category: ApplyFailureCategory) -> ApplyCommitState:
+    """Derive the failing operation's commit certainty from its typed category.
+
+    Only ``VALIDATION``/``NOT_FOUND``/``CONFLICT`` are guaranteed to be raised
+    before the repository's atomic entity write, so only those may be presented
+    as ``NOT_WRITTEN``.  A ``STORAGE``-category failure may occur after the
+    entity write (for example committed-audit finalization), so it is
+    conservatively ``UNCONFIRMED``.  No exception message is ever parsed.
+    """
+    if category is ApplyFailureCategory.STORAGE:
+        return ApplyCommitState.UNCONFIRMED
+    return ApplyCommitState.NOT_WRITTEN
+
+
 # ── Public entry point ────────────────────────────────────────────────────
 
 
@@ -350,6 +399,7 @@ def apply_changeset(
             _apply_operation(operation, repository, audit, context)
         except (ValidationError, NotFoundError, ConflictError, StorageError) as exc:
             outcome = ChangeSetApplyOutcome.PARTIAL if applied else ChangeSetApplyOutcome.FAILED
+            category = _categorize(exc)
             return ChangeSetApplyResult(
                 changeset_id=changeset.changeset_id,
                 outcome=outcome,
@@ -357,10 +407,11 @@ def apply_changeset(
                 remaining_operation_indices=tuple(range(index + 1, total)),
                 failure=ApplyFailure(
                     operation_index=index,
-                    category=_categorize(exc),
+                    category=category,
                     message=str(exc),
                     entity_id=operation.entity_id,
                 ),
+                failing_operation_commit_state=_commit_state_for_category(category),
             )
         applied.append(index)
 
@@ -370,10 +421,12 @@ def apply_changeset(
         applied_operation_indices=tuple(applied),
         remaining_operation_indices=(),
         failure=None,
+        failing_operation_commit_state=None,
     )
 
 
 __all__ = [
+    "ApplyCommitState",
     "ApplyFailure",
     "ApplyFailureCategory",
     "ChangeSetApplyContext",

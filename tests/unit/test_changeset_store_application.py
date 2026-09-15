@@ -44,6 +44,7 @@ class FakeChangeSetStore:
     def __init__(self) -> None:
         self.proposals: dict[str, str] = {}
         self.approvals: dict[str, str] = {}
+        self.apply_attempts: dict[str, str] = {}
 
     def create_proposal(self, changeset_id: str, content: str) -> None:
         if changeset_id in self.proposals:
@@ -70,6 +71,12 @@ class FakeChangeSetStore:
 
     def read_approval_if_present(self, changeset_id: str) -> str | None:
         return self.approvals.get(changeset_id)
+
+    def append_apply_attempt(self, changeset_id: str, content: str) -> None:
+        self.apply_attempts[changeset_id] = self.apply_attempts.get(changeset_id, "") + content
+
+    def read_apply_attempts_if_present(self, changeset_id: str) -> str | None:
+        return self.apply_attempts.get(changeset_id)
 
 
 # ── Builders ───────────────────────────────────────────────────────────────

@@ -14,6 +14,7 @@ import pytest
 from typer.testing import CliRunner
 
 from dnd_assistant.application.changeset_apply import (
+    ApplyCommitState,
     ApplyFailure,
     ApplyFailureCategory,
     ChangeSetApplyOutcome,
@@ -24,6 +25,7 @@ from dnd_assistant.application.changeset_review import (
     ReviewDecision,
     compute_changeset_fingerprint,
 )
+from dnd_assistant.application.changeset_status import record_apply_attempt
 from dnd_assistant.application.changeset_store import (
     load_approval,
     persist_approval,
@@ -45,7 +47,8 @@ from dnd_assistant.domain.types import (
     Provenance,
     Visibility,
 )
-from dnd_assistant.storage.audit import AuditService
+from dnd_assistant.errors import StorageError
+from dnd_assistant.storage.audit import AuditRecord, AuditService
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
 from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.paths import entity_directory
@@ -139,6 +142,42 @@ def _seed_entity(root: Path, entity_id: str) -> None:
     _repo(root).create_entity(make_document(entity_id), audit=make_audit_context("setup"))
 
 
+def _result(
+    changeset_id: str,
+    outcome: ChangeSetApplyOutcome,
+    applied: tuple[int, ...],
+    remaining: tuple[int, ...],
+    *,
+    failure: ApplyFailure | None = None,
+    commit_state: ApplyCommitState | None = None,
+) -> ChangeSetApplyResult:
+    return ChangeSetApplyResult(
+        changeset_id=changeset_id,
+        outcome=outcome,
+        applied_operation_indices=applied,
+        remaining_operation_indices=remaining,
+        failure=failure,
+        failing_operation_commit_state=commit_state,
+    )
+
+
+def _seed_attempt(root: Path, changeset: ChangeSet, result: ChangeSetApplyResult) -> None:
+    record_apply_attempt(_store(root), changeset, result, source="test", real_time=MUTATION_TIME)
+
+
+def _seed_intent_audit(root: Path, operation_id: str) -> None:
+    AuditService(str(root / "_system" / "audit" / "audit.jsonl")).append(
+        AuditRecord(
+            operation_id=operation_id,
+            real_time=MUTATION_TIME,
+            operation="create_entity",
+            entity_id="npc-new",
+            source="test",
+            phase="intent",
+        )
+    )
+
+
 # ── Help ───────────────────────────────────────────────────────────────────
 
 
@@ -146,7 +185,7 @@ class TestHelp:
     def test_subgroup_help_lists_commands(self) -> None:
         result = runner.invoke(app, ["changeset", "--help"])
         assert result.exit_code == 0
-        for command in ("save", "review", "approve", "reject", "apply"):
+        for command in ("save", "review", "approve", "reject", "apply", "status"):
             assert command in result.stdout
 
     def test_root_help_lists_changeset(self) -> None:
@@ -513,3 +552,334 @@ class TestApplyRendering:
 
         assert result.exit_code == 1
         assert "откат не выполнялся" in result.stdout
+
+
+# ── status command ─────────────────────────────────────────────────────────
+
+
+class TestStatusCommand:
+    def test_status_shows_proposal_without_approval(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        persist_proposal(_store(root), _changeset("cs-1", (_create_op("npc-new"),)))
+
+        result = runner.invoke(app, ["changeset", "status", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 0
+        assert "Статус ChangeSet cs-1" in result.stdout
+        assert "Предложение: найдено" in result.stdout
+        assert "Решение о проверке: отсутствует" in result.stdout
+        assert "Повторное применение: разрешено" in result.stdout
+
+    def test_status_shows_approval_binding(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+
+        result = runner.invoke(app, ["changeset", "status", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 0
+        assert "Решение: одобрено" in result.stdout
+        assert "Привязка одобрения: подтверждена" in result.stdout
+
+    def test_status_shows_applied_attempt_and_blocks(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        _seed_attempt(
+            root,
+            changeset,
+            _result("cs-1", ChangeSetApplyOutcome.APPLIED, (0,), ()),
+        )
+
+        result = runner.invoke(app, ["changeset", "status", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 0
+        assert "Записей о применении: 1" in result.stdout
+        assert "Последний результат: применён" in result.stdout
+        assert "Повторное применение: запрещено" in result.stdout
+        assert "Аудит операций" in result.stdout
+
+    def test_status_does_not_run_recovery_preflight(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _create_vault(tmp_path)
+        persist_proposal(_store(root), _changeset("cs-1", (_create_op("npc-new"),)))
+
+        def _boom(vault_root: Path) -> None:
+            raise AssertionError("status must not run global recovery preflight")
+
+        monkeypatch.setattr("dnd_assistant.cli.changeset._recovery_preflight", _boom)
+
+        result = runner.invoke(app, ["changeset", "status", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 0
+
+    def test_status_missing_proposal(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        result = runner.invoke(app, ["changeset", "status", "cs-missing", "--vault", str(root)])
+        assert result.exit_code == 1
+        assert "Ошибка" in result.stderr
+
+    def test_status_reports_intent_only_without_artifact(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        persist_proposal(_store(root), _changeset("cs-1", (_create_op("npc-new"),)))
+        _seed_intent_audit(root, "cs-1:0")
+
+        result = runner.invoke(app, ["changeset", "status", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 0
+        assert "не подтверждено" in result.stdout
+        assert "Повторное применение: запрещено" in result.stdout
+
+
+# ── double apply / retry gate ──────────────────────────────────────────────
+
+
+class TestApplyGate:
+    def test_second_apply_after_applied_blocked_zero_mutation(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        _seed_attempt(root, changeset, _result("cs-1", ChangeSetApplyOutcome.APPLIED, (0,), ()))
+
+        before = _snapshot(root)
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert _snapshot(root) == before
+
+    def test_second_apply_after_partial_blocked_zero_mutation(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-a"), _create_op("npc-b")))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        _seed_attempt(
+            root,
+            changeset,
+            _result(
+                "cs-1",
+                ChangeSetApplyOutcome.PARTIAL,
+                (0,),
+                (),
+                failure=ApplyFailure(
+                    operation_index=1,
+                    category=ApplyFailureCategory.CONFLICT,
+                    message="revision",
+                    entity_id="npc-b",
+                ),
+                commit_state=ApplyCommitState.NOT_WRITTEN,
+            ),
+        )
+
+        before = _snapshot(root)
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert _snapshot(root) == before
+
+    def test_failed_not_written_clean_retry_reaches_apply(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        _seed_attempt(
+            root,
+            changeset,
+            _result(
+                "cs-1",
+                ChangeSetApplyOutcome.FAILED,
+                (),
+                (),
+                failure=ApplyFailure(
+                    operation_index=0,
+                    category=ApplyFailureCategory.CONFLICT,
+                    message="revision",
+                    entity_id="npc-new",
+                ),
+                commit_state=ApplyCommitState.NOT_WRITTEN,
+            ),
+        )
+
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 0
+        assert _repo(root).get_entity("npc-new").entity.revision == 1
+
+    def test_failed_unconfirmed_blocked_zero_mutation(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        _seed_attempt(
+            root,
+            changeset,
+            _result(
+                "cs-1",
+                ChangeSetApplyOutcome.FAILED,
+                (),
+                (),
+                failure=ApplyFailure(
+                    operation_index=0,
+                    category=ApplyFailureCategory.STORAGE,
+                    message="disk",
+                    entity_id="npc-new",
+                ),
+                commit_state=ApplyCommitState.UNCONFIRMED,
+            ),
+        )
+
+        before = _snapshot(root)
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert _snapshot(root) == before
+
+    def test_intent_only_audit_without_artifact_blocked(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        _seed_intent_audit(root, "cs-1:0")
+
+        before = _snapshot(root)
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert _snapshot(root) == before
+
+    def test_malformed_apply_artifact_fails_closed(self, tmp_path: Path) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+        store.append_apply_attempt("cs-1", "{not json\n")
+
+        before = _snapshot(root)
+        apply_result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+        assert apply_result.exit_code == 1
+        assert "Ошибка" in apply_result.stderr
+        assert _snapshot(root) == before
+
+        status = runner.invoke(app, ["changeset", "status", "cs-1", "--vault", str(root)])
+        assert status.exit_code == 1
+        assert "Ошибка" in status.stderr
+
+
+# ── attempt-record persistence failure ─────────────────────────────────────
+
+
+class TestAttemptRecordFailure:
+    def test_applied_record_failure_keeps_mutation_and_warns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+
+        def _fail(*args: object, **kwargs: object) -> None:
+            raise StorageError("disk full")
+
+        monkeypatch.setattr("dnd_assistant.cli.changeset.record_apply_attempt", _fail)
+
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert "применён" in result.stdout
+        assert "durable-запись" in result.stderr
+        assert _repo(root).get_entity("npc-new").entity.revision == 1
+
+    def test_partial_record_failure_keeps_applied_prefix_and_warns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"), _create_op("npc-new-2")))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+
+        from dnd_assistant.storage.types import VaultRepository
+        from tests.integration.helpers import make_audit_context, make_document
+
+        def fake_apply(
+            changeset: ChangeSet,
+            approval: ChangeSetApproval,
+            repository: VaultRepository,
+            *,
+            context: object,
+        ) -> ChangeSetApplyResult:
+            repository.create_entity(make_document("npc-new"), audit=make_audit_context("fake"))
+            return _result(
+                "cs-1",
+                ChangeSetApplyOutcome.PARTIAL,
+                (0,),
+                (),
+                failure=ApplyFailure(
+                    operation_index=1,
+                    category=ApplyFailureCategory.STORAGE,
+                    message="disk",
+                    entity_id="npc-new-2",
+                ),
+                commit_state=ApplyCommitState.UNCONFIRMED,
+            )
+
+        def _fail(*args: object, **kwargs: object) -> None:
+            raise StorageError("disk full")
+
+        monkeypatch.setattr("dnd_assistant.cli.changeset.apply_changeset", fake_apply)
+        monkeypatch.setattr("dnd_assistant.cli.changeset.record_apply_attempt", _fail)
+
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert "частично" in result.stdout
+        assert "durable-запись" in result.stderr
+        assert _repo(root).get_entity("npc-new").entity.revision == 1
+
+    def test_failed_unconfirmed_record_failure_warns(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _create_vault(tmp_path)
+        changeset = _changeset("cs-1", (_create_op("npc-new"),))
+        store = _store(root)
+        persist_proposal(store, changeset)
+        persist_approval(store, _approval(changeset))
+
+        def fake_apply(*args: object, **kwargs: object) -> ChangeSetApplyResult:
+            return _result(
+                "cs-1",
+                ChangeSetApplyOutcome.FAILED,
+                (),
+                (),
+                failure=ApplyFailure(
+                    operation_index=0,
+                    category=ApplyFailureCategory.STORAGE,
+                    message="disk",
+                    entity_id="npc-new",
+                ),
+                commit_state=ApplyCommitState.UNCONFIRMED,
+            )
+
+        def _fail(*args: object, **kwargs: object) -> None:
+            raise StorageError("disk full")
+
+        monkeypatch.setattr("dnd_assistant.cli.changeset.apply_changeset", fake_apply)
+        monkeypatch.setattr("dnd_assistant.cli.changeset.record_apply_attempt", _fail)
+
+        result = runner.invoke(app, ["changeset", "apply", "cs-1", "--vault", str(root)])
+
+        assert result.exit_code == 1
+        assert "не подтверждено" in result.stdout
+        assert "durable-запись" in result.stderr

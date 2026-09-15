@@ -29,6 +29,7 @@ import pytest
 
 from dnd_assistant.application import changeset_apply
 from dnd_assistant.application.changeset_apply import (
+    ApplyCommitState,
     ApplyFailureCategory,
     ChangeSetApplyContext,
     ChangeSetApplyOutcome,
@@ -54,7 +55,7 @@ from dnd_assistant.domain.types import (
     Provenance,
     Visibility,
 )
-from dnd_assistant.errors import ConflictError, NotFoundError
+from dnd_assistant.errors import ConflictError, NotFoundError, StorageError, ValidationError
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.types import VaultDocument
@@ -563,6 +564,65 @@ class TestFailureSemantics:
 
         with pytest.raises(RuntimeError, match="programmer error"):
             apply_changeset(changeset, _approval(changeset), repo, context=_context())
+
+
+# ── Commit-state truthfulness ─────────────────────────────────────────────
+
+
+class TestCommitStateDerivation:
+    """The failing operation's commit certainty must never be inferred from text."""
+
+    def test_applied_has_no_commit_state(self) -> None:
+        changeset = _changeset(_create("npc_a"))
+        repo = FakeVaultRepository()
+        result = apply_changeset(changeset, _approval(changeset), repo, context=_context())
+        assert result.outcome is ChangeSetApplyOutcome.APPLIED
+        assert result.failing_operation_commit_state is None
+
+    def test_conflict_failure_is_not_written(self) -> None:
+        changeset = _changeset(_update("npc_a", 1, status="dead"))
+        repo = FakeVaultRepository([_document("npc_a")])
+        repo.failures["npc_a"] = ConflictError("revision changed")
+
+        result = apply_changeset(changeset, _approval(changeset), repo, context=_context())
+        assert result.failing_operation_commit_state is ApplyCommitState.NOT_WRITTEN
+
+    def test_not_found_failure_is_not_written(self) -> None:
+        changeset = _changeset(_update("npc_a", 1, status="dead"))
+        repo = FakeVaultRepository([_document("npc_a")])
+        repo.failures["npc_a"] = NotFoundError("missing")
+
+        result = apply_changeset(changeset, _approval(changeset), repo, context=_context())
+        assert result.failing_operation_commit_state is ApplyCommitState.NOT_WRITTEN
+
+    def test_validation_failure_is_not_written(self) -> None:
+        changeset = _changeset(_update("npc_a", 1, status="dead"))
+        repo = FakeVaultRepository([_document("npc_a")])
+        repo.failures["npc_a"] = ValidationError("invalid")
+
+        result = apply_changeset(changeset, _approval(changeset), repo, context=_context())
+        assert result.failing_operation_commit_state is ApplyCommitState.NOT_WRITTEN
+
+    def test_storage_failure_is_unconfirmed(self) -> None:
+        changeset = _changeset(_update("npc_a", 1, status="dead"))
+        repo = FakeVaultRepository([_document("npc_a")])
+        repo.failures["npc_a"] = StorageError("commit committed but audit failed")
+
+        result = apply_changeset(changeset, _approval(changeset), repo, context=_context())
+        assert result.outcome is ChangeSetApplyOutcome.FAILED
+        assert result.failing_operation_commit_state is ApplyCommitState.UNCONFIRMED
+
+    def test_partial_storage_failure_is_unconfirmed(self) -> None:
+        changeset = _changeset(
+            _update("npc_a", 1, status="dead"),
+            _update("npc_b", 1, status="dead"),
+        )
+        repo = FakeVaultRepository([_document("npc_a"), _document("npc_b")])
+        repo.failures["npc_b"] = StorageError("disk")
+
+        result = apply_changeset(changeset, _approval(changeset), repo, context=_context())
+        assert result.outcome is ChangeSetApplyOutcome.PARTIAL
+        assert result.failing_operation_commit_state is ApplyCommitState.UNCONFIRMED
 
 
 # ── I7 — no direct filesystem mutation ────────────────────────────────────

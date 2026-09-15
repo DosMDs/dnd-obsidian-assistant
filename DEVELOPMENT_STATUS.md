@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (S10-05)
+**Last updated:** 2026-09-15 (S10-06)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`; S10-02 pure validation/preflight `DONE`; S10-03 review/fingerprint/approval `DONE`; S10-04 applier/revision safety `DONE`; S10-05 CLI workflow + durable proposal store `DONE`)
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`; S10-02 pure validation/preflight `DONE`; S10-03 review/fingerprint/approval `DONE`; S10-04 applier/revision safety `DONE`; S10-05 CLI workflow + durable proposal store `DONE`; S10-06 failure/partial-application/audit hardening `DONE`)
 **Active stage:** Stage 10 — ChangeSet (`IN PROGRESS`)
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -77,7 +77,7 @@ final architecture decision (`ACCEPTED`) and reference-runtime retirement
 | S10-03 — Review DTO + approval/rejection + fingerprint binding | DONE |
 | S10-04 — ChangeSetApplier + revision/conflict safety | DONE |
 | S10-05 — CLI review/apply workflow + proposal persistence decision | DONE |
-| S10-06 — Failure / partial-application / audit hardening | NOT STARTED |
+| S10-06 — Failure / partial-application / audit hardening | DONE |
 | S10-07 — Full Stage-10 historical review / completion | NOT STARTED |
 
 `S10-00` completed the trusted ChangeSet architecture/domain contract. Verdict:
@@ -105,7 +105,10 @@ FAILED results (`application/changeset_apply.py`). `S10-05` implemented the dura
 proposal/approval artifact store (`storage/changeset_store.py`,
 `application/changeset_store.py`) and the `dnd changeset`
 save/review/approve/reject/apply CLI workflow (`cli/changeset.py`). `S10-06`
-remains `NOT STARTED`.
+implemented the append-only apply-attempt artifact, deterministic audit
+correlation, truthful commit-state classification, the fail-closed pre-apply
+gate and the read-only `dnd changeset status` command
+(`application/changeset_status.py`). `S10-07` remains `NOT STARTED`.
 
 ## Accepted custom reference baseline
 
@@ -258,7 +261,7 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-06 — Failure / partial-application / audit hardening)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-07 — Full Stage-10 historical review / completion)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -522,13 +525,16 @@ S10-02 pure validator/whole-batch preflight complete in application/changeset_va
 S10-03 review/fingerprint/approval complete in application/changeset_review.py.
 S10-04 applier/revision safety complete in application/changeset_apply.py.
 S10-05 proposal/approval artifact store + `dnd changeset` CLI workflow complete.
+S10-06 apply-attempt evidence + audit correlation + status hardening complete.
+Known limitation R1: an intent-only ChangeSet audit record with a real session_ref
+can still participate in global session-recovery blocking; no repair action added.
 No confirmed Stage-10 blocker; no model-generated ChangeSet producer exists yet.
 ```
 
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-06 — Failure / partial-application / audit hardening)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-07 — Full Stage-10 historical review / completion)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)

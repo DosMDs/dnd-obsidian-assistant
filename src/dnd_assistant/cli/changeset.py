@@ -25,6 +25,7 @@ import typer
 from pydantic import ValidationError as PydanticValidationError
 
 from dnd_assistant.application.changeset_apply import (
+    ApplyCommitState,
     ChangeSetApplyContext,
     ChangeSetApplyOutcome,
     ChangeSetApplyResult,
@@ -36,6 +37,14 @@ from dnd_assistant.application.changeset_review import (
     ChangeSetReview,
     ReviewDecision,
     build_changeset_review,
+)
+from dnd_assistant.application.changeset_status import (
+    AuditOperationState,
+    ChangeSetStatus,
+    assert_changeset_applicable,
+    build_changeset_status,
+    load_apply_attempts,
+    record_apply_attempt,
 )
 from dnd_assistant.application.changeset_store import (
     ApprovalPersistOutcome,
@@ -49,11 +58,18 @@ from dnd_assistant.application.changeset_store import (
 from dnd_assistant.cli.session import _now_utc, _recovery_preflight
 from dnd_assistant.domain.changeset import (
     AppendFactOperation,
+    ChangeSet,
     CreateEntityOperation,
     UpdateEntityOperation,
 )
-from dnd_assistant.errors import DndAssistantError, ValidationError
-from dnd_assistant.storage.audit import AuditService
+from dnd_assistant.errors import (
+    ConflictError,
+    DndAssistantError,
+    NotFoundError,
+    StorageError,
+    ValidationError,
+)
+from dnd_assistant.storage.audit import AuditRecord, AuditService
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
 
@@ -70,6 +86,17 @@ def _compose_repository(vault_root: Path) -> ObsidianVaultRepository:
     audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
     audit_service = AuditService(str(audit_log_path))
     return ObsidianVaultRepository(vault_root=str(vault_root), audit_service=audit_service)
+
+
+def _read_audit_records(vault_root: Path) -> list[AuditRecord]:
+    """Read validated audit records through the storage service.
+
+    The CLI never parses the audit JSONL itself: ``AuditService.read_all``
+    returns validated ``AuditRecord`` values, and the application status service
+    owns the correlation rules.
+    """
+    audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+    return AuditService(str(audit_log_path)).read_all()
 
 
 # ── Formatting helpers ─────────────────────────────────────────────────────
@@ -99,6 +126,21 @@ def _format_value(value: object) -> str:
 def _format_indices(indices: tuple[int, ...]) -> str:
     """Format an ordered index tuple, or an em-dash when empty."""
     return ", ".join(str(index) for index in indices) if indices else "—"
+
+
+_COMMIT_STATE_LABELS: dict[ApplyCommitState, str] = {
+    ApplyCommitState.COMMITTED: "зафиксировано",
+    ApplyCommitState.NOT_WRITTEN: "не записано",
+    ApplyCommitState.UNCONFIRMED: "не подтверждено (возможна частичная запись)",
+    ApplyCommitState.NOT_ATTEMPTED: "не выполнялось",
+}
+
+
+def _format_commit_state(state: ApplyCommitState | None) -> str:
+    """Format a failing-operation commit state for Russian output."""
+    if state is None:
+        return "—"
+    return _COMMIT_STATE_LABELS[state]
 
 
 def _render_operation(operation: object) -> list[str]:
@@ -205,6 +247,7 @@ def _render_apply_result(result: ChangeSetApplyResult) -> str:
         f"  Неудачная операция: #{failure.operation_index}",
         f"  Категория: {failure.category.value}",
         f"  Сообщение: {failure.message}",
+        f"  Состояние записи: {_format_commit_state(result.failing_operation_commit_state)}",
         f"  Оставшиеся операции: {_format_indices(result.remaining_operation_indices)}",
     ]
 
@@ -224,6 +267,110 @@ def _render_apply_result(result: ChangeSetApplyResult) -> str:
             *failed_lines,
         ]
     )
+
+
+def _render_attempt_record_failure(
+    result: ChangeSetApplyResult, error: object, vault_root: Path
+) -> str:
+    """Render a durable apply-attempt persistence failure without claiming rollback."""
+    lines = [
+        "Внимание: результат применения получен, но durable-запись попытки не сохранена.",
+        f"  Причина: {error}",
+        "  Автоматический откат не выполнялся; повторное применение не запускалось.",
+        "  Фактическое состояние можно восстановить из журнала аудита:",
+        f"    dnd changeset status {result.changeset_id} --vault {vault_root}",
+    ]
+    if result.outcome is ChangeSetApplyOutcome.APPLIED:
+        lines.append("  Все операции могли быть успешно записаны в Vault.")
+    elif result.outcome is ChangeSetApplyOutcome.PARTIAL:
+        lines.append("  Уже применённые операции остаются применёнными.")
+    elif result.failing_operation_commit_state is ApplyCommitState.UNCONFIRMED:
+        lines.append("  Неудачная операция может быть частично записана (не подтверждено).")
+    return "\n".join(lines)
+
+
+_OUTCOME_LABELS: dict[ChangeSetApplyOutcome, str] = {
+    ChangeSetApplyOutcome.APPLIED: "применён",
+    ChangeSetApplyOutcome.PARTIAL: "применён частично",
+    ChangeSetApplyOutcome.FAILED: "не применён (нет подтверждённых операций)",
+}
+
+_AUDIT_STATE_LABELS: dict[AuditOperationState, str] = {
+    AuditOperationState.NOT_ATTEMPTED: "не выполнялось",
+    AuditOperationState.UNCONFIRMED: "не подтверждено (intent без committed)",
+    AuditOperationState.COMMITTED: "зафиксировано (intent + committed)",
+}
+
+_DECISION_LABELS: dict[ReviewDecision, str] = {
+    ReviewDecision.APPROVED: "одобрено",
+    ReviewDecision.REJECTED: "отклонено",
+}
+
+
+def _render_status(
+    changeset: ChangeSet,
+    approval: ChangeSetApproval | None,
+    status: ChangeSetStatus,
+) -> str:
+    """Render a truthful, read-only ChangeSet workflow status in Russian."""
+    lines = [
+        f"Статус ChangeSet {status.changeset_id}",
+        "  Предложение: найдено",
+        f"  Операций: {len(changeset.operations)}",
+        f"  Отпечаток: {status.fingerprint.algorithm}:{status.fingerprint.digest}",
+    ]
+
+    if approval is None:
+        lines.append("  Решение о проверке: отсутствует")
+    else:
+        lines.append(f"  Решение: {_DECISION_LABELS[approval.decision]}")
+        lines.append(f"  Проверяющий: {approval.reviewer}")
+        if approval.reason is not None:
+            lines.append(f"  Причина: {approval.reason}")
+        if not approval.is_approved:
+            lines.append("  Привязка одобрения: решение не является одобрением")
+        elif approval.matches_approved_changeset(changeset):
+            lines.append("  Привязка одобрения: подтверждена")
+        else:
+            lines.append("  Привязка одобрения: НЕ подтверждена (идентификатор/отпечаток)")
+
+    lines.append("")
+    lines.append(f"Записей о применении: {status.attempt_count}")
+    latest = status.latest_attempt
+    if latest is None:
+        lines.append("  Последняя попытка: отсутствует")
+    else:
+        lines.append(f"  Последний результат: {_OUTCOME_LABELS[latest.outcome]}")
+        lines.append(f"  Источник: {latest.source}")
+        lines.append(f"  Время: {latest.real_time.isoformat()}")
+        lines.append(f"  Применённые операции: {_format_indices(latest.applied_operation_indices)}")
+        lines.append(
+            f"  Оставшиеся операции: {_format_indices(latest.remaining_operation_indices)}"
+        )
+        if latest.failure is not None:
+            lines.append(f"  Неудачная операция: #{latest.failure.operation_index}")
+            lines.append(f"  Категория: {latest.failure.category.value}")
+            lines.append(f"  Сообщение: {latest.failure.message}")
+            lines.append(
+                f"  Состояние записи: {_format_commit_state(latest.failing_operation_commit_state)}"
+            )
+        if latest.outcome is not ChangeSetApplyOutcome.APPLIED:
+            lines.append("  Автоматический откат не выполнялся.")
+
+    lines.append("")
+    lines.append("Аудит операций:")
+    for index, state in enumerate(status.audit_states):
+        lines.append(f"  #{index}: {_AUDIT_STATE_LABELS[state]}")
+    if not status.audit_evidence_present:
+        lines.append("  (записей аудита по этому ChangeSet не найдено)")
+
+    lines.append("")
+    if status.can_apply:
+        lines.append("Повторное применение: разрешено")
+    else:
+        lines.append(f"Повторное применение: запрещено — {status.block_reason}")
+        lines.append("Требуется ручная проверка; автоматическое возобновление не выполняется.")
+    return "\n".join(lines)
 
 
 # ── ChangeSet Typer subgroup ───────────────────────────────────────────────
@@ -442,12 +589,75 @@ def _changeset_apply(
             )
             raise typer.Exit(code=1)
 
+        # S10-06 pre-apply gate: durable attempt history + correlated audit
+        # evidence decide whether another apply may start.  The gate logic lives
+        # in application.changeset_status; the CLI only invokes it.
+        attempts = load_apply_attempts(store, changeset_id)
+        audit_records = _read_audit_records(vault_root)
+        assert_changeset_applicable(changeset, attempts, audit_records)
+
         context = ChangeSetApplyContext(source="cli", real_time=_now_utc())
         result = apply_changeset(changeset, approval, repository, context=context)
         typer.echo(_render_apply_result(result))
 
+        # Persist the durable attempt record after a structured result.  A
+        # record-persistence failure never triggers rollback or a mutation
+        # retry: the apply result is already printed truthfully.
+        try:
+            record_apply_attempt(
+                store,
+                changeset,
+                result,
+                source=context.source,
+                real_time=context.real_time,
+            )
+        except (StorageError, ConflictError) as exc:
+            typer.echo(_render_attempt_record_failure(result, exc, vault_root), err=True)
+            raise typer.Exit(code=1) from exc
+
         if result.outcome is not ChangeSetApplyOutcome.APPLIED:
             raise typer.Exit(code=1)
+    except DndAssistantError as exc:
+        typer.echo(f"Ошибка: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+@changeset_app.command("status")
+def _changeset_status(
+    changeset_id: str = typer.Argument(  # noqa: B008
+        ...,
+        help="Идентификатор предложения ChangeSet.",
+    ),
+    vault: Path = typer.Option(  # noqa: B008
+        ...,
+        "--vault",
+        help="Путь к корню Obsidian Vault.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+    ),
+) -> None:
+    """Показать durable-состояние workflow ChangeSet (только чтение).
+
+    Намеренно НЕ запускает глобальный recovery preflight: команда должна
+    оставаться доступной для диагностики незавершённого состояния ChangeSet
+    даже тогда, когда recovery preflight блокирует изменяющие команды.
+    """
+    vault_root = vault.resolve(strict=False)
+
+    try:
+        store = _compose_store(vault_root)
+        changeset = load_proposal(store, changeset_id)
+        try:
+            approval: ChangeSetApproval | None = load_approval(store, changeset_id)
+        except NotFoundError:
+            approval = None
+        attempts = load_apply_attempts(store, changeset_id)
+        audit_records = _read_audit_records(vault_root)
+        status = build_changeset_status(changeset, attempts, audit_records)
+        typer.echo(_render_status(changeset, approval, status))
     except DndAssistantError as exc:
         typer.echo(f"Ошибка: {exc}", err=True)
         raise typer.Exit(code=1) from exc

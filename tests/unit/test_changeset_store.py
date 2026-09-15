@@ -133,6 +133,54 @@ class TestApprovalArtifacts:
         assert (root / "_system" / "changesets" / "cs-1.approval.json").is_file()
 
 
+# ── Apply-attempt append/read ──────────────────────────────────────────────
+
+
+class TestApplyAttemptArtifacts:
+    def test_append_then_exact_read(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        store = ObsidianChangeSetStore(root)
+
+        store.append_apply_attempt("cs-1", '{"n":1}\n')
+
+        assert store.read_apply_attempts_if_present("cs-1") == '{"n":1}\n'
+        assert (root / "_system" / "changesets" / "cs-1.apply.jsonl").is_file()
+
+    def test_absent_read_is_none(self, tmp_path: Path) -> None:
+        store = ObsidianChangeSetStore(_make_vault(tmp_path))
+        assert store.read_apply_attempts_if_present("cs-missing") is None
+
+    def test_append_is_append_only(self, tmp_path: Path) -> None:
+        store = ObsidianChangeSetStore(_make_vault(tmp_path))
+        store.append_apply_attempt("cs-1", '{"n":1}\n')
+        store.append_apply_attempt("cs-1", '{"n":2}\n')
+
+        assert store.read_apply_attempts_if_present("cs-1") == '{"n":1}\n{"n":2}\n'
+
+    def test_append_does_not_touch_proposal_or_approval(self, tmp_path: Path) -> None:
+        store = ObsidianChangeSetStore(_make_vault(tmp_path))
+        store.create_proposal("cs-1", PROPOSAL_TEXT)
+        store.append_apply_attempt("cs-1", '{"n":1}\n')
+
+        assert store.read_proposal("cs-1") == PROPOSAL_TEXT
+        assert store.read_approval_if_present("cs-1") is None
+
+    def test_symlink_apply_leaf_rejected(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        store = ObsidianChangeSetStore(root)
+        changesets = root / "_system" / "changesets"
+        changesets.mkdir()
+        target = tmp_path / "outside.jsonl"
+        target.write_text("{}", encoding="utf-8")
+        if not _can_symlink(tmp_path, target, changesets / "cs-1.apply.jsonl", is_dir=False):
+            pytest.skip("symlink not supported")
+
+        with pytest.raises(StorageError):
+            store.append_apply_attempt("cs-1", '{"n":1}\n')
+        with pytest.raises(StorageError):
+            store.read_apply_attempts_if_present("cs-1")
+
+
 # ── Path-component safety ──────────────────────────────────────────────────
 
 
@@ -165,6 +213,8 @@ class TestPathSafety:
             store.create_proposal(unsafe_id, PROPOSAL_TEXT)
         with pytest.raises(StorageError):
             store.create_approval(unsafe_id, APPROVAL_TEXT)
+        with pytest.raises(StorageError):
+            store.append_apply_attempt(unsafe_id, '{"n":1}\n')
 
         existing = sorted(changesets.iterdir()) if changesets.exists() else []
         assert existing == []

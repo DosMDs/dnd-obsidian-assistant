@@ -29,10 +29,11 @@ from dnd_assistant.domain.types import (
     Provenance,
     Visibility,
 )
+from dnd_assistant.storage.audit import AuditRecord, AuditService
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
 from dnd_assistant.storage.patch import EntityPatch
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
-from tests.integration.helpers import make_audit_context, make_document
+from tests.integration.helpers import BASE_TIME, make_audit_context, make_document
 
 runner = CliRunner()
 
@@ -118,6 +119,16 @@ class TestCliWorkflow:
         assert "approved" in approval_text
         assert '"reviewer":"dm"' in approval_text
 
+        # S10-06: the durable apply-attempt artifact exists and a fresh store
+        # instance (the ``status`` invocation composes a new one) reports truth.
+        attempt_artifact = vault_root / "_system" / "changesets" / "cs-flow.apply.jsonl"
+        assert attempt_artifact.is_file()
+        status = runner.invoke(app, ["changeset", "status", "cs-flow", "--vault", str(vault_root)])
+        assert status.exit_code == 0
+        assert "Записей о применении: 1" in status.stdout
+        assert "Последний результат: применён" in status.stdout
+        assert "Повторное применение: запрещено" in status.stdout
+
     def test_tampered_proposal_fails_fingerprint_and_mutates_nothing(
         self, tmp_path: Path, vault_root: Path
     ) -> None:
@@ -140,6 +151,7 @@ class TestCliWorkflow:
 
         assert result.exit_code == 1
         assert _snapshot(vault_root) == before
+        assert not (vault_root / "_system" / "changesets" / "cs-tamper.apply.jsonl").exists()
 
     def test_stale_revision_fails_fresh_preflight_and_mutates_nothing(
         self, tmp_path: Path, vault_root: Path, repo: ObsidianVaultRepository
@@ -174,4 +186,77 @@ class TestCliWorkflow:
         result = runner.invoke(app, ["changeset", "apply", "cs-stale", "--vault", str(vault_root)])
 
         assert result.exit_code == 1
+        assert _snapshot(vault_root) == before
+        assert not (vault_root / "_system" / "changesets" / "cs-stale.apply.jsonl").exists()
+
+
+class TestCrashWithoutAttemptArtifact:
+    """Audit evidence without a workflow record must fail closed."""
+
+    def _proposal(self, changeset_id: str, entity_id: str) -> ChangeSet:
+        return _changeset(changeset_id, (_create_op(entity_id),))
+
+    def test_committed_audit_without_artifact_blocks(
+        self, tmp_path: Path, vault_root: Path, repo: ObsidianVaultRepository
+    ) -> None:
+        changeset = self._proposal("cs-commit", "npc-commit")
+        document = _save_document(tmp_path, changeset, "proposal.json")
+        runner.invoke(app, ["changeset", "save", str(document), "--vault", str(vault_root)])
+        runner.invoke(
+            app,
+            ["changeset", "approve", "cs-commit", "--vault", str(vault_root), "--reviewer", "dm"],
+        )
+
+        # Crash-equivalent: the entity + committed audit exist, but the workflow
+        # artifact was never written (operation id matches the apply scheme).
+        repo.create_entity(make_document("npc-commit"), audit=make_audit_context("cs-commit:0"))
+
+        status = runner.invoke(
+            app, ["changeset", "status", "cs-commit", "--vault", str(vault_root)]
+        )
+        assert status.exit_code == 0
+        assert "зафиксировано (intent + committed)" in status.stdout
+        assert "Повторное применение: запрещено" in status.stdout
+
+        before = _snapshot(vault_root)
+        apply_result = runner.invoke(
+            app, ["changeset", "apply", "cs-commit", "--vault", str(vault_root)]
+        )
+        assert apply_result.exit_code == 1
+        assert _snapshot(vault_root) == before
+
+    def test_intent_only_audit_without_artifact_blocks(
+        self, tmp_path: Path, vault_root: Path
+    ) -> None:
+        changeset = self._proposal("cs-intent", "npc-intent")
+        document = _save_document(tmp_path, changeset, "proposal.json")
+        runner.invoke(app, ["changeset", "save", str(document), "--vault", str(vault_root)])
+        runner.invoke(
+            app,
+            ["changeset", "approve", "cs-intent", "--vault", str(vault_root), "--reviewer", "dm"],
+        )
+
+        AuditService(str(vault_root / "_system" / "audit" / "audit.jsonl")).append(
+            AuditRecord(
+                operation_id="cs-intent:0",
+                real_time=BASE_TIME,
+                operation="create_entity",
+                entity_id="npc-intent",
+                source="test",
+                phase="intent",
+            )
+        )
+
+        status = runner.invoke(
+            app, ["changeset", "status", "cs-intent", "--vault", str(vault_root)]
+        )
+        assert status.exit_code == 0
+        assert "не подтверждено" in status.stdout
+        assert "Повторное применение: запрещено" in status.stdout
+
+        before = _snapshot(vault_root)
+        apply_result = runner.invoke(
+            app, ["changeset", "apply", "cs-intent", "--vault", str(vault_root)]
+        )
+        assert apply_result.exit_code == 1
         assert _snapshot(vault_root) == before

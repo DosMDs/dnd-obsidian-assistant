@@ -10,7 +10,7 @@ S10-02 — DONE
 S10-03 — DONE
 S10-04 — DONE
 S10-05 — DONE
-S10-06 — NOT STARTED
+S10-06 — DONE
 S10-07 — NOT STARTED
 Stage 11 — NOT STARTED
 ```
@@ -33,8 +33,11 @@ domain proposal schemas; `S10-02` implemented the pure validation/preflight
 layer; `S10-03` implemented the application review/fingerprint/approval
 contracts; `S10-04` implemented the repository-backed applier; `S10-05`
 implemented the durable proposal/approval artifact store and the
-`dnd changeset` CLI review/apply workflow. No model-generated ChangeSet
-proposal producer exists yet; `S10-06` remains `NOT STARTED`.
+`dnd changeset` CLI review/apply workflow. `S10-06` implemented the append-only
+apply-attempt artifact, deterministic operation-index audit correlation, the
+truthful commit-state classification, the pre-apply applicability gate and the
+read-only `dnd changeset status` command. No model-generated ChangeSet proposal
+producer exists yet; `S10-07` remains `NOT STARTED`.
 
 ## 1. Purpose
 
@@ -957,5 +960,201 @@ No model-generated proposal producer, no S10-06 hardening, no rollback/retry,
 no SQLite canonical store and no Stage-11 work was introduced.
 
 ```text
-Next task:         S10-06 — Failure / partial-application / audit hardening (NOT STARTED)
+Next task:         S10-06 — Failure / partial-application / audit hardening
+```
+
+## 23. S10-06 record
+
+```text
+Task:              S10-06 — Failure / partial-application / audit hardening
+Routing:           PLAN_REQUIRED (accepted) -> BUILD
+Baseline:          feat/changeset @ e5acc0bcdda777dd35ea836dc131b45eabe53247
+                   upstream origin/feat/changeset, clean working tree
+```
+
+Implemented durable apply-attempt evidence, deterministic audit correlation,
+truthful commit-state classification, a fail-closed pre-apply gate, and a
+read-only `dnd changeset status` command.
+
+### Append-only apply-attempt artifact
+
+```text
+<vault>/_system/changesets/<changeset_id>.apply.jsonl
+```
+
+The artifact is **append-only** and is a durable Vault control artifact, never
+campaign entity truth. Each record is one deterministic compact JSON line,
+appended with `flush()` + `fsync()`; existing bytes are never rewritten or
+truncated, so historical failure evidence is never destroyed. The storage layer
+continues to deal only in an opaque `changeset_id` path key and opaque UTF-8
+text (`append_apply_attempt`, `read_apply_attempts_if_present`); it has no
+domain/application/model dependency. A malformed, blank or partial final line
+fails closed with `StorageError` on read. Path-component, symlink and namespace
+protections are identical to proposal/approval artifacts.
+
+### Attempt schema and binding
+
+```text
+schema_version, changeset_id, fingerprint (sha256), outcome,
+applied_operation_indices, remaining_operation_indices, failure,
+failing_operation_commit_state, source, real_time
+```
+
+Every record binds the exact `changeset_id` and the exact
+`ChangeSetFingerprint` of the reviewed proposal. A mismatch (id or fingerprint)
+fails closed with `ConflictError`. Serialization/parsing, history validation,
+audit correlation and the applicability gate live in
+`application/changeset_status.py`; the CLI never reads or writes the artifact or
+the audit internals directly.
+
+### APPLIED / PARTIAL / FAILED semantics
+
+```text
+APPLIED  all operations confirmed applied
+PARTIAL  an applied prefix is confirmed, then apply stopped
+FAILED   no operation is CONFIRMED applied
+```
+
+`FAILED` no longer claims that no Vault write could have persisted. The new
+`failing_operation_commit_state` (`ApplyCommitState`) is derived from the typed
+failure category, never from parsing an exception message:
+
+```text
+VALIDATION / NOT_FOUND / CONFLICT -> NOT_WRITTEN
+    (the repository raises these before the atomic entity write)
+STORAGE                           -> UNCONFIRMED
+    (the failure may have occurred after the entity write, e.g. committed
+     audit finalization or read-back)
+```
+
+### Retry policy
+
+```text
+latest APPLIED                              -> ConflictError (already applied)
+latest PARTIAL                              -> ConflictError (unresolved partial)
+latest FAILED + NOT_WRITTEN, clean audit    -> retry allowed
+latest FAILED + UNCONFIRMED                 -> ConflictError (manual review)
+any intent-only audit evidence              -> ConflictError
+any committed audit evidence not reconciled -> ConflictError
+```
+
+No automatic resume, no operation replay and no rollback are introduced.
+Repository duplicate operation IDs and optimistic revisions remain the final
+backstop.
+
+### Crash without an attempt artifact
+
+If audit evidence exists but no attempt record does (crash before the workflow
+record was appended), the status command reports it and re-apply is blocked:
+
+```text
+committed evidence -> durable mutation evidence with a missing workflow record
+intent-only        -> unresolved/unconfirmed operation
+no evidence        -> no recorded apply attempt
+```
+
+### Audit correlation
+
+Per index the operation id is `f"{changeset_id}:{index}"`:
+
+```text
+no records                   -> NOT_ATTEMPTED
+exactly [intent]             -> UNCONFIRMED
+exactly [intent, committed]  -> COMMITTED
+anything else                -> ConflictError (impossible sequence)
+```
+
+Entity filesystem state is never inferred from the audit log alone.
+
+### Status command
+
+```text
+dnd changeset status <changeset_id> --vault PATH
+```
+
+Read-only. It renders in Russian: proposal presence, fingerprint, approval
+presence/decision/reviewer/binding, attempt count, latest outcome, applied /
+failed / remaining indices, failing category/message/commit state, per-index
+audit states, a contradiction/unresolved warning, and an explicit no-rollback
+statement for non-APPLIED states. It deliberately does **not** run the global
+recovery preflight so it remains usable to diagnose unresolved ChangeSet state
+even while recovery preflight blocks mutating commands.
+
+### Attempt-artifact persistence failure
+
+When `apply_changeset` returns a structured result but the attempt record cannot
+be persisted, the CLI:
+
+- never rolls back, retries or replaces the returned result;
+- prints the apply result truthfully;
+- prints a strong Russian warning that the durable record failed;
+- prints that no rollback/retry occurred;
+- exits `1` regardless of the mutation outcome.
+
+`status` later derives available truth from repository audit evidence.
+
+### Boundaries and non-goals
+
+`storage/session_recovery/*`, `domain/changeset.py`, `VaultRepository` public
+write semantics, the model/agent runtime and Stage-11 code are unchanged. No
+rollback, resume or operation-replay mechanism was added.
+
+### Known limitation (R1 — recovery wedge)
+
+An intent-only ChangeSet audit record carrying a real `session_ref` can
+currently participate in the global session-recovery
+`unresolved_audit_intent` detector and block mutating CLI commands, because
+there is no repair action for that issue. S10-06 does **not** modify
+`storage/session_recovery/*` and adds no repair action; it mitigates diagnosis
+by making `dnd changeset status` preflight-free and by failing the pre-apply
+gate with a specific `ConflictError`. A narrowly-scoped ChangeSet recovery
+handling remains a separate, explicitly authorized task.
+
+### Evidence
+
+```text
+tests/unit/test_changeset_status.py            attempt round-trips (APPLIED,
+                                               FAILED NOT_WRITTEN, FAILED
+                                               UNCONFIRMED, PARTIAL), restart
+                                               truth, JSONL fail-closed,
+                                               audit correlation, history
+                                               validation, applicability gate,
+                                               status, terminal refusal
+tests/unit/test_changeset_apply.py             commit-state derivation for all
+                                               four failure categories
+tests/unit/test_changeset_store.py             append-only apply-attempt I/O,
+                                               path/symlink safety
+tests/unit/test_cli_changeset.py               status command, double-apply and
+                                               retry gate, intent-only block,
+                                               attempt-record failure classes
+tests/integration/test_changeset_cli.py        save->apply->artifact->status on
+                                               a fresh store instance, no record
+                                               on rejection/tamper/stale, crash-
+                                               equivalent committed/intent-only
+                                               audit without artifact
+tests/contract/test_changeset_workflow_boundaries.py
+                                               application status layer,
+                                               storage dependency direction and
+                                               CLI artifact/audit indirectness
+```
+
+### Gates
+
+```text
+uv run pytest tests/unit/test_changeset_status.py tests/unit/test_changeset_apply.py tests/unit/test_changeset_store.py tests/unit/test_cli_changeset.py -q
+uv run pytest tests/integration/test_changeset_cli.py tests/integration/test_changeset_apply.py -q
+uv run pytest tests/contract/test_boundaries.py tests/contract/test_changeset_workflow_boundaries.py tests/contract/test_maintainability.py tests/contract/test_test_harness_policy.py -q
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+git diff --check
+```
+
+Full suite: 5423 passed, 117 skipped. Pyright: 0 errors, 0 warnings.
+`tests/contract/test_boundaries.py` remains exactly 1000 lines (unchanged); no
+maintainability ratchet or threshold was changed.
+
+```text
+Next task:         S10-07 — Full Stage-10 historical review / completion (NOT STARTED)
 ```

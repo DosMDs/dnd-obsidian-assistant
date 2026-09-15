@@ -1,10 +1,11 @@
 """S10-05 Vault-backed ChangeSet workflow-artifact store.
 
-Implements the ``ChangeSetStore`` protocol for raw Stage-10 proposal and
-approval artifacts persisted under a dedicated non-entity namespace::
+Implements the ``ChangeSetStore`` protocol for raw Stage-10 proposal, approval
+and apply-attempt artifacts persisted under a dedicated non-entity namespace::
 
     <vault>/_system/changesets/<changeset_id>.proposal.json
     <vault>/_system/changesets/<changeset_id>.approval.json
+    <vault>/_system/changesets/<changeset_id>.apply.jsonl
 
 These artifacts are **workflow/control state**, not campaign entities.  They do
 not live in an entity directory and are never a second campaign Source of
@@ -22,7 +23,8 @@ Safety properties:
   separators, ``.``/``..``, traversal, Windows-invalid characters, trailing
   dot/space or reserved device names);
 - symlinked components and artifact leaves are rejected;
-- new artifacts are created exclusively (no silent overwrite);
+- new proposal/approval artifacts are created exclusively (no silent
+  overwrite); apply-attempt records are appended (never rewritten/truncated);
 - writes and reads are exact UTF-8 with newline preservation;
 - malformed I/O becomes ``StorageError``; a missing required artifact becomes
   ``NotFoundError``.
@@ -46,6 +48,7 @@ _SYSTEM_DIR = "_system"
 _CHANGESETS_DIR = "changesets"
 _PROPOSAL_SUFFIX = ".proposal.json"
 _APPROVAL_SUFFIX = ".approval.json"
+_APPLY_ATTEMPT_SUFFIX = ".apply.jsonl"
 
 
 # ── ChangeSetStore protocol ────────────────────────────────────────────────
@@ -55,11 +58,11 @@ _APPROVAL_SUFFIX = ".approval.json"
 class ChangeSetStore(Protocol):
     """Protocol for persisted ChangeSet workflow/control artifacts.
 
-    This protocol owns safe persistence of raw Stage-10 proposal and approval
-    artifacts under a dedicated non-entity Vault namespace.  It is a separate
-    persistence aggregate from ``VaultRepository`` — ChangeSet
-    proposal/approval artifacts are workflow/control state, not campaign
-    entities, and do not live in an entity directory.
+    This protocol owns safe persistence of raw Stage-10 proposal, approval and
+    apply-attempt artifacts under a dedicated non-entity Vault namespace.  It is
+    a separate persistence aggregate from ``VaultRepository`` — ChangeSet
+    workflow/control artifacts are not campaign entities and do not live in an
+    entity directory.
 
     The storage layer deals only in an opaque ``changeset_id`` path key and an
     opaque UTF-8 text payload.  Serialization, fingerprint binding, workflow
@@ -123,6 +126,27 @@ class ChangeSetStore(Protocol):
         """
         ...
 
+    def append_apply_attempt(self, changeset_id: str, content: str) -> None:
+        """Append one apply-attempt record to the append-only artifact.
+
+        The payload is a complete record terminated by a newline.  Existing
+        content is never rewritten or truncated; a partial append is left in
+        place and detected by the reader.
+
+        Raises:
+            StorageError: The id is unsafe, a filesystem error occurred, or the
+                append failed.
+        """
+        ...
+
+    def read_apply_attempts_if_present(self, changeset_id: str) -> str | None:
+        """Read the raw apply-attempt artifact, returning ``None`` when absent.
+
+        Raises:
+            StorageError: The id is unsafe or the artifact is unreadable.
+        """
+        ...
+
 
 # ── Exact UTF-8 I/O helpers ────────────────────────────────────────────────
 
@@ -152,6 +176,26 @@ def _exclusive_create_text(path: Path, content: str) -> None:
         except OSError:
             pass
         raise StorageError(f"Failed to create artifact: {path}", cause=exc) from exc
+
+
+def _append_text(path: Path, content: str) -> None:
+    """Append exact UTF-8 ``content`` to ``path`` with flush + fsync.
+
+    The file is opened in append mode (``open(..., "a")``), so existing bytes
+    are never rewritten or truncated.  A failed append is intentionally **not**
+    rolled back: truncating would destroy already-persisted history.  A partial
+    final record is detected by the strict reader.
+
+    Raises:
+        StorageError: A filesystem error occurred during the append.
+    """
+    try:
+        with open(path, mode="a", encoding="utf-8", newline="") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except OSError as exc:
+        raise StorageError(f"Failed to append artifact: {path}", cause=exc) from exc
 
 
 def _read_exact_text(path: Path) -> str:
@@ -325,6 +369,19 @@ class ObsidianChangeSetStore:
         self._ensure_changesets_dir()
         _exclusive_create_text(path, content)
 
+    def append_apply_attempt(self, changeset_id: str, content: str) -> None:
+        """Append one apply-attempt record to the append-only artifact.
+
+        The artifact is created on first append and never rewritten or
+        truncated.
+
+        Raises:
+            StorageError: The id is unsafe or a filesystem error occurred.
+        """
+        path = self._artifact_path(changeset_id, _APPLY_ATTEMPT_SUFFIX)
+        self._ensure_changesets_dir()
+        _append_text(path, content)
+
     # ── Read operations ───────────────────────────────────────────────────
 
     def read_proposal(self, changeset_id: str) -> str:
@@ -366,6 +423,17 @@ class ObsidianChangeSetStore:
             StorageError: The id is unsafe or the artifact is unreadable.
         """
         return self._read(changeset_id, _APPROVAL_SUFFIX)
+
+    def read_apply_attempts_if_present(self, changeset_id: str) -> str | None:
+        """Read the raw apply-attempt artifact, returning ``None`` when absent.
+
+        The raw text is returned verbatim; JSONL parsing and fail-closed
+        validation are application concerns.
+
+        Raises:
+            StorageError: The id is unsafe or the artifact is unreadable.
+        """
+        return self._read(changeset_id, _APPLY_ATTEMPT_SUFFIX)
 
     # ── Shared read ───────────────────────────────────────────────────────
 

@@ -203,11 +203,20 @@ def test_cli_changeset_does_not_write_artifacts_directly() -> None:
             "read_approval",
             "read_proposal_if_present",
             "read_approval_if_present",
+            "append_apply_attempt",
+            "read_apply_attempts_if_present",
             "write_text",
             "write_bytes",
         }
     )
     assert "open" not in call_names
+
+
+def test_cli_changeset_does_not_parse_audit_or_json_directly() -> None:
+    call_attrs, _ = _module_call_names(_CLI_CHANGESET)
+    # Audit records are obtained through AuditService (typed), never parsed by
+    # the CLI; apply-attempt serialization stays in the application service.
+    assert call_attrs.isdisjoint({"loads", "load", "dumps", "dump"})
 
 
 def test_cli_changeset_is_provider_neutral() -> None:
@@ -223,3 +232,61 @@ def test_cli_changeset_is_provider_neutral() -> None:
         or m.startswith("pydantic_ai.")
     )
     assert not offending, f"cli.changeset imported provider/framework modules: {offending}"
+
+
+# ── application/changeset_status ───────────────────────────────────────────
+
+_CHANGESET_STATUS = "dnd_assistant.application.changeset_status"
+
+_FORBIDDEN_STATUS_LAYERS: tuple[str, ...] = (
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.retrieval",
+    "dnd_assistant.cli",
+)
+
+_FORBIDDEN_STATUS_STDLIB: frozenset[str] = frozenset(
+    {"pathlib", "os", "shutil", "tempfile", "subprocess"}
+)
+
+
+def test_application_changeset_status_does_not_import_upper_layers() -> None:
+    _clean_import(_CHANGESET_STATUS)
+    loaded = _modules_loaded()
+    offending = sorted(
+        m
+        for m in loaded
+        if any(m == layer or m.startswith(f"{layer}.") for layer in _FORBIDDEN_STATUS_LAYERS)
+    )
+    assert not offending, f"application.changeset_status imported forbidden layers: {offending}"
+
+
+def test_application_changeset_status_is_filesystem_free_and_provider_neutral() -> None:
+    targets = _module_import_targets(_CHANGESET_STATUS)
+    roots = {target.split(".")[0] for target in targets}
+    offending = sorted(roots & (_FORBIDDEN_STATUS_STDLIB | {"ollama", "pydantic_ai"}))
+    assert not offending, f"application.changeset_status imported forbidden modules: {offending}"
+
+
+def test_application_changeset_status_references_no_concrete_storage_classes() -> None:
+    # Storage is referenced only through the application layer / protocol types;
+    # the status module itself names no concrete storage implementation.
+    names = _module_name_nodes(_CHANGESET_STATUS)
+    assert names.isdisjoint({"ObsidianChangeSetStore", "ObsidianVaultRepository"})
+
+
+# ── storage/changeset_store dependency direction ───────────────────────────
+
+_STORAGE_CHANGESET = "dnd_assistant.storage.changeset_store"
+
+
+def test_storage_changeset_store_depends_only_on_storage_and_errors() -> None:
+    targets = _module_import_targets(_STORAGE_CHANGESET)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.")
+        and not target.startswith("dnd_assistant.storage")
+        and target != "dnd_assistant.errors"
+    )
+    assert not offending, f"storage.changeset_store imported non-storage dependencies: {offending}"
