@@ -118,6 +118,105 @@ def _resolve_vault_root(vault_root: str | Path) -> Path:
     return resolved
 
 
+# ── Safe single path-component validation ───────────────────────────────────
+
+_WINDOWS_RESERVED_NAMES: frozenset[str] = frozenset(
+    name.lower()
+    for name in [
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        "COM1",
+        "COM2",
+        "COM3",
+        "COM4",
+        "COM5",
+        "COM6",
+        "COM7",
+        "COM8",
+        "COM9",
+        "LPT1",
+        "LPT2",
+        "LPT3",
+        "LPT4",
+        "LPT5",
+        "LPT6",
+        "LPT7",
+        "LPT8",
+        "LPT9",
+    ]
+)
+
+_WINDOWS_INVALID_FILENAME_CHARS: frozenset[str] = frozenset('<>:"|?*')
+
+
+def validate_path_component(value: str, *, label: str = "path component") -> str:
+    """Validate that ``value`` is a safe single filesystem path component.
+
+    This is a shared storage-level helper for values used as one directory /
+    filename component under an already-authorised Vault subtree.  It is not
+    Vault-root authorization and does not resolve against the filesystem.
+
+    Requirements beyond the domain string validators:
+
+    - strict ``str``, non-empty, no leading/trailing whitespace, printable;
+    - not ``"."`` or ``".."``;
+    - no ``/`` or ``\\`` path separators;
+    - no Windows-invalid filename characters (``<``, ``>``, ``:``, ``"``,
+      ``|``, ``?``, ``*``);
+    - no trailing ``.`` or space (unsafe on Windows);
+    - not a Windows reserved device name (case-insensitive, with or without
+      extension).
+
+    Args:
+        value: The candidate path component.
+        label: Human-readable label used in error messages.
+
+    Returns:
+        The validated value (unchanged).
+
+    Raises:
+        StorageError: The value is not safe for use as a path component.
+    """
+    if not isinstance(value, str):
+        raise StorageError(f"{label} must be a string, got {type(value).__name__}")
+
+    if not value:
+        raise StorageError(f"{label} must not be empty")
+
+    if value.strip() != value:
+        raise StorageError(f"{label} must not have leading or trailing whitespace")
+
+    if not value.isprintable():
+        raise StorageError(f"{label} must not contain non-printable characters")
+
+    if value in (".", ".."):
+        raise StorageError(f"{label} must not be '.' or '..', got: {value!r}")
+
+    if "/" in value:
+        raise StorageError(f"{label} must not contain '/', got: {value!r}")
+
+    if "\\" in value:
+        raise StorageError(f"{label} must not contain '\\', got: {value!r}")
+
+    for char in value:
+        if char in _WINDOWS_INVALID_FILENAME_CHARS:
+            raise StorageError(f"{label} must not contain character {char!r}, got: {value!r}")
+
+    if value.endswith("."):
+        raise StorageError(f"{label} must not end with '.', got: {value!r}")
+
+    if value.endswith(" "):
+        raise StorageError(f"{label} must not end with space, got: {value!r}")
+
+    base = value.split(".")[0].lower() if "." in value else value.lower()
+    if base in _WINDOWS_RESERVED_NAMES:
+        raise StorageError(f"{label} must not be a Windows reserved device name, got: {value!r}")
+
+    return value
+
+
 # ── Safe canonical entity-directory resolution ──────────────────────────────
 
 

@@ -9,7 +9,7 @@ S10-01 — DONE
 S10-02 — DONE
 S10-03 — DONE
 S10-04 — DONE
-S10-05 — NOT STARTED
+S10-05 — DONE
 S10-06 — NOT STARTED
 S10-07 — NOT STARTED
 Stage 11 — NOT STARTED
@@ -31,8 +31,10 @@ This document is the canonical Stage-10 architecture record and task map. It
 describes **contracts and evidence plans**. `S10-01` implemented the immutable
 domain proposal schemas; `S10-02` implemented the pure validation/preflight
 layer; `S10-03` implemented the application review/fingerprint/approval
-contracts; `S10-04` implemented the repository-backed applier. No CLI (`S10-05`)
-implementation exists yet.
+contracts; `S10-04` implemented the repository-backed applier; `S10-05`
+implemented the durable proposal/approval artifact store and the
+`dnd changeset` CLI review/apply workflow. No model-generated ChangeSet
+proposal producer exists yet; `S10-06` remains `NOT STARTED`.
 
 ## 1. Purpose
 
@@ -769,6 +771,191 @@ rollback/transaction layer, cross-process locking, proposal/approval persistence
 or CLI workflow was added. S10-05 remains NOT STARTED and Stage 11 remains NOT
 STARTED.
 
+## 22. S10-05 record
+
 ```text
-Next task:         S10-05 — CLI review/apply workflow + proposal persistence decision (NOT STARTED)
+Task:              S10-05 — CLI review/apply workflow + proposal persistence decision
+Routing:           PLAN (accepted) -> BUILD
+Baseline:          feat/changeset @ c139f3646443f5ac307f10c7ba1e0cca6868503e
+                   upstream origin/feat/changeset, clean working tree
+```
+
+Implemented the durable ChangeSet proposal/approval artifact store and the
+`dnd changeset` CLI review/apply workflow.
+
+### Artifact layout
+
+```text
+<vault>/_system/changesets/<changeset_id>.proposal.json
+<vault>/_system/changesets/<changeset_id>.approval.json
+```
+
+The `_system/changesets/` namespace is created on demand beneath a validated,
+symlink-checked `_system/`. Artifacts are **durable Vault control artifacts**,
+not campaign entities: they do not live in an entity directory, are never
+discovered by entity scans and are never a second campaign Source of Truth.
+Persistence remains inside the Vault Source of Truth.
+
+### Storage contract
+
+`storage/changeset_store.py` declares the `ChangeSetStore` protocol and its
+concrete `ObsidianChangeSetStore`. The storage layer deals only in an opaque
+`changeset_id` path key and an opaque UTF-8 text payload; it does not import
+ChangeSet domain/application types. `changeset_id` is validated as exactly one
+safe path component (no separators, `.`/`..`, traversal, Windows-invalid
+characters, trailing dot/space or reserved device names). New artifacts are
+created exclusively; symlinked components and leaves are rejected; missing
+required reads raise `NotFoundError`; malformed I/O raises `StorageError`.
+
+The shared `validate_path_component` helper was added to `storage/paths.py`.
+The `ChangeSetStore` protocol is declared in the cohesive
+`storage/changeset_store.py` module rather than `storage/types.py`, which is a
+pinned legacy size exception that must not grow; `storage/types.py` is
+therefore unchanged.
+
+### Proposal serialization and policy
+
+`application/changeset_store.py` serializes the proposal as
+`canonical_changeset_bytes(changeset).decode("utf-8") + "\n"` and loads it via
+JSON parse + `ChangeSet.model_validate(...)`. Malformed persisted proposals
+raise `StorageError`. Round-trips preserve the fingerprint exactly, including
+the `EntityFieldUpdate` "omitted nullable field" versus "explicit None"
+distinction.
+
+Proposal persistence policy:
+
+```text
+absent                          -> exclusive create; CREATED
+identical fingerprint           -> no write; ALREADY_PRESENT
+same id, different fingerprint  -> ConflictError
+present but malformed           -> StorageError
+```
+
+Proposal content is never silently overwritten.
+
+### Approval serialization and policy
+
+Approvals persist as deterministic JSON
+(`sort_keys=True`, compact separators, `ensure_ascii=False`) + `"\n"` and are
+loaded via `ChangeSetApproval.model_validate(...)`; malformed approvals raise
+`StorageError`.
+
+Mandatory binding rule: before any approval write the persisted proposal for
+`approval.changeset_id` must exist, its id must match, and its recomputed
+fingerprint must equal `approval.fingerprint`. The rule applies to both
+`APPROVED` and `REJECTED`; a missing proposal raises `NotFoundError` and a
+binding failure raises `ValidationError`, with no artifact written. Orphan or
+fingerprint-unbound approvals cannot be persisted.
+
+Approval persistence policy:
+
+```text
+absent                  -> exclusive create; CREATED
+existing exactly equal  -> no write; ALREADY_PRESENT
+any differing field     -> ConflictError
+```
+
+The approval artifact is immutable in S10-05: `REJECTED` cannot become
+`APPROVED`, `APPROVED` cannot become `REJECTED`, and reviewer/reason changes
+conflict.
+
+### CLI workflow
+
+`cli/changeset.py` registers the `changeset` subgroup in `cli/main.py`:
+
+```text
+dnd changeset save   <file>         --vault PATH
+dnd changeset review <changeset_id> --vault PATH
+dnd changeset approve <changeset_id> --vault PATH --reviewer ID [--reason TEXT]
+dnd changeset reject  <changeset_id> --vault PATH --reviewer ID [--reason TEXT]
+dnd changeset apply   <changeset_id> --vault PATH
+```
+
+- Every command runs the existing recovery preflight.
+- `save` reads an external user-supplied JSON file, validates it as a
+  `ChangeSet`, and persists through the application store service.
+- `review` loads the persisted proposal, runs `build_changeset_review(...)`
+  (fresh preflight) and renders Russian review text. It never creates an
+  approval; an invalid preflight exits `1`.
+- `approve`/`reject` require `--reviewer`, optionally accept `--reason`, build a
+  content-bound `ChangeSetApproval` and persist it through the application
+  service (which re-binds to the persisted proposal). No interactive default
+  approval exists.
+- `apply` loads the persisted proposal and approval, constructs
+  `ChangeSetApplyContext(source="cli", real_time=_now_utc())` and calls
+  `apply_changeset(...)`. Fingerprint comparison, the approval gate, fresh
+  preflight, revision logic, `EntityPatch` mapping and repository mutations
+  remain owned by S10-04; the CLI reimplements none of them.
+
+### Apply UX (Russian)
+
+```text
+APPLIED  exit 0  applied operation count/indices
+FAILED   exit 1  no operation succeeded; failed index/category/message;
+                 remaining indices
+PARTIAL  exit 1  strong warning that some Vault writes already happened;
+                 applied indices; failed index/category/message; remaining
+                 indices; automatic rollback did not run
+```
+
+No automatic retry. Ordinary project errors follow the existing CLI convention
+(`except DndAssistantError`, Russian error prefix, exit `1`) with no traceback.
+
+### Evidence
+
+```text
+tests/unit/test_changeset_store.py              exclusive create, exact read,
+                                                missing/conflict semantics,
+                                                path-component safety (traversal,
+                                                separators, Windows-invalid/
+                                                reserved/trailing), symlink
+                                                rejection, namespace containment,
+                                                deterministic filenames
+tests/unit/test_changeset_store_application.py  proposal CREATED/ALREADY_PRESENT/
+                                                Conflict/malformed, round-trip
+                                                fingerprint, omitted-vs-explicit-
+                                                None, approval binding + immutable
+                                                policy, malformed approval, missing
+                                                proposal, wrong fingerprint/id
+tests/unit/test_cli_changeset.py                help, save idempotency/conflict/
+                                                malformed, review valid/invalid,
+                                                approve/reject, reviewer required,
+                                                reason, no implicit approval, apply
+                                                approved/rejected/mismatch/stale and
+                                                APPLIED/FAILED/PARTIAL rendering
+tests/integration/test_changeset_cli.py         real temp Vault save->review->
+                                                approve->apply with entity + approval
+                                                verification; tampered-proposal
+                                                fingerprint mismatch zero mutation;
+                                                stale-revision fresh-preflight failure
+                                                zero mutation (snapshotted before
+                                                apply)
+tests/contract/test_boundaries.py               unchanged (1000-line hard limit)
+tests/contract/test_changeset_workflow_boundaries.py
+                                                storage/application/CLI import and
+                                                AST boundaries; CLI no repository
+                                                mutation, no EntityPatch, no direct
+                                                artifact writes; provider-neutral
+```
+
+### Gates
+
+```text
+uv run pytest tests/unit/test_changeset_store.py tests/unit/test_changeset_store_application.py -q
+uv run pytest tests/unit/test_cli_changeset.py -q
+uv run pytest tests/integration/test_changeset_cli.py -q
+uv run pytest tests/contract/test_boundaries.py -q
+uv run pytest tests/contract/test_changeset_workflow_boundaries.py -q
+uv run ruff check .
+uv run ruff format --check .
+uv run pyright
+uv run pytest
+git diff --check
+```
+
+No model-generated proposal producer, no S10-06 hardening, no rollback/retry,
+no SQLite canonical store and no Stage-11 work was introduced.
+
+```text
+Next task:         S10-06 — Failure / partial-application / audit hardening (NOT STARTED)
 ```

@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (S10-04)
+**Last updated:** 2026-09-15 (S10-05)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`; S10-02 pure validation/preflight `DONE`; S10-03 review/fingerprint/approval `DONE`; S10-04 applier/revision safety `DONE`)
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`; S10-02 pure validation/preflight `DONE`; S10-03 review/fingerprint/approval `DONE`; S10-04 applier/revision safety `DONE`; S10-05 CLI workflow + durable proposal store `DONE`)
 **Active stage:** Stage 10 — ChangeSet (`IN PROGRESS`)
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -76,7 +76,7 @@ final architecture decision (`ACCEPTED`) and reference-runtime retirement
 | S10-02 — Pure validator / whole-batch preflight | DONE |
 | S10-03 — Review DTO + approval/rejection + fingerprint binding | DONE |
 | S10-04 — ChangeSetApplier + revision/conflict safety | DONE |
-| S10-05 — CLI review/apply workflow + proposal persistence decision | NOT STARTED |
+| S10-05 — CLI review/apply workflow + proposal persistence decision | DONE |
 | S10-06 — Failure / partial-application / audit hardening | NOT STARTED |
 | S10-07 — Full Stage-10 historical review / completion | NOT STARTED |
 
@@ -101,8 +101,11 @@ review DTOs, canonical serialization, SHA-256 fingerprint and immutable
 approval/rejection content binding (`application/changeset_review.py`); `S10-04`
 implemented the repository-backed applier with fresh preflight, explicit
 update-field mapping, stop-on-first-write-failure and structured APPLIED/PARTIAL/
-FAILED results (`application/changeset_apply.py`). No CLI implementation exists
-yet, and `S10-05` remains `NOT STARTED`.
+FAILED results (`application/changeset_apply.py`). `S10-05` implemented the durable
+proposal/approval artifact store (`storage/changeset_store.py`,
+`application/changeset_store.py`) and the `dnd changeset`
+save/review/approve/reject/apply CLI workflow (`cli/changeset.py`). `S10-06`
+remains `NOT STARTED`.
 
 ## Accepted custom reference baseline
 
@@ -255,7 +258,7 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-05 — CLI review/apply workflow + proposal persistence decision)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-06 — Failure / partial-application / audit hardening)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -518,13 +521,14 @@ S10-01 immutable ChangeSet/operation domain schemas complete in domain/changeset
 S10-02 pure validator/whole-batch preflight complete in application/changeset_validation.py.
 S10-03 review/fingerprint/approval complete in application/changeset_review.py.
 S10-04 applier/revision safety complete in application/changeset_apply.py.
-No confirmed Stage-10 blocker; no CLI implementation exists yet.
+S10-05 proposal/approval artifact store + `dnd changeset` CLI workflow complete.
+No confirmed Stage-10 blocker; no model-generated ChangeSet producer exists yet.
 ```
 
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-05 — CLI review/apply workflow + proposal persistence decision)
+Stage 10 — ChangeSet (IN PROGRESS; next S10-06 — Failure / partial-application / audit hardening)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)
