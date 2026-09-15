@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 from pydantic import ValidationError
 
@@ -9,6 +11,7 @@ from dnd_assistant.domain.post_session_extraction import (
     MAX_CLAIM_EVIDENCE_REFS,
     MAX_CLAIM_TEXT_CHARS,
     MAX_CLAIMS,
+    MAX_REFERENCE_TOKEN_CHARS,
     POST_SESSION_EXTRACTION_SCHEMA_VERSION,
     ClaimKind,
     ExtractedClaim,
@@ -104,6 +107,17 @@ def test_claim_kind_values() -> None:
     assert {k.value for k in ClaimKind} == {"event", "fact", "relationship", "other"}
 
 
+def _mention_data(**overrides: object) -> dict[str, object]:
+    data: dict[str, object] = {
+        "mention_id": "m1",
+        "text": "Aria",
+        "entity_type": "npc",
+        "evidence_event_ids": ["evt_001"],
+    }
+    data.update(overrides)
+    return data
+
+
 def test_mention_candidate_entity_id_is_optional() -> None:
     mention = ExtractedEntityMention(
         mention_id="m1",
@@ -112,3 +126,41 @@ def test_mention_candidate_entity_id_is_optional() -> None:
         evidence_event_ids=("evt_001",),
     )
     assert mention.candidate_entity_id is None
+
+
+def test_candidate_entity_id_omitted_is_none() -> None:
+    mention = ExtractedEntityMention.model_validate(_mention_data())
+    assert mention.candidate_entity_id is None
+
+
+def test_candidate_entity_id_explicit_python_none_is_none() -> None:
+    mention = ExtractedEntityMention.model_validate(_mention_data(candidate_entity_id=None))
+    assert mention.candidate_entity_id is None
+
+
+def test_candidate_entity_id_explicit_json_null_is_none() -> None:
+    payload = _mention_data(candidate_entity_id=None)
+    mention = ExtractedEntityMention.model_validate_json(json.dumps(payload))
+    assert mention.candidate_entity_id is None
+
+
+def test_candidate_entity_id_valid_non_null_is_accepted() -> None:
+    mention = ExtractedEntityMention.model_validate(_mention_data(candidate_entity_id="npc-aria"))
+    assert mention.candidate_entity_id == "npc-aria"
+
+
+def test_candidate_entity_id_over_length_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ExtractedEntityMention.model_validate(
+            _mention_data(candidate_entity_id="x" * (MAX_REFERENCE_TOKEN_CHARS + 1))
+        )
+
+
+def test_candidate_entity_id_empty_string_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ExtractedEntityMention.model_validate(_mention_data(candidate_entity_id=""))
+
+
+def test_candidate_entity_id_whitespace_padded_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        ExtractedEntityMention.model_validate(_mention_data(candidate_entity_id=" npc-aria "))

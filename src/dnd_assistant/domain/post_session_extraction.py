@@ -76,12 +76,6 @@ def _validate_nonempty_printable(value: str) -> str:
     return value
 
 
-def _validate_optional_token(value: str | None) -> str | None:
-    if value is None:
-        return None
-    return _validate_nonempty_printable(value)
-
-
 # ── Annotated bounded value types ─────────────────────────────────────────
 
 BoundedToken = Annotated[
@@ -90,11 +84,11 @@ BoundedToken = Annotated[
     Field(max_length=MAX_REFERENCE_TOKEN_CHARS, description="Bounded non-empty token"),
 ]
 
-OptionalBoundedToken = Annotated[
-    str | None,
-    BeforeValidator(_validate_optional_token),
-    Field(max_length=MAX_REFERENCE_TOKEN_CHARS),
-]
+# Constrain the string branch, then union with ``None``.  Applying
+# ``max_length`` to the ``str | None`` union itself makes an explicit JSON
+# ``null`` fail structured validation, which is incorrect for an optional
+# model-output field.
+OptionalBoundedToken = BoundedToken | None
 
 BoundedClaimText = Annotated[
     str,
