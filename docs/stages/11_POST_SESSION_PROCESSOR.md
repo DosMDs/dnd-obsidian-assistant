@@ -1,0 +1,520 @@
+# Stage 11 — Post-session Processor
+
+## Status
+
+```text
+Stage 11 — IN PROGRESS
+S11-00 — DONE
+S11-01 — NOT STARTED
+S11-02 — NOT STARTED
+S11-03 — NOT STARTED
+S11-04 — NOT STARTED
+S11-05 — NOT STARTED
+S11-06 — NOT STARTED
+S11-07 — NOT STARTED
+S11-08 — NOT STARTED
+S11-09 — NOT STARTED
+Stage 12 — NOT STARTED
+```
+
+Architecture verdict:
+
+```text
+S11_ARCHITECTURE_READY
+```
+
+This document is the canonical Stage-11 architecture record and task map. It
+describes **contracts and evidence plans**. Implementation begins at S11-01.
+
+## 1. Purpose
+
+Stage 11 provides the heavy post-session processing pipeline. It gathers a
+completed session's durable evidence deterministically and turns it into
+model-generated, reviewable outputs: a GM/internal **Summary**, a player-facing
+**Recap**, and candidate campaign-memory updates expressed as a Stage-10
+**ChangeSet proposal**.
+
+Stage 11 builds on the accepted Stage-10 ChangeSet pipeline and must not bypass
+it. The canonical lifecycle remains:
+
+```text
+raw/session evidence
+→ post-session processing
+→ ChangeSet proposal
+→ validation
+→ human review/approval
+→ apply
+→ VaultRepository
+```
+
+Stage 11 stops at proposal creation. It never approves, applies, or synthesizes
+approval of a ChangeSet.
+
+## 2. Trust boundary
+
+```text
+Obsidian Vault = only campaign Source of Truth
+Python         = trusted domain/application/storage/retrieval/calendar logic
+LLM/model      = untrusted, replaceable mechanism
+```
+
+The model never:
+
+- receives unrestricted filesystem or shell access;
+- writes to the Vault;
+- performs revision/conflict checks;
+- decides that generated campaign facts are canonical;
+- bypasses ChangeSet validation/review/apply;
+- performs calendar arithmetic that belongs to `CalendarService`;
+- receives any tool surface for Stage-11 production.
+
+All canonical campaign mutation introduced by Stage 11 flows exclusively through
+the existing Stage-10 `ChangeSet` → review → `apply_changeset` →
+`VaultRepository` path. No alternate write path is introduced.
+
+## 3. Durable post-session evidence (input reality)
+
+After `session end`, the durable evidence is:
+
+```text
+_system/raw/sessions/<id>/metadata.json   canonical Session + touched_entities
+                                          extra (+ legacy processing_status string)
+_system/raw/sessions/<id>/events.jsonl    append-only immutable raw events
+_system/audit/audit.jsonl                 session.start/event.append/end audit
+_system/world_time.json                   current world tick (not session-specific)
+```
+
+Findings that shape the design:
+
+- `Sessions/<id>/Session.md` is a reserved path only; production code never
+  creates or reads it. It is not a canonical session record.
+- `Sessions/<id>/Summary.md` / `Recap.md` / `Notes.md` exist only in the golden
+  fixture and are not enforced by production code.
+- Raw events carry no per-event `visibility` field.
+- No canonical `CalendarDefinition` source is persisted or loaded in production.
+
+## 4. Accepted architecture corrections
+
+The S11-00 PLAN was accepted with five mandatory corrections. They are
+authoritative for every later Stage-11 task.
+
+### C1 — Prepared-input fingerprint, not raw-session-only identity
+
+Processing identity is a canonical **full prepared-input fingerprint**. A raw
+event hash may be one component, but it is never sufficient.
+
+```text
+input_fingerprint = SHA-256(canonical_json(input_identity))
+input_identity =
+    session_projection          # id, status, real_started_at/finished_at,
+                                # world_tick_start/end, revision,
+                                # ordered touched_entities
+  + ordered_raw_events          # canonical per-event serialization, in order
+  + entity_projections          # per referenced entity: stable id, revision,
+                                # name, status, visibility, knowledge_status,
+                                # tags, bounded body projection
+  + context_projection          # the exact deterministic prepared-input document
+  + calendar_projection         # raw ticks now; deterministic dates when a
+                                # canonical CalendarDefinition source exists
+  + processor_version
+  + prompt_version
+```
+
+`model_profile` shapes generated output, not the prepared input bytes, and is
+recorded as execution metadata (not part of `input_fingerprint`). Every
+deterministic durable/context input that can affect model input must be included.
+A future deterministic calendar projection is included the moment it exists.
+
+### C2 — Input identity separated from execution-attempt identity
+
+```text
+input_fingerprint   deterministic identity of prepared processing input
+attempt_id / run_id unique identity of one execution attempt
+```
+
+Multiple attempts may share one `input_fingerprint` (deliberate rerun, different
+`model_profile`, retry after failure). A ChangeSet produced by Stage 11 is
+**attempt-scoped** so separate reruns can never collide:
+
+```text
+changeset_id = cs_<session_ref>_<attempt_id>
+```
+
+Stage-10 `persist_proposal` is immutable/idempotent by `(changeset_id,
+fingerprint)`, so a distinct attempt id yields a distinct proposal, while an
+exact retry of the same attempt is idempotent.
+
+### C3 — Versioned, immutable generated artifacts (no silent overwrite)
+
+Generated Summary/Recap artifacts are **immutable and versioned per attempt**.
+Singleton `Sessions/<id>/Summary.md` / `Recap.md` files are **not** the sole
+durable processing outputs.
+
+```text
+_system/raw/sessions/<id>/processing/attempts/<attempt_id>/summary.md
+_system/raw/sessions/<id>/processing/attempts/<attempt_id>/recap.md
+```
+
+Each artifact is created exclusively and never rewritten or truncated. A later
+human-facing "latest/current" projection (for example into `Sessions/<id>/`) may
+be considered separately, but it is a projection/copy and must not destroy or
+replace prior generated artifact content. The projection decision is deferred;
+it is not part of S11-00 or of the initial durable contract.
+
+### C4 — Genuinely append-only processing ledger
+
+There is no mutable record whose status silently changes from `started` to
+`completed`. Processing history is an append-only event ledger:
+
+```text
+_system/raw/sessions/<id>/processing/ledger.jsonl   (append-only, one JSON
+                                                      event per line)
+```
+
+Event kinds (initial contract; exact schema owned by S11-01/S11-06):
+
+```text
+attempt_started       attempt_id, input_fingerprint, processor_version,
+                      prompt_version, model_profile, real_time
+artifact_persisted    attempt_id, artifact_kind, relative_path, content_hash,
+                      real_time
+proposal_persisted    attempt_id, changeset_id, changeset_fingerprint, real_time
+attempt_completed     attempt_id, outcome (produced | no_changes), real_time
+attempt_failed        attempt_id, phase, failure_category, message, real_time
+attempt_superseded    attempt_id, superseded_by_attempt_id, reason, real_time
+```
+
+State is reconstructed by folding events per `attempt_id`. A terminal event
+(`attempt_completed` or `attempt_failed`) defines terminal status; an
+`attempt_started` with no terminal event means interrupted/in-progress. Events
+are never rewritten or truncated; malformed/partial history fails closed.
+
+### C5 — Ledger is authority; legacy session fields are not
+
+During Stage 11 the durable processing **ledger is the authority** for
+processing state. `Session.processed`, `Session.processed_model_profile`, and the
+string-only `processing_status` extra are **not** authoritative Stage-11 state
+and must not be read as such.
+
+Whether those existing session-metadata fields should later be synchronized is an
+explicit **S11-06** decision, made only after crash/idempotency semantics are
+implemented and proven.
+
+## 5. Processing eligibility (Python-owned)
+
+Deterministic and evaluated before any model call:
+
+```text
+1 session exists and metadata parses
+2 status == "completed"
+3 real_finished_at and world_tick_end present and consistent
+  (world_tick_end >= world_tick_start; real_finished_at >= real_started_at)
+4 events.jsonl exists, is readable/safe, and parses strictly (fail closed)
+5 session is not the active session
+6 touched_entities is a list of valid EntityId strings
+7 requested attempt is not already terminal for the same attempt_id
+```
+
+The model never decides structural eligibility. `processing_status` is not the
+gate.
+
+## 6. Model input contract
+
+Three strictly separated tiers:
+
+```text
+canonical durable input   completed Session record, ordered raw events,
+                          touched_entities, canonical entity snapshots,
+                          current world tick
+derived context           Python-resolved entities, canonical visibility/
+                          knowledge_status, revisions, tick span, evidence links
+model prompt material      bounded deterministic projection of the above
+```
+
+Transient framework message history is never canonical input. All model input is
+rebuilt deterministically from the tiers above.
+
+## 7. Summary vs Recap semantics
+
+```text
+Summary   GM/internal factual artifact; may include DM-visible facts;
+          reproducible from the prepared input; never stronger evidence
+          than the raw log.
+Recap     player-facing narrative; must exclude GM/hidden information.
+```
+
+Recap visibility is enforced by a **deterministic** boundary, not prompt wording:
+the extraction phase emits per-claim typed structures with `visibility` and
+`knowledge_status` plus evidence links; Python constructs the recap model input
+only from the player-visible projection and cross-checks claims that reference
+canonical entities against those entities' canonical `visibility`. Claims whose
+evidence references a non-player entity are excluded from recap by default
+(fail-safe). Because raw events have no visibility field, recap-eligible claims
+must cite player-visible entity evidence and/or be tagged `player` without
+referencing any non-player entity.
+
+## 8. ChangeSet producer contract
+
+Stage 11 emits normal persisted Stage-10 proposals via
+`application.changeset_store.persist_proposal`; no parallel format.
+
+```text
+changeset_id      cs_<session_ref>_<attempt_id>     (attempt-scoped, C2)
+session_ref       real completed session id (R1 resolved)
+provenance        MODEL_INFERENCE + model_profile + prompt_version
+operations        create_entity first, then update_entity/append_fact, stable order
+expected_revision captured from Python reads at processing time; stale revisions
+                  fail closed at apply (no rebase)
+visibility        canonical Visibility validated by Python, never a raw passthrough
+persistence       _system/changesets/<id>.proposal.json (existing store)
+```
+
+Model output is untrusted structured input; Python validates, normalizes,
+resolves and constructs the immutable `ChangeSet`. Unsupported/ambiguous
+operations are omitted and recorded as `unresolved` items, never guessed. If
+zero valid operations result, Stage 11 emits a distinct `no_changes` outcome and
+no proposal (the domain requires at least one operation). Stage 11 never
+approves or applies.
+
+## 9. Entity ambiguity policy
+
+```text
+one unambiguous existing entity        -> reference its EntityId
+multiple plausible candidates          -> no mutation; record unresolved/ambiguous
+genuinely new entity (explicit signal) -> Python-allocated EntityId; create_entity
+alias-only mention                     -> resolve; else ambiguity/new-entity path
+unresolved reference                   -> record unresolved; omit
+```
+
+Canonical rule: `explicit unresolved/clarification/reviewable omission >
+speculative mutation`. Duplicate entities are never created because the model
+emitted a new name. Internal/DM resolution uses `VaultRepository` reads plus
+exact-ID matching; the player-only `SearchService`/`EntityResolver` contracts are
+reused only for the player-visible subset.
+
+## 10. Calendar/time policy
+
+All `world_tick` ↔ `GameDate` conversion and game-time arithmetic stay in
+`CalendarService`. No canonical `CalendarDefinition` source exists yet, so
+Stage 11 passes raw `world_tick` values deterministically and must not fabricate
+game dates. The model may phrase supplied deterministic time information but
+must never compute campaign time. When a canonical definition source is added,
+date projection becomes a deterministic Python step and enters
+`calendar_projection` (C1). `TimelineEvent` creation is not a Stage-10 operation
+kind and remains out of scope.
+
+## 11. Heavy-model/runtime integration
+
+- Narrow application-owned `PostSessionModel` protocol with typed structured
+  methods (extraction and rendering).
+- Pydantic AI adapter lives in an isolated `application/pydantic_ai_post_session`
+  style module, using `Agent(model, output_type=<PydanticModel>,
+  retries={"output": 0})`. No framework retries by policy.
+- The heavy model receives **no tools** and no `ToolExecutor` surface.
+- Model construction uses a models-layer factory for the post-session role
+  (reusing provider/URL/timeout mechanics). `build_pydantic_ai_ollama_model`
+  currently rejects non-`AGENT` roles, so S11-03 adds a focused factory and
+  decides the role value (`POST_SESSION` recommended; final choice S11-03).
+- Canonical tests inject a deterministic fake model; no Ollama is required.
+  Live heavy-model smoke/eval is opt-in only.
+
+## 12. Orchestration phases
+
+One bounded application service (`PostSessionProcessor`), explicit phases, not an
+autonomous tool-using agent:
+
+```text
+1 eligibility (Python, fail closed; no model call)
+2 input assembly + entity resolution (Python, deterministic)
+3 structured extraction (one model request; untrusted)
+4 validate/normalize + resolve + build ChangeSet / no_changes (Python)
+5 render Summary (full authorized extraction)
+  render Recap (player-only projection)
+6 persist, in order:
+     ledger attempt_started (already durable before model work)
+     artifact_persisted per generated artifact
+     proposal_persisted (if any)
+     attempt_completed | attempt_failed
+7 return aggregate result
+```
+
+## 13. Persistence, provenance and restart
+
+```text
+_system/raw/sessions/<id>/processing/ledger.jsonl              append-only ledger
+_system/raw/sessions/<id>/processing/attempts/<attempt_id>/
+        summary.md                                             immutable per attempt
+        recap.md                                               immutable per attempt
+_system/changesets/<id>.proposal.json                          Stage-10 proposal
+```
+
+Every durable artifact carries provenance: `session_ref`, `attempt_id`,
+`input_fingerprint`, real timestamp, model profile, prompt/processor version,
+artifact type, and ChangeSet id where applicable. No chain-of-thought is
+persisted. Model traces/metrics, if stored, are operational metadata only and are
+distinct from campaign truth.
+
+Restart: state is reconstructed by reading the ledger and verifying referenced
+artifacts/proposals. No hidden process state and no SQLite-only state.
+
+## 14. Reprocessing / idempotency
+
+```text
+same input_fingerprint + same attempt_id, terminal  -> idempotent no-op
+same input_fingerprint + new attempt_id             -> new attempt (allowed)
+different input_fingerprint                         -> new processing input
+```
+
+Raw events are immutable and reprocessable. Prior attempts and their generated
+artifacts are never overwritten. Multiple ChangeSets from reruns are
+distinguished by attempt-scoped `changeset_id`. An already-approved/applied
+earlier ChangeSet is never replayed or re-applied by Stage 11; only a new
+proposal may be created.
+
+## 15. Failure/restart semantics
+
+```text
+model unavailable / timeout          -> ModelError; ledger attempt_failed; no
+                                        canonical mutation
+malformed structured output          -> ValidationError; attempt_failed
+unknown operation kind / bad IDs     -> rejected before persistence
+ambiguous entity                     -> unresolved item, not a hard failure
+summary produced, ChangeSet failed   -> artifacts persist; attempt_failed;
+                                        no proposal; rerun allowed
+interrupted processing               -> attempt_started without terminal event;
+                                        detected on next run
+evidence changed unexpectedly        -> input_fingerprint mismatch; fail closed
+duplicate processing request         -> idempotent terminal attempt
+```
+
+No partial failure can corrupt canonical campaign state: the only canonical
+entity mutation is Stage-10 apply, which Stage 11 never invokes.
+
+## 16. CLI/user flow
+
+```text
+dnd session process [SESSION_ID] --vault PATH --config PATH --profile NAME
+                    [--latest]
+dnd session outputs <SESSION_ID> --vault PATH      (optional read-only)
+```
+
+Selector: exactly one of explicit `SESSION_ID` or `--latest`; both or neither
+fails safely. Review/approve/apply remain exclusively `dnd changeset ...`. New
+CLI logic lives in a focused module; `cli/changeset.py` (666 lines) is not grown.
+
+## 17. Invariants
+
+```text
+I1  Vault is the only campaign Source of Truth
+I2  Stage 11 creates proposals; it never approves or applies
+I3  Every model output is untrusted until Python validates it
+I4  The heavy model has no tools, no filesystem, no shell, no Vault write
+I5  input_fingerprint binds the full deterministic prepared input (C1)
+I6  input identity and attempt identity are distinct (C2)
+I7  generated artifacts are immutable/versioned per attempt (C3)
+I8  the processing ledger is append-only; history is never rewritten (C4)
+I9  the ledger is authoritative; legacy session fields are not (C5)
+I10 recap excludes hidden information by deterministic filtering, not prompts
+I11 ambiguous references are never speculatively mutated
+I12 calendar conversion and arithmetic stay in CalendarService
+I13 domain/storage never depend on a concrete model/provider
+I14 no new canonical campaign store outside the Vault
+```
+
+## 18. Acceptance criteria
+
+Architecture acceptance is proven when later tasks deliver:
+
+1. completed session accepted; active/incomplete/missing/corrupt rejected
+   (fail closed, zero model calls);
+2. same durable input produces the same `input_fingerprint`; changed input
+   produces a different one;
+3. `input_fingerprint` is stable across attempts; `attempt_id` is unique and
+   attempt-scoped `changeset_id` never collides;
+4. generated Summary/Recap are immutable per attempt; reruns never overwrite;
+5. ledger is append-only and state is reconstructable after simulated restart;
+6. legacy `Session.processed`/`processed_model_profile`/`processing_status` are
+   not used as Stage-11 state;
+7. recap excludes hidden/GM-only information under a fixture with hidden facts;
+8. produced ChangeSet has a real `session_ref`, passes the existing validator,
+   remains unapproved, and is consumed by existing `dnd changeset status/review`;
+9. ambiguous references are omitted, not mutated; new entities never duplicate
+   existing ones;
+10. model/provider failure leaves canonical Vault entities unchanged.
+
+## 19. Acceptance → evidence map (planned)
+
+```text
+full-input fingerprint binding   -> two prepared-input variants differing only in
+                                    entity revision / visibility produce distinct
+                                    input_fingerprint; raw-event-only change does too
+attempt vs input separation      -> same input_fingerprint, two attempt_ids, two
+                                    distinct attempt-scoped changeset_ids
+immutable per-attempt artifacts  -> artifact inventory + byte equality across a
+                                    rerun; prior attempt files unchanged
+append-only ledger               -> line-count monotonic growth; no rewrite;
+                                    state reconstruction from ledger alone
+ledger authority                 -> injected legacy field changes do not alter
+                                    processing decisions
+no direct canonical write        -> repository mutation spy; before/after Vault
+                                    assertion for the processing path
+unapproved proposal              -> persisted proposal read-back + no approval
+player recap safe                -> hidden-fact fixture + negative model-input and
+                                    output assertions
+model-independent tests          -> fake PostSessionModel; no Ollama
+```
+
+A green test without the matching semantic assertion does not satisfy a row.
+
+## 20. Out of scope
+
+```text
+Stage 12 Campaign State
+bootstrap/import
+embeddings / vector DB / graph DB
+voice / transcription
+combat / rules automation
+generic RAG framework
+new canonical campaign storage outside the Vault
+automatic ChangeSet approval / apply
+automatic canonical entity mutation from model output
+```
+
+## 21. Task map
+
+```text
+S11-00  Post-session architecture/contracts/kickoff        DONE
+S11-01  post-session input + durable processing schemas    NOT STARTED
+        (domain schemas, eligibility, fingerprint, append-only ledger
+         repository; smallest first BUILD increment)
+S11-02  deterministic context assembly + entity resolution NOT STARTED
+S11-03  heavy-model structured extraction mechanism        NOT STARTED
+S11-04  Summary/Recap production + visibility filtering    NOT STARTED
+S11-05  ChangeSet producer integration + ambiguity policy  NOT STARTED
+S11-06  persistence/rerun/failure semantics (incl. decision NOT STARTED
+        on whether to sync legacy session fields)
+S11-07  CLI orchestration / end-to-end flow                NOT STARTED
+S11-08  hardening / failure injection                      NOT STARTED
+S11-09  full Stage-11 review/completion                    NOT STARTED
+```
+
+Smallest first BUILD task after S11-00: **S11-01**.
+
+## 22. S11-00 record
+
+```text
+Task:              S11-00 — Post-session Processor Architecture & Stage Kickoff
+Routing:           PLAN_REQUIRED -> accepted PLAN -> BUILD (documentation-only)
+Baseline:          main @ 513401f807e0808c58e6673a3af73911a0c61de4
+                   HEAD == origin/main, clean working tree
+Branch:            feat/post-session-processor
+Verdict:           S11_ARCHITECTURE_READY
+Corrections:       C1 full prepared-input fingerprint
+                   C2 input identity vs attempt identity
+                   C3 immutable/versioned per-attempt artifacts
+                   C4 append-only processing ledger
+                   C5 ledger is authority; legacy session fields are not
+Deliverable:       this stage record + DEVELOPMENT_STATUS reconciliation +
+                  docs/stages/README.md index entry
+Next task:         S11-01 — post-session input + durable processing schemas
+```

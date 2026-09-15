@@ -1,11 +1,11 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (R1 documentation cleanup)
+**Last updated:** 2026-09-15 (Stage-11 kickoff)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `NOT STARTED`
-**Active stage:** none — Stage 10 complete; Stage 11 not started
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
+**Active stage:** Stage 11 — Post-session Processor
 **Active migration:** PAIM — `ACCEPTED`, complete
-**Current branch:** `feat/r1-changeset-recovery-ownership`
+**Current branch:** `feat/post-session-processor`
 **Reference main SHA (PAIM behavioral/rollback reference):** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 
 ## Status model
@@ -48,7 +48,7 @@ docs/adr/          architecture decisions
 | 8. Model Gateway / Ollama | DONE | `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` |
 | 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
-| 11. Post-session Processor | NOT STARTED | — |
+| 11. Post-session Processor | IN PROGRESS | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | NOT STARTED | — |
 | 13. Bootstrap | NOT STARTED | — |
 | 14. Evals / Hardening | NOT STARTED | — |
@@ -91,9 +91,13 @@ audit record with a real `session_ref` could enter global session-recovery
 Resolution verdict `R1_RECOVERY_READY`; evidence in
 `docs/stages/10_CHANGESET.md` (R1 resolution section).
 
-### Stage 11 — Post-session Processor `NOT STARTED`
+### Stage 11 — Post-session Processor `IN PROGRESS`
 
-Not begun. No Stage-11 work may start automatically after this cleanup.
+S11-00 `DONE` — architecture/contracts/kickoff accepted
+(`S11_ARCHITECTURE_READY`). Detailed architecture, invariants, task map and
+evidence plan: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
+`S11-01 — post-session input + durable processing schemas`. No production
+Stage-11 runtime code exists yet.
 
 ## Accepted reference baseline
 
@@ -129,7 +133,8 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ```text
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
-No model-generated ChangeSet producer exists yet.
+No model-generated ChangeSet producer exists yet (Stage 11 does not start it).
+Stage 11 is in progress; next task is S11-01.
 ```
 
 ## Known limitations affecting future work
@@ -145,7 +150,9 @@ no in-repo CI evidence guarantees symlink-capable execution.
 
 ```text
 Stage 10 — ChangeSet (DONE)
-Stage 11 — Post-session Processor (NOT STARTED; not begun)
+Stage 11 — Post-session Processor (IN PROGRESS)
+  S11-00 DONE — architecture/contracts/kickoff
+  S11-01 NOT STARTED — post-session input + durable processing schemas
 ```
 
 ## Operational invariants
@@ -168,6 +175,7 @@ Stage 11 — Post-session Processor (NOT STARTED; not begun)
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state |
 | `docs/stages/09_FAST_AGENT.md` | Detailed Stage-9 history/reference behavior |
 | `docs/stages/10_CHANGESET.md` | Stage-10 architecture record, task map, R1 resolution |
+| `docs/stages/11_POST_SESSION_PROCESSOR.md` | Stage-11 architecture, invariants, task map, evidence plan |
 | `docs/adr/0006-changeset-review-apply-boundary.md` | ChangeSet review/apply architecture decision |
 | `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` | PAIM task plan/history/evidence |
 | `docs/adr/0003-pydantic-ai-runtime-migration.md` | Migration architecture/rollback decision |
