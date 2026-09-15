@@ -856,8 +856,16 @@ existing entity id is trusted only when selected in the prepared input **and**
 the declared type matches the canonical prepared type; otherwise it is cleared
 from the sanitized extraction and recorded as an `UnresolvedEntityReference`
 (`NOT_IN_PREPARED_INPUT` / `TYPE_MISMATCH` / `NO_CANDIDATE_ID`) for S11-05.
-Duplicate claim/mention/candidate ids and total-size/mention-count bounds fail
-closed.
+Evidence normalization is applied at every evidence-bearing level (claim,
+mention and candidate): every event id is validated against the prepared input
+and order-preserving first-occurrence deduplicated, and the sanitized accepted
+extraction carries the normalized tuple.  A mention's normalized evidence and
+sanitized candidate id are returned together, so clearing a fabricated or
+type-mismatched id does not discard normalization.  Duplicate claim/mention ids
+and duplicate `candidate_id` fail closed with distinct reasons
+(`DUPLICATE_CLAIM_ID` / `DUPLICATE_MENTION_ID` / `DUPLICATE_CANDIDATE_ID`); all
+three map to the durable `INVALID_OUTPUT` category.  Total-size/mention-count
+bounds fail closed.
 
 ### 25.5 Error mapping (observed Pydantic AI 2.39 path)
 

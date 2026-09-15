@@ -79,6 +79,7 @@ class ExtractionFailureReason(StrEnum):
     UNSUPPORTED_ENTITY_TYPE = "unsupported_entity_type"
     DUPLICATE_CLAIM_ID = "duplicate_claim_id"
     DUPLICATE_MENTION_ID = "duplicate_mention_id"
+    DUPLICATE_CANDIDATE_ID = "duplicate_candidate_id"
     CONTRADICTORY_BINDING = "contradictory_binding"
     OUTPUT_BOUNDS_EXCEEDED = "output_bounds_exceeded"
 
@@ -362,11 +363,18 @@ def _validate_total_size(extraction: PostSessionExtraction) -> None:
 def _bind_mention(
     claim_id: str,
     mention: ExtractedEntityMention,
+    normalized_evidence: tuple[str, ...],
     bindings: dict[str, EntityType],
     resolved: list[ResolvedEntityMention],
     unresolved: list[UnresolvedEntityReference],
 ) -> ExtractedEntityMention:
-    """Return a sanitized mention and record resolution outcome."""
+    """Return a sanitized mention and record resolution outcome.
+
+    The returned mention always carries the normalized ``evidence_event_ids``
+    passed in (validated and deduplicated by the caller) and the sanitized
+    ``candidate_entity_id``: a fabricated or type-mismatched id is cleared,
+    while a trusted binding is preserved.
+    """
     if mention.entity_type not in _SUPPORTED_ENTITY_TYPES:
         raise PostSessionExtractionError(
             ExtractionFailureReason.UNSUPPORTED_ENTITY_TYPE,
@@ -384,7 +392,7 @@ def _bind_mention(
                 reason=UnresolvedReferenceReason.NO_CANDIDATE_ID,
             )
         )
-        return mention
+        return mention.model_copy(update={"evidence_event_ids": normalized_evidence})
 
     if candidate_id not in bindings:
         unresolved.append(
@@ -396,7 +404,9 @@ def _bind_mention(
                 reason=UnresolvedReferenceReason.NOT_IN_PREPARED_INPUT,
             )
         )
-        return mention.model_copy(update={"candidate_entity_id": None})
+        return mention.model_copy(
+            update={"candidate_entity_id": None, "evidence_event_ids": normalized_evidence}
+        )
 
     if bindings[candidate_id] is not mention.entity_type:
         unresolved.append(
@@ -408,7 +418,9 @@ def _bind_mention(
                 reason=UnresolvedReferenceReason.TYPE_MISMATCH,
             )
         )
-        return mention.model_copy(update={"candidate_entity_id": None})
+        return mention.model_copy(
+            update={"candidate_entity_id": None, "evidence_event_ids": normalized_evidence}
+        )
 
     resolved.append(
         ResolvedEntityMention(
@@ -418,7 +430,7 @@ def _bind_mention(
             entity_type=mention.entity_type,
         )
     )
-    return mention
+    return mention.model_copy(update={"evidence_event_ids": normalized_evidence})
 
 
 def validate_post_session_extraction(
@@ -479,13 +491,20 @@ def validate_post_session_extraction(
                     f"Duplicate mention_id {mention.mention_id!r}",
                 )
             seen_mention_ids.add(mention.mention_id)
-            _normalize_evidence(
+            mention_evidence = _normalize_evidence(
                 mention.evidence_event_ids,
                 allowed_event_ids,
                 f"Mention {mention.mention_id}",
             )
             sanitized_mentions.append(
-                _bind_mention(claim.claim_id, mention, bindings, resolved, unresolved)
+                _bind_mention(
+                    claim.claim_id,
+                    mention,
+                    mention_evidence,
+                    bindings,
+                    resolved,
+                    unresolved,
+                )
             )
 
         sanitized_claims.append(
@@ -497,10 +516,11 @@ def validate_post_session_extraction(
             )
         )
 
+    sanitized_candidates = []
     for candidate in extraction.entity_candidates:
         if candidate.candidate_id in seen_candidate_ids:
             raise PostSessionExtractionError(
-                ExtractionFailureReason.DUPLICATE_MENTION_ID,
+                ExtractionFailureReason.DUPLICATE_CANDIDATE_ID,
                 f"Duplicate candidate_id {candidate.candidate_id!r}",
             )
         seen_candidate_ids.add(candidate.candidate_id)
@@ -510,13 +530,21 @@ def validate_post_session_extraction(
                 f"Candidate {candidate.candidate_id!r} declares unsupported type "
                 f"{candidate.entity_type!r}",
             )
-        _normalize_evidence(
+        candidate_evidence = _normalize_evidence(
             candidate.evidence_event_ids,
             allowed_event_ids,
             f"Candidate {candidate.candidate_id}",
         )
+        sanitized_candidates.append(
+            candidate.model_copy(update={"evidence_event_ids": candidate_evidence})
+        )
 
-    sanitized = extraction.model_copy(update={"claims": tuple(sanitized_claims)})
+    sanitized = extraction.model_copy(
+        update={
+            "claims": tuple(sanitized_claims),
+            "entity_candidates": tuple(sanitized_candidates),
+        }
+    )
     return ValidatedPostSessionExtraction(
         extraction=sanitized,
         resolved_mentions=tuple(resolved),

@@ -235,6 +235,156 @@ def test_missing_required_evidence_rejected() -> None:
         make_claim(evidence_event_ids=())
 
 
+# ── Evidence normalization consistency (S11-03 correction) ────────────────
+
+
+def test_duplicate_claim_evidence_remains_normalized() -> None:
+    prepared = make_prepared_input(event_ids=("evt_001", "evt_002"))
+    accepted, _ = _accepted(
+        make_extraction(claims=(make_claim(evidence_event_ids=("evt_002", "evt_001", "evt_002")),)),
+        prepared,
+    )
+    assert accepted.validated.extraction.claims[0].evidence_event_ids == (
+        "evt_002",
+        "evt_001",
+    )
+
+
+def test_duplicate_mention_evidence_normalized_in_validated_extraction() -> None:
+    prepared = make_prepared_input(
+        event_ids=("evt_001", "evt_002"),
+        entity_bindings=(("npc-aria", EntityType.NPC),),
+    )
+    accepted, _ = _accepted(
+        make_extraction(
+            claims=(
+                make_claim(
+                    evidence_event_ids=("evt_001",),
+                    entity_mentions=(
+                        make_mention(
+                            candidate_entity_id="npc-aria",
+                            evidence_event_ids=("evt_001", "evt_001"),
+                        ),
+                    ),
+                ),
+            )
+        ),
+        prepared,
+    )
+    mention = accepted.validated.extraction.claims[0].entity_mentions[0]
+    assert mention.evidence_event_ids == ("evt_001",)
+    assert mention.candidate_entity_id == "npc-aria"
+
+
+def test_duplicate_candidate_evidence_normalized_in_validated_extraction() -> None:
+    prepared = make_prepared_input(event_ids=("evt_001", "evt_002"))
+    accepted, _ = _accepted(
+        make_extraction(
+            entity_candidates=(
+                make_candidate(evidence_event_ids=("evt_002", "evt_001", "evt_002")),
+            ),
+        ),
+        prepared,
+    )
+    candidate = accepted.validated.extraction.entity_candidates[0]
+    assert candidate.evidence_event_ids == ("evt_002", "evt_001")
+
+
+def test_fabricated_mention_id_cleared_when_evidence_normalized() -> None:
+    accepted, _ = _accepted(
+        make_extraction(
+            claims=(
+                make_claim(
+                    entity_mentions=(
+                        make_mention(
+                            candidate_entity_id="npc-fabricated",
+                            evidence_event_ids=("evt_001", "evt_001"),
+                        ),
+                    ),
+                ),
+            )
+        )
+    )
+    mention = accepted.validated.extraction.claims[0].entity_mentions[0]
+    assert mention.candidate_entity_id is None
+    assert mention.evidence_event_ids == ("evt_001",)
+    assert (
+        accepted.validated.unresolved_references[0].reason
+        is UnresolvedReferenceReason.NOT_IN_PREPARED_INPUT
+    )
+
+
+def test_type_mismatch_cleared_when_evidence_normalized() -> None:
+    prepared = make_prepared_input(
+        event_ids=("evt_001", "evt_002"),
+        entity_bindings=(("loc-grayford", EntityType.LOCATION),),
+    )
+    accepted, _ = _accepted(
+        make_extraction(
+            claims=(
+                make_claim(
+                    entity_mentions=(
+                        make_mention(
+                            candidate_entity_id="loc-grayford",
+                            entity_type=EntityType.NPC,
+                            evidence_event_ids=("evt_002", "evt_002"),
+                        ),
+                    ),
+                ),
+            )
+        ),
+        prepared,
+    )
+    mention = accepted.validated.extraction.claims[0].entity_mentions[0]
+    assert mention.candidate_entity_id is None
+    assert mention.evidence_event_ids == ("evt_002",)
+    assert (
+        accepted.validated.unresolved_references[0].reason
+        is UnresolvedReferenceReason.TYPE_MISMATCH
+    )
+
+
+def test_unknown_mention_evidence_fails_closed() -> None:
+    with pytest.raises(PostSessionExtractionError) as exc_info:
+        _accepted(
+            make_extraction(
+                claims=(
+                    make_claim(
+                        entity_mentions=(
+                            make_mention(
+                                candidate_entity_id="npc-aria",
+                                evidence_event_ids=("evt_nope",),
+                            ),
+                        ),
+                    ),
+                )
+            )
+        )
+    assert exc_info.value.reason is ExtractionFailureReason.INVALID_EVIDENCE_REFERENCE
+
+
+def test_unknown_candidate_evidence_fails_closed() -> None:
+    with pytest.raises(PostSessionExtractionError) as exc_info:
+        _accepted(
+            make_extraction(entity_candidates=(make_candidate(evidence_event_ids=("evt_nope",)),))
+        )
+    assert exc_info.value.reason is ExtractionFailureReason.INVALID_EVIDENCE_REFERENCE
+
+
+def test_duplicate_candidate_ids_raise_stable_reason() -> None:
+    with pytest.raises(PostSessionExtractionError) as exc_info:
+        _accepted(
+            make_extraction(
+                entity_candidates=(
+                    make_candidate(candidate_id="n1"),
+                    make_candidate(candidate_id="n1", display_name="Other"),
+                )
+            )
+        )
+    assert exc_info.value.reason is ExtractionFailureReason.DUPLICATE_CANDIDATE_ID
+    assert exc_info.value.reason is not ExtractionFailureReason.DUPLICATE_MENTION_ID
+
+
 # ── Entity references ─────────────────────────────────────────────────────
 
 
