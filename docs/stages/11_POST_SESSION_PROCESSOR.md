@@ -8,7 +8,7 @@ S11-00 — DONE
 S11-01 — DONE
 S11-02 — DONE
 S11-03 — DONE
-S11-04 — NOT STARTED
+S11-04 — DONE
 S11-05 — NOT STARTED
 S11-06 — NOT STARTED
 S11-07 — NOT STARTED
@@ -249,9 +249,17 @@ the extraction phase emits per-claim typed structures with `visibility` and
 only from the player-visible projection and cross-checks claims that reference
 canonical entities against those entities' canonical `visibility`. Claims whose
 evidence references a non-player entity are excluded from recap by default
-(fail-safe). Because raw events have no visibility field, recap-eligible claims
-must cite player-visible entity evidence and/or be tagged `player` without
-referencing any non-player entity.
+(fail-safe).
+
+Finalized by S11-04 (supersedes earlier permissive wording): because raw events
+have no visibility field, **a claim is recap-eligible only when its untrusted
+`visibility_hint` is `player` AND it has at least one canonical resolved
+entity binding AND every referenced canonical entity is `Visibility.PLAYER`
+AND it carries no unresolved reference.** A player-hinted claim with no
+canonical entity binding is excluded (`no_canonical_player_safe_evidence`);
+`ExtractionVisibilityHint` never authorizes player disclosure by itself.
+Excluded claims are dropped whole; a hidden entity name is never redacted out
+of surrounding claim text. New-entity candidates never enter Recap.
 
 ## 8. ChangeSet producer contract
 
@@ -489,7 +497,7 @@ S11-01  post-session input + durable processing schemas    DONE
          repository; smallest first BUILD increment)
 S11-02  deterministic context assembly + entity resolution DONE
 S11-03  heavy-model structured extraction mechanism        NOT STARTED
-S11-04  Summary/Recap production + visibility filtering    NOT STARTED
+S11-04  Summary/Recap production + visibility filtering    DONE
 S11-05  ChangeSet producer integration + ambiguity policy  NOT STARTED
 S11-06  persistence/rerun/failure semantics (incl. decision NOT STARTED
         on whether to sync legacy session fields)
@@ -910,3 +918,135 @@ Summary/Recap artifacts and visibility filtering (S11-04), ChangeSet producer +
 canonical binding/ambiguity and alias resolution (S11-05), full attempt-state
 folding, tail repair and the legacy-field sync decision (S11-06), CLI (S11-07),
 hardening (S11-08), Stage-12.
+
+## 26. S11-04 record
+
+```text
+Task:              S11-04 — Summary/Recap Production + Deterministic Visibility Filtering
+Routing:           PLAN_REQUIRED -> accepted PLAN (5 corrections) -> BUILD
+Baseline:          feat/post-session-processor @
+                   fb04a1b9f72a6284e636929b1e90c2430df8852a
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             in-memory Summary/Recap generation over accepted S11-03
+                   extraction: deterministic player-safe Recap filtering,
+                   complete provenance binding, structurally distinct request
+                   types, provider-neutral rendering protocol, Pydantic AI
+                   rendering adapter, separate render prompts; no persistence/
+                   ledger/audit/ChangeSet/CLI/S11-05/Stage-12
+Deliverable:       7 production modules + 1 bounded adapter refactor + focused
+                   unit/integration/contract tests + this record +
+                   DEVELOPMENT_STATUS reconciliation
+Next task:         S11-05 — ChangeSet producer integration + ambiguity policy
+```
+
+### 26.1 Implemented modules
+
+```text
+domain/post_session_artifacts.py
+    POST_SESSION_RENDER_SCHEMA_VERSION, MAX_RENDER_BODY_CHARS,
+    RenderOutcome, PostSessionRenderOutput (multi-line Markdown body validation)
+application/post_session_visibility.py
+    RecapEntityRef, SummaryEntityRef (SYSTEM structurally rejected),
+    RecapClaimProjection, SummaryClaimProjection,
+    SummaryUnresolvedReferenceProjection, SummaryCandidateProjection,
+    Recap/Summary exclusion reasons + diagnostics,
+    project_recap(), project_summary()
+application/post_session_rendering.py
+    SummaryRenderRequest, RecapRenderRequest (structurally distinct),
+    PostSessionRenderingModel protocol, deterministic serializers,
+    RenderingProvenance, RenderedPostSessionArtifact,
+    RenderingFailureReason / PostSessionRenderingError,
+    _verify_provenance(), generate_summary(), generate_recap()
+application/pydantic_ai_post_session_rendering.py
+    PydanticAIPostSessionRenderingModel (zero project tools,
+    retries={"tools": 0, "output": 0}, UsageLimits(request_limit=1))
+application/pydantic_ai_model_errors.py
+    ModelFailureKind + classify_model_api_error() shared neutral classifier
+prompts/post_session_summary_v1.py, prompts/post_session_recap_v1.py
+    distinct artifact-generation prompt ids + instructions
+application/pydantic_ai_post_session.py
+    bounded behavior-preserving refactor: private classifier now delegates to
+    the shared neutral classifier (S11-03 behavior unchanged)
+```
+
+### 26.2 Finalized Summary authorization algorithm
+
+For every accepted claim, Python builds a `SummaryClaimProjection` unless it
+references a canonical entity that is unavailable or `Visibility.SYSTEM`, in
+which case the whole claim is excluded (`REFERENCES_SYSTEM_ENTITY` /
+`REFERENCES_UNAVAILABLE_ENTITY`).  PLAYER and DM canonical entities are
+eligible.  SYSTEM entity metadata/body/text never reaches the Summary model
+input; SYSTEM rejection is also structural (`SummaryEntityRef` validator).
+Unresolved references and new-entity candidates enter Summary only as
+structurally distinct non-canonical material. `visibility_hint` /
+`knowledge_hint` are exposed as untrusted labels only.
+
+### 26.3 Finalized Recap authorization algorithm
+
+```text
+claim eligible  <=>  visibility_hint == PLAYER
+                AND  has >= 1 canonical resolved entity binding
+                AND  every referenced canonical entity is Visibility.PLAYER
+                AND  contains no unresolved reference
+```
+
+Bounded exclusion reasons: `visibility_hint_not_player`,
+`contains_unresolved_reference`, `no_canonical_player_safe_evidence`,
+`references_non_player_entity`, `references_unavailable_entity`.  Exclusion is
+whole-claim; hidden text is never redacted out.  Candidates and unresolved
+references never enter Recap.  Canonical prepared entity visibility always
+outranks the untrusted model hint.
+
+### 26.4 Structurally distinct requests and provenance binding
+
+`SummaryRenderRequest` and `RecapRenderRequest` are separate frozen models.
+The Recap type has no field able to carry unresolved references, candidates,
+DM/SYSTEM projections, canonical bodies, the full extraction or the full
+prepared context.  Before any model call, `generate_summary` / `generate_recap`
+verify `session_ref`, `input_fingerprint`, `processor_version`,
+`prompt_version`, `extraction_schema_version` and the extraction's own
+`schema_version` against the prepared input; any mismatch raises
+`PROVENANCE_MISMATCH` (durable `FINGERPRINT_MISMATCH`) with zero renderer calls.
+
+### 26.5 EMPTY outcome and render prompts
+
+`RenderOutcome.RENDERED` requires a non-empty `content`; `RenderOutcome.EMPTY`
+requires `content is None` and is produced deterministically with **zero model
+calls** when no claim is Recap-eligible.  Model-generated empty/whitespace
+output remains an error (`EMPTY_OUTPUT`).  Summary/Recap render prompt ids are
+distinct from `POST_SESSION_PROMPT_VERSION` and do not participate in
+`input_fingerprint`; only the exact rendering inputs are reproducible, not the
+model prose.
+
+### 26.6 No persistence
+
+S11-04 writes nothing.  Success, EMPTY and render-failure paths leave the Vault
+byte-identical with no ledger, audit or ChangeSet artifact.  Durable EMPTY
+representation is an S11-06 decision.
+
+### 26.7 Evidence
+
+```text
+render output schema / bounds     tests/unit/post_session/test_artifacts_domain.py
+visibility policy / binding /     tests/unit/post_session/test_rendering_policy.py
+  canaries / EMPTY
+Pydantic AI rendering adapter     tests/unit/post_session/test_pydantic_ai_post_session_rendering.py
+real-Vault zero-write + canary    tests/integration/test_post_session_rendering.py
+dependency boundaries             tests/contract/test_post_session_boundaries.py
+S11-03 adapter regression         tests/unit/post_session/test_pydantic_ai_post_session.py
+```
+
+Actual model-visible canary proofs: the serialized `RecapRenderRequest` passed
+to the capturing fake contains no DM/SYSTEM/unresolved/candidate canary, and an
+echo renderer's resulting Recap body is likewise clean; the Summary request
+contains the authorized DM canary and no SYSTEM canary.  Adapter tests inspect
+the actual `FunctionModel` message payload.  No Ollama is required.  Quality
+gates: focused suites, `ruff check`, `ruff format --check`, `pyright` (0
+errors), full `pytest`, `git diff --check`.
+
+### 26.8 Deferred (S11-05+)
+
+ChangeSet producer + canonical binding/ambiguity and alias resolution (S11-05),
+artifact/ledger persistence + durable EMPTY representation + attempt-state
+folding + legacy-field sync decision (S11-06), CLI orchestration (S11-07),
+hardening (S11-08), Stage-11 review (S11-09), Stage-12.

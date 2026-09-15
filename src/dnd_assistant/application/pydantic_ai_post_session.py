@@ -38,35 +38,30 @@ from dnd_assistant.application.post_session_extraction import (
     PostSessionExtractionError,
     PostSessionExtractionRequest,
 )
+from dnd_assistant.application.pydantic_ai_model_errors import (
+    ModelFailureKind,
+    classify_model_api_error,
+)
 from dnd_assistant.domain.post_session_extraction import PostSessionExtraction
 from dnd_assistant.prompts.post_session_extraction_v1 import (
     POST_SESSION_EXTRACTION_SYSTEM_PROMPT,
 )
 
+_MODEL_API_FAILURE_REASON: dict[ModelFailureKind, ExtractionFailureReason] = {
+    ModelFailureKind.TIMEOUT: ExtractionFailureReason.MODEL_TIMEOUT,
+    ModelFailureKind.UNAVAILABLE: ExtractionFailureReason.MODEL_UNAVAILABLE,
+    ModelFailureKind.INVOCATION_FAILED: ExtractionFailureReason.MODEL_INVOCATION_FAILED,
+}
+
 
 def _classify_model_api_error(exc: ModelAPIError) -> ExtractionFailureReason:
-    """Classify a confirmed ``ModelAPIError`` by its observed public cause.
+    """Map a provider ``ModelAPIError`` to a stable extraction reason.
 
-    Pydantic AI 2.39 maps OpenAI-compatible ``APIConnectionError`` (which
-    ``APITimeoutError`` subclasses) to ``ModelAPIError``.  We therefore inspect
-    the documented cause chain to distinguish timeout from plain connection
-    failure; everything else stays conservatively ``MODEL_INVOCATION_FAILED``.
+    Delegates the observed-cause classification to the shared
+    ``application.pydantic_ai_model_errors`` neutral classifier so extraction
+    and rendering adapters cannot drift apart.
     """
-    try:
-        import openai
-    except ImportError:  # pragma: no cover - openai is a required extra
-        return ExtractionFailureReason.MODEL_INVOCATION_FAILED
-
-    cause: BaseException | None = exc.__cause__
-    depth = 0
-    while cause is not None and depth < 8:
-        if isinstance(cause, openai.APITimeoutError):
-            return ExtractionFailureReason.MODEL_TIMEOUT
-        if isinstance(cause, openai.APIConnectionError):
-            return ExtractionFailureReason.MODEL_UNAVAILABLE
-        cause = cause.__cause__
-        depth += 1
-    return ExtractionFailureReason.MODEL_INVOCATION_FAILED
+    return _MODEL_API_FAILURE_REASON[classify_model_api_error(exc)]
 
 
 class PydanticAIPostSessionExtractionModel:

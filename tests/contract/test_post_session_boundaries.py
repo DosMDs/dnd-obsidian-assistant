@@ -389,3 +389,145 @@ def test_storage_processing_does_not_import_application() -> None:
     _clean_import(_STORAGE_MODULE)
     offending = sorted(m for m in _modules_loaded() if m.startswith("dnd_assistant.application"))
     assert not offending, f"storage.post_session_processing imported application: {offending}"
+
+
+# ── domain/post_session_artifacts (S11-04) ─────────────────────────────────
+
+_ARTIFACTS_DOMAIN_MODULE = "dnd_assistant.domain.post_session_artifacts"
+
+
+def test_artifacts_domain_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_ARTIFACTS_DOMAIN_MODULE)
+
+
+def test_artifacts_domain_does_not_import_storage_or_application() -> None:
+    _clean_import(_ARTIFACTS_DOMAIN_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(
+        m
+        for m in loaded
+        if m.startswith("dnd_assistant.storage") or m.startswith("dnd_assistant.application")
+    )
+    assert not offending, f"domain.post_session_artifacts imported storage/application: {offending}"
+
+
+def test_artifacts_domain_has_no_persistence_stdlib() -> None:
+    targets = _module_import_targets(_ARTIFACTS_DOMAIN_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_DOMAIN_STDLIB
+    )
+    assert not offending, f"domain.post_session_artifacts imported persistence stdlib: {offending}"
+
+
+def test_artifacts_domain_is_provider_neutral() -> None:
+    _assert_provider_neutral(_ARTIFACTS_DOMAIN_MODULE)
+
+
+# ── application/post_session_visibility (S11-04) ───────────────────────────
+
+_VISIBILITY_MODULE = "dnd_assistant.application.post_session_visibility"
+
+
+def test_visibility_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_VISIBILITY_MODULE)
+
+
+def test_visibility_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_VISIBILITY_MODULE)
+    offending = sorted(m for m in _modules_loaded() if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.post_session_visibility imported storage: {offending}"
+
+
+def test_visibility_names_no_concrete_storage_class() -> None:
+    names = _module_name_nodes(_VISIBILITY_MODULE)
+    assert "ObsidianVaultRepository" not in names
+    assert "ObsidianPostSessionProcessingStore" not in names
+    assert "ToolExecutor" not in names
+
+
+def test_visibility_is_provider_neutral() -> None:
+    _assert_provider_neutral(_VISIBILITY_MODULE)
+
+
+# ── application/post_session_rendering (S11-04) ────────────────────────────
+
+_RENDERING_MODULE = "dnd_assistant.application.post_session_rendering"
+
+
+def test_rendering_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_RENDERING_MODULE)
+
+
+def test_rendering_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_RENDERING_MODULE)
+    offending = sorted(m for m in _modules_loaded() if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.post_session_rendering imported storage: {offending}"
+
+
+def test_rendering_names_no_concrete_storage_class_or_write_method() -> None:
+    names = _module_name_nodes(_RENDERING_MODULE)
+    assert "ObsidianVaultRepository" not in names
+    assert "ObsidianChangeSetStore" not in names
+    assert "ToolExecutor" not in names
+    offending = sorted(names & _WRITE_CAPABLE_METHOD_NAMES)
+    assert not offending, f"application.post_session_rendering references writes: {offending}"
+
+
+def test_rendering_is_provider_neutral() -> None:
+    _assert_provider_neutral(_RENDERING_MODULE)
+
+
+# ── application/pydantic_ai_post_session_rendering adapter (S11-04) ────────
+
+_RENDERING_ADAPTER_MODULE = "dnd_assistant.application.pydantic_ai_post_session_rendering"
+
+
+def test_rendering_adapter_does_not_import_storage_tools_cli_retrieval() -> None:
+    targets = _module_import_targets(_RENDERING_ADAPTER_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.storage")
+        or target.startswith("dnd_assistant.tools")
+        or target.startswith("dnd_assistant.cli")
+        or target.startswith("dnd_assistant.retrieval")
+    )
+    assert not offending, f"pydantic_ai_post_session_rendering imported forbidden deps: {offending}"
+
+
+def test_rendering_adapter_does_not_reference_tool_or_vault_surface() -> None:
+    names = _module_name_nodes(_RENDERING_ADAPTER_MODULE)
+    for forbidden in ("ToolExecutor", "ToolRegistry", "ExternalToolset", "VaultRepository"):
+        assert forbidden not in names, f"rendering adapter references {forbidden}"
+
+
+def test_rendering_modules_do_not_import_tool_executor() -> None:
+    for module_path in (
+        "dnd_assistant.domain.post_session_artifacts",
+        "dnd_assistant.application.post_session_visibility",
+        "dnd_assistant.application.post_session_rendering",
+        "dnd_assistant.application.pydantic_ai_post_session_rendering",
+        "dnd_assistant.prompts.post_session_summary_v1",
+        "dnd_assistant.prompts.post_session_recap_v1",
+    ):
+        targets = _module_import_targets(module_path)
+        offending = sorted(target for target in targets if target == "dnd_assistant.tools.executor")
+        assert not offending, f"{module_path} imported ToolExecutor"
+
+
+def test_shared_error_classifier_is_provider_adjacent_only() -> None:
+    targets = _module_import_targets("dnd_assistant.application.pydantic_ai_model_errors")
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.storage")
+        or target.startswith("dnd_assistant.tools")
+        or target.startswith("dnd_assistant.cli")
+        or target.startswith("dnd_assistant.retrieval")
+    )
+    assert not offending, f"pydantic_ai_model_errors imported forbidden deps: {offending}"
+
+
+def test_rendering_prompts_are_provider_neutral() -> None:
+    _assert_provider_neutral("dnd_assistant.prompts.post_session_summary_v1")
+    _assert_provider_neutral("dnd_assistant.prompts.post_session_recap_v1")

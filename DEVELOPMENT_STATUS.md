@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (S11-03 completion)
+**Last updated:** 2026-09-15 (S11-04 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
 **Active stage:** Stage 11 — Post-session Processor
@@ -104,12 +104,19 @@ fail-closed context bounds. S11-03 `DONE` — bounded heavy-model structured
 extraction: trusted request derivation from prepared input, application-owned
 `PostSessionExtractionModel` protocol, untrusted versioned extraction schema,
 Python semantic evidence/entity binding, Pydantic AI adapter with zero project
-tools and output/tool retries 0, `POST_SESSION` model role/factory. The ledger
+tools and output/tool retries 0, `POST_SESSION` model role/factory. S11-04
+`DONE` — in-memory Summary/Recap generation: structurally distinct
+`SummaryRenderRequest`/`RecapRenderRequest`, deterministic player-safe Recap
+authorization requiring a PLAYER hint plus at least one player-visible
+canonical binding, whole-claim exclusion of non-player/unresolved/SYSTEM
+material, SYSTEM exclusion from Summary, complete provenance binding before any
+model call, deterministic EMPTY outcome with zero model calls, Pydantic AI
+rendering adapter with zero project tools and retries 0. The ledger
 is unaudited durable workflow evidence under
 `_system/raw/sessions/<id>/processing/` and does not participate in global
 `unresolved_audit_intent` recovery. Detailed architecture, invariants, task map
 and evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-04 — Summary/Recap production + visibility filtering`.
+`S11-05 — ChangeSet producer integration + ambiguity policy`.
 
 ## Accepted reference baseline
 
@@ -146,7 +153,7 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
 No model-generated ChangeSet producer exists yet (Stage 11 does not start it).
-Stage 11 is in progress; S11-03 is DONE; next task is S11-04.
+Stage 11 is in progress; S11-04 is DONE; next task is S11-05.
 ```
 
 ## Known limitations affecting future work
@@ -167,7 +174,8 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-01 DONE — post-session input + durable processing schemas
   S11-02 DONE — deterministic context assembly + entity resolution
   S11-03 DONE — heavy-model structured extraction mechanism
-  S11-04 NOT STARTED — Summary/Recap production + visibility filtering
+  S11-04 DONE — Summary/Recap production + visibility filtering
+  S11-05 NOT STARTED — ChangeSet producer integration + ambiguity policy
 ```
 
 ## Operational invariants
