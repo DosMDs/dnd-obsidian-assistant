@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (S10-06)
+**Last updated:** 2026-09-15 (S10-07)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `IN PROGRESS` (S10-00 architecture/domain contract `DONE`; S10-01 domain schemas `DONE`; S10-02 pure validation/preflight `DONE`; S10-03 review/fingerprint/approval `DONE`; S10-04 applier/revision safety `DONE`; S10-05 CLI workflow + durable proposal store `DONE`; S10-06 failure/partial-application/audit hardening `DONE`)
-**Active stage:** Stage 10 — ChangeSet (`IN PROGRESS`)
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE` (S10-00..S10-07 all `DONE`); Stage 11 `NOT STARTED`
+**Active stage:** none — Stage 10 complete; Stage 11 not started
 **Active migration:** PAIM — Pydantic AI Runtime Migration
 **Reference main SHA:** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
 
@@ -44,7 +44,7 @@ docs/adr/          architecture decisions
 | 7. Tool Registry / Executor | DONE | `docs/stages/07_TOOL_REGISTRY_AND_EXECUTOR.md` |
 | 8. Model Gateway / Ollama | DONE | `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` |
 | 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
-| 10. ChangeSet | IN PROGRESS | `docs/stages/10_CHANGESET.md` |
+| 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | NOT STARTED | — |
 | 12. Campaign State | NOT STARTED | — |
 | 13. Bootstrap | NOT STARTED | — |
@@ -78,7 +78,7 @@ final architecture decision (`ACCEPTED`) and reference-runtime retirement
 | S10-04 — ChangeSetApplier + revision/conflict safety | DONE |
 | S10-05 — CLI review/apply workflow + proposal persistence decision | DONE |
 | S10-06 — Failure / partial-application / audit hardening | DONE |
-| S10-07 — Full Stage-10 historical review / completion | NOT STARTED |
+| S10-07 — Full Stage-10 historical review / completion | DONE |
 
 `S10-00` completed the trusted ChangeSet architecture/domain contract. Verdict:
 
@@ -108,7 +108,19 @@ save/review/approve/reject/apply CLI workflow (`cli/changeset.py`). `S10-06`
 implemented the append-only apply-attempt artifact, deterministic audit
 correlation, truthful commit-state classification, the fail-closed pre-apply
 gate and the read-only `dnd changeset status` command
-(`application/changeset_status.py`). `S10-07` remains `NOT STARTED`.
+(`application/changeset_status.py`). `S10-07` completed the independent
+historical/final-state review of the full Stage-10 range
+(`7c331f2..bf6673c`) and marked Stage 10 `DONE`. Verdict:
+
+```text
+STAGE10_READY_FOR_COMPLETION
+```
+
+Stage-10 full gates at completion: `uv run pytest` 5423 passed / 117 skipped;
+`uv run ruff check .` clean; `uv run ruff format --check .` clean;
+`uv run pyright` 0 errors / 0 warnings; `git diff --check` clean. Merge
+readiness: `MERGE_READY`. Detailed record: S10-07 section of
+`docs/stages/10_CHANGESET.md`.
 
 ## Accepted custom reference baseline
 
@@ -261,7 +273,8 @@ PAIM-RETIRE-01 — DONE
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-07 — Full Stage-10 historical review / completion)
+Stage 10 — ChangeSet (DONE)
+Stage 11 — Post-session Processor (NOT STARTED; not begun)
 ```
 
 ## PAIM-15 final architecture review — verdict `ACCEPTED`
@@ -526,15 +539,22 @@ S10-03 review/fingerprint/approval complete in application/changeset_review.py.
 S10-04 applier/revision safety complete in application/changeset_apply.py.
 S10-05 proposal/approval artifact store + `dnd changeset` CLI workflow complete.
 S10-06 apply-attempt evidence + audit correlation + status hardening complete.
-Known limitation R1: an intent-only ChangeSet audit record with a real session_ref
-can still participate in global session-recovery blocking; no repair action added.
+S10-07 full Stage-10 historical/final-state review complete; Stage 10 DONE; verdict
+STAGE10_READY_FOR_COMPLETION; MERGE_READY.
+Known limitation R1 (classification B — acceptable known limitation for Stage 10):
+an intent-only ChangeSet audit record with a real session_ref can participate in
+global session-recovery unresolved_audit_intent blocking; no repair action exists.
+R1 PREREQUISITE: before Stage 11 or any later producer emits ChangeSets carrying a
+real session_ref, R1 must receive a separately authorized recovery decision/fix.
+R1 is NOT resolved by S10-07.
 No confirmed Stage-10 blocker; no model-generated ChangeSet producer exists yet.
 ```
 
 Active next:
 
 ```text
-Stage 10 — ChangeSet (IN PROGRESS; next S10-07 — Full Stage-10 historical review / completion)
+Stage 10 — ChangeSet (DONE)
+Stage 11 — Post-session Processor (NOT STARTED; not begun)
 ```
 
 PAIM-02 blocker gate result: **PASS** (corrected by PAIM-C03)

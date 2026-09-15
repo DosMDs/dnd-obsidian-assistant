@@ -3,7 +3,7 @@
 ## Status
 
 ```text
-Stage 10 — IN PROGRESS
+Stage 10 — DONE
 S10-00 — DONE
 S10-01 — DONE
 S10-02 — DONE
@@ -11,7 +11,7 @@ S10-03 — DONE
 S10-04 — DONE
 S10-05 — DONE
 S10-06 — DONE
-S10-07 — NOT STARTED
+S10-07 — DONE
 Stage 11 — NOT STARTED
 ```
 
@@ -37,7 +37,9 @@ implemented the durable proposal/approval artifact store and the
 apply-attempt artifact, deterministic operation-index audit correlation, the
 truthful commit-state classification, the pre-apply applicability gate and the
 read-only `dnd changeset status` command. No model-generated ChangeSet proposal
-producer exists yet; `S10-07` remains `NOT STARTED`.
+producer exists yet. `S10-07` completed the full historical/final-state review
+and marked Stage 10 `DONE`; see the S10-07 completion record at the end of this
+document.
 
 ## 1. Purpose
 
@@ -1152,9 +1154,170 @@ git diff --check
 ```
 
 Full suite: 5423 passed, 117 skipped. Pyright: 0 errors, 0 warnings.
-`tests/contract/test_boundaries.py` remains exactly 1000 lines (unchanged); no
-maintainability ratchet or threshold was changed.
+`tests/contract/test_boundaries.py` grew during Stage 10 (last touched by
+`S10-04`) to exactly 1000 lines — the test-module hard ceiling — and was
+unchanged during the later S10 tasks. No maintainability ratchet or threshold
+was changed.
+
+## S10-07 — Full Stage-10 historical review / completion — DONE
+
+Completed 2026-09-15 on `feat/changeset`. S10-07 performed the independent
+historical-range review **and** final-state architecture review of Stage 10 and
+qualified it for completion. Verdict:
 
 ```text
-Next task:         S10-07 — Full Stage-10 historical review / completion (NOT STARTED)
+STAGE10_READY_FOR_COMPLETION
+```
+
+### Historical review range
+
+```text
+7c331f29cd418e4c4cda6a487fbbf5f1983d20eb..bf6673cc652fee7f6e684da582b1adfb75251eeb
+```
+
+`7c331f2` is the accepted Stage-9 completion boundary (`docs: complete Stage 9
+historical review and mark DONE (S9-07)`), also `main` / `origin/main` at review
+time. The Stage-10 branch history is **linear** from that boundary with no merge
+commits.
+
+### Stage-10 implementation commit inventory
+
+```text
+f5dcff58444882e821b8544ac7e845d103028b7e  S10-00 — architecture/domain contract
+83415a5bfb892f9b260843bf32f8b4506c81e988  S10-01 — ChangeSet/domain schemas
+f13c03044da4ebc7cb08346873735d4cac51b9db  S10-02 — pure validator/preflight
+420ef08b7dcd80335323804e2c0e419fbf6eca57  S10-C01 — duplicate-create command-history correction
+549236f70772012e8a58200026a429455b49364c  S10-03 — review/fingerprint/approval
+c139f3646443f5ac307f10c7ba1e0cca6868503e  S10-04 — ChangeSet applier/revision safety
+e5acc0bcdda777dd35ea836dc131b45eabe53247  S10-05 — durable proposal/approval store + CLI
+bf6673cc652fee7f6e684da582b1adfb75251eeb  S10-06 — failure/partial/audit hardening
+```
+
+No unrelated or concurrent commits occur in the Stage-10 range.
+
+### Final component inventory
+
+```text
+domain/
+    changeset.py                       immutable ChangeSet / operation / EntityFieldUpdate schemas
+
+application/
+    changeset_validation.py            pure whole-batch preflight + projection
+    changeset_review.py                canonical serialization, SHA-256 fingerprint, review DTOs, approval/rejection
+    changeset_apply.py                 repository-only applier, revision safety, structured result
+    changeset_store.py                 proposal/approval persistence policy
+    changeset_status.py                append-only apply-attempt evidence, audit correlation, applicability gate, status
+
+storage/
+    changeset_store.py                 ObsidianChangeSetStore (safe workflow-artifact I/O)
+    paths.py                           shared validate_path_component addition
+
+cli/
+    changeset.py                       save/review/approve/reject/apply/status (Russian UX)
+    main.py                            changeset subgroup registration
+
+workflow artifacts (under <vault>/_system/changesets/)
+    <id>.proposal.json
+    <id>.approval.json
+    <id>.apply.jsonl
+```
+
+### Invariant verdict
+
+The historical/final-state review found **no blocking violation** of:
+
+```text
+- Vault Source of Truth (campaign entities remain Vault Markdown; artifacts stay in _system)
+- VaultRepository-only entity write authority
+- domain purity (proposal data only)
+- whole-batch preflight semantics (single read view; projection; zero mutation)
+- duplicate-create command-history semantics (S10-C01)
+- deterministic fingerprinting (canonical bytes, stable SHA-256)
+- explicit None vs omitted preservation
+- immutable explicit approval/rejection (no default approval)
+- approval binding vs apply-authority distinction
+- fresh apply preflight
+- explicit EntityFieldUpdate -> EntityPatch allowlist
+- optimistic revision enforcement (expected_revision unchanged)
+- strict ordered application
+- stop-on-first-failure
+- no rollback / whole-ChangeSet transaction claim
+- truthful APPLIED / PARTIAL / FAILED semantics
+- UNCONFIRMED storage-failure commit semantics
+- deterministic audit operation IDs (<changeset_id>:<index>)
+- durable proposal/approval/apply-attempt artifacts
+- append-only attempt history
+- fail-closed malformed/contradictory workflow state
+- double-apply / retry policy
+- restart/status observability (no filesystem inference from audit alone)
+- CLI/application/storage dependency boundaries
+- model/Ollama/Pydantic-AI independence
+```
+
+### R1 classification
+
+```text
+B — ACCEPTABLE KNOWN LIMITATION FOR STAGE 10
+```
+
+An intent-only ChangeSet repository audit record carrying a real `session_ref`
+can participate in the global session-recovery `unresolved_audit_intent`
+detector and block mutating CLI commands. Current posture: fail-closed; no data
+corruption claim; `dnd changeset status` remains available for diagnosis; no
+repair action exists; `storage/session_recovery/*` was intentionally not
+modified in Stage 10.
+
+**Locked follow-up:** before Stage 11 or any later producer is allowed to
+generate ChangeSets carrying a real `session_ref`, R1 must receive a separately
+authorized recovery decision/fix. R1 is **not** resolved by S10-07.
+
+### Non-blocking risks
+
+```text
+- tests/contract/test_boundaries.py is exactly at the 1000-line ceiling (zero headroom)
+- cli/changeset.py (666 lines) is close to the 700-line production ceiling
+- symlink safety tests may skip on Windows hosts without symlink capability
+- no in-repo CI evidence guarantees symlink-capable execution
+```
+
+None of these block Stage-10 completion. The historical `test_boundaries.py`
+"unchanged" wording was corrected above: the file grew during Stage 10 and was
+only unchanged during the later S10 tasks.
+
+### Gate evidence
+
+Targeted Stage-10 gates:
+
+```text
+uv run pytest tests/unit/test_changeset_domain.py ... tests/unit/test_cli_changeset.py -q
+    410 passed, 3 skipped
+uv run pytest tests/integration/test_changeset_validation.py tests/integration/test_changeset_apply.py tests/integration/test_changeset_cli.py -q
+    17 passed
+uv run pytest tests/contract/test_boundaries.py tests/contract/test_changeset_workflow_boundaries.py tests/contract/test_maintainability.py tests/contract/test_test_harness_policy.py -q
+    607 passed
+```
+
+Full repository gates:
+
+```text
+uv run pytest                       5423 passed, 117 skipped, 1 warning
+uv run ruff check .                 All checks passed
+uv run ruff format --check .        374 files already formatted
+uv run pyright                      0 errors, 0 warnings, 0 informations
+git diff --check                    clean
+```
+
+### Merge readiness
+
+```text
+MERGE_READY
+```
+
+`feat/changeset` is linear from the Stage-9 boundary, contains no unrelated
+changes, has no blocking Stage-10 defect, and all qualification gates are green.
+R1 is recorded as an accepted known limitation / prerequisite.
+
+```text
+Stage 10 — DONE
+Stage 11 — NOT STARTED
 ```
