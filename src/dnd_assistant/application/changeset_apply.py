@@ -40,6 +40,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, BeforeValidator, Field
 from pydantic.types import AwareDatetime
 
+from dnd_assistant.application.changeset_recovery import format_changeset_operation_id
 from dnd_assistant.application.changeset_review import ChangeSetApproval
 from dnd_assistant.application.changeset_validation import validate_changeset
 from dnd_assistant.domain.changeset import (
@@ -224,7 +225,7 @@ def _per_operation_audit(
     fails naturally (no ChangeSet ledger is introduced).
     """
     return AuditContext(
-        operation_id=f"{changeset.changeset_id}:{index}",
+        operation_id=format_changeset_operation_id(changeset.changeset_id, index),
         real_time=context.real_time,
         source=context.source,
         session=changeset.session_ref,

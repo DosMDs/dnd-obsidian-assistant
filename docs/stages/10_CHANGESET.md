@@ -1112,6 +1112,15 @@ by making `dnd changeset status` preflight-free and by failing the pre-apply
 gate with a specific `ConflictError`. A narrowly-scoped ChangeSet recovery
 handling remains a separate, explicitly authorized task.
 
+> **Resolved by the R1 correction** (separate authorized task, branch
+> `feat/r1-changeset-recovery-ownership`). An application-owned intent-ownership
+> partition now narrows **blocking scope only**. Conclusively ChangeSet-owned
+> intent-only records are delegated to the ChangeSet status/applicability gate;
+> `SessionRecoveryService.inspect_runtime` keeps returning the complete raw
+> report; `storage/session_recovery/*` is still unchanged; no recovery/replay/
+> resume/rollback command was added; the affected ChangeSet stays permanently
+> UNCONFIRMED and blocked.
+
 ### Evidence
 
 ```text
@@ -1270,6 +1279,35 @@ modified in Stage 10.
 **Locked follow-up:** before Stage 11 or any later producer is allowed to
 generate ChangeSets carrying a real `session_ref`, R1 must receive a separately
 authorized recovery decision/fix. R1 is **not** resolved by S10-07.
+
+### R1 resolution (separate authorized task)
+
+```text
+R1_RECOVERY_READY — resolved by application-owned ownership partition
+```
+
+Branch `feat/r1-changeset-recovery-ownership` adds
+`application/changeset_recovery.py`, which owns the canonical
+`<changeset_id>:<index>` format helper and a fail-closed ownership classifier.
+Ownership is proven from durable evidence only: canonical operation-id parse,
+persisted-proposal verification (index range, `session_ref` match), and
+audit-record binding (exactly one intent, no committed, operation/entity match).
+
+The correction narrows **blocking scope, never detection/reporting scope**:
+
+- `SessionRecoveryService.inspect_runtime()` still returns the complete raw
+  report, including ChangeSet-owned `unresolved_audit_intent` issues;
+- `SessionRecoveryService.inspect_runtime_partition()` (with an optional
+  injected ownership gate) returns `blocking` + `externally_owned`; only
+  mutation preflight consumers use the blocking subset;
+- `storage/session_recovery/*` is unchanged and remains the raw detector;
+- the affected ChangeSet stays permanently UNCONFIRMED and blocked by the
+  existing `application/changeset_status` applicability gate;
+- no repair/replay/resume/rollback action or command exists.
+
+Both crash windows are covered by evidence: Window A (intent, no entity write)
+and Window B (intent, entity present, no committed audit) classify identically
+as delegated while remaining UNCONFIRMED.
 
 ### Non-blocking risks
 

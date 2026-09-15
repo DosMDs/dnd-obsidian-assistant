@@ -13,6 +13,7 @@ from collections.abc import Mapping, Sequence
 
 from pydantic.types import AwareDatetime
 
+from dnd_assistant.application.session_recovery import RecoveryPartition
 from dnd_assistant.domain.calendar import CalendarDefinition, GameDate, WorldTick
 from dnd_assistant.domain.events import TimelineEvent
 from dnd_assistant.domain.session import Session
@@ -109,6 +110,9 @@ class FakeSessionRecovery:
 
     def inspect_runtime(self) -> SessionRecoveryReport:
         return SessionRecoveryReport([])
+
+    def inspect_runtime_partition(self) -> RecoveryPartition:
+        return RecoveryPartition(blocking=(), externally_owned=())
 
 
 class FakeSessionMetadataRepository:

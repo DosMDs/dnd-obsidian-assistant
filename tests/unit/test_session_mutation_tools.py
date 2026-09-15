@@ -18,6 +18,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from dnd_assistant.application.session_recovery import RecoveryPartition
 from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.types import EntityId
@@ -176,6 +177,13 @@ class TrackingRecoveryService:
         issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
         return SessionRecoveryReport(issues)
 
+    def inspect_runtime_partition(self) -> RecoveryPartition:
+        self.calls.append("inspect_runtime_partition")
+        if self._inspect_side_effect:
+            raise self._inspect_side_effect
+        issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
+        return RecoveryPartition(blocking=tuple(issues), externally_owned=())
+
     def repair_audit_tail(self, *, audit: object = None) -> None:
         self.calls.append("repair_audit_tail")
 
@@ -256,7 +264,7 @@ class TestStartSessionDelegation:
         )
         assert isinstance(result, StartSessionOutput)
         assert isinstance(result.session, Session)
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert runtime.calls == ["start_session"]
 
     def test_same_audit_context_passed(
@@ -287,7 +295,7 @@ class TestStartSessionDelegation:
                 input_data={},
                 context=write_context_no_active,
             )
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert runtime.calls == ["start_session"]
 
     def test_runtime_not_found_propagates(
@@ -326,7 +334,7 @@ class TestRecordEventDelegation:
         )
         assert isinstance(result, RecordEventOutput)
         assert isinstance(result.event, SessionEventResult)
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert runtime.calls == ["record_event:item_acquired"]
 
     def test_event_type_forwarded(
@@ -442,7 +450,7 @@ class TestRecordNoteDelegation:
         )
         assert isinstance(result, RecordNoteOutput)
         assert isinstance(result.event, SessionEventResult)
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert "record_note:Hello world" in runtime.calls
 
     def test_text_forwarded(
@@ -537,7 +545,7 @@ class TestEndSessionDelegation:
         )
         assert isinstance(result, EndSessionOutput)
         assert isinstance(result.session, Session)
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert runtime.calls == ["end_session"]
 
     def test_touched_ids_forwarded(

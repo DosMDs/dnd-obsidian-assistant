@@ -548,6 +548,16 @@ R1 PREREQUISITE: before Stage 11 or any later producer emits ChangeSets carrying
 real session_ref, R1 must receive a separately authorized recovery decision/fix.
 R1 is NOT resolved by S10-07.
 No confirmed Stage-10 blocker; no model-generated ChangeSet producer exists yet.
+
+R1 RECOVERY RESOLUTION (separately authorized; branch
+feat/r1-changeset-recovery-ownership): an application-owned
+ChangeSet intent-ownership partition (application/changeset_recovery.py) narrows
+*blocking scope* only.  Conclusively ChangeSet-owned intent-only audit records
+are delegated to the ChangeSet status/applicability gate; raw
+SessionRecoveryService.inspect_runtime stays complete, storage/session_recovery
+is unchanged, and no recovery/replay/resume/rollback command exists.  The
+affected ChangeSet stays permanently UNCONFIRMED/blocked.  R1 is resolved as a
+Stage-11 prerequisite; Stage 11 remains NOT STARTED.
 ```
 
 Active next:

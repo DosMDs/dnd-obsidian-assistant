@@ -32,6 +32,7 @@ from uuid import uuid4
 from pydantic_ai.models import Model
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
+from dnd_assistant.application.changeset_recovery import ChangeSetIntentOwnershipGate
 from dnd_assistant.application.pydantic_ai_agent_runtime import PydanticAIAgentRuntime
 from dnd_assistant.application.pydantic_ai_run_deps import DndAgentRunPreparer
 from dnd_assistant.application.pydantic_ai_tool_bridge import PydanticAIToolBridge
@@ -43,6 +44,7 @@ from dnd_assistant.models.pydantic_ai_ollama import build_pydantic_ai_ollama_mod
 from dnd_assistant.retrieval.index import SqliteFtsIndex
 from dnd_assistant.retrieval.search import VaultSearchService
 from dnd_assistant.storage.audit import AuditContext, AuditService
+from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
 from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
 from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataRepository
 from dnd_assistant.storage.session_recovery import ObsidianSessionRecoveryRepository
@@ -380,7 +382,13 @@ def compose_ask_runtime(
             world_time_repository,
             event_repository,
         )
-        recovery_service = SessionRecoveryService(recovery_repository)
+        recovery_service = SessionRecoveryService(
+            recovery_repository,
+            ownership_gate=ChangeSetIntentOwnershipGate(
+                ObsidianChangeSetStore(vault_root),
+                read_audit_records=audit_service.read_all,
+            ),
+        )
 
         # 5. Compose retrieval
         fts_index = SqliteFtsIndex(vault_root=str(vault_root))

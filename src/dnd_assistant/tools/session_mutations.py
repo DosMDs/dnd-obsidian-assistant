@@ -72,18 +72,20 @@ def _check_recovery_preflight(
 ) -> None:
     """Perform a read-only recovery preflight before mutation.
 
-    If recovery issues exist, the mutation is blocked with a generic
-    ConflictError.  No recovery issue details are exposed.
+    Only the ``blocking`` subset of the raw recovery report stops the mutation.
+    Conclusively ChangeSet-owned intent-only issues are delegated to the
+    ChangeSet status/applicability gate and do not block unrelated mutations.
+    No recovery issue details are exposed.
 
     Args:
         recovery_service: The recovery service to inspect.
 
     Raises:
-        ConflictError: Recovery issues exist; mutation is blocked.
-        DndAssistantError: Propagated unchanged from inspect_runtime().
+        ConflictError: Blocking recovery issues exist; mutation is blocked.
+        DndAssistantError: Propagated unchanged from the inspection call.
     """
-    report = recovery_service.inspect_runtime()
-    if report.has_issues:
+    partition = recovery_service.inspect_runtime_partition()
+    if partition.blocking:
         raise ConflictError("Session runtime requires explicit recovery before mutation")
 
 

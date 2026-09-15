@@ -55,6 +55,10 @@ from dnd_assistant.application.changeset_apply import (
     ChangeSetApplyOutcome,
     ChangeSetApplyResult,
 )
+from dnd_assistant.application.changeset_recovery import (
+    CHANGESET_OPERATION_ID_SEPARATOR,
+    format_changeset_operation_id,
+)
 from dnd_assistant.application.changeset_review import (
     ChangeSetFingerprint,
     compute_changeset_fingerprint,
@@ -382,7 +386,7 @@ def correlate_audit(
         ConflictError: An impossible intent/committed phase sequence exists.
     """
     total = len(changeset.operations)
-    prefix = f"{changeset.changeset_id}:"
+    prefix = f"{changeset.changeset_id}{CHANGESET_OPERATION_ID_SEPARATOR}"
     by_operation_id: dict[str, list[str]] = {}
     for record in audit_records:
         if record.operation_id.startswith(prefix):
@@ -390,7 +394,7 @@ def correlate_audit(
 
     states: list[AuditOperationState] = []
     for index in range(total):
-        operation_id = f"{changeset.changeset_id}:{index}"
+        operation_id = format_changeset_operation_id(changeset.changeset_id, index)
         phases = by_operation_id.get(operation_id, [])
         if not phases:
             states.append(AuditOperationState.NOT_ATTEMPTED)

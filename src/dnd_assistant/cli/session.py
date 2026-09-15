@@ -13,10 +13,12 @@ from uuid import uuid4
 
 import typer
 
+from dnd_assistant.application.changeset_recovery import ChangeSetIntentOwnershipGate
 from dnd_assistant.application.session_recovery import SessionRecoveryService
 from dnd_assistant.application.session_runtime import SessionRuntimeService
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.storage.audit import AuditContext, AuditService
+from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
 from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
 from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataRepository
 from dnd_assistant.storage.session_recovery import ObsidianSessionRecoveryRepository
@@ -83,6 +85,12 @@ def _compose_runtime(vault_root: Path) -> SessionRuntimeService:
 def _compose_recovery(vault_root: Path) -> SessionRecoveryService:
     """Compose a ``SessionRecoveryService`` for recovery preflight.
 
+    The ChangeSet ownership gate narrows blocking scope only: conclusively
+    ChangeSet-owned intent-only audit records are delegated to
+    ``dnd changeset status`` / the ChangeSet applicability gate instead of
+    wedging unrelated mutations.  Raw inspection remains available through
+    ``inspect_runtime``.
+
     Args:
         vault_root: The resolved Vault root path.
 
@@ -93,35 +101,38 @@ def _compose_recovery(vault_root: Path) -> SessionRecoveryService:
     audit_service = AuditService(str(audit_log_path))
 
     recovery_repo = ObsidianSessionRecoveryRepository(vault_root, audit_service)
-    return SessionRecoveryService(recovery_repo)
-
-
-# ── Recovery preflight ────────────────────────────────────────────────────
+    ownership_gate = ChangeSetIntentOwnershipGate(
+        ObsidianChangeSetStore(vault_root),
+        read_audit_records=audit_service.read_all,
+    )
+    return SessionRecoveryService(recovery_repo, ownership_gate=ownership_gate)
 
 
 def _recovery_preflight(vault_root: Path) -> None:
     """Perform a read-only recovery preflight before a mutating operation.
 
-    If recovery issues are found, prints a Russian error message and exits
-    non-zero without performing any repair.
+    If blocking recovery issues are found, prints a Russian error message and
+    exits non-zero without performing any repair.  Conclusively ChangeSet-owned
+    intent-only issues are reported as a non-fatal hint (diagnosis stays in
+    ``dnd changeset status``) and do not block unrelated mutations.
 
     Args:
         vault_root: The resolved Vault root path.
 
     Raises:
-        typer.Exit: If recovery issues exist.
+        typer.Exit: If blocking recovery issues exist.
     """
     recovery_service = _compose_recovery(vault_root)
-    report = recovery_service.inspect_runtime()
+    partition = recovery_service.inspect_runtime_partition()
 
-    if report.has_issues:
+    if partition.blocking:
         lines: list[str] = [
             "Обнаружено повреждённое или незавершённое состояние сессии.",
             "Требуется явное восстановление перед продолжением.",
             "",
             "Обнаруженные проблемы:",
         ]
-        for issue in report.issues:
+        for issue in partition.blocking:
             parts = [f"  [{issue.code}]"]
             if issue.session_id:
                 parts.append(f"сессия={issue.session_id}")
@@ -133,6 +144,14 @@ def _recovery_preflight(vault_root: Path) -> None:
 
         typer.echo("\n".join(lines), err=True)
         raise typer.Exit(code=1)
+
+    if partition.externally_owned:
+        typer.echo(
+            "Примечание: обнаружены незавершённые операции ChangeSet; "
+            "они не блокируют изменения. Проверьте `dnd changeset status`:\n"
+            + "\n".join(f"  операция={issue.operation_id}" for issue in partition.externally_owned),
+            err=True,
+        )
 
 
 # ── Session Typer subgroup ────────────────────────────────────────────────

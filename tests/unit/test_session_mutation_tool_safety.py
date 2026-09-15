@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from dnd_assistant.application.session_recovery import RecoveryPartition
 from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.types import EntityId
@@ -113,10 +114,14 @@ class TrackingRecoveryService:
     def __init__(self) -> None:
         self.calls: list[str] = []
         self._has_issues = False
+        self._delegated_issue = False
         self._inspect_side_effect: Exception | None = None
 
     def set_has_issues(self, value: bool) -> None:
         self._has_issues = value
+
+    def set_delegated_issue(self, value: bool) -> None:
+        self._delegated_issue = value
 
     def set_inspect_side_effect(self, exc: Exception) -> None:
         self._inspect_side_effect = exc
@@ -127,6 +132,14 @@ class TrackingRecoveryService:
             raise self._inspect_side_effect
         issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
         return SessionRecoveryReport(issues)
+
+    def inspect_runtime_partition(self) -> RecoveryPartition:
+        self.calls.append("inspect_runtime_partition")
+        if self._inspect_side_effect:
+            raise self._inspect_side_effect
+        blocking = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
+        delegated = [RecoveryIssue("unresolved_audit_intent")] if self._delegated_issue else []
+        return RecoveryPartition(blocking=tuple(blocking), externally_owned=tuple(delegated))
 
     def repair_audit_tail(self, *, audit: object = None) -> None:
         self.calls.append("repair_audit_tail")
@@ -439,7 +452,7 @@ class TestPreflightOrdering:
             input_data={},
             context=write_context_no_active,
         )
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert runtime.calls == ["start_session"]
 
     def test_clean_preflight_before_record_event(
@@ -454,7 +467,7 @@ class TestPreflightOrdering:
             input_data={"event_type": "test"},
             context=write_context_active,
         )
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert "record_event" in runtime.calls[0]
 
     def test_clean_preflight_before_record_note(
@@ -469,7 +482,7 @@ class TestPreflightOrdering:
             input_data={"text": "test"},
             context=write_context_active,
         )
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
 
     def test_clean_preflight_before_end(
         self,
@@ -483,8 +496,49 @@ class TestPreflightOrdering:
             input_data={},
             context=write_context_active,
         )
-        assert recovery.calls == ["inspect_runtime"]
+        assert recovery.calls == ["inspect_runtime_partition"]
         assert runtime.calls == ["end_session"]
+
+
+class TestDelegatedOwnershipPreflight:
+    """Conclusively ChangeSet-owned issues must not block session mutations."""
+
+    def test_delegated_issue_does_not_block_start(
+        self,
+        executor: ToolExecutor,
+        runtime: TrackingRuntimeService,
+        recovery: TrackingRecoveryService,
+        write_context_no_active: ExecutionContext,
+    ) -> None:
+        recovery.set_delegated_issue(True)
+
+        executor.execute(
+            "start_session",
+            input_data={},
+            context=write_context_no_active,
+        )
+
+        assert recovery.calls == ["inspect_runtime_partition"]
+        assert runtime.calls == ["start_session"]
+
+    def test_blocking_issue_still_blocks_start(
+        self,
+        executor: ToolExecutor,
+        runtime: TrackingRuntimeService,
+        recovery: TrackingRecoveryService,
+        write_context_no_active: ExecutionContext,
+    ) -> None:
+        recovery.set_has_issues(True)
+        recovery.set_delegated_issue(True)
+
+        with pytest.raises(ConflictError, match="requires explicit recovery"):
+            executor.execute(
+                "start_session",
+                input_data={},
+                context=write_context_no_active,
+            )
+
+        assert runtime.calls == []
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

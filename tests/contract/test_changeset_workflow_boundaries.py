@@ -290,3 +290,56 @@ def test_storage_changeset_store_depends_only_on_storage_and_errors() -> None:
         and target != "dnd_assistant.errors"
     )
     assert not offending, f"storage.changeset_store imported non-storage dependencies: {offending}"
+
+
+# ── application/changeset_recovery (R1 ownership classification) ───────────
+
+_CHANGESET_RECOVERY = "dnd_assistant.application.changeset_recovery"
+
+_FORBIDDEN_RECOVERY_LAYERS: tuple[str, ...] = (
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.retrieval",
+    "dnd_assistant.cli",
+)
+
+_FORBIDDEN_RECOVERY_STDLIB: frozenset[str] = frozenset(
+    {"pathlib", "os", "shutil", "tempfile", "subprocess"}
+)
+
+
+def test_application_changeset_recovery_does_not_import_upper_layers() -> None:
+    _clean_import(_CHANGESET_RECOVERY)
+    loaded = _modules_loaded()
+    offending = sorted(
+        m
+        for m in loaded
+        if any(m == layer or m.startswith(f"{layer}.") for layer in _FORBIDDEN_RECOVERY_LAYERS)
+    )
+    assert not offending, f"application.changeset_recovery imported forbidden layers: {offending}"
+
+
+def test_application_changeset_recovery_is_filesystem_free_and_provider_neutral() -> None:
+    targets = _module_import_targets(_CHANGESET_RECOVERY)
+    roots = {target.split(".")[0] for target in targets}
+    offending = sorted(roots & (_FORBIDDEN_RECOVERY_STDLIB | {"ollama", "pydantic_ai"}))
+    assert not offending, f"application.changeset_recovery imported forbidden modules: {offending}"
+
+
+def test_application_changeset_recovery_names_no_concrete_storage_classes() -> None:
+    names = _module_name_nodes(_CHANGESET_RECOVERY)
+    assert names.isdisjoint(
+        {
+            "ObsidianChangeSetStore",
+            "ObsidianVaultRepository",
+            "ObsidianSessionRecoveryRepository",
+        }
+    )
+
+
+def test_application_session_recovery_stays_changeset_agnostic() -> None:
+    targets = _module_import_targets("dnd_assistant.application.session_recovery")
+    offending = sorted(
+        target for target in targets if target.startswith("dnd_assistant.application.changeset")
+    )
+    assert not offending, f"application.session_recovery imported ChangeSet modules: {offending}"

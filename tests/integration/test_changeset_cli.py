@@ -23,15 +23,17 @@ from dnd_assistant.domain.changeset import (
     ProposalProvenance,
     UpdateEntityOperation,
 )
+from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.types import (
     EntityType,
     KnowledgeStatus,
     Provenance,
     Visibility,
 )
-from dnd_assistant.storage.audit import AuditRecord, AuditService
+from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
 from dnd_assistant.storage.patch import EntityPatch
+from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataRepository
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
 from tests.integration.helpers import BASE_TIME, make_audit_context, make_document
 
@@ -260,3 +262,129 @@ class TestCrashWithoutAttemptArtifact:
         )
         assert apply_result.exit_code == 1
         assert _snapshot(vault_root) == before
+
+
+class TestR1RecoveryOwnership:
+    """A ChangeSet-owned intent with a real session_ref must not wedge the Vault.
+
+    The affected ChangeSet stays permanently blocked; unrelated mutations
+    proceed; genuine session issues still block.  Both crash windows are covered.
+    """
+
+    def _session_changeset(self, changeset_id: str, entity_id: str) -> ChangeSet:
+        return ChangeSet(
+            changeset_id=changeset_id,
+            provenance=ProposalProvenance(provenance=Provenance.MANUAL),
+            session_ref="S003",
+            operations=(_create_op(entity_id),),
+        )
+
+    def _start_session(self, vault_root: Path) -> None:
+        session = Session.model_validate(
+            {
+                "id": "S003",
+                "type": "session",
+                "status": "active",
+                "revision": 1,
+                "real_started_at": "2026-08-30T10:00:00+00:00",
+                "world_tick_start": 100,
+            }
+        )
+        ObsidianSessionMetadataRepository(
+            vault_root, AuditService(_audit_path(vault_root))
+        ).create_session(
+            session,
+            audit=AuditContext(operation_id="start-S003", real_time=BASE_TIME, source="test"),
+        )
+
+    def _seed_intent(
+        self, vault_root: Path, operation_id: str, *, session: str, entity_id: str
+    ) -> None:
+        AuditService(_audit_path(vault_root)).append(
+            AuditRecord(
+                operation_id=operation_id,
+                real_time=BASE_TIME,
+                session=session,
+                operation="create_entity",
+                entity_id=entity_id,
+                source="test",
+                phase="intent",
+            )
+        )
+
+    def _save_approve(self, tmp_path: Path, vault_root: Path, changeset: ChangeSet) -> None:
+        document = _save_document(tmp_path, changeset, f"{changeset.changeset_id}.json")
+        assert (
+            runner.invoke(
+                app, ["changeset", "save", str(document), "--vault", str(vault_root)]
+            ).exit_code
+            == 0
+        )
+        assert (
+            runner.invoke(
+                app,
+                [
+                    "changeset",
+                    "approve",
+                    changeset.changeset_id,
+                    "--vault",
+                    str(vault_root),
+                    "--reviewer",
+                    "dm",
+                ],
+            ).exit_code
+            == 0
+        )
+
+    def test_window_a_owned_intent_does_not_block_unrelated_apply(
+        self, tmp_path: Path, vault_root: Path, repo: ObsidianVaultRepository
+    ) -> None:
+        self._start_session(vault_root)
+        self._save_approve(tmp_path, vault_root, self._session_changeset("cs-r1", "npc-r1"))
+        self._save_approve(tmp_path, vault_root, _changeset("cs-other", (_create_op("npc-other"),)))
+        self._seed_intent(vault_root, "cs-r1:0", session="S003", entity_id="npc-r1")
+
+        result = runner.invoke(app, ["changeset", "apply", "cs-other", "--vault", str(vault_root)])
+
+        assert result.exit_code == 0
+        assert repo.get_entity("npc-other").entity.revision == 1
+
+    def test_window_b_owned_intent_after_entity_mutation_still_delegated(
+        self, tmp_path: Path, vault_root: Path, repo: ObsidianVaultRepository
+    ) -> None:
+        self._start_session(vault_root)
+        self._save_approve(tmp_path, vault_root, self._session_changeset("cs-r1b", "npc-r1b"))
+        self._save_approve(tmp_path, vault_root, _changeset("cs-other", (_create_op("npc-other"),)))
+        repo.create_entity(make_document("npc-r1b"), audit=make_audit_context("setup-r1b"))
+        self._seed_intent(vault_root, "cs-r1b:0", session="S003", entity_id="npc-r1b")
+
+        result = runner.invoke(app, ["changeset", "apply", "cs-other", "--vault", str(vault_root)])
+
+        assert result.exit_code == 0
+
+    def test_affected_changeset_stays_blocked(self, tmp_path: Path, vault_root: Path) -> None:
+        self._start_session(vault_root)
+        self._save_approve(tmp_path, vault_root, self._session_changeset("cs-r1", "npc-r1"))
+        self._seed_intent(vault_root, "cs-r1:0", session="S003", entity_id="npc-r1")
+
+        before = _snapshot(vault_root)
+        result = runner.invoke(app, ["changeset", "apply", "cs-r1", "--vault", str(vault_root)])
+
+        assert result.exit_code == 1
+        assert _snapshot(vault_root) == before
+
+    def test_genuine_session_issue_still_blocks(self, tmp_path: Path, vault_root: Path) -> None:
+        self._start_session(vault_root)
+        self._save_approve(tmp_path, vault_root, _changeset("cs-other", (_create_op("npc-other"),)))
+        self._seed_intent(vault_root, "genuine-op", session="S003", entity_id="npc-other")
+
+        before = _snapshot(vault_root)
+        result = runner.invoke(app, ["changeset", "apply", "cs-other", "--vault", str(vault_root)])
+
+        assert result.exit_code == 1
+        assert "Обнаружено" in result.stderr
+        assert _snapshot(vault_root) == before
+
+
+def _audit_path(vault_root: Path) -> Path:
+    return vault_root / "_system" / "audit" / "audit.jsonl"

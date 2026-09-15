@@ -16,6 +16,7 @@ from datetime import UTC, datetime
 
 import pytest
 
+from dnd_assistant.application.session_recovery import RecoveryPartition
 from dnd_assistant.domain.calendar import make_world_tick
 from dnd_assistant.domain.session import Session
 from dnd_assistant.domain.types import EntityId
@@ -143,6 +144,11 @@ class FakeRecoveryService:
         self._inspect_calls += 1
         issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
         return SessionRecoveryReport(issues)
+
+    def inspect_runtime_partition(self) -> RecoveryPartition:
+        self._inspect_calls += 1
+        issues = [RecoveryIssue("audit_partial_tail")] if self._has_issues else []
+        return RecoveryPartition(blocking=tuple(issues), externally_owned=())
 
     def repair_audit_tail(self, *, audit: object = None) -> object:
         self._repair_audit_calls += 1
