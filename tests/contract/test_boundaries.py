@@ -934,3 +934,67 @@ def test_application_changeset_review_does_not_import_pydantic_ai() -> None:
     targets = _module_import_targets("dnd_assistant.application.changeset_review")
     offending = sorted(target for target in targets if target.split(".")[0] == "pydantic_ai")
     assert not offending, f"changeset_review imports pydantic_ai: {offending}"
+
+
+# ── application/changeset_apply: repository-only persistence, no raw I/O ──
+# S10-04 apply orchestration depends only on domain/storage/errors.  It must not
+# import provider/model/tool/CLI layers or raw filesystem stdlib, and every Vault
+# mutation must flow through the VaultRepository protocol.
+
+_FORBIDDEN_CHANGESET_APPLY_LAYERS: tuple[str, ...] = (
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.retrieval",
+    "dnd_assistant.cli",
+)
+
+_FORBIDDEN_CHANGESET_APPLY_STDLIB: tuple[str, ...] = (
+    "pathlib",
+    "os",
+    "shutil",
+    "tempfile",
+    "subprocess",
+)
+
+
+def test_application_changeset_apply_does_not_import_upper_layers() -> None:
+    _clean_import("dnd_assistant.application.changeset_apply")
+    loaded = _modules_loaded()
+    offending = sorted(
+        m
+        for m in loaded
+        if any(
+            m == layer or m.startswith(f"{layer}.") for layer in _FORBIDDEN_CHANGESET_APPLY_LAYERS
+        )
+    )
+    assert not offending, f"changeset_apply imported forbidden layers: {offending}"
+
+
+def test_application_changeset_apply_is_provider_neutral_and_write_free() -> None:
+    targets = _module_import_targets("dnd_assistant.application.changeset_apply")
+    roots = {target.split(".")[0] for target in targets}
+    forbidden_roots = set(_FORBIDDEN_CHANGESET_APPLY_STDLIB) | {"pydantic_ai", "ollama"}
+    offending = sorted(roots & forbidden_roots)
+    assert not offending, f"changeset_apply imported forbidden modules: {offending}"
+    _clean_import("dnd_assistant.application.changeset_apply")
+    assert not {m for m in sys.modules if m.startswith("ollama")}
+
+
+def test_application_changeset_apply_mutates_only_through_repository() -> None:
+    spec = importlib.util.find_spec("dnd_assistant.application.changeset_apply")
+    assert spec is not None and spec.origin is not None
+    tree = ast.parse(Path(spec.origin).read_text(encoding="utf-8"))
+    calls = [node for node in ast.walk(tree) if isinstance(node, ast.Call)]
+    repository_calls = {
+        node.func.attr
+        for node in calls
+        if isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id == "repository"
+    }
+    assert repository_calls <= {"create_entity", "patch_entity", "append_entity_fact"}
+    called_attrs = {node.func.attr for node in calls if isinstance(node.func, ast.Attribute)}
+    assert called_attrs.isdisjoint(
+        {"write_text", "write_bytes", "mkdir", "unlink", "rmdir", "rename"}
+    )
+    assert "open" not in {node.func.id for node in calls if isinstance(node.func, ast.Name)}

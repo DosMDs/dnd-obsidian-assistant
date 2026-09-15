@@ -8,7 +8,7 @@ S10-00 — DONE
 S10-01 — DONE
 S10-02 — DONE
 S10-03 — DONE
-S10-04 — NOT STARTED
+S10-04 — DONE
 S10-05 — NOT STARTED
 S10-06 — NOT STARTED
 S10-07 — NOT STARTED
@@ -31,7 +31,8 @@ This document is the canonical Stage-10 architecture record and task map. It
 describes **contracts and evidence plans**. `S10-01` implemented the immutable
 domain proposal schemas; `S10-02` implemented the pure validation/preflight
 layer; `S10-03` implemented the application review/fingerprint/approval
-contracts. No applier (`S10-04`) or CLI (`S10-05`) implementation exists yet.
+contracts; `S10-04` implemented the repository-backed applier. No CLI (`S10-05`)
+implementation exists yet.
 
 ## 1. Purpose
 
@@ -645,4 +646,129 @@ persistence were introduced. S10-04 remains NOT STARTED.
 
 ```text
 Next task:         S10-04 — ChangeSetApplier + revision/conflict safety (NOT STARTED)
+```
+
+## 21. S10-04 record
+
+```text
+Task:              S10-04 — ChangeSetApplier + revision/conflict safety
+Routing:           BUILD (accepted PLAN)
+Baseline:          feat/changeset @ 549236f70772012e8a58200026a429455b49364c
+                   upstream origin/feat/changeset, clean working tree
+```
+
+Implemented the application-layer repository-backed apply orchestrator, in:
+
+```text
+src/dnd_assistant/application/changeset_apply.py
+```
+
+Contracts:
+
+```text
+ChangeSetApplyContext   frozen, extra="forbid": trusted source + real_time
+ApplyFailureCategory    StrEnum: validation | not_found | conflict | storage
+ApplyFailure            frozen: operation_index, category, message, entity_id?
+ChangeSetApplyOutcome   StrEnum: applied | partial | failed
+ChangeSetApplyResult    frozen: changeset_id, outcome, applied_operation_indices,
+                        remaining_operation_indices, failure?; succeeded property
+apply_changeset(changeset, approval, repository, *, context) -> ChangeSetApplyResult
+```
+
+Semantics:
+
+```text
+approval gate    approval.matches_approved_changeset(changeset) (S10-03 content
+                 binding: APPROVED + changeset_id + SHA-256 fingerprint); a
+                 rejected decision, wrong id or wrong fingerprint raises existing
+                 ValidationError, zero writes, no ApplyResult
+fresh preflight  validate_changeset(changeset, repository) runs immediately
+                 before the first mutation; any issue raises ValidationError,
+                 zero writes, no ApplyResult.  Fingerprint content binding does
+                 not replace fresh Vault-state validation.
+persistence      all writes go through VaultRepository.create_entity /
+                 patch_entity / append_entity_fact only; no filesystem, path or
+                 filename authority and no model/framework access
+create           revision = 1, created_at = updated_at = context.real_time,
+                 body = "", repository chooses path/filename
+update           explicit EntityFieldUpdate -> EntityPatch allowlist mapping
+                 (name, status, visibility, knowledge_status, created_session,
+                 last_seen_session, tags); omitted stays omitted, explicit None
+                 on nullable session fields stays an explicit clear, tags is a
+                 full replacement; expected_revision passed unchanged
+append           repository.append_entity_fact(..., fact=..., expected_revision
+                 unchanged); no body manipulation in application code
+revision safety  no rebase, no retry, no auto-merge; repository remains final
+                 authority; same-batch create X -> append X expected=1 ->
+                 update X expected=2 succeeds because the repository re-reads
+                 disk on every call
+result rules     full success  -> APPLIED, all indices applied, failure None
+                 first-op fail -> FAILED, applied empty, failing op excluded
+                                  from remaining, failure present
+                 later fail    -> PARTIAL, prior indices applied, failing op
+                                  excluded from remaining, failure present
+stop policy      stop at the first write-time failure; later operations are
+                 never attempted; already-applied writes remain; no rollback and
+                 no whole-ChangeSet transaction or atomicity claim
+error mapping    only ValidationError / NotFoundError / ConflictError /
+                 StorageError are caught (mapped to validation / not_found /
+                 conflict / storage) with the original message preserved;
+                 unexpected exceptions propagate unchanged; no except Exception
+audit            per-operation AuditContext: operation_id == f"{changeset_id}:{i}",
+                 source == context.source, real_time == context.real_time,
+                 session == changeset.session_ref,
+                 model_profile / prompt_version == changeset.provenance values;
+                 proposal text can never become audit source
+double apply     no ChangeSet ledger; deterministic operation IDs reuse the
+                 repository duplicate-operation guard, so a second apply
+                 naturally fails (also duplicate create / stale revision); no
+                 retry or resume mechanism
+concurrency      unavoidable preflight -> mutation window remains; repository
+                 snapshot/expected_revision/operation_id checks are final
+                 authority; no lock/snapshot isolation claimed
+```
+
+Evidence:
+
+```text
+tests/unit/test_changeset_apply.py         approval gate (I3), fresh preflight
+                                           (I4/I5/I6), create/update/append
+                                           mapping, allowlist/omitted/explicit
+                                           None/tags, same-batch chain (I8/I10),
+                                           audit derivation (I9), FAILED/PARTIAL
+                                           semantics, unexpected-exception
+                                           propagation, AST + monkeypatch
+                                           filesystem guard (I7)
+tests/integration/test_changeset_apply.py  real temp Vault: approved create,
+                                           update, append, create->append->update
+                                           chain, stale revision fail-close,
+                                           audit records, preflight failure
+                                           leaves Vault byte-identical
+tests/contract/test_boundaries.py          changeset_apply import boundaries
+                                           (no models/tools/retrieval/cli/
+                                           pathlib/os/shutil/tempfile/subprocess/
+                                           pydantic_ai/ollama) and AST
+                                           repository-only mutation guard
+```
+
+Gates:
+
+```text
+uv run pytest tests/unit/test_changeset_apply.py -q          26 passed
+uv run pytest tests/integration/test_changeset_apply.py -q    7 passed
+uv run pytest tests/contract/test_boundaries.py -q          117 passed
+uv run ruff check .                                          All checks passed
+uv run ruff format --check .                                 364 files already formatted
+uv run pyright                                               0 errors, 0 warnings
+uv run pytest                                                5240 passed, 114 skipped, 1 warning
+git diff --check                                             clean
+```
+
+No domain, storage implementation, CLI, model or tool change was introduced. No
+rollback/transaction layer, cross-process locking, proposal/approval persistence
+or CLI workflow was added. S10-05 remains NOT STARTED and Stage 11 remains NOT
+STARTED.
+
+```text
+Next task:         S10-05 — CLI review/apply workflow + proposal persistence decision (NOT STARTED)
 ```
