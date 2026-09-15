@@ -372,6 +372,7 @@ class TestRestorationOptInUsage:
     MODULE_LEVEL_OPTIIN: set[str] = {
         "contract/test_boundaries.py",
         "contract/test_changeset_workflow_boundaries.py",
+        "contract/test_post_session_boundaries.py",
     }
 
     # (module_path, class_name) tuples that use it via @pytest.mark.usefixtures

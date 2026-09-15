@@ -94,10 +94,14 @@ Resolution verdict `R1_RECOVERY_READY`; evidence in
 ### Stage 11 — Post-session Processor `IN PROGRESS`
 
 S11-00 `DONE` — architecture/contracts/kickoff accepted
-(`S11_ARCHITECTURE_READY`). Detailed architecture, invariants, task map and
-evidence plan: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-01 — post-session input + durable processing schemas`. No production
-Stage-11 runtime code exists yet.
+(`S11_ARCHITECTURE_READY`). S11-01 `DONE` — post-session input + durable
+processing schemas: typed prepared-input identity/fingerprint, trusted attempt
+identity, append-only processing-ledger schemas/storage, deterministic
+model-free eligibility. The ledger is unaudited durable workflow evidence under
+`_system/raw/sessions/<id>/processing/` and does not participate in global
+`unresolved_audit_intent` recovery. Detailed architecture, invariants, task map
+and evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
+`S11-02 — deterministic context assembly + entity resolution`.
 
 ## Accepted reference baseline
 
@@ -134,7 +138,7 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
 No model-generated ChangeSet producer exists yet (Stage 11 does not start it).
-Stage 11 is in progress; next task is S11-01.
+Stage 11 is in progress; S11-01 is DONE; next task is S11-02.
 ```
 
 ## Known limitations affecting future work
@@ -152,7 +156,8 @@ no in-repo CI evidence guarantees symlink-capable execution.
 Stage 10 — ChangeSet (DONE)
 Stage 11 — Post-session Processor (IN PROGRESS)
   S11-00 DONE — architecture/contracts/kickoff
-  S11-01 NOT STARTED — post-session input + durable processing schemas
+  S11-01 DONE — post-session input + durable processing schemas
+  S11-02 NOT STARTED — deterministic context assembly + entity resolution
 ```
 
 ## Operational invariants
