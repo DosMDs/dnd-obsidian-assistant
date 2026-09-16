@@ -183,7 +183,7 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for S11-08.
+No confirmed blocker for S11-09.
 R1 Stage-11 prerequisite remains resolved by the application-owned ownership partition.
 S11-08 is DONE; next task is S11-09 (Stage-11 full review/completion).
 ```

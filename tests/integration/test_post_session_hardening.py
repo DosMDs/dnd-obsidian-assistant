@@ -535,7 +535,10 @@ def test_artifact_orphan_never_implies_completion(tmp_path: Path, kind: str) -> 
     result = run_post_session_processing(deps2, "S001", ATTEMPT_A, clock=fixed_clock)
     assert result.status is PostSessionProcessorStatus.INTERRUPTED
     assert _extraction_calls(deps2) == 0
-    assert artifact_store.artifact_exists("S001", ATTEMPT_A, PersistedArtifactKind.WORKFLOW) or True
+    # The crash happens after the real persistence call, so the parameterized
+    # artifact file does exist even though its ledger event is absent.
+    persisted_kind = PersistedArtifactKind(kind)
+    assert artifact_store.artifact_exists("S001", ATTEMPT_A, persisted_kind) is True
 
 
 # ── Proposal orphan + independent reviewability ────────────────────────────

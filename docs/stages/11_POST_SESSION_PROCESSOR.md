@@ -1685,7 +1685,7 @@ Scope:             test-heavy failure-injection hardening of the accepted
                    model/provider failures, resource bounds, privacy canaries,
                    path/symlink topology, restart/rerun edges, CLI error
                    surfaces and Stage-10 proposal interaction
-Deliverable:       12 new test/support modules + 1 focused edit to an existing
+Deliverable:       11 new test/support modules + 1 focused edit to an existing
                    integrity test module + this record +
                    DEVELOPMENT_STATUS reconciliation
 Production edits:  NONE (no DEFECT_FIX / DECOMPOSITION required)
