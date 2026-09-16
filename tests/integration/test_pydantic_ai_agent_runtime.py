@@ -36,7 +36,7 @@ from dnd_assistant.application.pydantic_ai_tool_bridge import (
 from dnd_assistant.models.types import (
     MessageRole,
 )
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.catalog import ToolPublicDefinition, ToolRegistrySchema
 from dnd_assistant.tools.registry import ToolRegistry

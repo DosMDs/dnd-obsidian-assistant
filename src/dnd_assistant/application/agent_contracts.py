@@ -43,10 +43,11 @@ from pydantic_core import PydanticSerializationError
 
 from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.models.types import ChatMessage, ChatRequest, MessageRole
-from dnd_assistant.prompts.agent_v2 import SYSTEM_PROMPT
+from dnd_assistant.prompts.agent_v3 import SYSTEM_PROMPT
 
 if TYPE_CHECKING:
     from dnd_assistant.application.agent_context import (
+        AgentCampaignMemory,
         AgentContext,
         AgentEntityContext,
         AgentEventContext,
@@ -111,6 +112,7 @@ def _build_user_json(context: AgentContext) -> str:
         "active_session": _serialize_session(context.active_session),
         "relevant_entities": [_serialize_entity(e) for e in context.relevant_entities],
         "recent_events": [_serialize_event(e) for e in context.recent_events],
+        "campaign_memory": _serialize_campaign_memory(context.campaign_memory),
     }
     return json.dumps(
         payload,
@@ -156,6 +158,31 @@ def _serialize_event(event: AgentEventContext) -> dict[str, object]:
         "world_tick": event.world_tick,
         "text_excerpt": event.text_excerpt,
         "text_truncated": event.text_truncated,
+    }
+
+
+def _serialize_campaign_memory(
+    memory: AgentCampaignMemory | None,
+) -> dict[str, object] | None:
+    """Serialize an ``AgentCampaignMemory`` or return ``None``.
+
+    The field is always explicitly present (``null`` when unavailable) and is
+    kept distinct from ``relevant_entities``: Campaign State memory is
+    recently-touched derived memory, not query-derived retrieval relevance.
+    """
+    if memory is None:
+        return None
+    return {
+        "recently_touched": [
+            {
+                "entity_id": entity.entity_id,
+                "entity_type": entity.entity_type,
+                "name": entity.name,
+            }
+            for entity in memory.recently_touched
+        ],
+        "total_recently_touched": memory.total_recently_touched,
+        "truncated": memory.truncated,
     }
 
 

@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S12-03 + S12-03-C1)
+**Last updated:** 2026-09-16 (S12-04)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
-**Active stage:** Stage 12 — Campaign State (S12-04 next)
+**Active stage:** Stage 12 — Campaign State (S12-05 next)
 **Current branch:** `feat/campaign-state`
 
 ## Status model
@@ -83,9 +83,27 @@ from rendered bytes; internal source collection stays all-visibility. Rebuilds
 append no canonical audit. No model call, no canonical ChangeSet operation and
 no CLI were introduced.
 
-Next: S12-04 — visibility projection + focused consumer integration. A
-successful apply is not itself an independent staleness signal; a fresh
-derivation's fingerprint comparison determines it.
+S12-04 delivered the player-safe projection and its focused Fast-Agent
+consumer. `application/campaign_state_projection.py` is the single pure
+projection (PLAYER-only `entity_id`/`entity_type`/`name`);
+`application/campaign_state_consumer.py` lazily rebuilds/repairs the derived
+generation and projects it through a `PlayerCampaignStateProvider`.
+`AgentContextBuilder` consumes only that capability, and
+`build_agent_request` always serializes an explicit bounded `campaign_memory`
+(`MAX_AGENT_CAMPAIGN_MEMORY_ENTITIES` + UTF-8 `MAX_AGENT_CAMPAIGN_MEMORY_TEXT_BYTES`;
+no partial ids/names). `current_world_tick` stays the only model-facing
+world-time field; campaign memory stays distinct from `relevant_entities`.  The
+changed deterministic USER contract is identified by `prompts/agent_v3.py`
+(`PROMPT_VERSION = "agent-v3"`); `agent_v1`/`agent_v2` are preserved.  Only
+`WORLD_TIME_UNAVAILABLE` and a pre-publication source race degrade to
+unavailable memory; other source failures and storage failures propagate.  A
+READ-only `dnd ask` may maintain derived `State/*` files (non-canonical cache
+maintenance) without canonical mutation, canonical audit, or model WRITE
+authorization.
+
+Next: S12-05 — hardening / failure injection. A successful apply is not itself
+an independent staleness signal; a fresh derivation's fingerprint comparison
+determines it.
 
 ## Current blockers and prerequisites
 
@@ -136,8 +154,8 @@ S12-00 DONE — architecture/contracts/kickoff
 S12-01 DONE — typed derived-state contract (CampaignState v2 + manifest/fingerprint)
 S12-02 DONE — deterministic source collection / evidence binding
 S12-03 DONE — materialization + rebuild/staleness/corruption
-S12-04 Next — visibility projection + focused consumer integration
-S12-05      — hardening / failure injection
+S12-04 DONE — visibility projection + focused Fast-Agent consumer integration
+S12-05 Next — hardening / failure injection
 S12-06      — full Stage-12 review / completion
 ```
 

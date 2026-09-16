@@ -41,7 +41,7 @@ from typer.testing import CliRunner
 from dnd_assistant.cli.ask import _ask_command
 from dnd_assistant.cli.main import app as dnd_app
 from dnd_assistant.errors import DndAssistantError
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
 

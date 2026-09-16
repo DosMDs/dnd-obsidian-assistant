@@ -32,6 +32,10 @@ from uuid import uuid4
 from pydantic_ai.models import Model
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
+from dnd_assistant.application.campaign_state_consumer import (
+    FAST_AGENT_RECENT_SESSION_LIMIT,
+    RebuildPlayerCampaignStateProvider,
+)
 from dnd_assistant.application.changeset_recovery import ChangeSetIntentOwnershipGate
 from dnd_assistant.application.pydantic_ai_agent_runtime import PydanticAIAgentRuntime
 from dnd_assistant.application.pydantic_ai_run_deps import DndAgentRunPreparer
@@ -45,6 +49,7 @@ from dnd_assistant.retrieval.index import SqliteFtsIndex
 from dnd_assistant.retrieval.search import VaultSearchService
 from dnd_assistant.storage.audit import AuditContext, AuditService
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
+from dnd_assistant.storage.derived_state import ObsidianDerivedStateStore
 from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
 from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataRepository
 from dnd_assistant.storage.session_recovery import ObsidianSessionRecoveryRepository
@@ -413,13 +418,27 @@ def compose_ask_runtime(
         tool_catalog = build_tool_registry_schema(tool_registry)
         tool_bridge = PydanticAIToolBridge(registry=tool_registry)
 
-        # 8. Build context builder
+        # 8. Build context builder.
+        #    Campaign State is exposed only through the player-safe provider
+        #    capability: the builder never receives repositories, the store or
+        #    materialization internals.  The provider lazily ensures the
+        #    derived generation on first read (non-canonical cache maintenance).
+        derived_state_store = ObsidianDerivedStateStore(vault_root)
+        campaign_state_provider = RebuildPlayerCampaignStateProvider(
+            vault_repository=vault_repository,
+            session_repository=session_repository,
+            world_time_repository=world_time_repository,
+            derived_state_store=derived_state_store,
+            recent_session_limit=FAST_AGENT_RECENT_SESSION_LIMIT,
+            calendar_definition=None,
+        )
         context_builder = AgentContextBuilder(
             search_service=search_service,
             vault_repository=vault_repository,
             session_repository=session_repository,
             event_repository=event_repository,
             world_time_repository=world_time_repository,
+            campaign_state_provider=campaign_state_provider,
         )
 
         # 9. Build the project-owned Pydantic AI run boundary
@@ -439,7 +458,7 @@ def compose_ask_runtime(
         session_mode, active_session_id = _derive_session_context(session_repository)
 
         if allow_write:
-            from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+            from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 
             audit_ctx = _build_ask_audit_context(
                 model_profile=profile_name,

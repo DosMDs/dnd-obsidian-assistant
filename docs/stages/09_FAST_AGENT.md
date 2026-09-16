@@ -2371,3 +2371,43 @@ S9-07 — DONE
 Stage 9 — DONE
 Stage 10 — NOT STARTED (do not begin without explicit authorization)
 ```
+
+---
+
+## S12-04 — Fast Agent deterministic USER contract update (agent-v3)
+
+**Status:** DONE
+
+Stage-12 S12-04 added an explicit, player-safe Campaign State `campaign_memory`
+field to the deterministic Fast-Agent USER request.  Because the model-facing
+request contract changed, the current prompt/request identity advanced from
+`agent-v2` to `agent-v3` (`src/dnd_assistant/prompts/agent_v3.py`,
+`PROMPT_VERSION = "agent-v3"`).  The v3 system prompt text is intentionally
+identical to v2; `agent_v1` and `agent_v2` remain preserved and unchanged.
+
+Current deterministic USER payload keys:
+
+```text
+user_input, current_world_tick, active_session, relevant_entities,
+recent_events, campaign_memory
+```
+
+`campaign_memory` is always explicitly present: `null` when Campaign State is
+unavailable, otherwise a compact player-safe object
+(`{recently_touched:[{entity_id,entity_type,name}], total_recently_touched,
+truncated}`) bounded by `MAX_AGENT_CAMPAIGN_MEMORY_ENTITIES` and
+`MAX_AGENT_CAMPAIGN_MEMORY_TEXT_BYTES`.  It stays distinct from
+`relevant_entities`, and `current_world_tick` remains the only model-facing
+world-time field.
+
+Production prompt import sites now use `agent_v3`:
+`application/agent_contracts.py`, `application/pydantic_ai_fast_agent.py`,
+`application/pydantic_ai_agent_runtime.py`, and the `dnd ask` audit
+`prompt_version` in `cli/agent_runtime.py`.
+
+Evidence: `AgentDecision.prompt_version == "agent-v3"`; write-capable `dnd ask`
+`AuditContext.prompt_version == "agent-v3"`; `agent_v1.py` / `agent_v2.py`
+unchanged.  Detailed S12-04 integration evidence lives in
+`docs/stages/12_CAMPAIGN_STATE.md`.
+
+Historical v1/v2 sections above remain accurate for their time periods.

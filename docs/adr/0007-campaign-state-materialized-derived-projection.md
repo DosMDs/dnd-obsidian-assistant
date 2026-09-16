@@ -113,3 +113,30 @@ though on-demand derivation remains an internal fallback for a missing file.
 
 Nothing. The earlier S12-00 PLAN draft recommendation of a purely on-demand,
 no-artifact design was not accepted and is not part of this decision.
+
+## Update — S12-04 (2026-09-16)
+
+S12-04 established the durable consumer/visibility decisions for Campaign
+State without changing the core ADR:
+
+1. **Single player-safe projection boundary.** A pure
+   `project_player_campaign_state` is the one reusable boundary that admits
+   `Visibility.PLAYER` references and exposes only `entity_id`, `entity_type`
+   and `name`.  The internal all-visibility projection is not consumed directly
+   by any model-facing path.
+2. **Focused consumer, lazy ensure-current.** The Fast Agent consumes Campaign
+   State only through a `PlayerCampaignStateProvider` that lazily rebuilds /
+   repairs the materialized generation and returns the projected player-safe
+   state.  This gives the S12-03 durable materialization a real consumer; there
+   is no separate Campaign State rebuild CLI.
+3. **Narrow failure normalization.** Only `WORLD_TIME_UNAVAILABLE` and a
+   pre-publication source race degrade to unavailable memory; every other
+   bounded source failure and all storage failures propagate fail-closed.
+4. **Derived writes are not model authorization.** A READ-only `dnd ask` may
+   maintain derived `State/*` files; this is trusted Python cache maintenance
+   and does not mutate canonical data, append canonical audit, or grant model
+   WRITE permission.
+5. **No duplicate world time; explicit request identity.** The existing
+   `current_world_tick` remains the only model-facing world-time field, and the
+   changed deterministic USER contract is identified by `agent-v3` rather than
+   silently retaining `agent-v2`.

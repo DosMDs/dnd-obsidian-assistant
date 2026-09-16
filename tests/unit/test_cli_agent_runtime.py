@@ -25,6 +25,10 @@ import pytest
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.wrapper import WrapperModel
 
+from dnd_assistant.application.campaign_state_consumer import (
+    FAST_AGENT_RECENT_SESSION_LIMIT,
+    RebuildPlayerCampaignStateProvider,
+)
 from dnd_assistant.cli.agent_runtime import (
     AskRuntime,
     _build_agent_model,
@@ -37,7 +41,7 @@ from dnd_assistant.cli.agent_runtime import (
 )
 from dnd_assistant.errors import DndAssistantError, ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 
 # ── Fixtures ───────────────────────────────────────────────────────────────
@@ -236,6 +240,14 @@ class TestBuildAskAuditContext:
         assert ctx.source == "model_tool"
         assert ctx.model_profile == "my-agent"
         assert ctx.prompt_version == PROMPT_VERSION
+
+    def test_write_ask_audit_prompt_version_is_agent_v3(self) -> None:
+        """The write-capable ask prompt identity is literally agent-v3."""
+        ctx = _build_ask_audit_context(
+            model_profile="my-agent",
+            prompt_version=PROMPT_VERSION,
+        )
+        assert ctx.prompt_version == "agent-v3"
 
     def test_audit_context_with_session(self) -> None:
         """AuditContext includes session ID when provided."""
@@ -606,3 +618,49 @@ class TestImportSideEffects:
         # This should not raise StorageError or ModelError
         mod = importlib.import_module("dnd_assistant.cli.ask")
         assert mod is not None
+
+
+# ── S12-04 Campaign State provider wiring ──────────────────────────────────
+
+
+class TestComposeAskRuntimeCampaignState:
+    """Composition wires the player-safe Campaign State provider."""
+
+    def _minimal_vault(self, tmp_path: Path) -> Path:
+        vault_root = tmp_path / "vault"
+        vault_root.mkdir()
+        (vault_root / "Characters" / "NPCs").mkdir(parents=True)
+        (vault_root / "Locations").mkdir()
+        (vault_root / "Quests").mkdir()
+        (vault_root / "Items").mkdir()
+        (vault_root / "Sessions").mkdir()
+        (vault_root / "_system" / "audit").mkdir(parents=True)
+        (vault_root / "_system" / "raw" / "sessions").mkdir(parents=True)
+        (vault_root / "_system" / "indexes").mkdir(parents=True)
+        return vault_root
+
+    def _write_config(self, tmp_path: Path) -> Path:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(
+            "[profiles.test-agent]\nprovider='ollama'\nmodel='test'\n"
+            "base_url='http://localhost:11434'\nrole='agent'\n",
+            encoding="utf-8",
+        )
+        return config_path
+
+    def test_read_only_compose_wires_provider_and_explicit_limit(self, tmp_path: Path) -> None:
+        from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+        runtime = compose_ask_runtime(
+            vault_root=self._minimal_vault(tmp_path),
+            config_path=self._write_config(tmp_path),
+            profile_name="test-agent",
+            model_factory=lambda p: _ClosableTestModel(),
+        )
+        try:
+            assert runtime.execution_context.granted_permission is Permission.READ
+            provider = runtime.agent_runtime._run_preparer._context_builder._campaign_state_provider
+            assert isinstance(provider, RebuildPlayerCampaignStateProvider)
+            assert provider._recent_session_limit == FAST_AGENT_RECENT_SESSION_LIMIT
+        finally:
+            runtime.close()

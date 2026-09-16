@@ -249,6 +249,64 @@ def test_application_campaign_state_materialization_is_provider_neutral() -> Non
     _assert_provider_neutral(_MATERIALIZATION_MODULE)
 
 
+# ── application/campaign_state_projection (S12-04) ─────────────────────────
+
+_PROJECTION_MODULE = "dnd_assistant.application.campaign_state_projection"
+_FORBIDDEN_PROJECTION_STDLIB = {"pathlib", "os", "hashlib", "json"}
+
+
+def test_application_campaign_state_projection_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_PROJECTION_MODULE)
+
+
+def test_application_campaign_state_projection_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_PROJECTION_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(m for m in loaded if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.campaign_state_projection imported storage: {offending}"
+
+
+def test_application_campaign_state_projection_has_no_persistence_stdlib() -> None:
+    targets = _module_import_targets(_PROJECTION_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_PROJECTION_STDLIB
+    )
+    assert not offending, f"application.campaign_state_projection stdlib: {offending}"
+
+
+def test_application_campaign_state_projection_is_provider_neutral() -> None:
+    _assert_provider_neutral(_PROJECTION_MODULE)
+
+
+# ── application/campaign_state_consumer (S12-04) ───────────────────────────
+
+_CONSUMER_MODULE = "dnd_assistant.application.campaign_state_consumer"
+_FORBIDDEN_CONSUMER_STDLIB = {"pathlib", "os", "hashlib", "json"}
+
+
+def test_application_campaign_state_consumer_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_CONSUMER_MODULE)
+
+
+def test_application_campaign_state_consumer_has_no_storage_runtime_import() -> None:
+    _clean_import(_CONSUMER_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(m for m in loaded if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.campaign_state_consumer imported storage: {offending}"
+
+
+def test_application_campaign_state_consumer_has_no_filesystem_stdlib() -> None:
+    targets = _module_import_targets(_CONSUMER_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_CONSUMER_STDLIB
+    )
+    assert not offending, f"application.campaign_state_consumer stdlib: {offending}"
+
+
+def test_application_campaign_state_consumer_is_provider_neutral() -> None:
+    _assert_provider_neutral(_CONSUMER_MODULE)
+
+
 # ── storage/derived_state (S12-03) ─────────────────────────────────────────
 
 _STORE_MODULE = "dnd_assistant.storage.derived_state"

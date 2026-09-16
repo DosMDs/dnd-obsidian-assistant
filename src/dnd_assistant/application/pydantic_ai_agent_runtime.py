@@ -61,7 +61,7 @@ from pydantic_ai.tools import DeferredToolRequests, DeferredToolResults
 
 from dnd_assistant.application.dnd_agent_policy import MAX_MODEL_REQUESTS_PER_RUN
 from dnd_assistant.errors import ModelError, ValidationError
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
@@ -150,7 +150,7 @@ class PydanticAIAgentRuntime:
         from dnd_assistant.application.agent_contracts import (
             build_agent_request,
         )
-        from dnd_assistant.prompts.agent_v2 import SYSTEM_PROMPT
+        from dnd_assistant.prompts.agent_v3 import SYSTEM_PROMPT
 
         # 1. Prepare exactly once (validates input, builds context, selects
         #    tools, issues snapshot, creates fresh policy).

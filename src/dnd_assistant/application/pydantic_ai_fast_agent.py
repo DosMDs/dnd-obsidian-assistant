@@ -53,7 +53,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.tools import DeferredToolRequests
 
 from dnd_assistant.errors import ModelError
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION
+from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 
 if TYPE_CHECKING:
     from pydantic_ai.run import AgentRunResult as PydanticAgentRunResult
@@ -153,7 +153,7 @@ class PydanticAIFastAgent:
         #    - output_type = str | DeferredToolRequests
         #    - retries = 0 (tools and output)
         #    - request_limit = 1 (exactly one model request)
-        from dnd_assistant.prompts.agent_v2 import SYSTEM_PROMPT
+        from dnd_assistant.prompts.agent_v3 import SYSTEM_PROMPT
 
         agent = Agent(
             self._model,

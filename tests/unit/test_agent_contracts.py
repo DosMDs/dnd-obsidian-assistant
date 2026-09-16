@@ -40,7 +40,7 @@ from dnd_assistant.models.types import (
     ToolAwareResponse,
     ToolCall,
 )
-from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION, SYSTEM_PROMPT
+from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION, SYSTEM_PROMPT
 
 # ── Output schemas ─────────────────────────────────────────────────────────────
 
@@ -402,3 +402,27 @@ def _text_response(content: str | None) -> ToolAwareResponse:
             tool_calls=(),
         )
     )
+
+
+# ── Prompt/request version transition (S12-04) ─────────────────────────────────
+
+
+class TestPromptVersionTransition:
+    """The current Fast-Agent request identity is agent-v3; v1/v2 preserved."""
+
+    def test_current_prompt_version_is_agent_v3(self) -> None:
+        assert PROMPT_VERSION == "agent-v3"
+
+    def test_v3_system_prompt_is_text_identical_to_v2(self) -> None:
+        from dnd_assistant.prompts.agent_v2 import PROMPT_VERSION as v2_version
+        from dnd_assistant.prompts.agent_v2 import SYSTEM_PROMPT as v2_prompt
+
+        assert v2_version == "agent-v2"
+        assert SYSTEM_PROMPT == v2_prompt
+
+    def test_historical_agent_v1_resource_preserved(self) -> None:
+        from dnd_assistant.prompts.agent_v1 import PROMPT_VERSION as v1_version
+        from dnd_assistant.prompts.agent_v1 import SYSTEM_PROMPT as v1_prompt
+
+        assert v1_version == "agent-v1"
+        assert v1_prompt

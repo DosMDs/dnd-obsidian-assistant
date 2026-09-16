@@ -8,9 +8,14 @@ future Fast Agent.  It composes only already accepted data sources:
 - ``SessionMetadataRepository.get_active_session()`` for active session.
 - ``SessionEventRepository.list_events()`` for recent session events.
 - ``WorldTimeRepository.get_current_world_time()`` for current world tick.
+- an optional ``PlayerCampaignStateProvider`` capability for the compact,
+  player-safe Campaign State ``campaign_memory`` (S12-04).
 
 The builder is strictly read-only, synchronous, provider-neutral, and
-performs zero model/tool/prompt work.
+performs zero model/tool/prompt work.  It never receives repositories, a
+derived-state store or materialization internals for Campaign State: the
+provider is the sole Campaign State dependency and returns an already
+player-safe projection.
 
 Runtime imports are deferred to avoid eagerly loading ``dnd_assistant.models``,
 ``dnd_assistant.tools``, or ``dnd_assistant.cli`` at module-import time.
@@ -30,6 +35,10 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from dnd_assistant.application.campaign_state_projection import (
+    PlayerCampaignState,
+    PlayerCampaignStateProvider,
+)
 from dnd_assistant.errors import NotFoundError, ValidationError
 
 if TYPE_CHECKING:
@@ -50,6 +59,20 @@ _MAX_RELEVANT_ENTITIES = 5
 _MAX_RECENT_EVENTS = 5
 _MAX_ENTITY_BODY_EXCERPT = 1000
 _MAX_EVENT_TEXT_EXCERPT = 400
+
+# Campaign State memory compactness (Fast-Agent policy).
+#
+# ``EntityId`` and ``NameStr`` are deliberately not length-bounded, so a count
+# bound alone cannot bound the payload.  Both a deterministic entity-count
+# bound and a UTF-8 text budget are enforced.  The budget counts the exact
+# UTF-8 bytes of the entity id and display name; the first entry that would
+# exceed the remaining budget stops inclusion.  Entries are never truncated
+# and stable ids are never mutated.
+MAX_AGENT_CAMPAIGN_MEMORY_ENTITIES = 10
+"""Maximum player-safe Campaign State entities exposed to the model."""
+
+MAX_AGENT_CAMPAIGN_MEMORY_TEXT_BYTES = 2048
+"""UTF-8 byte budget for the concatenated entity ids and names in memory."""
 
 
 # ── Context DTOs ───────────────────────────────────────────────────────────────
@@ -89,11 +112,45 @@ class AgentEventContext:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentCampaignMemoryEntity:
+    """One compact player-safe Campaign State memory entity.
+
+    Only the player-safe minimum is exposed to the model: the exact stable id,
+    the entity type and the display name.
+    """
+
+    entity_id: EntityId
+    entity_type: EntityType
+    name: str
+
+
+@dataclass(frozen=True, slots=True)
+class AgentCampaignMemory:
+    """Compact, bounded, player-safe Campaign State memory for the Fast Agent.
+
+    ``recently_touched`` contains at most
+    ``MAX_AGENT_CAMPAIGN_MEMORY_ENTITIES`` entries that fit within
+    ``MAX_AGENT_CAMPAIGN_MEMORY_TEXT_BYTES``.  ``total_recently_touched`` is
+    the full player-visible reference count *before* Fast-Agent compacting and
+    ``truncated`` is ``True`` when any reference was omitted.  Ordering is the
+    deterministic canonical ``entity_id`` ascending order; it is not a
+    relevance ranking.
+    """
+
+    recently_touched: tuple[AgentCampaignMemoryEntity, ...]
+    total_recently_touched: int
+    truncated: bool
+
+
+@dataclass(frozen=True, slots=True)
 class AgentContext:
     """Complete immutable compact context snapshot for the Fast Agent.
 
     This is an application-layer DTO.  It is NOT a ModelGateway DTO and must
     not be passed directly to a model provider.
+
+    ``current_world_tick`` is the only model-facing world-time field; Campaign
+    State memory carries no second tick or derived date.
     """
 
     user_input: str
@@ -101,6 +158,7 @@ class AgentContext:
     active_session: AgentSessionContext | None
     relevant_entities: tuple[AgentEntityContext, ...]
     recent_events: tuple[AgentEventContext, ...]
+    campaign_memory: AgentCampaignMemory | None = None
 
 
 # ── Input validation ───────────────────────────────────────────────────────────
@@ -167,12 +225,14 @@ class AgentContextBuilder:
         session_repository: SessionMetadataRepository,
         event_repository: SessionEventRepository,
         world_time_repository: WorldTimeRepository,
+        campaign_state_provider: PlayerCampaignStateProvider | None = None,
     ) -> None:
         self._search_service = search_service
         self._vault_repository = vault_repository
         self._session_repository = session_repository
         self._event_repository = event_repository
         self._world_time_repository = world_time_repository
+        self._campaign_state_provider = campaign_state_provider
 
     def build(self, user_input: str) -> AgentContext:
         """Build a compact context snapshot from the given user input.
@@ -215,12 +275,16 @@ class AgentContextBuilder:
             event_repository=self._event_repository,
         )
 
+        # 6. Player-safe Campaign State memory (optional capability)
+        campaign_memory = _read_campaign_memory(self._campaign_state_provider)
+
         return AgentContext(
             user_input=validated_input,
             current_world_tick=current_tick,
             active_session=active_session,
             relevant_entities=entities,
             recent_events=recent_events,
+            campaign_memory=campaign_memory,
         )
 
 
@@ -329,3 +393,48 @@ def _build_session_context(
         )
 
     return session_ctx, tuple(event_ctxs)
+
+
+def _read_campaign_memory(
+    provider: PlayerCampaignStateProvider | None,
+) -> AgentCampaignMemory | None:
+    """Build the compact player-safe Campaign State memory.
+
+    ``None`` when no provider is configured or Campaign State is unavailable.
+    The player-safe references are already in canonical ``entity_id``
+    ascending order; this function applies the Fast-Agent count and UTF-8 byte
+    bounds without truncating ids or names, stopping before the first entry
+    that would not fit.
+    """
+    if provider is None:
+        return None
+
+    player_state: PlayerCampaignState | None = provider.get_player_campaign_state()
+    if player_state is None:
+        return None
+
+    references = player_state.recently_touched
+    total = len(references)
+
+    included: list[AgentCampaignMemoryEntity] = []
+    used_bytes = 0
+    for ref in references:
+        if len(included) >= MAX_AGENT_CAMPAIGN_MEMORY_ENTITIES:
+            break
+        entry_bytes = len(ref.entity_id.encode("utf-8")) + len(ref.name.encode("utf-8"))
+        if used_bytes + entry_bytes > MAX_AGENT_CAMPAIGN_MEMORY_TEXT_BYTES:
+            break
+        used_bytes += entry_bytes
+        included.append(
+            AgentCampaignMemoryEntity(
+                entity_id=ref.entity_id,
+                entity_type=ref.entity_type,
+                name=ref.name,
+            )
+        )
+
+    return AgentCampaignMemory(
+        recently_touched=tuple(included),
+        total_recently_touched=total,
+        truncated=len(included) < total,
+    )

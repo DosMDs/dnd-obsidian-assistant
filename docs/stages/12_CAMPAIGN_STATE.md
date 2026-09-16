@@ -632,3 +632,161 @@ objects. No new audit subsystem and no `AuditContext` requirement.
 Not implemented (deferred): CLI, model calls, canonical ChangeSet operations,
 TimelineEvent persistence, CalendarDefinition persistence, locking framework,
 S12-04 consumer projection.
+
+## 18. S12-04 record — player-safe projection + Focused Fast-Agent consumer
+
+```text
+Task:      S12-04 — visibility projection + focused consumer integration
+Routing:   PLAN_REQUIRED -> accepted PLAN (+ architect corrections) -> BUILD
+Branch:    feat/campaign-state
+Baseline:  7b6d63f94b5e9a6d14daf0d8ec1d0c327d32f18a (S12-03-C1)
+```
+
+### Player-safe projection
+
+`application/campaign_state_projection.py` is the single reusable
+player-visibility boundary over the internally all-visibility
+``CampaignState``:
+
+- `project_player_campaign_state(state) -> PlayerCampaignState` is pure,
+  deterministic, I/O-free and never mutates the input.
+- Only `Visibility.PLAYER` references are admitted; `PlayerCampaignEntityReference`
+  carries exactly `entity_id`, `entity_type`, `name` (no visibility, revision,
+  provenance session ids or fingerprint).
+- Player references are emitted in canonical `entity_id` ascending order.
+- `PlayerCampaignStateProvider` (Protocol) is the only capability the Fast-Agent
+  context builder consumes.
+
+### Focused consumer (lazy ensure-current)
+
+`application/campaign_state_consumer.py::RebuildPlayerCampaignStateProvider`
+composes the S12-03 rebuild service, trusted repositories and a derived-state
+store:
+
+```text
+rebuild_campaign_state            (lazy ensure-current; PUBLISHED | ALREADY_CURRENT)
+  -> trusted typed CampaignState
+  -> project_player_campaign_state
+  -> PlayerCampaignState
+```
+
+`FAST_AGENT_RECENT_SESSION_LIMIT = 5` is the explicit, named production policy
+value (no CLI/config expansion; the literal is not duplicated).  Production
+uses `calendar_definition=None`: no canonical `CalendarDefinition` source
+exists, so no ``GameDate`` is fabricated.
+
+### Graceful vs fail-closed mapping
+
+```text
+WORLD_TIME_UNAVAILABLE                    -> None (omit campaign memory, continue)
+CampaignStateSourceChangedError (race)    -> None (omit; no retry loop)
+INVALID_COMPLETED_SESSION
+INVALID_TOUCHED_ENTITIES
+MISSING_TOUCHED_ENTITY
+INVALID_CALENDAR_INPUT
+INVALID_SELECTION_LIMIT
+INPUT_TOO_LARGE                            -> propagate CampaignStateSourceError
+StorageError (unsafe State topology,
+  store/canonical corruption)              -> propagate fail-closed
+```
+
+### Agent context + USER request contract
+
+`application/agent_context.py`:
+
+- `AgentCampaignMemoryEntity` (`entity_id`, `entity_type`, `name`) and
+  `AgentCampaignMemory` (`recently_touched`, `total_recently_touched`,
+  `truncated`), with `AgentContext.campaign_memory: AgentCampaignMemory | None`
+  defaulting to `None`.
+- `AgentContextBuilder` takes an optional `campaign_state_provider`; it never
+  receives repositories, the derived-state store or materialization internals.
+- Compactness is a Fast-Agent policy: `MAX_AGENT_CAMPAIGN_MEMORY_ENTITIES = 10`
+  and `MAX_AGENT_CAMPAIGN_MEMORY_TEXT_BYTES = 2048`.  `EntityId`/`NameStr` are
+  not length-bounded, so both a count bound and a UTF-8 byte budget are
+  enforced.  Entries in canonical `entity_id` order are included only while the
+  exact `entity_id` + `name` fit the remaining budget; ids/names are never
+  truncated and iteration stops before the first non-fitting entry.
+  `total_recently_touched` is the full PLAYER count before compacting and
+  `truncated = included < total`.  A first entry that alone exceeds the budget
+  yields `recently_touched = ()`, `total > 0`, `truncated = True`.
+- The ordering is deterministic canonical order, explicitly **not** a relevance
+  ranking.  Campaign memory is kept distinct from `relevant_entities`
+  (query-derived retrieval) and carries no second tick/date; the existing
+  `current_world_tick` remains the only model-facing world-time field.
+
+`application/agent_contracts.py::build_agent_request` keeps explicit field
+mapping and always serializes a top-level `campaign_memory` (`null` when
+unavailable; otherwise the compact object).  Adding `AgentContext` fields still
+does not auto-expose them.
+
+### Prompt/request version — agent-v3
+
+The additive deterministic USER field changes the model-facing request
+contract, so the current prompt/request identity is now
+`src/dnd_assistant/prompts/agent_v3.py` (`PROMPT_VERSION = "agent-v3"`, system
+prompt text identical to v2).  `agent_v1.py` and `agent_v2.py` are preserved
+unchanged.  `AgentDecision.prompt_version`, the Pydantic AI runtime prompt
+imports and the `dnd ask` audit `prompt_version` all use `agent-v3`.  No
+separate request-schema namespace was introduced.
+
+### Lazy materialization / READ-only semantics
+
+Default READ-only `dnd ask` may create/repair managed `State/*` files.  This is
+trusted Python derived-cache maintenance, not model WRITE authorization:
+
+- no canonical entity/session/event/world-time mutation;
+- no canonical `_system/audit/audit.jsonl` append;
+- `ExecutionContext.granted_permission` remains `READ` and only READ tools are
+  exposed;
+- unsafe `State/` topology still fails closed with `StorageError`;
+- no model participates in whether/where derived files are written.
+
+### Literal evidence
+
+| Criterion | Literal evidence |
+|---|---|
+| PLAYER retained / DM+SYSTEM excluded / deterministic order / no mutation / minimal fields | `tests/unit/test_campaign_state_projection.py` |
+| per-reason graceful-vs-propagated mapping / StorageError propagation / explicit policy config | `tests/unit/test_campaign_state_consumer.py` |
+| count + UTF-8 byte budget / long ASCII + Cyrillic / never partial id | `tests/unit/test_agent_campaign_memory.py` |
+| exact USER JSON shape / always-present `null` / distinct field / hidden-data negative | `tests/unit/test_agent_request_campaign_memory.py` |
+| rebuild→project, stale repair, world-time omission, unsafe-symlink fail-closed | `tests/integration/test_s12_04_campaign_memory.py` |
+| derived-only writes, no canonical/audit mutation, READ tool exposure | `tests/integration/test_s12_04_campaign_memory.py` |
+| fake-model first USER payload player-safe + `agent-v3` | `tests/integration/test_s12_04_campaign_memory.py` |
+| composition wires provider + explicit limit + READ context | `tests/unit/test_cli_agent_runtime.py` |
+| projection/consumer provider-neutral boundary | `tests/contract/test_campaign_state_boundaries.py` |
+
+### Changed files
+
+```text
+src/dnd_assistant/prompts/agent_v3.py                          (new)
+src/dnd_assistant/application/campaign_state_projection.py     (new)
+src/dnd_assistant/application/campaign_state_consumer.py       (new)
+src/dnd_assistant/application/agent_context.py                 (modified)
+src/dnd_assistant/application/agent_contracts.py               (modified)
+src/dnd_assistant/application/pydantic_ai_fast_agent.py        (agent-v3)
+src/dnd_assistant/application/pydantic_ai_agent_runtime.py     (agent-v3)
+src/dnd_assistant/cli/agent_runtime.py                         (provider wiring, agent-v3)
+tests/unit/test_campaign_state_projection.py                   (new)
+tests/unit/test_campaign_state_consumer.py                     (new)
+tests/unit/test_agent_campaign_memory.py                       (new)
+tests/unit/test_agent_request_campaign_memory.py               (new)
+tests/integration/test_s12_04_campaign_memory.py               (new)
+tests/unit/test_cli_agent_runtime.py                           (modified)
+tests/unit/test_agent_contracts.py                             (agent-v3)
+tests/integration/test_pydantic_ai_agent_runtime.py            (agent-v3)
+tests/integration/test_pydantic_ai_fast_agent.py               (agent-v3)
+tests/integration/test_cli_ask_mocked.py                       (agent-v3)
+tests/contract/test_campaign_state_boundaries.py               (projection/consumer boundaries)
+docs/stages/12_CAMPAIGN_STATE.md, docs/stages/09_FAST_AGENT.md,
+docs/adr/0007-campaign-state-materialized-derived-projection.md,
+DEVELOPMENT_STATUS.md
+```
+
+No new third-party dependency. No arbitrary filesystem capability reached
+application/model code. No Markdown parsing in the consumer path.
+`tests/contract/test_boundaries.py` unchanged.
+
+Deferred beyond S12-04: S12-05 hardening/failure injection, S12-06 review.
+No model call in derivation; model-assisted narrative, semantic ranking,
+TimelineEvent/CalendarDefinition persistence, new ChangeSet operations, DM mode
+and Web UI remain out of scope.
