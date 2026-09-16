@@ -8,6 +8,7 @@ and symlink safety for ``State/``, managed artifacts and the manifest.
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 
 import pytest
@@ -194,3 +195,58 @@ class TestSymlinkSafety:
         )
         with pytest.raises(StorageError):
             store.read_artifact_bytes(CampaignStateArtifact.WORLD_STATE)
+
+
+class TestMutationTimeReauthorization:
+    """``State/`` substituted between managed writes must fail closed."""
+
+    @staticmethod
+    def _substitute_after(
+        monkeypatch: pytest.MonkeyPatch,
+        store: ObsidianDerivedStateStore,
+        trigger_name: str,
+        outside: Path,
+    ) -> None:
+        import dnd_assistant.storage.derived_state as ds
+
+        original = ds.atomic_write_text
+
+        def hook(target, content, *, validator):
+            result = original(target, content, validator=validator)
+            if Path(target).name == trigger_name:
+                shutil.rmtree(store.state_dir)
+                os.symlink(str(outside), str(store.state_dir))
+            return result
+
+        monkeypatch.setattr(ds, "atomic_write_text", hook)
+
+    def test_parent_substitution_before_second_artifact(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        if not _can_symlink():
+            pytest.skip("Environment does not support symlinks")
+        store = _store(tmp_path)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        self._substitute_after(
+            monkeypatch, store, ARTIFACT_FILENAMES[CampaignStateArtifact.WORLD_STATE], outside
+        )
+        with pytest.raises(StorageError):
+            store.publish(_texts(), _MANIFEST)
+        assert list(outside.iterdir()) == []
+
+    def test_parent_substitution_before_manifest(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        if not _can_symlink():
+            pytest.skip("Environment does not support symlinks")
+        store = _store(tmp_path)
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        self._substitute_after(
+            monkeypatch, store, ARTIFACT_FILENAMES[CampaignStateArtifact.RECENTLY_TOUCHED], outside
+        )
+        with pytest.raises(StorageError):
+            store.publish(_texts(), _MANIFEST)
+        assert list(outside.iterdir()) == []
+        assert not (outside / MANIFEST_FILENAME).exists()

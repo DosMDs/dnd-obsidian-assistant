@@ -242,7 +242,12 @@ class ObsidianDerivedStateStore:
         artifacts: Mapping[CampaignStateArtifact, str],
         manifest_text: str,
     ) -> None:
-        """Atomically replace managed artifacts, then the manifest last."""
+        """Atomically replace managed artifacts, then the manifest last.
+
+        The ``State/`` parent is reauthorized immediately before each managed
+        replacement; a parent substituted between writes (e.g. by a symlink)
+        fails closed before the next write.
+        """
         if not isinstance(manifest_text, str):
             raise StorageError("Manifest content must be a string")
 
@@ -263,9 +268,15 @@ class ObsidianDerivedStateStore:
                 raise StorageError(f"Artifact content must be a string: {artifact.value!r}")
             _validate_text_content(text)
 
-        state = self._ensure_state_dir()
-
+        # Mutation-time reauthorization discipline: the managed parent is
+        # reauthorized immediately before *every* managed replacement, so a
+        # ``State/`` substituted with a symlink between managed writes fails
+        # closed before the next write and no later artifact/manifest is
+        # written through the substituted parent.  This does not create a
+        # filesystem transaction and does not eliminate every OS-level TOCTOU
+        # race.
         for artifact in _ARTIFACT_ORDER:
+            state = self._ensure_state_dir()
             leaf = self._safe_leaf(state, artifact_filename(artifact))
             atomic_write_text(
                 target=leaf,
@@ -273,6 +284,9 @@ class ObsidianDerivedStateStore:
                 validator=_validate_text_content,
             )
 
+        # The manifest is the generation commit marker and is written last,
+        # with its own fresh parent reauthorization.
+        state = self._ensure_state_dir()
         manifest_leaf = self._safe_leaf(state, MANIFEST_FILENAME)
         atomic_write_text(
             target=manifest_leaf,

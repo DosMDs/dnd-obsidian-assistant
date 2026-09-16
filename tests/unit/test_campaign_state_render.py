@@ -83,7 +83,7 @@ class TestRecentlyTouched:
             CampaignStateArtifact.RECENTLY_TOUCHED
         ]
         assert "**Aria**" in text
-        assert "(`npc-aria`, npc, visibility: player, revision: 1)" in text
+        assert "(npc-aria, npc, visibility: player, revision: 1)" in text
         assert "— sessions: S001, S002" in text
 
     def test_dm_system_absent_from_rendered_bytes(self) -> None:
@@ -115,6 +115,31 @@ class TestRecentlyTouched:
         assert "*bold*" not in text
         assert "npc`tick" not in text
         assert "npc\\`tick" in text
+
+    def test_entity_id_inline_context_metacharacters(self) -> None:
+        raw_id = "`*[]\\"
+        ref = make_reference(raw_id, name="Магистр Варос")
+        text = _artifacts(make_state(_FP, references=(ref,)))[
+            CampaignStateArtifact.RECENTLY_TOUCHED
+        ]
+        ref_lines = [line for line in text.splitlines() if line.startswith("- **")]
+        assert len(ref_lines) == 1
+        line = ref_lines[0]
+        # Fixed list structure: bold name, then the metadata group and provenance.
+        assert line.startswith("- **Магистр Варос** (")
+        assert line.endswith("— sessions: S001")
+        # The id is ordinary escaped inline text; the raw metacharacter run must
+        # not survive unescaped (which is what a backtick code span would fail
+        # to guarantee).
+        assert escape_inline(raw_id) in line
+        assert raw_id not in line
+
+    def test_cyrillic_entity_id_preserved(self) -> None:
+        ref = make_reference("npc-варос", name="Магистр")
+        text = _artifacts(make_state(_FP, references=(ref,)))[
+            CampaignStateArtifact.RECENTLY_TOUCHED
+        ]
+        assert "npc-варос" in text
 
     def test_no_unsupported_semantics(self) -> None:
         text = _joined(make_state(_FP))

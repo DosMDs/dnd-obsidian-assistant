@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S12-03)
+**Last updated:** 2026-09-16 (S12-03 + S12-03-C1)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
 **Active stage:** Stage 12 — Campaign State (S12-04 next)

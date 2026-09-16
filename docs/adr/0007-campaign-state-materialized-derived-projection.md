@@ -54,7 +54,9 @@ canonical evidence.
 6. **Dedicated storage boundary.** Derived-State persistence uses a trusted
    derived-state store (path safety, atomic replacement, symlink safety).
    Application code does not receive arbitrary filesystem access. The canonical
-   `VaultRepository` protocol is not reused for derived files.
+   `VaultRepository` protocol is not reused for derived files. Each managed
+   publication step reauthorizes the derived-state parent directory immediately
+   before its atomic replacement, and the manifest is always written last.
 7. **Honest semantics.** Session `touched_entities` means only that an entity
    was touched/referenced. It is not interpreted as current location, active
    quest, or important NPC. Recent-session references are named **recently

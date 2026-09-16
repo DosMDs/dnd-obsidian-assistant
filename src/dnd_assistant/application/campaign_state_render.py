@@ -51,7 +51,7 @@ from dnd_assistant.errors import ValidationError
 
 # ── Format identity ───────────────────────────────────────────────────────
 
-CAMPAIGN_STATE_RENDER_VERSION: Final[str] = "1"
+CAMPAIGN_STATE_RENDER_VERSION: Final[str] = "2"
 """Artifact/renderer format version persisted as ``manifest.render_version``.
 
 Bump whenever rendered artifact bytes or the managed artifact set can change
@@ -205,10 +205,18 @@ def _render_recently_touched(state: CampaignState) -> str:
 
 
 def _render_reference(ref: CampaignEntityReference) -> str:
+    """Render one reference as a single fixed-structure list line.
+
+    The entity id is rendered as ordinary escaped inline text, never inside a
+    Markdown code span: backslash escaping is not interpreted inside CommonMark
+    code spans, so a generally printable ``EntityId`` containing a backtick
+    would break the span.  The existing deterministic ``escape_inline`` rule is
+    valid in the inline-text context used here.
+    """
     sessions = ", ".join(escape_inline(session_id) for session_id in ref.source_session_ids)
     return (
         f"- **{escape_inline(ref.name)}** "
-        f"(`{escape_inline(ref.entity_id)}`, {ref.entity_type.value}, "
+        f"({escape_inline(ref.entity_id)}, {ref.entity_type.value}, "
         f"visibility: {ref.visibility.value}, revision: {ref.revision}) "
         f"— sessions: {sessions}"
     )

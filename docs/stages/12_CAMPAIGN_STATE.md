@@ -509,6 +509,10 @@ model-free, wall-clock-free, filesystem-free; owned by
 - One deterministic inline-escaping rule (`escape_inline`) backslash-escapes
   Markdown metacharacters and CR/LF for every user-controlled value (names, ids,
   session ids, calendar names), so a value can never alter the template.
+  User-controlled values are rendered as ordinary escaped inline text, never
+  inside a Markdown code span: backslash escaping is not interpreted inside
+  CommonMark code spans, so a generally printable `EntityId` containing a
+  backtick would break the span. `EntityId` validation is not weakened.
 
 ### Visibility
 
@@ -522,10 +526,12 @@ consumer projection.
 ### Manifest v2 / versioning
 
 `DerivedStateManifest` schema → 2, adding `render_version`
-(`CAMPAIGN_STATE_RENDER_VERSION`). Source-snapshot identity
+(`CAMPAIGN_STATE_RENDER_VERSION`, currently `"2"`). Source-snapshot identity
 (`input_fingerprint`, which binds `recent_session_limit` and the complete
 `CalendarDefinition` fingerprint) is never overloaded with presentation format
-version. `recent_session_limit` and the `CalendarDefinition` are **not**
+version. A generation persisted with an older render version is classified
+`OUTDATED` (rebuild required) even when its source fingerprint still matches.
+`recent_session_limit` and the `CalendarDefinition` are **not**
 persisted: caller/current trusted configuration is re-supplied and re-bound at
 verification. No persisted S12-01 manifest existed, so no physical migration.
 
@@ -541,6 +547,24 @@ initial S12-02 build
 → fully current: ALREADY_CURRENT (zero publication writes)
 → otherwise publish candidate artifacts, manifest LAST
 ```
+
+Publication reauthorizes the derived-state parent immediately before **every**
+managed replacement (mutation-time reauthorization discipline):
+
+```text
+authorize State/
+→ authorize/write World State.md
+→ reauthorize State/
+→ authorize/write Recently Touched.md
+→ reauthorize State/
+→ authorize/write manifest LAST
+```
+
+If `State/` is substituted (e.g. replaced by a symlink) between managed writes,
+publication fails closed before the next write and no later artifact or the
+manifest is written through the substituted parent. The manifest always gets
+its own fresh parent reauthorization. This is not a filesystem transaction and
+does not eliminate every OS-level TOCTOU race.
 
 No cross-repository atomic snapshot is claimed: canonical sources may still
 change during publication, so read-time freshness verification remains
@@ -588,7 +612,22 @@ objects. No new audit subsystem and no `AuditContext` requirement.
 | store path/symlink/directory safety, payload-set, CR rejection | `tests/unit/test_campaign_state_store.py` |
 | publication gate, `ALREADY_CURRENT`, coordinated edit, malicious manifest path, statuses | `tests/unit/test_campaign_state_materialization.py` |
 | freshness, repair, deterministic rebuild, calendar, canonical read-only, manifest-last | `tests/integration/test_campaign_state_materialization.py` |
+| mutation-time parent reauthorization between managed writes | `tests/unit/test_campaign_state_store.py::TestMutationTimeReauthorization` |
 | layer boundaries | `tests/contract/test_campaign_state_boundaries.py` (render/materialization/store) |
+
+### S12-03-C1 correction
+
+- `ObsidianDerivedStateStore.publish()` reauthorizes the current `State/`
+  topology immediately before each managed replacement (artifact, artifact,
+  manifest-last); a parent substituted between writes fails closed before the
+  next write.
+- `Recently Touched.md` renders the entity id as ordinary escaped inline text
+  rather than inside a backtick code span, where backslash escaping is not
+  interpreted.
+- `CAMPAIGN_STATE_RENDER_VERSION` bumped `"1"` → `"2"` (renderer output changed
+  without a source-identity change); manifest schema remains v2 and
+  `CAMPAIGN_STATE_DERIVATION_VERSION` is unchanged. A generation persisted with
+  render version `"1"` is `OUTDATED`.
 
 Not implemented (deferred): CLI, model calls, canonical ChangeSet operations,
 TimelineEvent persistence, CalendarDefinition persistence, locking framework,

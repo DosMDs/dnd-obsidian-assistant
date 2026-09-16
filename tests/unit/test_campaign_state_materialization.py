@@ -258,10 +258,13 @@ class TestIntegrityVerification:
         _manifest_path(services.store).write_text("{not json", encoding="utf-8")
         assert _inspect(services, services.store).status is CampaignStateStatus.CORRUPT
 
-    def test_outdated_render_version(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    @pytest.mark.parametrize("old_version", ["1", "999"])
+    def test_old_or_unknown_render_version_is_outdated(
+        self, tmp_path: Path, old_version: str
+    ) -> None:
         services = _services(tmp_path)
         _publish_state(services.store, make_state(_FP_A))
-        _rewrite_manifest(services.store, lambda d: d.update(render_version="999"))
+        _rewrite_manifest(services.store, lambda d: d.update(render_version=old_version))
         assert _inspect(services, services.store).status is CampaignStateStatus.OUTDATED
 
 
