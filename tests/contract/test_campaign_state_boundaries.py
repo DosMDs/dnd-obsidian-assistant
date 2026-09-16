@@ -147,6 +147,42 @@ def test_application_campaign_state_identity_is_provider_neutral() -> None:
     _assert_provider_neutral(_IDENTITY_MODULE)
 
 
+# ── application/campaign_state_source (S12-02) ─────────────────────────────
+
+_SOURCE_MODULE = "dnd_assistant.application.campaign_state_source"
+_FORBIDDEN_SOURCE_STDLIB = {"pathlib", "os", "hashlib", "json"}
+
+
+def test_application_campaign_state_source_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_SOURCE_MODULE)
+
+
+def test_application_campaign_state_source_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_SOURCE_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(m for m in loaded if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.campaign_state_source imported storage: {offending}"
+
+
+def test_application_campaign_state_source_does_not_import_retrieval_at_runtime() -> None:
+    _clean_import(_SOURCE_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(m for m in loaded if m.startswith("dnd_assistant.retrieval"))
+    assert not offending, f"application.campaign_state_source imported retrieval: {offending}"
+
+
+def test_application_campaign_state_source_has_no_persistence_stdlib() -> None:
+    targets = _module_import_targets(_SOURCE_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_SOURCE_STDLIB
+    )
+    assert not offending, f"application.campaign_state_source stdlib: {offending}"
+
+
+def test_application_campaign_state_source_is_provider_neutral() -> None:
+    _assert_provider_neutral(_SOURCE_MODULE)
+
+
 # ── promoted foundational value types keep Stage-10/11 imports working ─────
 
 

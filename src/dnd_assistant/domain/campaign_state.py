@@ -222,6 +222,25 @@ class CampaignState(BaseModel):
 # ── Fingerprint input identity ────────────────────────────────────────────
 
 
+SelectionLimit = Annotated[
+    int,
+    Field(
+        ge=1,
+        strict=True,
+        description="Maximum number of most-recently-completed sessions bound into the projection",
+    ),
+]
+"""Validated session-selection limit bound into the projection identity.
+
+A semantic derivation input, not incidental execution metadata: two otherwise
+identical inputs that requested different limits define different
+selection/freshness semantics and must not share a fingerprint.
+
+- strict integer; ``bool`` and string coercion rejected
+- must be >= 1; the application-owned safety ceiling is enforced separately
+"""
+
+
 class CampaignWorldTimeSource(BaseModel):
     """Canonical current-world-time source binding."""
 
@@ -256,12 +275,16 @@ class CampaignStateInputIdentity(BaseModel):
     because session metadata revision does not bind the event stream.
 
     Collection ordering is normalized (ascending, duplicate-free) so caller
-    ordering never becomes part of identity.  The canonical serialization of
-    this model is what the input fingerprint hashes.
+    ordering never becomes part of identity.  ``recent_session_limit`` is an
+    intentional identity input: a different limit defines different selection
+    and freshness semantics, so it changes the fingerprint even when the
+    currently selected session set happens to be identical.  The canonical
+    serialization of this model is what the input fingerprint hashes.
     """
 
     schema_version: Literal[1] = 1
     derivation_version: PrintableNonEmptyStr
+    recent_session_limit: SelectionLimit
     world_time: CampaignWorldTimeSource
     sessions: tuple[CampaignSessionSource, ...] = ()
     entities: tuple[CampaignEntityReference, ...] = ()
@@ -356,4 +379,5 @@ __all__ = [
     "DerivedStateArtifact",
     "DerivedStateManifest",
     "PrintableNonEmptyStr",
+    "SelectionLimit",
 ]

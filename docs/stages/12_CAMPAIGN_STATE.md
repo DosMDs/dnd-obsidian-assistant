@@ -108,9 +108,12 @@ The projection is one logically consistent generation.  Its identity is a
 canonical input set, not merely "some source revisions".
 
 - **Authoritative inputs (`CampaignStateInputIdentity`):** derivation version;
-  current world time (tick + revision); selected completed sessions (id +
-  revision); referenced canonical entities (id, type, name, visibility,
-  revision + source session ids); and the supplied `CalendarDefinition`.
+  the requested recent-session selection limit (an intentional semantic input —
+  a different limit defines different selection/freshness semantics and changes
+  the fingerprint even when the currently selected set is identical); current
+  world time (tick + revision); selected completed sessions (id + revision);
+  referenced canonical entities (id, type, name, visibility, revision + source
+  session ids); and the supplied `CalendarDefinition`.
 - **Source-snapshot semantics:** entity/session/world-time revisions are
   intentional identity inputs.  Any source change — including a revision bump
   with unchanged projected text — changes the fingerprint.  A change outside
@@ -143,20 +146,45 @@ physical persistence (S12-03) are separate.
 
 ## 5. Rebuild, staleness, corruption, manual edits
 
-- **Stale when:** the current-input fingerprint differs from the manifest
-  fingerprint; a bound entity/session/world-time revision changed; or a
-  successful canonical apply occurred.
+- **Stale when:** a fresh derivation computes a current-input fingerprint that
+  differs from the manifest fingerprint. A bound entity/session/world-time
+  revision change, or a newly completed session that changes the selected set,
+  produces such a mismatch. A successful canonical apply is **not** itself an
+  independent staleness signal:
+  ```text
+  successful apply
+  → canonical source set/content may change
+  → fresh derivation recomputes source identity
+  → fingerprint comparison determines staleness
+  ```
+  An unrelated successful apply that does not change any bound source leaves
+  the fingerprint unchanged.
 - **Missing State:** consumers report the projection as unavailable; an
   explicit rebuild materializes it.
 - **Corrupt State / manifest:** fail closed with `StorageError`; never parsed as
   canonical; rebuild overwrites.
 - **After canonical entity / world-time / session change:** stale → rebuild.
-- **After a successful ChangeSet apply:** stale → rebuild reflects the new
-  canonical result.
 - **After an unapplied or merely approved ChangeSet:** no effect. Persisted
   proposals under `_system/changesets/` are not inputs and cannot alter State.
 - **After manual/external edit:** content hash mismatch vs manifest → treated as
   stale/tampered; overwritten on rebuild; never canonical.
+- **Pre-publication verification (S12-03 mandatory):** a persisted projection
+  must not be declared current merely because an earlier build once produced a
+  valid fingerprint.  S12-03 publication must re-derive the source identity
+  immediately before publication and abort on any mismatch:
+  ```text
+  build candidate
+  → render candidate
+  → fresh source re-derivation using the same selection configuration
+  → compare fingerprint
+  → mismatch: abort publication
+  → match: publish artifacts and manifest-last
+  ```
+  Read-time staleness verification remains required after publication because
+  no atomic transaction spans Vault entities, sessions, world time and
+  derived-State files.  The S12-02 collector deliberately accepts a mixed-time
+  snapshot for a single build and does not add a retry loop; the fresh
+  pre-publication re-derivation is the S12-03 consistency gate.
 - **Atomic replacement:** each file is written via temporary file + atomic
   replacement after validation; the manifest is written after file
   replacements, so a half-finished rebuild is detectable and never consumed as
@@ -220,7 +248,9 @@ Campaign State observes canonical change only after a **successful** apply.
 proposal persisted        → no derived-state change
 proposal approved         → no derived-state change
 apply attempted/failed    → no derived-state change
-apply succeeded           → existing projection becomes stale / rebuild eligible
+apply succeeded           → canonical sources may change; next fresh derivation
+                            recomputes source identity; fingerprint comparison
+                            determines staleness (apply alone is not a signal)
 canonical Vault changed   → derived inputs change → fingerprint mismatch
 ```
 
@@ -323,6 +353,20 @@ A green test without the matching semantic assertion does not satisfy a row.
 | manifest contract | `tests/unit/test_campaign_state_manifest.py`: non-empty inventory, canonical order, duplicate/path/hash validation |
 | layer boundaries | `tests/contract/test_campaign_state_boundaries.py`: pure domain, provider-neutral application, promoted-type re-exports |
 
+### S12-02 literal evidence (source collection / evidence binding)
+
+| Criterion | Literal evidence |
+|---|---|
+| deterministic selection / order independence | `tests/unit/test_campaign_state_source.py`: listing-order independence, tied-finish tie-break, non-numeric ids |
+| completed-only eligibility | active sessions never selected; unknown status / malformed completed lifecycle fail closed |
+| touched-evidence rules | absent → empty; malformed → fail closed; duplicates collapsed; cross-session provenance union |
+| exact entity binding | missing touched entity fail closed; current canonical fields; PLAYER/DM/SYSTEM admitted internally |
+| selection-limit identity | `recent_session_limit` strict ≥ 1, required, bound into fingerprint even with identical selected set |
+| source-snapshot sensitivity | world-time/session/entity revision change → fingerprint change; unrelated entity change → unchanged |
+| world time / calendar | missing world time → `WORLD_TIME_UNAVAILABLE`; absent vs supplied calendar; definition change → fingerprint change |
+| read-only / no writes | `tests/integration/test_campaign_state_source.py`: vault bytes and audit log unchanged across a build |
+| layer boundaries | `tests/contract/test_campaign_state_boundaries.py`: `campaign_state_source` provider-neutral, no storage/retrieval runtime import, no persistence stdlib |
+
 ## 14. S12-00 record
 
 ```text
@@ -357,3 +401,43 @@ Decisions: source-snapshot identity includes source revisions;
            manifest is a logical contract (no filesystem paths, no I/O).
 No storage/materialization/model/consumer integration (S12-02..S12-04).
 ```
+
+## 16. S12-02 record
+
+```text
+Task:      S12-02 — deterministic source collection / evidence binding
+Routing:   PLAN_REQUIRED -> accepted PLAN -> BUILD
+Branch:    feat/campaign-state
+Baseline:  0fbd7e70ddbd1da9c43a6eb7600c0a3632c44ece (S12-01)
+Scope:     application/campaign_state_source.py (new; read-only collector)
+           domain/campaign_state.py (CampaignStateInputIdentity gains the
+             validated recent_session_limit identity input; SelectionLimit)
+           domain/__init__.py (SelectionLimit export)
+           tests/unit/test_campaign_state_source.py (new)
+           tests/integration/test_campaign_state_source.py (new)
+           tests/unit/test_campaign_state_identity.py (limit binding)
+           tests/contract/test_campaign_state_boundaries.py (new-module boundary)
+           Stage-12 docs + DEVELOPMENT_STATUS.md reconciliation
+Decisions: selection = latest N completed sessions by real_finished_at DESC,
+             session_id ASC tie-break only (never listing order / lexical
+             chronology / revision / world tick); N explicit, required,
+             ceiling-bounded;
+           recent_session_limit is bound into the identity/fingerprint;
+           malformed completed lifecycle / unknown status / malformed
+             touched_entities / missing touched entity fail closed; active
+             sessions ignored;
+           exact EntityId binding via one all-visibility list_entities()
+             snapshot; all visibilities admitted internally;
+           mixed-time single-pass snapshot; S12-03 must re-derive and compare
+             the fingerprint immediately before publication and again at read
+             time (no atomic repository transaction exists);
+           raw session events never consulted; no model call; no write.
+No derived-state persistence / rendering / manifest / path / atomic write /
+CLI / consumer projection (S12-03..S12-04).
+```
+
+S12-03 warning: `RelativeArtifactPath` is a **logical** inventory identifier,
+not filesystem authority.  Its current validation accepts a `C:/...`
+drive-form string (it only rejects a leading `/`, backslashes and
+empty/`.`/`..` segments), so S12-03 must not treat it as a safe filesystem
+path without its own path-safety layer.

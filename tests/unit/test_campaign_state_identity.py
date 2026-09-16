@@ -58,6 +58,7 @@ def _ref(
 def _identity(**overrides: Any) -> CampaignStateInputIdentity:
     kwargs: dict[str, Any] = {
         "derivation_version": CAMPAIGN_STATE_DERIVATION_VERSION,
+        "recent_session_limit": 5,
         "world_time": CampaignWorldTimeSource(current_world_tick=13800, revision=1),
         "sessions": (CampaignSessionSource(session_id="S001", revision=5),),
         "entities": (_ref(),),
@@ -236,6 +237,41 @@ class TestInvalidInputs:
         with pytest.raises(ValidationError):
             _identity(derivation_version="")
 
+    @pytest.mark.parametrize("limit", [0, -1, True, 1.5, "3", None])
+    def test_invalid_recent_session_limit_rejected(self, limit: object) -> None:
+        with pytest.raises(ValidationError):
+            _identity(recent_session_limit=limit)
+
+    def test_recent_session_limit_required(self) -> None:
+        payload = _identity().model_dump()
+        del payload["recent_session_limit"]
+        with pytest.raises(ValidationError):
+            CampaignStateInputIdentity.model_validate(payload)
+
+
+# ── Recent-session limit identity ───────────────────────────────────────────
+
+
+class TestRecentSessionLimitIdentity:
+    def test_limit_changes_fingerprint_with_identical_selection(self) -> None:
+        base = _identity(
+            recent_session_limit=3,
+            sessions=(CampaignSessionSource(session_id="S001", revision=5),),
+            entities=(_ref(sessions=("S001",)),),
+        )
+        changed = _identity(
+            recent_session_limit=4,
+            sessions=(CampaignSessionSource(session_id="S001", revision=5),),
+            entities=(_ref(sessions=("S001",)),),
+        )
+        assert base.sessions == changed.sessions
+        assert compute_input_fingerprint(base) != compute_input_fingerprint(changed)
+
+    def test_same_limit_same_fingerprint(self) -> None:
+        assert compute_input_fingerprint(
+            _identity(recent_session_limit=7)
+        ) == compute_input_fingerprint(_identity(recent_session_limit=7))
+
     def test_bad_fingerprint_digest_rejected(self) -> None:
         with pytest.raises(ValidationError):
             Sha256Fingerprint(digest="A" * 64)
@@ -290,5 +326,5 @@ def test_unicode_canonicalization_golden_value() -> None:
         entities=(_ref("npc_varos", name="Магистр Варос"), _ref("npc_endrin", name="Эндрин")),
     )
     assert compute_input_fingerprint(identity).digest == (
-        "53e044a7d1b90f647e6bb9eb987de684529c9fa6a4cdc55f5974f59dcb4771ef"
+        "66c3d1092ff30b37b7fb39b3adce0d4961cfafc5e30dcd2554dafc68ed545a11"
     )

@@ -18,6 +18,7 @@ from dnd_assistant.domain.campaign_state import (
     CampaignWorldTimeSource,
     DerivedStateArtifact,
     DerivedStateManifest,
+    SelectionLimit,
 )
 from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.events import TemporalCertainty, TimelineEvent
@@ -58,6 +59,7 @@ __all__: list[str] = [
     "RelativeArtifactPath",
     "Revision",
     "Session",
+    "SelectionLimit",
     "SessionId",
     "Sha256Fingerprint",
     "TemporalCertainty",
