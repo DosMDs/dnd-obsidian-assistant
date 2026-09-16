@@ -371,6 +371,7 @@ class TestRestorationOptInUsage:
     # Modules that use restore_dnd_assistant_modules via module-level pytestmark
     MODULE_LEVEL_OPTIIN: set[str] = {
         "contract/test_boundaries.py",
+        "contract/test_campaign_state_boundaries.py",
         "contract/test_changeset_workflow_boundaries.py",
         "contract/test_post_session_boundaries.py",
     }

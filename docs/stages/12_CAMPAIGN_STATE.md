@@ -9,8 +9,9 @@ campaign evidence into human-readable `State/*.md` files.
 Stage 12 does not introduce a new canonical aggregate. It derives a projection
 over sources that are already canonical and rebuilds it on demand.
 
-This document is the S12-00 architecture/contracts/kickoff record. Production
-schema and services begin in S12-01.
+This document is the S12-00 architecture/contracts/kickoff record, with the
+S12-01 typed-contract decision/evidence appended (§4, §10, §15).  Production
+source collection and materialization services begin in S12-02/S12-03.
 
 ## Architectural position
 
@@ -86,9 +87,10 @@ Legend: derivable = deterministic from current accepted evidence.
 
 | Semantic area | Source | Derivable today | Rule / prerequisite | Visibility | Provenance |
 |---|---|---|---|---|---|
-| current world time / date | `CurrentWorldTime` + `CalendarService` | tick yes; date only with a supplied `CalendarDefinition` | read canonical tick; `GameDate` via `CalendarService`; **omit date** when no definition | internal + player (tick/date) | world_time revision + `calendar_id` |
-| recent session contribution | session metadata + `events.jsonl` | yes | last N completed sessions; ordered touched entity IDs + recent events, projected as **recently touched** | internal; player subset only | session id + revision |
+| current world time / date | `CurrentWorldTime` + `CalendarService` | tick yes; date only with a supplied `CalendarDefinition` | read canonical tick; `GameDate` via `CalendarService`; **omit date** when no definition | internal + player (tick/date) | world_time revision + complete `CalendarDefinition` fingerprint |
+| recent session contribution | completed session metadata (`touched_entities`) | yes | selected completed sessions; touched entity IDs resolved to canonical entities and projected as **recently touched** | internal; player subset only | session id + revision |
 | recently touched entities | entity IDs from recent accepted sessions | yes | resolve each reference by exact `EntityId` via `VaultRepository.get_entity`; validate existence/type; **labeled recent** | internal; player projection only for PLAYER entities | source session id(s) + entity revision |
+| raw session events | `events.jsonl` | **no** (S12-01/S12-02) | session metadata revision does **not** bind the exact event stream (`append_event` appends without bumping metadata revision); events are excluded from the source-snapshot identity | n/a | n/a |
 | current location | none canonical | **no** | no canonical "current location" marker; a touched location is not a current location | n/a | n/a |
 | active quests | none canonical | **no** | no fixed quest-status/"active" vocabulary; touched quests are not active quests | n/a | n/a |
 | important NPCs | none canonical | **no** | no canonical importance/relevance marker | n/a | n/a |
@@ -99,22 +101,45 @@ Legend: derivable = deterministic from current accepted evidence.
 A field marked unavailable is explicitly omitted from the projection. Missing
 semantic evidence must never produce a synthesized value.
 
-## 4. Materialized projection identity
+## 4. Materialized projection identity (S12-01 contract)
 
-The projection is one logically consistent generation:
+The projection is one logically consistent generation.  Its identity is a
+**source-snapshot fingerprint**: the deterministic SHA-256 of the exact
+canonical input set, not merely "some source revisions".
 
-- **Authoritative inputs:** entities (id + revision, all visibility), current
-  world time (tick + revision), session metadata (id + revision,
-  `touched_entities`), and `calendar_id` when available.
-- **Input fingerprint:** deterministic SHA-256 over a canonical serialization of
-  exactly those inputs, mirroring the Stage-11 input-fingerprint approach. It is
-  the projection's identity and staleness key.
-- **Manifest:** a derived-state manifest binds the generation fingerprint, the
-  rendered file inventory, and each file's content hash.
+- **Authoritative inputs (`CampaignStateInputIdentity`):** derivation version;
+  current world time (tick + revision); selected completed sessions (id +
+  revision); referenced canonical entities (id, type, name, visibility,
+  revision + source session ids); and the supplied `CalendarDefinition`.
+- **Source-snapshot semantics:** entity/session/world-time revisions are
+  intentional identity inputs.  Any source change — including a revision bump
+  with unchanged projected text — changes the fingerprint.  A change outside
+  the accepted input contract cannot change it.
+- **Canonical collection ordering:** set-like sources (sessions, entities,
+  artifact inventory) are normalized ascending and duplicate-free, so caller
+  order never becomes part of identity.
+- **Calendar-definition identity:** the fingerprint binds the SHA-256 of the
+  **complete validated `CalendarDefinition`** (months, intercalary days,
+  holidays, epoch, hours/minutes).  `calendar_id` alone is not definition
+  identity: two definitions sharing a `calendar_id` but differing in content
+  produce different fingerprints.  No canonical `CalendarDefinition` source
+  exists yet, so it is caller-supplied and may be absent (`None`).
+- **Raw session events are not an input:** session metadata revision is not
+  provably bound to the immutable event stream, so events are excluded rather
+  than given a fabricated binding.
+- **Manifest (`DerivedStateManifest`):** binds the generation fingerprint
+  (`input_fingerprint`), `state_schema_version`, and a non-empty artifact
+  inventory (logical relative path + per-file content hash).  The manifest is
+  never part of its own inventory and contains no filesystem paths.
 
-Entity `Revision` semantics are **not** reused. There is no optimistic
-concurrency writer for a derived projection; a fingerprint manifest is the
-correct identity mechanism.
+Entity `Revision` semantics are **not** reused as a concurrency counter. There
+is no optimistic-concurrency writer for a derived projection; the
+source-snapshot fingerprint manifest is the identity/staleness mechanism.
+
+Ownership: the DTOs are pure domain contracts (`domain/campaign_state.py`);
+canonical serialization and SHA-256 computation are application concerns
+(`application/campaign_state_identity.py`).  Source collection (S12-02) and
+physical persistence (S12-03) are separate.
 
 ## 5. Rebuild, staleness, corruption, manual edits
 
@@ -203,17 +228,25 @@ No recompute-after-apply hook and no `CampaignState` ChangeSet operation are
 introduced. State is rebuilt lazily from current canonical reads. Stage-10's
 operation set and Stage-11's accepted producer subset are not expanded.
 
-## 10. `CampaignState` v1 reconciliation
+## 10. `CampaignState` v1 reconciliation (completed in S12-01)
 
-- `domain/campaign_state.py` v1 is dormant production dead code: it has no
+- `domain/campaign_state.py` v1 was dormant production dead code: it had no
   reader, writer, path, serializer, or production consumer; only unit tests and
-  a static fixture reference it.
-- Stage 12 will replace/adjust it (in S12-01, not in S12-00) to become the typed
-  in-memory materialized-projection contract (`schema_version = 2`), with
-  `revision` replaced by the input fingerprint and with honest
-  recently-touched/unavailable semantics.
-- No v1 data migration is required because no production v1 artifact exists.
-- Any schema change is an implementation task; S12-00 records the decision only.
+  a static fixture referenced it.
+- S12-01 replaced it with the typed in-memory materialized-projection contract
+  (`schema_version = 2`): `revision` is gone (replaced by `input_fingerprint`)
+  and the unsupported semantic fields (`current_location`, `active_quests`,
+  `important_npcs`, `party_goals`, `unresolved_threads`, `upcoming_deadlines`)
+  are omitted.  `extra="forbid"` rejects any v1 payload; there is **no v1
+  parsing shim** and **no v1 data migration** (no production v1 artifact ever
+  existed).
+- The static golden `State/World State.md` v1 fixture was obsolete (no test
+  parsed it) and was removed; Stage-12 materialization fixtures belong to
+  S12-03.
+- Generic value types `Sha256Fingerprint` and `RelativeArtifactPath` were
+  promoted to `domain/types.py` (with backward-compatible `domain.post_session`
+  re-exports), and the canonical session-id validation is exposed as the public
+  domain `SessionId` type.
 
 ## 11. Non-goals
 
@@ -274,6 +307,22 @@ Location/Quest/NPC selection vocabularies, Bootstrap (Stage 13), evals
 
 A green test without the matching semantic assertion does not satisfy a row.
 
+### S12-01 literal evidence (typed contract)
+
+| Criterion | Literal evidence |
+|---|---|
+| v2 shape / strictness | `tests/unit/test_campaign_state.py`: minimal construction, `schema_version=2`, frozen, `extra="forbid"` |
+| legacy semantic fields rejected | every v1 field + whole v1 payload → `ValidationError`; no `revision` attribute |
+| fingerprint determinism + ordering normalization | `tests/unit/test_campaign_state_identity.py`: same input → equal bytes/digest; entity/session reorder → equal digest |
+| source-snapshot sensitivity | tick, world-time revision, session revision, entity revision/name/visibility/type changes each change the digest |
+| irrelevant metadata unchanged | repeated serialization stable; wall-clock / raw-event fields rejected as extra |
+| duplicate references | duplicate session/entity ids and duplicate artifact paths rejected |
+| `source_session_ids` provenance | mandatory, duplicate-free, canonical order, subset of identity sessions |
+| calendar definition identity | same `calendar_id` + different structure → different calendar and input fingerprints |
+| Unicode canonicalization | Cyrillic golden digest |
+| manifest contract | `tests/unit/test_campaign_state_manifest.py`: non-empty inventory, canonical order, duplicate/path/hash validation |
+| layer boundaries | `tests/contract/test_campaign_state_boundaries.py`: pure domain, provider-neutral application, promoted-type re-exports |
+
 ## 14. S12-00 record
 
 ```text
@@ -285,4 +334,26 @@ Scope:             docs/stages/12_CAMPAIGN_STATE.md (new)
                    docs/adr/0007-campaign-state-materialized-derived-projection.md (new)
                    DEVELOPMENT_STATUS.md (compacted)
 No production/test/schema/dependency changes.
+```
+
+## 15. S12-01 record
+
+```text
+Task:      S12-01 — typed derived-state contract (CampaignState v2 + manifest/fingerprint)
+Routing:   PLAN_REQUIRED -> accepted PLAN -> BUILD
+Branch:    feat/campaign-state
+Baseline:  fee00dabb155ae4c94627faf4b920e7fe5ea71ce (S12-00)
+Scope:     domain/campaign_state.py (v2 rewrite)
+           application/campaign_state_identity.py (new)
+           domain/types.py + domain/post_session.py (promoted Sha256Fingerprint,
+             RelativeArtifactPath with backward-compatible re-exports)
+           domain/session.py (public SessionId) + domain/__init__.py exports
+           tests (schema/identity/manifest/boundaries)
+           golden fixture cleanup (obsolete State/World State.md)
+           Stage-12 docs + DEVELOPMENT_STATUS.md reconciliation
+Decisions: source-snapshot identity includes source revisions;
+           calendar identity = SHA-256 of the complete CalendarDefinition;
+           raw session events excluded from S12-01/S12-02 identity;
+           manifest is a logical contract (no filesystem paths, no I/O).
+No storage/materialization/model/consumer integration (S12-02..S12-04).
 ```

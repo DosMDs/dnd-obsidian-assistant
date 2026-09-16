@@ -4,7 +4,8 @@ Defines the immutable, strict typed contracts that establish the durable
 post-session processing foundations required before any model execution:
 
 - ``PostSessionAttemptId`` / ``LedgerEventId`` — opaque trusted identities;
-- ``Sha256Fingerprint`` — self-describing content hash value;
+- ``Sha256Fingerprint`` (re-exported from ``domain.types``) — self-describing
+  content hash value;
 - ``PreparedInputIdentity`` — the canonical full prepared-input projection
   whose serialization is fingerprinted (architecture correction C1);
 - ``ProcessingLedgerEvent`` — the append-only processing-ledger event union
@@ -34,7 +35,9 @@ from dnd_assistant.domain.types import (
     EntityId,
     EntityType,
     KnowledgeStatus,
+    RelativeArtifactPath,
     Revision,
+    Sha256Fingerprint,
     Visibility,
 )
 
@@ -42,7 +45,6 @@ from dnd_assistant.domain.types import (
 
 _ATTEMPT_ID_PATTERN = r"^att_[0-9a-f]{32}$"
 _LEDGER_EVENT_ID_PATTERN = r"^le_[0-9a-f]{32}$"
-_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
 
 _ATTEMPT_ID_RE = re.compile(_ATTEMPT_ID_PATTERN)
 _LEDGER_EVENT_ID_RE = re.compile(_LEDGER_EVENT_ID_PATTERN)
@@ -106,23 +108,6 @@ def _validate_bounded_message(value: str) -> str:
     return value
 
 
-def _validate_relative_path(value: str) -> str:
-    """Validate a logical relative artifact path.
-
-    This is a *logical* path segment used in durable provenance, not a
-    filesystem path.  Absolute paths, backslashes and parent-directory
-    traversal are rejected.  The value carries no filesystem authority.
-    """
-    value = _validate_nonempty_printable(value)
-    if value.startswith("/"):
-        raise ValueError("relative path must not be absolute")
-    if "\\" in value:
-        raise ValueError("relative path must use '/' separators only")
-    if any(part in ("", ".", "..") for part in value.split("/")):
-        raise ValueError("relative path must not contain empty, '.', or '..' segments")
-    return value
-
-
 # ── Annotated value types ─────────────────────────────────────────────────
 
 
@@ -156,31 +141,9 @@ BoundedMessageStr = Annotated[
     Field(description="Bounded printable failure message (no newlines/traceback)"),
 ]
 
-RelativeArtifactPath = Annotated[
-    str,
-    BeforeValidator(_validate_relative_path),
-    Field(description="Logical relative artifact path (no traversal/absolute)"),
-]
-
-# ── Fingerprint value type ────────────────────────────────────────────────
-
-
-class Sha256Fingerprint(BaseModel):
-    """Self-describing content hash of an exact canonical byte sequence.
-
-    Used for the prepared-input fingerprint (C1) and for the ChangeSet
-    proposal digest / artifact content hash recorded in ledger provenance.
-    It contains no path and no provider data.
-    """
-
-    algorithm: Literal["sha256"] = "sha256"
-    digest: str = Field(pattern=_DIGEST_PATTERN)
-
-    model_config = {
-        "frozen": True,
-        "extra": "forbid",
-    }
-
+# ``RelativeArtifactPath`` and ``Sha256Fingerprint`` are foundational domain
+# value types (``dnd_assistant.domain.types``) re-exported here for backward
+# compatibility with existing Stage-10/Stage-11 imports.
 
 InputFingerprint = Sha256Fingerprint
 """Deterministic identity of the full prepared processing input (C1)."""

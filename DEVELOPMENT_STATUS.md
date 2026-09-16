@@ -1,10 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S12-00 kickoff)
+**Last updated:** 2026-09-16 (S12-01)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
-**Active stage:** Stage 12 — Campaign State (S12-00)
-**Active migration:** PAIM — `ACCEPTED`, complete
+**Active stage:** Stage 12 — Campaign State (S12-01)
 **Current branch:** `feat/campaign-state`
 
 ## Status model
@@ -40,21 +39,28 @@ records live in `docs/stages/`, `docs/migrations/`, `docs/adr/` and Git.
 
 ## Current state — Stage 12
 
-S12-00 `DONE` — architecture/contracts/kickoff. Campaign State is a
-**materialized derived projection** persisted as human-readable `State/*.md`,
-produced by trusted Python derivation over canonical Vault/session/world-time
-evidence. It is not a canonical aggregate, is discardable/rebuildable, has no
-canonical mutation surface and no model call in the MVP. Architecture:
+S12-00 `DONE` — architecture/contracts/kickoff. S12-01 `DONE` — typed
+derived-state contract. Campaign State is a **materialized derived projection**
+persisted as human-readable `State/*.md`, produced by trusted Python derivation
+over canonical Vault/session/world-time evidence. It is not a canonical
+aggregate, is discardable/rebuildable, has no canonical mutation surface and no
+model call in the MVP. Architecture:
 `docs/adr/0007-campaign-state-materialized-derived-projection.md` and
 `docs/stages/12_CAMPAIGN_STATE.md`.
+
+S12-01 delivered `domain/campaign_state.py` (`CampaignState` v2 + recently
+touched reference + input identity + manifest DTOs) and
+`application/campaign_state_identity.py` (canonical source-snapshot
+fingerprint). The fingerprint binds source revisions and the complete
+`CalendarDefinition`; raw session events are excluded from the identity. No
+storage I/O, materialization, source collection or model call was introduced.
 
 Fields with no canonical/evidence source (current location, active quests,
 important NPCs, party goals, unresolved threads, upcoming deadlines) are
 **unavailable** and omitted; session `touched_entities` is reported only as
 recently touched, never as current/active/important.
 
-Next: S12-01 — typed derived-state contract (`CampaignState` v2 + manifest /
-input fingerprint).
+Next: S12-02 — deterministic source collection / evidence binding.
 
 ## Current blockers and prerequisites
 
@@ -102,12 +108,12 @@ process-crash (not machine/power-loss) semantics of newly created entries.
 
 ```text
 S12-00 DONE — architecture/contracts/kickoff
-S12-01 Next  — typed derived-state contract (CampaignState v2 + manifest/fingerprint)
-S12-02       — deterministic source collection / evidence binding
-S12-03       — materialization + rebuild/staleness/corruption
-S12-04       — visibility projection + focused consumer integration
-S12-05       — hardening / failure injection
-S12-06       — full Stage-12 review / completion
+S12-01 DONE — typed derived-state contract (CampaignState v2 + manifest/fingerprint)
+S12-02 Next — deterministic source collection / evidence binding
+S12-03      — materialization + rebuild/staleness/corruption
+S12-04      — visibility projection + focused consumer integration
+S12-05      — hardening / failure injection
+S12-06      — full Stage-12 review / completion
 ```
 
 ## Documentation map

@@ -85,11 +85,17 @@ def _validate_processed_model_profile(value: str | None) -> str | None:
 # ── Annotated field types ─────────────────────────────────────────────────
 
 
-_SessionIdStr = Annotated[
+SessionId = Annotated[
     str,
     BeforeValidator(_validate_session_id),
     Field(description="Session identifier (e.g. S014)"),
 ]
+"""Canonical session identifier.
+
+A validated, non-empty, printable string with no surrounding whitespace.  The
+canonical public type for session references across the domain and application
+layers.
+"""
 
 SessionStatusStr = Annotated[
     str,
@@ -121,7 +127,7 @@ class Session(BaseModel):
     schema_version: Literal[1] = 1
     """Schema version for migration detection.  Currently always 1."""
 
-    id: _SessionIdStr
+    id: SessionId
     """Session identifier (e.g. S014)."""
 
     type: Literal["session"] = "session"

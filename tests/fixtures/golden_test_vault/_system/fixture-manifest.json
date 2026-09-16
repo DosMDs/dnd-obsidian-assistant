@@ -22,10 +22,6 @@
     "non_player_visibility": [
       "npc_archivist_kell",
       "event_020"
-    ],
-    "active_quests": [
-      "quest_missing_caravan",
-      "quest_silver_key"
     ]
   }
 }

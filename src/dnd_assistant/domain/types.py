@@ -8,14 +8,16 @@ This module defines the primitive value types used across the domain layer:
 - Provenance: how the information entered the system.
 - EntityId: a stable, validated domain identifier.
 - Revision: optimistic concurrency revision counter.
+- Sha256Fingerprint: validated self-describing SHA-256 hash value.
+- RelativeArtifactPath: validated logical relative artifact path.
 """
 
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Annotated
+from typing import Annotated, Literal
 
-from pydantic import BeforeValidator, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 class EntityType(StrEnum):
@@ -139,3 +141,65 @@ def make_revision(value: object) -> Revision:
     if value < 1:
         raise ValueError(f"Revision must be >= 1, got {value}")
     return value
+
+
+# ── Sha256Fingerprint ─────────────────────────────────────────────────────
+
+_DIGEST_PATTERN = r"^[0-9a-f]{64}$"
+
+
+class Sha256Fingerprint(BaseModel):
+    """Self-describing SHA-256 content/input hash.
+
+    Generic foundational value type shared across derived-canonicity
+    boundaries (ChangeSet proposal digests, post-session prepared-input
+    fingerprints and Stage-12 source-snapshot identity).  It contains no
+    filesystem path and no provider/model data.
+    """
+
+    algorithm: Literal["sha256"] = "sha256"
+    digest: str = Field(pattern=_DIGEST_PATTERN)
+
+    model_config = {
+        "frozen": True,
+        "extra": "forbid",
+    }
+
+
+# ── RelativeArtifactPath ──────────────────────────────────────────────────
+
+
+def _validate_logical_relative_path(value: str) -> str:
+    """Validate a logical relative artifact path.
+
+    This is a *logical* identifier used in durable provenance/inventory data,
+    not a filesystem path.  Absolute paths, backslashes and parent-directory
+    traversal are rejected.  The value carries no filesystem authority.
+    """
+    if not isinstance(value, str):
+        raise ValueError("relative path must be a string")
+    if not value:
+        raise ValueError("relative path must not be empty")
+    if value.strip() != value:
+        raise ValueError("relative path must not have leading or trailing whitespace")
+    if not value.isprintable():
+        raise ValueError("relative path must not contain non-printable characters")
+    if value.startswith("/"):
+        raise ValueError("relative path must not be absolute")
+    if "\\" in value:
+        raise ValueError("relative path must use '/' separators only")
+    if any(part in ("", ".", "..") for part in value.split("/")):
+        raise ValueError("relative path must not contain empty, '.', or '..' segments")
+    return value
+
+
+RelativeArtifactPath = Annotated[
+    str,
+    BeforeValidator(_validate_logical_relative_path),
+    Field(description="Logical relative artifact path (no traversal/absolute)"),
+]
+"""A validated logical relative artifact path.
+
+It is *not* a filesystem path: absolute paths, backslashes and parent-directory
+traversal are rejected, and it carries no filesystem authority.
+"""

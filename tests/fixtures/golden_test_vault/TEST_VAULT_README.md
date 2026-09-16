@@ -11,7 +11,6 @@
 - 5 completed sessions
 - 20 timeline events
 - 20 raw session events
-- 1 compact CampaignState snapshot
 
 ## Deliberate test cases
 
