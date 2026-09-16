@@ -101,6 +101,14 @@ Legend: derivable = deterministic from current accepted evidence.
 A field marked unavailable is explicitly omitted from the projection. Missing
 semantic evidence must never produce a synthesized value.
 
+Session `world_tick_start` / `world_tick_end` are signed `WorldTick` values.
+The canonical Session and world-time contracts do **not** establish monotonic
+in-session world-time progression (`close_session()` accepts any valid
+`world_tick_end`; world time may move backwards). Campaign State therefore does
+not impose `world_tick_end >= world_tick_start`, and a completed session with a
+decreasing tick is a valid source. Only real-time ordering
+(`real_finished_at >= real_started_at`) is treated as a lifecycle requirement.
+
 ## 4. Materialized projection identity (S12-01 contract)
 
 The projection is one logically consistent generation.  Its identity is a
@@ -328,7 +336,7 @@ Location/Quest/NPC selection vocabularies, Bootstrap (Stage 13), evals
 | canonical mutation → rebuild reflects it | mutate an entity via `VaultRepository`; rebuild; assert State equals new canonical values |
 | delete all State files → rebuild | delete `State/*`; rebuild; assert deterministic byte/semantic equality (no model in MVP) |
 | unapplied ChangeSet → no State change | persist an unapplied proposal; assert manifest fingerprint and State bytes unchanged |
-| successful apply → stale / rebuild reflects canon | apply a ChangeSet; assert fingerprint mismatch (stale), then rebuild reflects applied entity state |
+| successful apply → fresh derivation recomputes fingerprint | apply a ChangeSet; fresh derivation's fingerprint mismatches the manifest (bound source changed) and rebuild reflects the applied entity state; an unrelated successful apply leaves the fingerprint unchanged |
 | manual/corrupt State artifact → never canonical | edit/corrupt a State file; assert content-hash mismatch → stale/tampered; no canonical read path consumes it; rebuild overwrites |
 | DM/SYSTEM evidence → absent from player projection | DM/SYSTEM fixture; internal projection may contain it, player projection negative assertion |
 | missing semantic evidence → omitted, never fabricated | no sessions / no location; field omitted or explicitly unavailable |
@@ -435,6 +443,13 @@ Decisions: selection = latest N completed sessions by real_finished_at DESC,
 No derived-state persistence / rendering / manifest / path / atomic write /
 CLI / consumer projection (S12-03..S12-04).
 ```
+
+S12-02-C1 correction: Campaign State must not require
+`world_tick_end >= world_tick_start`. `WorldTick` is signed and the canonical
+Session / world-time contracts establish no monotonic in-session progression;
+decreasing game-world time is a valid completed-session source. Only real-time
+ordering (`real_finished_at >= real_started_at`) remains a fail-closed
+lifecycle requirement.
 
 S12-03 warning: `RelativeArtifactPath` is a **logical** inventory identifier,
 not filesystem authority.  Its current validation accepts a `C:/...`

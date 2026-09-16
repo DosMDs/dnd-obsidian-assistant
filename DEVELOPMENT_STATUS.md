@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S12-02)
+**Last updated:** 2026-09-16 (S12-02 + S12-02-C1)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
-**Active stage:** Stage 12 — Campaign State (S12-02)
+**Active stage:** Stage 12 — Campaign State (S12-03 next)
 **Current branch:** `feat/campaign-state`
 
 ## Status model
@@ -61,7 +61,9 @@ deterministic, model-free collector that selects eligible completed sessions,
 validates touched evidence, binds current canonical entities by exact
 `EntityId`, reads canonical world time, optionally binds a supplied calendar
 definition, and returns `CampaignState` plus its full
-`CampaignStateInputIdentity`/fingerprint. Still no persistence/render/model.
+`CampaignStateInputIdentity`/fingerprint. S12-02-C1 corrected completed-session
+lifecycle validation to not require monotonic in-session world ticks. Still no
+persistence/render/model.
 
 Fields with no canonical/evidence source (current location, active quests,
 important NPCs, party goals, unresolved threads, upcoming deadlines) are

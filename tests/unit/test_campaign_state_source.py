@@ -294,7 +294,7 @@ def test_unknown_status_fails_closed() -> None:
     [
         {"real_finished_at": None},
         {"world_tick_end": None},
-        {"world_tick_start": 300, "world_tick_end": 200},
+        {"real_started_at": BASE + timedelta(hours=4)},
     ],
 )
 def test_malformed_completed_fails_closed(overrides: dict[str, object]) -> None:
@@ -313,6 +313,36 @@ def test_malformed_completed_fails_closed(overrides: dict[str, object]) -> None:
     with pytest.raises(CampaignStateSourceError) as err:
         _build([_meta(session, touched=["npc-a"])], [], limit=5)
     assert err.value.reason is CampaignStateSourceReason.INVALID_COMPLETED_SESSION
+
+
+def test_decreasing_world_tick_is_valid_source() -> None:
+    """A completed session with world_tick_end < world_tick_start is not corrupt.
+
+    WorldTick is signed and canonical contracts do not establish monotonic
+    in-session progression, so decreasing game-world time must remain a valid
+    Campaign State source that participates normally in selection and identity.
+    """
+    decreasing = _session(
+        "S001",
+        finished=BASE + timedelta(hours=2),
+        tick_start=300,
+        tick_end=200,
+    )
+    earlier = _session(
+        "S002",
+        finished=BASE + timedelta(hours=1),
+        tick_start=50,
+        tick_end=150,
+    )
+    docs = [_doc(_entity("npc-a"))]
+    result = _build(
+        [_meta(earlier, touched=["npc-a"]), _meta(decreasing, touched=["npc-a"])],
+        docs,
+        limit=1,
+    )
+    assert tuple(s.session_id for s in result.identity.sessions) == ("S001",)
+    assert tuple(r.entity_id for r in result.identity.entities) == ("npc-a",)
+    assert result.state.current_world_tick == 150
 
 
 def test_missing_touched_entities_is_empty() -> None:

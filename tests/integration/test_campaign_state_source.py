@@ -218,6 +218,34 @@ def test_selected_entity_mutation_changes_fingerprint(tmp_path: Path) -> None:
     assert after.state.input_fingerprint != before.state.input_fingerprint
 
 
+def test_decreasing_world_tick_closed_session_is_valid_source(tmp_path: Path) -> None:
+    """A normally-closed session may end at a lower tick than it started.
+
+    ``close_session`` accepts any valid WorldTick, so decreasing game-world
+    time is canonical and must remain a valid Campaign State source.
+    """
+    root = make_vault(tmp_path)
+    _setup_vault(root)
+    audit, vault, metadata_repo, world_time = _services(root)
+    world_time.initialize_current_world_time(50, audit=_audit("wt-init"))
+    _create_entity(vault, _entity("npc-aria"), op_id="c-aria")
+    _close(
+        metadata_repo,
+        "S001",
+        finish=BASE_START + timedelta(hours=1),
+        world_tick_end=50,
+        touched=("npc-aria",),
+    )
+    result = build_campaign_state(
+        vault_repository=ObsidianVaultRepository(root, audit),
+        session_repository=ObsidianSessionMetadataRepository(root, audit),
+        world_time_repository=ObsidianWorldTimeRepository(root, audit),
+        recent_session_limit=5,
+    )
+    assert tuple(s.session_id for s in result.identity.sessions) == ("S001",)
+    assert tuple(r.entity_id for r in result.state.recently_touched) == ("npc-aria",)
+
+
 def test_all_visibilities_admitted_internally(tmp_path: Path) -> None:
     root = make_vault(tmp_path)
     _setup_vault(root)

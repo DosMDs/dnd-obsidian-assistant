@@ -197,7 +197,13 @@ def _validate_touched_entities(raw: object) -> tuple[str, ...]:
 
 
 def _validate_completed_lifecycle(session: Session) -> None:
-    """Fail closed on a completed session with a malformed lifecycle."""
+    """Fail closed on a completed session with a malformed lifecycle.
+
+    Only real-time ordering is enforced.  ``WorldTick`` is a signed value and
+    the canonical Session / world-time contracts do not establish monotonic
+    session-world-time progression, so a decreasing in-session tick is **not**
+    corruption and must not be rejected here.
+    """
     if session.real_finished_at is None:
         raise CampaignStateSourceError(
             CampaignStateSourceReason.INVALID_COMPLETED_SESSION,
@@ -207,11 +213,6 @@ def _validate_completed_lifecycle(session: Session) -> None:
         raise CampaignStateSourceError(
             CampaignStateSourceReason.INVALID_COMPLETED_SESSION,
             f"Session {session.id!r} is completed but has no world_tick_end",
-        )
-    if session.world_tick_end < session.world_tick_start:
-        raise CampaignStateSourceError(
-            CampaignStateSourceReason.INVALID_COMPLETED_SESSION,
-            f"Session {session.id!r} has world_tick_end before world_tick_start",
         )
     if session.real_finished_at < session.real_started_at:
         raise CampaignStateSourceError(
