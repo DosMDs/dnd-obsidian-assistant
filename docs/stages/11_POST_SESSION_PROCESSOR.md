@@ -12,7 +12,7 @@ S11-04 — DONE
 S11-05 — DONE
 S11-06 — DONE
 S11-07 — DONE
-S11-08 — NOT STARTED
+S11-08 — DONE
 S11-09 — NOT STARTED
 Stage 12 — NOT STARTED
 ```
@@ -1670,3 +1670,169 @@ zero model construction and zero Stage-11 attempt writes.
 Hardening/failure injection (S11-08), Stage-11 review (S11-09), lease/heartbeat
 interrupted finalization, supersession API, human-facing latest
 Summary/Recap projection (never a mutable overwrite), Stage 12.
+
+## 30. S11-08 record
+
+```text
+Task:              S11-08 — Hardening / Failure Injection
+Routing:           PLAN_REQUIRED -> accepted PLAN (5 corrections) -> BUILD
+Baseline:          feat/post-session-processor @
+                   ff3509571ccbb24de10010bae0de3a435d78553d
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             test-heavy failure-injection hardening of the accepted
+                   S11-01..S11-07 pipeline: storage faults, abrupt crash
+                   windows, corrupt/tampered durable evidence, concurrency,
+                   model/provider failures, resource bounds, privacy canaries,
+                   path/symlink topology, restart/rerun edges, CLI error
+                   surfaces and Stage-10 proposal interaction
+Deliverable:       12 new test/support modules + 1 focused edit to an existing
+                   integrity test module + this record +
+                   DEVELOPMENT_STATUS reconciliation
+Production edits:  NONE (no DEFECT_FIX / DECOMPOSITION required)
+Next task:         S11-09 — full Stage-11 review/completion
+```
+
+### 30.1 Implemented test-only modules
+
+```text
+tests/support/post_session_faults.py           delegating fault stores +
+                                               AbruptProcessCrash(BaseException)
+tests/support/post_session_truth.py            literal canonical-truth snapshot /
+                                               attempt-artifact byte snapshot
+tests/unit/post_session/test_hardening_ledger.py     fsync-uncertain append,
+                                                     no-reread contract, permanent lock
+tests/unit/post_session/test_hardening_storage.py    read-back orphan, cleanup,
+                                                     concurrent same-slot, symlink topology
+tests/unit/post_session/test_hardening_bounds.py     remaining S11-02 ceilings
+tests/unit/post_session/test_hardening_unicode.py    NFC/NFD/casefold candidate identity
+tests/unit/post_session/test_hardening_cli.py        CLI typed-except source guard
+tests/unit/post_session/test_integrity.py            edit: produced terminal +
+                                                     PROPOSAL_FINGERPRINT_MISMATCH +
+                                                     WORKFLOW_EVIDENCE_INCONSISTENT reasons
+tests/integration/test_post_session_hardening.py     pre-start, AttemptStarted
+                                                     uncertainty, extraction/rendering
+                                                     typed failures, artifact orphans,
+                                                     proposal orphan reviewability,
+                                                     zero-rewrite idempotency,
+                                                     changed-input retries, interrupted
+                                                     matrix, rerun semantics, privacy canaries
+tests/integration/test_post_session_corruption.py    all 9 TerminalIntegrityReason via
+                                                     `session outputs`, structural conflicts,
+                                                     proposal persistence failure,
+                                                     NO_CHANGES tamper, R1 ownership,
+                                                     CLI privacy and model-close
+tests/integration/test_post_session_concurrency.py   same-attempt single owner,
+                                                     different attempts, concurrent reads
+tests/integration/test_post_session_paths.py         Unicode/space Vault root,
+                                                     Unicode session id, symlink topology
+```
+
+### 30.2 Hardening / failure matrix covered
+
+```text
+pre-start failures                 invalid attempt id, corrupt ledger, oversized input,
+                                   orphan claim -> zero model / no Stage-11 attempt write
+AttemptStarted uncertainty         definite-before-write and written-but-reported-failed
+                                   append; STARTED re-fold on the same attempt; no auto
+                                   second append; claim remains unusable
+extraction typed failures          MODEL_UNAVAILABLE/MODEL_TIMEOUT/MODEL_INVOCATION_FAILED/
+                                   INVALID_STRUCTURED_OUTPUT/INVALID_EVIDENCE_REFERENCE ->
+                                   bounded typed attempt_failed, no later durable outputs
+rendering failures                 Summary vs Recap unavailable/timeout separately; no
+                                   artifacts persisted; deterministic EMPTY recap = zero
+                                   Recap model calls
+artifact persistence faults        read-back mismatch orphan, write/fsync cleanup,
+                                   concurrent identical/different bytes
+artifact orphan windows            summary/recap/workflow file without event -> STARTED,
+                                   never completion, no model resume
+proposal orphan / reviewability    file without event -> STARTED, ordinary Stage-10
+                                   proposal remains reviewable, never auto-approved
+terminal idempotency               ALREADY_TERMINAL with zero model calls and exact
+                                   artifact/ledger/audit/proposal byte equality
+changed current input              raw event, session metadata and canonical entity change
+                                   -> fingerprint_mismatch, zero model, no rewrite
+interrupted restart matrix         start-only + summary/recap/workflow/proposal file/event
+                                   -> INTERRUPTED, zero model
+different-attempt rerun            independent namespaces; same candidate EntityId while
+                                   no proposal is applied; campaign truth unchanged
+applied-create rerun               explicit Stage-10 review/approve/apply, then rerun ->
+                                   whole-Vault duplicate prevention, no duplicate create
+privacy canaries                   durable recap.md excludes DM/SYSTEM/unresolved/candidate;
+                                   durable summary excludes SYSTEM; CLI prints no bodies
+TerminalIntegrityReason            all 9 reasons fail closed through `session outputs`
+workflow corruption                invalid JSON/version/hash/path + INCONSISTENT
+                                   (session_ref/attempt_id/fingerprint/produced/changeset)
+proposal corruption                missing/fingerprint mismatch/orphan/unexpected/storage fail
+structural ledger                  malformed/multiple_started/event_after_terminal at
+                                   processor and outputs, fail closed without repair
+ledger/lock                        fsync uncertainty, permanent lock failure, short write
+                                   (existing), symlinked lock (existing)
+bounds                             remaining S11-02 input ceilings; existing output/workflow
+                                   byte bounds retained
+Unicode/path                       Unicode+space Vault root, Unicode session id, traversal
+                                   rejection, symlinked processing directory
+R1 recovery                        processing state is not a recovery blocker; ChangeSet-owned
+                                   intent does not block processing; failures add no audit
+                                   repair action
+Stage-10 boundary                  proposal immutability/approval/apply remain mandatory and
+                                   unchanged; Stage-11 terminal state is not an approval
+                                   authority
+```
+
+### 30.3 Real defects found / fixed
+
+```text
+None.  No production change was required; all S11-08 evidence was obtained
+through test-only fault injection.  No production failpoint/framework was added.
+```
+
+### 30.4 Residual limitations
+
+```text
+Power-loss / parent-directory fsync
+    All durable write primitives (attempt claim mkdir, artifact exclusive create,
+    ledger create/append, proposal create) fsync the file but never the parent
+    directory.  Current implementation and tests therefore prove/process-test
+    *process-crash* semantics; they do NOT independently prove machine/power-loss
+    durability of newly created directory entries.  Parent-directory fsync is not
+    implemented and no stronger durability claim is made.
+
+POSIX / macOS lock backend
+    The POSIX fcntl.flock path is not executed in this Windows environment.  It is
+    guarded/import-isolated and covered by platform-specific classification tests,
+    but remains an honest unexecuted-platform limitation.
+
+Symlink capability
+    Symlink-gated hardening tests skip where the host cannot create symlinks
+    (observed on this Windows host).  The symlink-safety logic is exercised for
+    import/is_symlink classification; live symlink rejection coverage depends on
+    a symlink-capable host/CI.
+
+Concurrency determinism
+    Same-attempt single-owner evidence uses deterministic multiprocessing
+    Event/Value synchronization (model enters and blocks; contender cannot enter).
+    No timing-only sleeps are used.
+```
+
+### 30.5 Evidence
+
+```text
+fault injection / crash windows   tests/integration/test_post_session_hardening.py
+corruption / CLI / R1 / Stage-10  tests/integration/test_post_session_corruption.py
+same/different attempt + reads    tests/integration/test_post_session_concurrency.py
+path / Unicode / symlink          tests/integration/test_post_session_paths.py
+unit storage/ledger/bounds/unicode/CLI  tests/unit/post_session/test_hardening_*.py
+terminal integrity reasons        tests/unit/post_session/test_integrity.py (extended)
+maintainability (<=700/<=1000)    tests/contract/test_maintainability.py (unchanged, green)
+```
+
+No Ollama is required.  Gates run: focused hardening suites, S11 + Stage-10
+regressions, `ruff check`, `ruff format --check`, `pyright` (0 errors), full
+`pytest` (6240 passed, 124 skipped) and `git diff --check`.
+
+### 30.6 Deferred (S11-09+)
+
+Full Stage-11 historical/architecture conformance review, documentation/status
+reconciliation, merge/completion readiness and the final Stage-11 verdict
+(S11-09); plus lease/heartbeat interrupted finalization, supersession API,
+human-facing latest projection and Stage 12.

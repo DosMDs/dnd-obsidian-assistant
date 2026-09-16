@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S11-07 completion)
+**Last updated:** 2026-09-16 (S11-08 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
 **Active stage:** Stage 11 — Post-session Processor
@@ -137,10 +137,19 @@ attempt id per invocation, recovery preflight before model work, truthful
 Russian result/exit-code rendering, proposal-only boundary) and read-only
 ledger-authoritative `dnd session outputs` that reuses `fold_attempt_state` +
 `verify_terminal_integrity` (fail closed, no artifact bodies). No
-approve/apply, no latest Summary/Recap projection, no canonical entity mutation.
-Detailed architecture, invariants, task map and evidence:
-`docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-08 — hardening / failure injection`.
+approve/apply, no latest Summary/Recap projection, no canonical entity mutation. S11-08 `DONE` — test-heavy failure-injection
+hardening: fault stores + abrupt `BaseException` crash windows, ordinary
+`AttemptStarted` append-uncertainty vs stronger terminal-append uncertainty,
+artifact read-back orphan semantics, typed extraction/rendering failure
+categories end-to-end, all `TerminalIntegrityReason` cases via `session
+outputs`, structural ledger/proposal corruption fail-closed, durable
+Summary/Recap privacy canaries, deterministic same-attempt single-owner and
+different-attempt concurrency, interrupted/rerun matrices, applied-create
+cross-stage duplicate prevention, R1 ownership regressions, path/symlink and
+Unicode hardening, and `session outputs` never printing artifact bodies. No
+production change was required. Detailed architecture, invariants, task map and
+evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
+`S11-09 — Stage-11 full review/completion`.
 
 ## Accepted reference baseline
 
@@ -176,7 +185,7 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ```text
 No confirmed blocker for S11-08.
 R1 Stage-11 prerequisite remains resolved by the application-owned ownership partition.
-S11-07 is DONE; next task is S11-08 (hardening / failure injection).
+S11-08 is DONE; next task is S11-09 (Stage-11 full review/completion).
 ```
 
 ## Known limitations affecting future work
@@ -186,6 +195,8 @@ tests/contract/test_boundaries.py is at the 1000-line ceiling (zero headroom).
 cli/changeset.py (666 lines) is close to the 700-line production ceiling.
 Symlink safety tests may skip on Windows hosts without symlink capability;
 no in-repo CI evidence guarantees symlink-capable execution.
+Parent-directory fsync is not implemented; current durable-write evidence proves
+process-crash (not machine/power-loss) semantics of newly created directory entries.
 ```
 
 ## Immediate next step
@@ -201,6 +212,7 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-05 DONE — ChangeSet producer integration + ambiguity policy
   S11-06 DONE — persistence/rerun/failure semantics
   S11-07 DONE — CLI orchestration / end-to-end flow
+  S11-08 DONE — hardening / failure injection
 ```
 
 ## Operational invariants
