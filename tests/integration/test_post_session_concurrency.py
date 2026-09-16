@@ -9,6 +9,7 @@ synchronization; no timing-only sleeps.
 from __future__ import annotations
 
 import multiprocessing
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -200,9 +201,17 @@ def test_different_attempts_share_ledger_independently(tmp_path: Path) -> None:
     assert canonical_truth_snapshot(root) == before
 
 
-def _writer_process(root_str: str, count: int, done) -> None:
-    root = Path(root_str)
-    store = ObsidianPostSessionProcessingStore(root)
+def _writer_process(root_str: str, count: int, ready, start, done) -> None:
+    """Writer half of the bounded read/write handshake.
+
+    Signals ``ready``, waits for the parent's ``start`` release, then performs
+    exactly ``count`` appends and signals ``done`` on the normal path.  If the
+    parent never releases ``start`` the writer fails closed instead of hanging.
+    """
+    store = ObsidianPostSessionProcessingStore(Path(root_str))
+    ready.set()
+    if not start.wait(timeout=_QUEUE_TIMEOUT):
+        raise TimeoutError("parent never released the writer start event")
     for index in range(count):
         event = AttemptStarted(
             event_id="le_" + f"{index:032x}",
@@ -222,23 +231,42 @@ def test_concurrent_ledger_reads_never_observe_partial_records(tmp_path: Path) -
     _build(root, audit)
 
     ctx = multiprocessing.get_context("spawn")
+    ready = ctx.Event()
+    start = ctx.Event()
     done = ctx.Event()
     count = 40
-    writer = ctx.Process(target=_writer_process, args=(str(root), count, done))
+    writer = ctx.Process(target=_writer_process, args=(str(root), count, ready, start, done))
     writer.start()
 
     store = ObsidianPostSessionProcessingStore(root)
     reads = 0
     try:
-        while not done.is_set():
-            load_ledger_events(store, "S001")  # must never raise on a torn record
+        assert ready.wait(timeout=_QUEUE_TIMEOUT), "writer never became ready"
+        start.set()
+
+        # Read repeatedly while the writer is alive, bounded by both writer
+        # liveness and an explicit monotonic hang guard.  A dead or stalled
+        # writer is observed via ``is_alive``/``exitcode`` rather than spun on
+        # a single event forever.  ``load_ledger_events`` strictly parses every
+        # snapshot and must never raise on a torn record.
+        deadline = time.monotonic() + _QUEUE_TIMEOUT
+        while writer.is_alive() and not done.is_set() and time.monotonic() < deadline:
+            load_ledger_events(store, "S001")
             reads += 1
+
+        # Guarantee at least one observed snapshot regardless of how quickly
+        # the writer finished, without depending on scheduler timing.
+        load_ledger_events(store, "S001")
+        reads += 1
+
         writer.join(timeout=_QUEUE_TIMEOUT)
+        assert not writer.is_alive(), "writer did not terminate before the timeout"
         assert writer.exitcode == 0
         final = load_ledger_events(store, "S001")
         assert len(final) == count
         assert reads >= 1
     finally:
+        start.set()
         if writer.is_alive():
             writer.terminate()
             writer.join(timeout=30)

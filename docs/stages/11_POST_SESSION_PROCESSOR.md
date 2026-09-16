@@ -3,7 +3,7 @@
 ## Status
 
 ```text
-Stage 11 — IN PROGRESS
+Stage 11 — DONE
 S11-00 — DONE
 S11-01 — DONE
 S11-02 — DONE
@@ -13,7 +13,7 @@ S11-05 — DONE
 S11-06 — DONE
 S11-07 — DONE
 S11-08 — DONE
-S11-09 — NOT STARTED
+S11-09 — DONE
 Stage 12 — NOT STARTED
 ```
 
@@ -23,8 +23,11 @@ Architecture verdict:
 S11_ARCHITECTURE_READY
 ```
 
-This document is the canonical Stage-11 architecture record and task map. It
-describes **contracts and evidence plans**. Implementation begins at S11-01.
+This document is the canonical Stage-11 architecture record, task map and
+implementation history. The contract and evidence-plan sections retain their
+original wording; the per-task records below describe what each task deferred
+at the time it ran and are not rewritten after later tasks complete. Stage 11
+is complete (see the S11-09 completion record).
 
 ## 1. Purpose
 
@@ -502,11 +505,11 @@ S11-05  ChangeSet producer integration + ambiguity policy  DONE
 S11-06  persistence/rerun/failure semantics (incl. decision DONE
         on whether to sync legacy session fields)
 S11-07  CLI orchestration / end-to-end flow                DONE
-S11-08  hardening / failure injection                      NOT STARTED
-S11-09  full Stage-11 review/completion                    NOT STARTED
+S11-08  hardening / failure injection                      DONE
+S11-09  full Stage-11 review/completion                    DONE
 ```
 
-Smallest first BUILD task after S11-00: **S11-01**.
+Smallest first BUILD task after S11-00 was **S11-01** (historical).
 
 ## 22. S11-00 record
 
@@ -1836,3 +1839,253 @@ Full Stage-11 historical/architecture conformance review, documentation/status
 reconciliation, merge/completion readiness and the final Stage-11 verdict
 (S11-09); plus lease/heartbeat interrupted finalization, supersession API,
 human-facing latest projection and Stage 12.
+
+## 31. S11-09 record
+
+```text
+Task:              S11-09 — Full Stage-11 Historical Review / Completion
+Routing:           PLAN_REQUIRED -> accepted PLAN
+                   (1 mandatory test-harness correction,
+                    1 documentation-clarity requirement) -> BUILD
+Baseline:          feat/post-session-processor @
+                   3738c6092934c50f53b5b51ab6c752c80102a44f
+                   HEAD == origin/feat/post-session-processor, clean tree
+Pre-Stage-11 base: 513401f807e0808c58e6673a3af73911a0c61de4
+Immutable review range:
+                   513401f807e0808c58e6673a3af73911a0c61de4
+                   .. 3738c6092934c50f53b5b51ab6c752c80102a44f
+Review base:       513401f807e0808c58e6673a3af73911a0c61de4
+Review head:       3738c6092934c50f53b5b51ab6c752c80102a44f
+Finalization:      1 corrected test-harness file + this record +
+                   DEVELOPMENT_STATUS reconciliation committed on top of the
+                   reviewed implementation head (SHA in Git history; the
+                   historical review range itself is not rewritten)
+Verdict:           STAGE11_READY_FOR_COMPLETION
+```
+
+### 31.1 Commit inventory / classification
+
+15 Stage-11-owned commits in the immutable range; **0 unrelated/concurrent**;
+no merge commits. 10 stage implementations, 3 stage corrections, 2
+documentation corrections:
+
+```text
+15b522f  S11-00  docs/kickoff            architecture + DEVELOPMENT_STATUS + index
+2dba067  S11-01  implementation           input + durable processing schemas
+2c1b75f  S11-02  implementation           deterministic context assembly
+7dac72f  S11-03  implementation           bounded structured extraction
+5fa39a6  S11-03  correction               normalize extraction evidence
+fb04a1b  S11-03  correction               accept explicit null candidate id
+2c66fc6  S11-04  implementation           Summary/Recap + visibility filtering
+91922cc  S11-04  documentation correction mark S11-03 DONE
+5f30632  S11-05  implementation           ChangeSet producer + ambiguity policy
+5e9a59a  S11-06  implementation           durable persistence/rerun/failure
+4ff387c  S11-06  correction               lock failure/schema version/NO_CHANGES
+50b7e2c  S11-07  implementation           CLI orchestration + verified outputs
+ff35095  S11-07  documentation correction finalize status header
+60013b2  S11-08  implementation           hardening/failure injection (test-only)
+3738c60  S11-08  test correction           orphan-artifact assertion + wording
+```
+
+### 31.2 Git-derived changed-file summary
+
+95 changed files (`+24267 / -59`) from `git diff --name-status 513401f..3738c60`:
+new `domain/post_session*.py` (4), new `application/post_session_*.py` +
+`entity_id_allocator.py` + `pydantic_ai_post_session*.py` (21), new
+`storage/post_session_{processing,artifacts}.py` (2), new prompts (3), new
+`retrieval/exact_matching.py`, new `cli/post_session{,_runtime}.py` (2), 45
+test/support modules, and documentation. Pre-existing files modified:
+`models/profiles.py` (+1 enum member), `models/pydantic_ai_ollama.py` (additive
+POST_SESSION factory over a shared private helper), `retrieval/search.py`
+(pure delegation to `exact_matching`, net −26 lines), `cli/main.py` (+2
+registration lines), three test modules, `DEVELOPMENT_STATUS.md`,
+`docs/stages/README.md`.
+
+### 31.3 Architecture-invariant verdict
+
+```text
+I1  Vault is the only campaign Source of Truth                 PASS
+I2  Stage 11 creates proposals; never approves/applies          PASS
+I3  model output untrusted until Python validates              PASS
+I4  heavy model has no tools/filesystem/shell/Vault write      PASS
+I5  input_fingerprint binds the prepared source/context input   PASS (scope see 31.7)
+I6  input identity vs attempt identity distinct                PASS
+I7  immutable/versioned per-attempt artifacts                   PASS
+I8  append-only processing ledger                              PASS
+I9  ledger authoritative; legacy session fields are not        PASS
+I10 Recap hidden-data filtering deterministic Python            PASS
+I11 ambiguous references never speculatively mutated            PASS
+I12 calendar conversion/arithmetic stays CalendarService         PASS
+I13 domain/storage concrete-model/provider-independent          PASS
+I14 no new canonical campaign store outside the Vault           PASS
+```
+
+No blocking defect; architecture conformance `ACCEPTED`.
+
+### 31.4 Original acceptance-criteria evidence
+
+```text
+1  completed accepted; invalid/incomplete rejected pre-model   test_eligibility.py; hardening pre-start
+2  same input -> same fingerprint; changed -> different         test_identity.py; test_context.py; hardening
+3  fingerprint stable across attempts; attempt-scoped changeset test_identity.py; test_post_session_processor.py
+4  immutable per-attempt Summary/Recap; rerun no overwrite      test_artifact_persistence.py; test_post_session_processor.py
+5  append-only ledger; reconstructable after restart            test_storage.py; test_post_session_processing.py
+6  legacy Session processing fields not Stage-11 state          test_eligibility.py; production audit
+7  Recap excludes hidden/GM material                            test_post_session_hardening.py durable canary
+8  real session_ref, validates, unapproved, consumed by changeset test_post_session_changeset.py; boundaries
+9  ambiguity omitted; candidates never duplicate                test_changeset_producer.py; applied-create rerun
+10 model/provider failure leaves canonical state unchanged      test_post_session_processor.py; processor_failure
+```
+
+### 31.5 S11-08 hardening evidence
+
+```text
+crash/restart windows        test_post_session_hardening.py
+corruption (all 9 reasons)   test_post_session_corruption.py
+concurrency (same/diff)      test_post_session_concurrency.py
+idempotency / zero-rewrite   test_post_session_hardening.py:586-609
+privacy canaries (durable)   test_post_session_hardening.py:874-915
+path/symlink topology        tests/unit/post_session/test_hardening_storage.py; test_post_session_paths.py
+R1 ownership                 test_post_session_corruption.py:401-463
+Stage-10 compatibility       test_post_session_boundaries.py; corruption
+```
+
+### 31.6 Test-quality review and corrected test-harness defect
+
+The S11-08 `or True` issue remains corrected. Final review additionally found
+one **`TEST_HARNESS_DEFECT`** (not a Stage-11 production defect) in
+`tests/integration/test_post_session_concurrency.py`:
+
+```text
+Before
+    test_concurrent_ledger_reads_never_observe_partial_records looped
+    ``while not done.is_set()`` with no deadline and no liveness check, and
+    depended on the scheduler-dependent ``assert reads >= 1``.
+    A writer that died before ``done.set()`` could spin the parent forever.
+
+After (bounded deterministic protocol)
+    writer process: signal READY -> wait for START (fail closed on timeout)
+    -> perform writes -> signal DONE on the normal path.
+    parent: wait READY with timeout; signal START; read in a loop bounded by
+    writer liveness AND a monotonic deadline (``_QUEUE_TIMEOUT``); then one
+    guaranteed read; join with timeout; assert not alive; assert exitcode 0;
+    final strict parse; exact event count.
+    No ``time.sleep``, no timing threshold used as correctness evidence.
+```
+
+The semantic property is retained: every observed snapshot is read through
+`load_ledger_events`, which strictly parses and must never raise on a torn
+record; final exact event-count validation is retained. No production
+concurrency behavior changed. No production failpoint or global lock added.
+Remaining non-blocking test-quality observations (from the accepted PLAN) are
+recorded, not corrected in S11-09.
+
+### 31.7 Fingerprint / rendering-contract scope statement
+
+```text
+input_fingerprint
+    deterministic identity of the prepared source/context input
+    + the extraction prompt contract. It is NOT a fingerprint of every
+    model call and NOT the entire execution recipe.
+
+render prompt/schema versions
+    immutable attempt artifact/workflow provenance; they are NOT part of
+    prepared-input identity.
+
+Changing a rendering prompt/schema does not rewrite an existing attempt;
+same-attempt terminal evidence remains immutable; a new execution attempt is
+required to produce outputs under a new rendering contract.
+```
+
+No production fingerprint change was made in S11-09;
+`POST_SESSION_PROCESSOR_VERSION` and the fingerprint schemas are unchanged.
+
+### 31.8 Known limitations
+
+```text
+NON_BLOCKING_ACCEPTED
+    no parent-directory fsync / no independently proven power-loss durability
+    POSIX/macOS flock backend not executed on the current Windows host
+    symlink-safety tests capability-gated on the current host
+    render prompt/schema versions are not part of input_fingerprint (31.7)
+    Recap filters typed bindings; hidden names in otherwise player-safe claim
+    free text are not redacted (accepted S11-04 policy)
+
+DEFERRED
+    lease/heartbeat interrupted-attempt reclamation
+    supersession API
+    human-facing mutable/latest Summary/Recap projection
+```
+
+### 31.9 Maintainability pressures
+
+```text
+production (<=700)  post_session_changeset.py 666; post_session_extraction.py 648;
+                    cli/post_session.py 479; storage/post_session_processing.py 480
+tests (<=1000)      test_post_session_hardening.py 949; test_post_session_boundaries.py 855;
+                    test_changeset_producer.py 762; test_cli_post_session.py 727
+ceiling (pre-existing) tests/contract/test_boundaries.py 1000 (zero headroom)
+pre-existing          cli/changeset.py 666
+```
+
+No speculative decomposition performed.
+
+### 31.10 Platform evidence classification
+
+```text
+LOCAL_VERIFIED (Windows host)
+    full pytest / ruff / pyright gates; multiprocessing spawn concurrency;
+    msvcrt ledger-lock backend.
+
+NOT_EXECUTED_HERE
+    POSIX/macOS fcntl.flock backend; symlink-enabled rejection tests where the
+    host lacks symlink capability.
+
+REMOTE_GIT_VERIFIED
+    pushed SHA/history after finalization (HEAD == upstream).
+```
+
+### 31.11 Quality gates
+
+```text
+focused
+    tests/integration/test_post_session_concurrency.py          3 passed
+    tests/unit/post_session                        385 passed, 6 skipped
+    tests/integration -k post_session              126 passed, 1 skipped (475 deselected)
+    tests/contract/test_post_session_boundaries.py
+      + tests/contract/test_maintainability.py     667 passed
+    Stage-10 / R1 / CLI / model-profile regressions 713 passed, 3 skipped
+full
+    uv run ruff check .                            All checks passed
+    uv run ruff format --check .                   464 files already formatted
+    uv run pyright                                  0 errors, 0 warnings, 0 informations
+    uv run pytest                                   6240 passed, 124 skipped
+    git diff --check                                clean
+```
+
+No live Ollama, no network.
+
+### 31.12 Merge readiness
+
+```text
+main is the exact pre-Stage-11 base (513401f) or divergence fully understood
+feature branch contains all 15 Stage-11 commits
+working tree clean
+no unresolved blocker
+full gates green
+docs/status final
+=> MERGE_READY
+```
+
+Merging is a separate action and was **not** performed in S11-09.
+
+### 31.13 Final Stage-11 verdict
+
+```text
+Stage 11: DONE
+S11-09: DONE
+Architecture conformance: ACCEPTED
+Stage acceptance: STAGE11_READY_FOR_COMPLETION
+Merge readiness: MERGE_READY
+Next: Stage 12 planning/kickoff
+```

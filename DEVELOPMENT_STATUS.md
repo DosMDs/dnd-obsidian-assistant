@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S11-08 completion)
+**Last updated:** 2026-09-16 (S11-09 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
-**Active stage:** Stage 11 — Post-session Processor
+**Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `DONE`
+**Active stage:** none — Stage 11 complete; Stage 12 not started
 **Active migration:** PAIM — `ACCEPTED`, complete
 **Current branch:** `feat/post-session-processor`
 **Reference main SHA (PAIM behavioral/rollback reference):** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
@@ -48,7 +48,7 @@ docs/adr/          architecture decisions
 | 8. Model Gateway / Ollama | DONE | `docs/stages/08_MODEL_GATEWAY_AND_OLLAMA.md` |
 | 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
-| 11. Post-session Processor | IN PROGRESS | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
+| 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | NOT STARTED | — |
 | 13. Bootstrap | NOT STARTED | — |
 | 14. Evals / Hardening | NOT STARTED | — |
@@ -91,7 +91,7 @@ audit record with a real `session_ref` could enter global session-recovery
 Resolution verdict `R1_RECOVERY_READY`; evidence in
 `docs/stages/10_CHANGESET.md` (R1 resolution section).
 
-### Stage 11 — Post-session Processor `IN PROGRESS`
+### Stage 11 — Post-session Processor `DONE`
 
 S11-00 `DONE` — architecture/contracts/kickoff accepted
 (`S11_ARCHITECTURE_READY`). S11-01 `DONE` — post-session input + durable
@@ -147,9 +147,14 @@ Summary/Recap privacy canaries, deterministic same-attempt single-owner and
 different-attempt concurrency, interrupted/rerun matrices, applied-create
 cross-stage duplicate prevention, R1 ownership regressions, path/symlink and
 Unicode hardening, and `session outputs` never printing artifact bodies. No
-production change was required. Detailed architecture, invariants, task map and
-evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-09 — Stage-11 full review/completion`.
+production change was required. S11-09 `DONE` — full Stage-11 historical and
+architecture-conformance review: 15 Stage-11-owned commits (0 unrelated), no
+blocking production defect, all invariants accepted, one bounded
+test-harness-only correction (concurrency reader deadline/liveness), full range
+and change inventory verified from Git, all quality gates green. Detailed
+architecture, invariants, task map, review and evidence:
+`docs/stages/11_POST_SESSION_PROCESSOR.md`. Stage 11 complete; next: Stage 12
+planning/kickoff.
 
 ## Accepted reference baseline
 
@@ -183,9 +188,9 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for S11-09.
+No confirmed blocker for Stage 12.
 R1 Stage-11 prerequisite remains resolved by the application-owned ownership partition.
-S11-08 is DONE; next task is S11-09 (Stage-11 full review/completion).
+Stage 11 is DONE; next is Stage 12 planning/kickoff (Campaign State).
 ```
 
 ## Known limitations affecting future work
@@ -203,7 +208,7 @@ process-crash (not machine/power-loss) semantics of newly created directory entr
 
 ```text
 Stage 10 — ChangeSet (DONE)
-Stage 11 — Post-session Processor (IN PROGRESS)
+Stage 11 — Post-session Processor (DONE)
   S11-00 DONE — architecture/contracts/kickoff
   S11-01 DONE — post-session input + durable processing schemas
   S11-02 DONE — deterministic context assembly + entity resolution
@@ -213,6 +218,8 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-06 DONE — persistence/rerun/failure semantics
   S11-07 DONE — CLI orchestration / end-to-end flow
   S11-08 DONE — hardening / failure injection
+  S11-09 DONE — full Stage-11 review / completion
+Stage 12 — Campaign State (NOT STARTED)
 ```
 
 ## Operational invariants
@@ -235,7 +242,7 @@ Stage 11 — Post-session Processor (IN PROGRESS)
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state |
 | `docs/stages/09_FAST_AGENT.md` | Detailed Stage-9 history/reference behavior |
 | `docs/stages/10_CHANGESET.md` | Stage-10 architecture record, task map, R1 resolution |
-| `docs/stages/11_POST_SESSION_PROCESSOR.md` | Stage-11 architecture, invariants, task map, evidence plan |
+| `docs/stages/11_POST_SESSION_PROCESSOR.md` | Stage-11 architecture, invariants, task map, history, completion record |
 | `docs/adr/0006-changeset-review-apply-boundary.md` | ChangeSet review/apply architecture decision |
 | `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` | PAIM task plan/history/evidence |
 | `docs/adr/0003-pydantic-ai-runtime-migration.md` | Migration architecture/rollback decision |
