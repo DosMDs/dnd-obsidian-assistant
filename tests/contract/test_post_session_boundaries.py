@@ -743,3 +743,113 @@ def test_s11_06_workflow_domain_is_pure_and_provider_neutral() -> None:
     assert not stdlib_offending, f"{module_path} imported persistence stdlib: {stdlib_offending}"
     _assert_no_upper_layers(module_path)
     _assert_provider_neutral(module_path)
+
+
+# ── S11-07 outputs read-model ──────────────────────────────────────────────
+
+_OUTPUTS_MODULE = "dnd_assistant.application.post_session_outputs"
+
+
+def test_outputs_read_model_source_imports_no_models_tools_cli() -> None:
+    targets = _module_import_targets(_OUTPUTS_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.models")
+        or target.startswith("dnd_assistant.tools")
+        or target.startswith("dnd_assistant.cli")
+    )
+    assert not offending, f"{_OUTPUTS_MODULE} imported upper layers: {offending}"
+
+
+def test_outputs_read_model_names_no_concrete_storage_or_write_method() -> None:
+    names = _module_name_nodes(_OUTPUTS_MODULE)
+    for forbidden in (
+        "ObsidianVaultRepository",
+        "ObsidianPostSessionProcessingStore",
+        "ObsidianPostSessionArtifactStore",
+        "ObsidianChangeSetStore",
+        "ToolExecutor",
+    ):
+        assert forbidden not in names, f"{_OUTPUTS_MODULE} references {forbidden}"
+    offending = sorted(names & _WRITE_CAPABLE_METHOD_NAMES)
+    assert not offending, f"{_OUTPUTS_MODULE} references writes: {offending}"
+
+
+def test_outputs_read_model_is_provider_neutral_and_reuses_integrity() -> None:
+    _assert_provider_neutral(_OUTPUTS_MODULE)
+    targets = _module_import_targets(_OUTPUTS_MODULE)
+    assert "dnd_assistant.application.post_session_integrity" in targets
+    assert "dnd_assistant.application.post_session_attempt_state" in targets
+
+
+# ── S11-07 CLI composition modules ─────────────────────────────────────────
+
+_PROCESS_CLI_MODULE = "dnd_assistant.cli.post_session"
+_PROCESS_RUNTIME_MODULE = "dnd_assistant.cli.post_session_runtime"
+
+
+def test_process_cli_has_no_changeset_approval_or_apply_authority() -> None:
+    targets = _module_import_targets(_PROCESS_CLI_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target
+        in {
+            "dnd_assistant.application.changeset_apply",
+            "dnd_assistant.application.changeset_review",
+            "dnd_assistant.application.changeset_store",
+        }
+    )
+    assert not offending, f"{_PROCESS_CLI_MODULE} imported ChangeSet authority: {offending}"
+    names = _module_name_nodes(_PROCESS_CLI_MODULE)
+    for forbidden in (
+        "apply_changeset",
+        "persist_approval",
+        "persist_proposal",
+        "build_changeset_review",
+        "ChangeSetApproval",
+    ):
+        assert forbidden not in names, f"{_PROCESS_CLI_MODULE} references {forbidden}"
+
+
+def test_process_cli_does_not_write_artifacts_or_proposals_directly() -> None:
+    names = _module_name_nodes(_PROCESS_CLI_MODULE)
+    for forbidden in (
+        "persist_immutable_artifact",
+        "create_proposal",
+        "create_approval",
+        "write_text",
+        "write_bytes",
+    ):
+        assert forbidden not in names, f"{_PROCESS_CLI_MODULE} references {forbidden}"
+
+
+def test_process_runtime_has_no_tool_or_search_surface() -> None:
+    names = _module_name_nodes(_PROCESS_RUNTIME_MODULE)
+    for forbidden in (
+        "ToolRegistry",
+        "ToolExecutor",
+        "SearchService",
+        "VaultSearchService",
+        "SqliteFtsIndex",
+        "EntityResolver",
+    ):
+        assert forbidden not in names, f"{_PROCESS_RUNTIME_MODULE} references {forbidden}"
+    targets = _module_import_targets(_PROCESS_RUNTIME_MODULE)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.tools") or target.startswith("dnd_assistant.retrieval")
+    )
+    assert not offending, f"{_PROCESS_RUNTIME_MODULE} imported tools/retrieval: {offending}"
+
+
+def test_process_runtime_uses_post_session_factory_and_processor() -> None:
+    targets = _module_import_targets(_PROCESS_RUNTIME_MODULE)
+    assert "dnd_assistant.models.pydantic_ai_ollama" in targets
+    assert "dnd_assistant.application.post_session_processor" in targets
+    names = _module_name_nodes(_PROCESS_RUNTIME_MODULE)
+    assert "build_pydantic_ai_post_session_model" in names
+    assert "run_post_session_processing" in names
+    assert "build_pydantic_ai_ollama_model" not in names

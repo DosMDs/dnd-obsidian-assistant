@@ -130,9 +130,17 @@ and the decision that legacy `Session.processed`/`processed_model_profile`/
 `processing_status` remain unchanged/non-authoritative. The ledger
 is unaudited durable workflow evidence under
 `_system/raw/sessions/<id>/processing/` and does not participate in global
-`unresolved_audit_intent` recovery. Detailed architecture, invariants, task map
-and evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-07 — CLI orchestration / end-to-end flow`.
+`unresolved_audit_intent` recovery. S11-07 `DONE` — focused CLI orchestration:
+`dnd session process` (exactly one of `SESSION_ID`/`--latest`, deterministic
+latest-completed selection, POST_SESSION-role profile/factory only, one trusted
+attempt id per invocation, recovery preflight before model work, truthful
+Russian result/exit-code rendering, proposal-only boundary) and read-only
+ledger-authoritative `dnd session outputs` that reuses `fold_attempt_state` +
+`verify_terminal_integrity` (fail closed, no artifact bodies). No
+approve/apply, no latest Summary/Recap projection, no canonical entity mutation.
+Detailed architecture, invariants, task map and evidence:
+`docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
+`S11-08 — hardening / failure injection`.
 
 ## Accepted reference baseline
 
@@ -169,8 +177,9 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
 The deterministic ChangeSet producer (S11-05) and the crash-aware durable
-persistence/rerun/failure workflow (S11-06) now exist. Stage 11 is in progress;
-S11-06 is DONE; next task is S11-07 (CLI orchestration).
+persistence/rerun/failure workflow (S11-06) now exist, and S11-07 exposes the
+processor through a focused CLI. Stage 11 is in progress; S11-07 is DONE; next
+task is S11-08 (hardening / failure injection).
 ```
 
 ## Known limitations affecting future work
@@ -194,6 +203,7 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-04 DONE — Summary/Recap production + visibility filtering
   S11-05 DONE — ChangeSet producer integration + ambiguity policy
   S11-06 DONE — persistence/rerun/failure semantics
+  S11-07 DONE — CLI orchestration / end-to-end flow
 ```
 
 ## Operational invariants

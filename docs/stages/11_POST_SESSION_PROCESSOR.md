@@ -11,7 +11,7 @@ S11-03 — DONE
 S11-04 — DONE
 S11-05 — DONE
 S11-06 — DONE
-S11-07 — NOT STARTED
+S11-07 — DONE
 S11-08 — NOT STARTED
 S11-09 — NOT STARTED
 Stage 12 — NOT STARTED
@@ -501,7 +501,7 @@ S11-04  Summary/Recap production + visibility filtering    DONE
 S11-05  ChangeSet producer integration + ambiguity policy  DONE
 S11-06  persistence/rerun/failure semantics (incl. decision DONE
         on whether to sync legacy session fields)
-S11-07  CLI orchestration / end-to-end flow                NOT STARTED
+S11-07  CLI orchestration / end-to-end flow                DONE
 S11-08  hardening / failure injection                      NOT STARTED
 S11-09  full Stage-11 review/completion                    NOT STARTED
 ```
@@ -1491,3 +1491,182 @@ No Ollama is required.  Gates run: focused suites, `ruff check`,
 CLI orchestration (S11-07), lease/heartbeat-based interrupted finalization,
 supersession API, human-facing latest projection, hardening/failure injection
 (S11-08), Stage-11 review (S11-09), Stage-12.
+
+## 29. S11-07 record
+
+```text
+Task:              S11-07 — CLI Orchestration / End-to-End Flow
+Routing:           PLAN_REQUIRED -> accepted PLAN (2 mandatory corrections) ->
+                   BUILD
+Baseline:          feat/post-session-processor @
+                   4ff387c3506569b41f6a82784b710d9d3d776592
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             focused CLI exposure of the accepted S11-06 processor:
+                   `dnd session process` selector + POST_SESSION runtime
+                   composition/model lifetime + typed result rendering + exit
+                   codes + recovery preflight; read-only integrity-verified
+                   `dnd session outputs`; no processing/model/storage policy in
+                   Typer; no ChangeSet approve/apply
+Deliverable:       2 new CLI modules + 1 new application read-model + command
+                   registration + focused unit/integration/contract tests +
+                   this record + DEVELOPMENT_STATUS reconciliation
+Next task:         S11-08 — hardening / failure injection
+```
+
+### 29.1 Implemented modules
+
+```text
+cli/post_session.py                     new  (Typer commands + Russian rendering;
+                                              selector validation; exit codes)
+cli/post_session_runtime.py             new  (POST_SESSION profile loading,
+                                              metadata selector composition,
+                                              concrete dependency wiring,
+                                              model lifetime)
+application/post_session_outputs.py     new  (read-only ledger attempt query,
+                                              reuses fold_attempt_state +
+                                              verify_terminal_integrity)
+cli/main.py                             edit (register `process`/`outputs` on the
+                                              existing session_app)
+```
+
+The application processor and its support module remain protocol-only and
+concrete-storage-free; all concrete wiring stays in the CLI composition module.
+
+### 29.2 Exact command syntax
+
+```text
+dnd session process [SESSION_ID] --vault PATH --config PATH --profile NAME [--latest]
+dnd session outputs <SESSION_ID> --vault PATH
+```
+
+`process` is registered on the existing `session` group (`start`/`status`/`end`
+unchanged); `outputs` is added alongside it. Registration happens through
+`cli.post_session.register_session_process_commands(session_app)` so
+`cli/session.py` never imports `cli/post_session.py` (no circular CLI import).
+
+### 29.3 Selector and `--latest` policy
+
+```text
+exactly one of SESSION_ID / --latest required; both or neither -> CLI error
+  before any model construction, attempt claim or write
+explicit SESSION_ID -> resolved via SessionMetadataRepository.get_session_metadata
+  (missing session -> bounded error, zero model construction)
+--latest  -> completed sessions only; ordering key
+  (real_finished_at, id_rank); id_rank is numeric-aware for ^S(\d+)$
+  zero completed            -> bounded error
+  completed missing finish  -> fail closed (never silently skipped for an
+                               older valid session)
+  active sessions           -> excluded, never block
+  corrupt metadata          -> list_session_metadata fails closed
+```
+
+`--latest` means the latest **completed** session, not the latest unprocessed
+session. Repeated invocation is a deliberate new attempt (new trusted id), so an
+already-terminal session is never skipped.
+
+### 29.4 POST_SESSION profile / model wiring
+
+- `_load_post_session_profile` selects exactly `ModelProfileRole.POST_SESSION`;
+  a missing profile or any other role (AGENT/SUMMARIZER/EMBEDDING) raises
+  `ValidationError` before model construction; `dnd ask` remains AGENT-only and
+  unchanged.
+- `_build_post_session_model` calls the accepted
+  `build_pydantic_ai_post_session_model` (never the AGENT factory).
+- One underlying configured model backs both
+  `PydanticAIPostSessionExtractionModel` and
+  `PydanticAIPostSessionRenderingModel`; both adapters expose zero
+  project/action tools.
+- `ModelExecutionIdentity(profile=profile_name, model=profile.model,
+  provider=profile.provider)` is derived from trusted configuration only.
+- The runtime owns model lifetime; `close()` is idempotent and is invoked from
+  the command `finally` (success, processor failure, rendering failure and
+  recording-uncertainty paths all close exactly once).
+
+### 29.5 Attempt id
+
+One normal `process` invocation generates exactly one
+`application.post_session_identity.new_attempt_id()` and passes it verbatim to
+`run_post_session_processing`. No `--attempt-id` option. The id is printed so
+durable artifacts/proposals can be correlated.
+
+### 29.6 Result / exit-code mapping
+
+```text
+COMPLETED (PRODUCED or NO_CHANGES) -> 0
+ALREADY_TERMINAL                   -> 0
+INELIGIBLE / INTERRUPTED / FAILED  -> 1
+selector/config/profile/input error-> 1
+PostSessionFailureRecordingError   -> 1
+```
+
+Rendering is Russian and truthful: produced proposals are stated to be
+**proposal-only, unapproved and unapplied**, with the only suggested next step
+`dnd changeset review <id> --vault ...`; NO_CHANGES explicitly states no
+ChangeSet was created and campaign entities were not modified; EMPTY recap is
+reported from the processor flag and the placeholder body is never printed;
+INTERRUPTED never claims retry/rollback; FAILED prints only phase/category,
+recording status and the processor-owned reason (never provider/model detail).
+
+### 29.7 Error boundary (Correction 2)
+
+`cli/post_session.py` catches only `PostSessionFailureRecordingError` and
+`DndAssistantError`. There is no broad `except Exception`; programming errors
+are not swallowed. Expected model/provider failures already cross the accepted
+S11-03/S11-04/S11-06 typed error boundaries (adapter -> `PostSessionExtractionError`
+/ `PostSessionRenderingError` -> bounded `AttemptFailed` -> typed result).
+Provider/model canaries injected through this normal typed path are proven
+absent from CLI output.
+
+### 29.8 `session outputs` (Correction 1)
+
+Read-only, ledger-authoritative, no config/profile/model. It first verifies the
+session exists through `SessionMetadataRepository`:
+
+```text
+existing session + no processing ledger -> exit 0, "Попыток обработки нет"
+missing session                         -> exit non-zero, bounded not-found
+```
+
+For every attempt it calls `fold_attempt_state`; a structural `COMPLETED`
+attempt is only surfaced as verified after `verify_terminal_integrity` succeeds
+against the real artifact/changeset stores. Any integrity failure fails closed
+(non-zero), shows the attempt id and the bounded `TerminalIntegrityReason`, and
+prints no artifact bodies. Terminal-integrity rules are not duplicated in
+`application/post_session_outputs.py`; it only loads the ledger, reads
+artifacts/proposals through protocols and calls the existing verifier. STARTED /
+FAILED / SUPERSEDED states remain inspectable without being presented as
+completed outputs. No legacy `Session.processed` field is read.
+
+### 29.9 No approval/apply and no canonical mutation
+
+`process` never imports or calls `build_changeset_review`, `persist_approval`,
+`persist_proposal` (processor-owned) or `apply_changeset`; it has no
+`--yes/--approve/--apply`. Integration tests prove a produced proposal leaves no
+approval artifact, no apply-attempt artifact, unchanged canonical entity bytes
+and an unchanged audit log. `session outputs` is read-only and writes nothing.
+Processing still performs no canonical entity mutation or audit growth.
+
+### 29.10 Evidence
+
+```text
+unit   selector validation / latest selection / profile loading /
+       result rendering / exit codes / model lifetime / recording-uncertainty
+       tests/unit/test_cli_post_session.py
+unit   outputs read-model grouping/order/non-completed
+       tests/unit/post_session/test_outputs.py
+integration  produced / no_changes / empty / zero-model-work / latest /
+       failures / recording-uncertainty / outputs integrity
+       tests/integration/test_cli_post_session.py
+contract     CLI composition boundaries + outputs read-model purity
+       tests/contract/test_post_session_boundaries.py
+```
+
+No Ollama is required. Verified: invalid selector, missing explicit session,
+no `--latest` candidate, blocking recovery and wrong-role profile all produce
+zero model construction and zero Stage-11 attempt writes.
+
+### 29.11 Deferred (S11-08+)
+
+Hardening/failure injection (S11-08), Stage-11 review (S11-09), lease/heartbeat
+interrupted finalization, supersession API, human-facing latest
+Summary/Recap projection (never a mutable overwrite), Stage 12.
