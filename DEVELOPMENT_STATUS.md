@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S11-06 completion)
+**Last updated:** 2026-09-16 (S11-07 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
 **Active stage:** Stage 11 — Post-session Processor
@@ -174,12 +174,9 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for Stage 11 start.
-R1 Stage-11 prerequisite resolved by application-owned ownership partition.
-The deterministic ChangeSet producer (S11-05) and the crash-aware durable
-persistence/rerun/failure workflow (S11-06) now exist, and S11-07 exposes the
-processor through a focused CLI. Stage 11 is in progress; S11-07 is DONE; next
-task is S11-08 (hardening / failure injection).
+No confirmed blocker for S11-08.
+R1 Stage-11 prerequisite remains resolved by the application-owned ownership partition.
+S11-07 is DONE; next task is S11-08 (hardening / failure injection).
 ```
 
 ## Known limitations affecting future work
