@@ -189,10 +189,14 @@ InputFingerprint = Sha256Fingerprint
 
 
 class ProcessingOutcome(StrEnum):
-    """Terminal outcome of a successful processing attempt."""
+    """Terminal outcome of a successful processing attempt.
+
+    The distinction concerns **campaign-change proposal production**, not
+    whether Summary/Recap/workflow artifacts exist (they exist for both).
+    """
 
     PRODUCED = "produced"
-    """Processing produced at least one persisted proposal/artifact."""
+    """Processing produced and persisted a Stage-10 campaign-change proposal."""
 
     NO_CHANGES = "no_changes"
     """Processing completed without any valid campaign change operations."""
@@ -223,10 +227,31 @@ class FailureCategory(StrEnum):
 
 
 class ArtifactKind(StrEnum):
-    """Generated artifact kinds recorded in the processing ledger."""
+    """Render-facing artifact kinds (S11-04 Summary/Recap rendering).
+
+    Deliberately limited to the two model-rendered artifacts.  It is the type
+    of :class:`dnd_assistant.application.post_session_rendering.RenderingProvenance.artifact_kind`
+    and of the S11-04 render APIs, so a workflow-evidence artifact can never be
+    mistaken for a render output.
+    """
 
     SUMMARY = "summary"
     RECAP = "recap"
+
+
+class PersistedArtifactKind(StrEnum):
+    """Durable per-attempt artifact slots recorded in the processing ledger.
+
+    A superset of :class:`ArtifactKind` that additionally covers the
+    machine-readable workflow-evidence artifact.  The JSON values of the
+    overlapping members are byte-identical to :class:`ArtifactKind`
+    (``"summary"`` / ``"recap"``), so previously persisted S11-01 ledger lines
+    parse without migration and re-serialize unchanged.
+    """
+
+    SUMMARY = "summary"
+    RECAP = "recap"
+    WORKFLOW = "workflow"
 
 
 # ── Prepared-input projections ────────────────────────────────────────────
@@ -381,7 +406,7 @@ class ArtifactPersisted(_LedgerEventBase):
     """One immutable per-attempt artifact was persisted."""
 
     event_kind: Literal["artifact_persisted"] = "artifact_persisted"
-    artifact_kind: ArtifactKind
+    artifact_kind: PersistedArtifactKind
     relative_path: RelativeArtifactPath
     content_hash: Sha256Fingerprint
 
@@ -446,6 +471,7 @@ __all__ = [
     "LedgerEventId",
     "NonEmptyStr",
     "OptionalNonEmptyStr",
+    "PersistedArtifactKind",
     "PostSessionAttemptId",
     "PreparedCalendarProjection",
     "PreparedContextProjection",

@@ -631,3 +631,115 @@ def test_exact_matching_helper_is_pure_and_provider_neutral() -> None:
     offending = sorted(target for target in targets if target.startswith("dnd_assistant"))
     assert not offending, f"exact_matching imported dnd_assistant modules: {offending}"
     _assert_provider_neutral("dnd_assistant.retrieval.exact_matching")
+
+
+# ── S11-06 processor / attempt-state / integrity / persistence / clock ─────
+
+_S11_06_APP_MODULES: tuple[str, ...] = (
+    "dnd_assistant.application.post_session_attempt_state",
+    "dnd_assistant.application.post_session_persistence",
+    "dnd_assistant.application.post_session_integrity",
+    "dnd_assistant.application.post_session_processor",
+    "dnd_assistant.application.post_session_processor_support",
+    "dnd_assistant.application.post_session_clock",
+)
+
+_FORBIDDEN_S11_06_TARGET_PREFIXES: tuple[str, ...] = (
+    "dnd_assistant.models",
+    "dnd_assistant.tools",
+    "dnd_assistant.cli",
+)
+
+
+def test_s11_06_modules_import_no_models_tools_cli() -> None:
+    for module_path in _S11_06_APP_MODULES:
+        targets = _module_import_targets(module_path)
+        offending = sorted(
+            target
+            for target in targets
+            if any(target.startswith(prefix) for prefix in _FORBIDDEN_S11_06_TARGET_PREFIXES)
+        )
+        assert not offending, f"{module_path} imported forbidden upper layers: {offending}"
+
+
+def test_s11_06_modules_are_provider_neutral() -> None:
+    for module_path in _S11_06_APP_MODULES:
+        targets = _module_import_targets(module_path)
+        roots = {target.split(".")[0] for target in targets}
+        assert not (roots & _PROVIDER_ROOTS), f"{module_path} imported a provider"
+        _assert_provider_neutral(module_path)
+
+
+def test_s11_06_modules_name_no_concrete_storage_or_executor() -> None:
+    for module_path in _S11_06_APP_MODULES:
+        names = _module_name_nodes(module_path)
+        for forbidden in (
+            "ObsidianVaultRepository",
+            "ObsidianSessionMetadataRepository",
+            "ObsidianPostSessionProcessingStore",
+            "ObsidianPostSessionArtifactStore",
+            "ObsidianChangeSetStore",
+            "ToolExecutor",
+        ):
+            assert forbidden not in names, f"{module_path} references {forbidden}"
+        offending = sorted(names & _WRITE_CAPABLE_METHOD_NAMES)
+        assert not offending, f"{module_path} references repository writes: {offending}"
+
+
+def test_s11_06_processor_has_no_apply_or_approval_authority() -> None:
+    for module_path in (
+        "dnd_assistant.application.post_session_processor",
+        "dnd_assistant.application.post_session_persistence",
+    ):
+        targets = _module_import_targets(module_path)
+        offending = sorted(
+            target for target in targets if target == "dnd_assistant.application.changeset_apply"
+        )
+        assert not offending, f"{module_path} imported ChangeSet apply authority"
+        names = _module_name_nodes(module_path)
+        for forbidden in ("apply_changeset", "ChangeSetApproval", "persist_approval"):
+            assert forbidden not in names, f"{module_path} references {forbidden}"
+
+
+def test_s11_06_artifact_store_readiness_requires_no_application_import() -> None:
+    storages = (
+        "dnd_assistant.storage.post_session_processing",
+        "dnd_assistant.storage.post_session_artifacts",
+    )
+    for module_path in storages:
+        targets = _module_import_targets(module_path)
+        offending = sorted(
+            target
+            for target in targets
+            if target.startswith("dnd_assistant.")
+            and not target.startswith("dnd_assistant.storage")
+            and not target.startswith("dnd_assistant.domain")
+            and target != "dnd_assistant.errors"
+        )
+        assert not offending, f"{module_path} imported non-storage/domain deps: {offending}"
+        _assert_no_upper_layers(module_path)
+        _assert_provider_neutral(module_path)
+
+
+def test_s11_06_artifact_store_imports_no_application_at_runtime() -> None:
+    _clean_import("dnd_assistant.storage.post_session_artifacts")
+    offending = sorted(m for m in _modules_loaded() if m.startswith("dnd_assistant.application"))
+    assert not offending, f"storage.post_session_artifacts imported application: {offending}"
+
+
+def test_s11_06_workflow_domain_is_pure_and_provider_neutral() -> None:
+    module_path = "dnd_assistant.domain.post_session_workflow"
+    targets = _module_import_targets(module_path)
+    offending = sorted(
+        target
+        for target in targets
+        if target.startswith("dnd_assistant.storage")
+        or target.startswith("dnd_assistant.application")
+    )
+    assert not offending, f"{module_path} imported storage/application: {offending}"
+    stdlib_offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_DOMAIN_STDLIB
+    )
+    assert not stdlib_offending, f"{module_path} imported persistence stdlib: {stdlib_offending}"
+    _assert_no_upper_layers(module_path)
+    _assert_provider_neutral(module_path)

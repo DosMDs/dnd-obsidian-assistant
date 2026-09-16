@@ -17,6 +17,7 @@ from dnd_assistant.domain.post_session import (
     AttemptStarted,
     AttemptSuperseded,
     FailureCategory,
+    PersistedArtifactKind,
     PostSessionAttemptId,
     ProcessingLedgerEvent,
     ProcessingOutcome,
@@ -149,7 +150,7 @@ def test_ledger_discriminated_union_parses_every_kind() -> None:
     assert parsed[4].phase is ProcessingPhase.EXTRACTION
     assert parsed[4].failure_category is FailureCategory.MODEL_TIMEOUT
     assert isinstance(parsed[1], ArtifactPersisted)
-    assert parsed[1].artifact_kind is ArtifactKind.SUMMARY
+    assert parsed[1].artifact_kind is PersistedArtifactKind.SUMMARY
     assert isinstance(parsed[2], ProposalPersisted)
     assert isinstance(parsed[5], AttemptSuperseded)
 
@@ -204,7 +205,7 @@ def test_artifact_relative_path_rejects_traversal_and_absolute() -> None:
         with pytest.raises(PydanticValidationError):
             ArtifactPersisted(
                 **_common(),
-                artifact_kind=ArtifactKind.SUMMARY,
+                artifact_kind=PersistedArtifactKind.SUMMARY,
                 relative_path=bad,
                 content_hash=_FP,
             )
@@ -219,3 +220,24 @@ def test_ledger_event_invariant_unknown_field_rejected() -> None:
 def test_post_session_attempt_id_type_adapter_roundtrip() -> None:
     adapter: TypeAdapter[str] = TypeAdapter(PostSessionAttemptId)
     assert adapter.validate_python(_ATT) == _ATT
+
+
+def test_persisted_and_render_artifact_kinds_stay_compatible() -> None:
+    # Render-facing ArtifactKind must never gain a workflow member.
+    assert {kind.value for kind in ArtifactKind} == {"summary", "recap"}
+    # Overlapping durable values are byte-identical, so old ledger lines parse.
+    assert ArtifactKind.SUMMARY.value == PersistedArtifactKind.SUMMARY.value == "summary"
+    assert ArtifactKind.RECAP.value == PersistedArtifactKind.RECAP.value == "recap"
+    assert PersistedArtifactKind.WORKFLOW.value == "workflow"
+    # A legacy summary artifact event (ArtifactKind value) parses to the durable enum.
+    event = _LEDGER_ADAPTER.validate_python(
+        {
+            "event_kind": "artifact_persisted",
+            **_common(),
+            "artifact_kind": "summary",
+            "relative_path": "a/summary.md",
+            "content_hash": _FP.model_dump(mode="json"),
+        }
+    )
+    assert isinstance(event, ArtifactPersisted)
+    assert event.artifact_kind is PersistedArtifactKind.SUMMARY

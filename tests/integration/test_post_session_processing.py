@@ -133,9 +133,16 @@ def test_completed_session_ledger_restart_and_no_canonical_mutation(tmp_path: Pa
     assert retry.outcome is LedgerAppendOutcome.ALREADY_PRESENT
 
     # 42. No Summary/Recap/ChangeSet/entity canonical mutation occurred.
+    # The only new durable files are the append-only ledger and its
+    # synchronization-only interprocess lock (no semantic payload).
     after_files = _snapshot(root)
     new_files = after_files - before_files
-    assert new_files == {"_system/raw/sessions/S001/processing/ledger.jsonl"}
+    assert new_files == {
+        "_system/raw/sessions/S001/processing/ledger.jsonl",
+        "_system/raw/sessions/S001/processing/ledger.lock",
+    }
+    lock_path = root / "_system" / "raw" / "sessions" / "S001" / "processing" / "ledger.lock"
+    assert lock_path.read_bytes() == b""
     assert not (root / "Sessions" / "S001" / "Summary.md").exists()
     assert not (root / "Sessions" / "S001" / "Recap.md").exists()
     assert not (root / "_system" / "changesets").exists()

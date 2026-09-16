@@ -10,7 +10,7 @@ S11-02 — DONE
 S11-03 — DONE
 S11-04 — DONE
 S11-05 — DONE
-S11-06 — NOT STARTED
+S11-06 — DONE
 S11-07 — NOT STARTED
 S11-08 — NOT STARTED
 S11-09 — NOT STARTED
@@ -499,7 +499,7 @@ S11-02  deterministic context assembly + entity resolution DONE
 S11-03  heavy-model structured extraction mechanism        DONE
 S11-04  Summary/Recap production + visibility filtering    DONE
 S11-05  ChangeSet producer integration + ambiguity policy  DONE
-S11-06  persistence/rerun/failure semantics (incl. decision NOT STARTED
+S11-06  persistence/rerun/failure semantics (incl. decision DONE
         on whether to sync legacy session fields)
 S11-07  CLI orchestration / end-to-end flow                NOT STARTED
 S11-08  hardening / failure injection                      NOT STARTED
@@ -1217,3 +1217,256 @@ No Ollama is required. Quality gates: focused suites, `ruff check`,
 Artifact/ledger persistence + durable EMPTY representation + attempt-state
 folding + legacy-field sync decision (S11-06), CLI orchestration (S11-07),
 hardening (S11-08), Stage-11 review (S11-09), Stage-12.
+
+## 28. S11-06 record
+
+```text
+Task:              S11-06 — Persistence / Rerun / Failure Semantics
+Routing:           PLAN_REQUIRED -> accepted PLAN (2 correction rounds) ->
+                   accepted final correction (portable interprocess ledger lock)
+                   -> BUILD
+Baseline:          feat/post-session-processor @
+                   5f30632fba9e1120ab053fcfdcf8bcf38f71b566
+                   HEAD == origin/feat/post-session-processor, clean tree
+Scope:             crash-aware durable processing workflow: full structural
+                   attempt-state fold; atomic per-attempt claim; portable
+                   interprocess ledger lock + single-write append; immutable
+                   per-attempt Summary/Recap/workflow persistence; durable EMPTY
+                   recap; terminal integrity verification; same-attempt
+                   idempotency; interrupted/orphan-claim policy; bounded typed
+                   failure recording; legacy-field no-sync decision; no CLI
+Deliverable:       6 production modules + 2 storage changes + focused
+                   unit/integration/contract tests + this record +
+                   DEVELOPMENT_STATUS reconciliation
+Next task:         S11-07 — CLI orchestration / end-to-end flow
+```
+
+### 28.1 Implemented modules
+
+```text
+domain/post_session.py                         edit (PersistedArtifactKind;
+                                               ArtifactPersisted uses it;
+                                               ProcessingOutcome docstrings)
+domain/post_session_workflow.py                new  (workflow evidence schema +
+                                               MAX_WORKFLOW_ARTIFACT_BYTES=2_000_000,
+                                               MAX_WORKFLOW_DIAGNOSTIC_CHARS=2000)
+application/post_session_attempt_state.py      new  (structural fold only)
+application/post_session_integrity.py          new  (terminal integrity verifier)
+application/post_session_persistence.py        new  (artifact bytes/hash/bounds,
+                                               EMPTY placeholder, workflow build)
+application/post_session_clock.py              new  (injectable real-time)
+application/post_session_processor.py          new  (orchestrator)
+application/post_session_processor_support.py  new  (result contracts + durable
+                                               event helpers)
+storage/post_session_processing.py             edit (portable interprocess lock +
+                                               single O_APPEND write hardening)
+storage/post_session_artifacts.py              new  (atomic claim + immutable
+                                               artifact store)
+```
+
+### 28.2 Structural fold vs terminal integrity (accepted correction C2)
+
+`fold_attempt_state` owns only structural/event-sequence invariants:
+`event_before_start`, `multiple_started`, `duplicate_artifact_slot`,
+`multiple_proposal_events`, `multiple_terminal`, `event_after_terminal`,
+`session_ref_mismatch`, plus the bounded states `NOT_STARTED`, `STARTED`,
+`COMPLETED`, `FAILED`, `SUPERSEDED`.  A legacy completed ledger folds to
+`COMPLETED` and is **never** reclassified as malformed; old ledger lines are
+never rewritten or migrated.
+
+S11-06 artifact/proposal inventory, existence, hash and fingerprint
+completeness live in `application/post_session_integrity.py`
+(`verify_terminal_integrity`), which reports `TERMINAL_EVIDENCE_INCOMPLETE`,
+`ARTIFACT_MISSING`, `ARTIFACT_HASH_MISMATCH`, `ARTIFACT_PATH_MISMATCH`,
+`PROPOSAL_MISSING`, `PROPOSAL_FINGERPRINT_MISMATCH`, `UNEXPECTED_PROPOSAL`,
+`WORKFLOW_EVIDENCE_INVALID` or `WORKFLOW_EVIDENCE_INCONSISTENT`.  A legacy
+completed ledger therefore fails closed with `terminal_evidence:*` while
+remaining structurally `COMPLETED`.
+
+### 28.3 PersistedArtifactKind / ArtifactKind separation (accepted correction C3)
+
+`ArtifactKind` stays render-only (`SUMMARY`, `RECAP`) and remains the type of
+`RenderingProvenance.artifact_kind` and the S11-04 render APIs.
+`PersistedArtifactKind` (`SUMMARY`, `RECAP`, `WORKFLOW`) owns the durable
+`ArtifactPersisted.artifact_kind`, the storage slot/path mapping, the
+attempt-state slot map and terminal integrity.  Overlapping JSON values
+(`"summary"` / `"recap"`) are byte-identical, so existing S11-01 ledger history
+parses and re-serializes unchanged; a render path can never receive a
+`WORKFLOW` kind.
+
+### 28.4 Same-attempt concurrency: atomic claim (accepted correction C1)
+
+The append-then-reread design was replaced by an atomic per-attempt claim
+(`_system/raw/sessions/<id>/processing/attempts/<attempt_id>/` via
+`mkdir(exist_ok=False)`) performed **before** `AttemptStarted`.  Exactly one
+racer creates the claim; a loser gets `ALREADY_EXISTS`, fails closed with zero
+ledger writes and zero model calls and requires a new attempt id.  The claim is
+**not** state authority: claim-exists + ledger `NOT_STARTED` is uncertain
+pre-start evidence (orphan claims are never auto-deleted).  Artifact persistence
+requires the already-claimed directory and never races to create it.  The claim
+solves same-attempt execution ownership; it does not replace the ledger.
+
+### 28.5 Ledger append hardening: portable interprocess lock
+
+`ObsidianPostSessionProcessingStore` now serializes every ledger read/write with
+a per-session interprocess lock (`processing/ledger.lock`; POSIX
+`fcntl.flock(LOCK_EX)` / Windows `msvcrt.locking(LK_NBLCK)` retry loop).  The
+lock file is synchronization infrastructure only: no payload, not state, not
+evidence, not an artifact slot, never audited; it is always released in
+`finally`.  The append encodes the complete line once and performs exactly one
+`O_APPEND|O_CREAT|O_BINARY` `os.write`; a short write fails closed and never
+appends the remainder, and the ledger is never truncated or repaired.  Platform
+imports are isolated so the storage module imports on Windows and POSIX.
+`record_ledger_event` keeps its read -> append -> post-read exact-prefix /
+strict-parse / event-presence verification, which tolerates unrelated
+concurrent appenders.
+
+### 28.6 Terminal idempotency, current-input binding, interruption
+
+```text
+same input_fingerprint + same attempt_id + COMPLETED
+    -> verify artifact existence/hash/path + proposal fingerprint/inventory
+    -> ALREADY_TERMINAL, zero model calls, zero writes
+same terminal attempt + changed current input   -> FINGERPRINT_MISMATCH, fail closed
+same attempt_id + STARTED (no terminal)         -> INTERRUPTED, never reruns model
+same attempt_id + orphan claim (ledger NOT_STARTED) -> INTERRUPTED (uncertain), new attempt
+new trusted attempt_id over same input          -> allowed (new artifacts + changeset id)
+```
+
+A terminal attempt is never returned on `attempt_id` alone: the processor always
+rebuilds the prepared input and compares the fresh `input_fingerprint` with
+`attempt_started.input_fingerprint` first.
+
+### 28.7 Artifact layout, immutability and durable EMPTY
+
+```text
+_system/raw/sessions/<session_id>/processing/attempts/<attempt_id>/summary.md
+.../recap.md
+.../workflow.json
+```
+
+Storage derives all paths itself (validated session id + `att_<32hex>` attempt
+id; no caller path; traversal/symlink/leaf rejection).  Absent -> exclusive
+create + fsync + exact read-back verification -> `CREATED`; identical existing
+bytes -> `ALREADY_PRESENT` (zero write); differing bytes -> `ConflictError`.
+A durably EMPTY Recap is persisted as the deterministic Python-owned
+`EMPTY_RECAP_ARTIFACT_TEXT` placeholder with a normal `artifact_persisted`
+event, so EMPTY is never inferred from file absence and every completed attempt
+has a verifiable Recap artifact.  Summary is always a RENDERED body.
+
+### 28.8 Workflow evidence, provenance and bounds (accepted correction C4)
+
+`AttemptWorkflowEvidence` durably retains rendering provenance/outcome for
+Summary and Recap, extraction provenance and the full S11-05 change plan
+(outcome, unresolved diagnostics, operation provenance, produced
+`changeset_id`/fingerprint).  It is derived workflow evidence, not campaign
+truth, not a parallel ChangeSet and not a processing-state authority; it is
+referenced by an `artifact_persisted` event and hash-verified on restart.
+
+`MAX_WORKFLOW_ARTIFACT_BYTES = 2_000_000` is validated over the exact canonical
+UTF-8 bytes that would be persisted (justified by the bounded S11-03 extraction
+of at most 500 000 chars); exceeding it fails closed with no write and an
+`AttemptFailed` when recording succeeds.  Each diagnostic `detail` is
+deterministically truncated to `MAX_WORKFLOW_DIAGNOSTIC_CHARS = 2000` on a
+character boundary (canonical campaign evidence is never truncated).
+
+### 28.9 Persistence order and crash windows
+
+```text
+attempt_started durable (pre-model) -> summary.md -> artifact_persisted
+-> recap.md -> artifact_persisted -> workflow.json -> artifact_persisted
+-> [proposal persisted + verified -> proposal_persisted]
+-> attempt_completed
+```
+
+Crash windows are classified: after claim before start -> uncertain pre-start
+(new attempt); after start before/among artifacts -> interrupted/STARTED (no
+model on retry); after proposal file before `proposal_persisted` or before
+`attempt_completed` -> interrupted, proposal remains independently reviewable;
+uncertain `attempt_completed` append -> re-fold and return success only when the
+exact logical terminal event is proven present, otherwise fail closed.  No
+cross-file atomicity is claimed.
+
+### 28.10 Orphan proposal semantics
+
+A Stage-11-produced proposal is a complete standalone Stage-10 workflow
+artifact; human review + exact-fingerprint approval + fresh apply preflight
+remain mandatory, and Stage-11 terminal state neither grants nor revokes Stage-10
+apply authority.  A proposal surviving a crash may remain reviewable, but its
+existence never makes Stage-11 infer `COMPLETED`; a `STARTED`/`FAILED` attempt
+stays `STARTED`/`FAILED` per the ledger.  No Stage-10 ownership gate or parallel
+ChangeSet format is introduced.
+
+### 28.11 Failure recording and typed wording (accepted correction C5)
+
+After `attempt_started` is durable, any caught failure appends exactly one
+bounded `AttemptFailed`; `message` is project-owned wording, never
+`sanitize(str(exc))`:
+
+```text
+extraction  -> "Post-session extraction failed: <reason>"
+rendering   -> "Post-session rendering failed: <reason>"
+validation  -> "Post-session ChangeSet production failed: <reason>"
+persistence -> "Artifact persistence failed" | "ChangeSet proposal conflict" |
+               "Processing storage failure" | "Workflow evidence invalid: <reason>"
+unexpected  -> "Internal processing error"
+```
+
+Phase/category mapping: extraction->`EXTRACTION`, ChangeSet->`VALIDATION`,
+rendering->`RENDERING`, artifact/proposal/storage->`PERSISTENCE`, unexpected->
+the active phase with `INTERNAL_ERROR`.  No traceback, raw model output,
+provider body, absolute path or exception repr is persisted.  If recording the
+failure itself fails, `PostSessionFailureRecordingError` is raised and the
+attempt remains `STARTED` (interrupted); a terminal state is never claimed.
+
+### 28.12 Legacy Session-field decision (accepted C5 outcome)
+
+```text
+Session.processed / Session.processed_model_profile / processing_status
+remain unchanged and NON-authoritative; S11-06 does not synchronize them.
+```
+
+Reasons: the ledger is already the accepted authority; `SessionMetadataRepository`
+exposes no post-close mutation for these fields (adding one would create a new
+audited mutation/recovery surface); completed-session metadata is prepared-input
+evidence; and `PreparedSessionProjection` carries `Session.revision`, so any
+metadata mutation would perturb future input fingerprints.
+
+### 28.13 R1 / zero canonical mutation
+
+Ledger, lock and attempt artifacts are unaudited workflow evidence and never
+write `_system/audit/audit.jsonl`; `processing/` remains invisible to generic
+session recovery (the only new durable files are `ledger.jsonl` and the
+synchronization-only `ledger.lock`).  The processor never calls
+`create_entity`/`patch_entity`/`append_entity_fact`/`apply_changeset`; the only
+writes are the processing ledger, attempt-local artifacts and the existing
+Stage-10 `persist_proposal`.
+
+### 28.14 Evidence
+
+```text
+structural fold / legacy COMPLETED      tests/unit/post_session/test_attempt_state.py
+terminal integrity reasons              tests/unit/post_session/test_integrity.py
+workflow schema/bounds/multibyte        tests/unit/post_session/test_workflow_domain.py
+artifact store + claim + immutability   tests/unit/post_session/test_artifact_persistence.py
+portable lock / short write / release   tests/unit/post_session/test_ledger_lock.py
+multiprocessing append concurrency      tests/unit/post_session/test_ledger_append_concurrency.py
+typed failure mapping                   tests/unit/post_session/test_processor_failure_mapping.py
+idempotency / rerun / interruption /    tests/integration/test_post_session_processor.py
+  crash windows / zero mutation
+failure wording / conflicts /           tests/integration/test_post_session_processor_failure.py
+  uncertain terminal / record failure
+restart + lock file                     tests/integration/test_post_session_processing.py
+boundary contract                       tests/contract/test_post_session_boundaries.py
+maintainability (<=700 production)      tests/contract/test_maintainability.py
+```
+
+No Ollama is required.  Gates run: focused suites, `ruff check`,
+`ruff format --check`, `pyright` (0 errors), full `pytest` (6044 passed,
+120 skipped), `git diff --check`.
+
+### 28.15 Deferred (S11-07+)
+
+CLI orchestration (S11-07), lease/heartbeat-based interrupted finalization,
+supersession API, human-facing latest projection, hardening/failure injection
+(S11-08), Stage-11 review (S11-09), Stage-12.

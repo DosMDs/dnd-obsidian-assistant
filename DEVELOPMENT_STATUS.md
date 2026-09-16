@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-15 (S11-05 completion)
+**Last updated:** 2026-09-16 (S11-06 completion)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `IN PROGRESS`
 **Active stage:** Stage 11 — Post-session Processor
@@ -119,12 +119,20 @@ binding), type-aware exact name/alias resolution over canonical Vault data,
 full prepared-vs-current stale detection (never rebased), whole-Vault duplicate
 prevention including SYSTEM, exact duplicate-fact suppression, final Stage-10
 `validate_changeset` preflight, explicit NO_CHANGES, and zero writes (no
-persistence/review/apply). The ledger
+persistence/review/apply). S11-06 `DONE` — crash-aware durable processing:
+structural attempt-state fold (separate from terminal integrity verification),
+atomic per-attempt claim, portable interprocess ledger lock + single-write
+append hardening, immutable per-attempt Summary/Recap/workflow persistence,
+durable Python-owned EMPTY recap placeholder, Stage-10 proposal persistence
+orchestration, same-attempt terminal idempotency with current-input binding,
+interrupted/orphan-claim fail-closed policy, bounded typed failure recording,
+and the decision that legacy `Session.processed`/`processed_model_profile`/
+`processing_status` remain unchanged/non-authoritative. The ledger
 is unaudited durable workflow evidence under
 `_system/raw/sessions/<id>/processing/` and does not participate in global
 `unresolved_audit_intent` recovery. Detailed architecture, invariants, task map
 and evidence: `docs/stages/11_POST_SESSION_PROCESSOR.md`. Next task:
-`S11-06 — persistence/rerun/failure semantics`.
+`S11-07 — CLI orchestration / end-to-end flow`.
 
 ## Accepted reference baseline
 
@@ -160,8 +168,9 @@ Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
 ```text
 No confirmed blocker for Stage 11 start.
 R1 Stage-11 prerequisite resolved by application-owned ownership partition.
-The model-generated ChangeSet producer now exists (S11-05, deterministic and
-read-only). Stage 11 is in progress; S11-05 is DONE; next task is S11-06.
+The deterministic ChangeSet producer (S11-05) and the crash-aware durable
+persistence/rerun/failure workflow (S11-06) now exist. Stage 11 is in progress;
+S11-06 is DONE; next task is S11-07 (CLI orchestration).
 ```
 
 ## Known limitations affecting future work
@@ -184,7 +193,7 @@ Stage 11 — Post-session Processor (IN PROGRESS)
   S11-03 DONE — heavy-model structured extraction mechanism
   S11-04 DONE — Summary/Recap production + visibility filtering
   S11-05 DONE — ChangeSet producer integration + ambiguity policy
-  S11-06 NOT STARTED — persistence/rerun/failure semantics
+  S11-06 DONE — persistence/rerun/failure semantics
 ```
 
 ## Operational invariants

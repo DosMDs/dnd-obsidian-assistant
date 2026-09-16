@@ -24,6 +24,10 @@ Safety properties:
   (no caller-supplied path, no traversal, no escape);
 - symlinked components and the ledger leaf are rejected;
 - the ``processing/`` directory is created exclusively and never overwrites;
+- all ledger reads/writes hold a per-session interprocess lock
+  (``processing/ledger.lock``; POSIX ``fcntl.flock`` / Windows
+  ``msvcrt.locking``) so complete append records cannot interleave and a read
+  never observes an in-progress application write;
 - appends preserve existing bytes exactly (never rewritten or truncated);
 - reads are exact UTF-8 with newline preservation and fail closed on
   symlinks, directories, non-UTF-8 or unreadable content;
@@ -35,7 +39,11 @@ This module belongs to the storage layer and must not import from:
 
 from __future__ import annotations
 
+import contextlib
 import os
+import sys
+import time
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Protocol, runtime_checkable
 
@@ -43,10 +51,53 @@ from dnd_assistant.errors import StorageError
 from dnd_assistant.storage.paths import _resolve_vault_root
 from dnd_assistant.storage.session_paths import resolve_session_storage_paths
 
+# ── Platform-specific interprocess lock backends ───────────────────────────
+#
+# Imports are guarded so this module imports cleanly on every platform.
+# On POSIX we use ``fcntl.flock``; on Windows we use ``msvcrt.locking``.  Both
+# provide an exclusive interprocess lock.  A byte beyond EOF is locked, so the
+# lock file carries no semantic payload.
+
+if sys.platform == "win32":  # pragma: no cover - platform specific
+    import msvcrt
+
+    def _acquire_exclusive(fd: int) -> None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        while True:
+            try:
+                msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
+                return
+            except OSError:
+                time.sleep(0.01)
+
+    def _release_exclusive(fd: int) -> None:
+        os.lseek(fd, 0, os.SEEK_SET)
+        try:
+            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
+        except OSError:
+            pass
+
+else:
+
+    def _acquire_exclusive(fd: int) -> None:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_EX)
+
+    def _release_exclusive(fd: int) -> None:
+        import fcntl
+
+        fcntl.flock(fd, fcntl.LOCK_UN)
+
+
+_O_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+_O_BINARY = getattr(os, "O_BINARY", 0)
+
 # ── Canonical layout ───────────────────────────────────────────────────────
 
 _PROCESSING_DIR = "processing"
 _LEDGER_FILE = "ledger.jsonl"
+_LEDGER_LOCK_FILE = "ledger.lock"
 
 
 # ── Protocol ───────────────────────────────────────────────────────────────
@@ -220,10 +271,60 @@ class ObsidianPostSessionProcessingStore:
             raise StorageError(f"Processing directory is not a safe directory: {processing}")
         return processing
 
+    # ── Interprocess ledger lock ──────────────────────────────────────────
+
+    def _lock_path(self, session_id: str) -> Path:
+        """Return the validated ledger-lock leaf path."""
+        lock = self._processing_dir(session_id) / _LEDGER_LOCK_FILE
+        if lock.is_symlink():
+            raise StorageError(f"Processing ledger lock is a symlink, rejected: {lock}")
+        return lock
+
+    @contextlib.contextmanager
+    def _ledger_lock(self, session_id: str) -> Iterator[None]:
+        """Hold the per-session exclusive interprocess ledger lock.
+
+        The lock file is synchronization infrastructure only: it is never
+        interpreted as processing state, ledger evidence or an artifact slot,
+        and it is never written to the audit log.  The lock is always released
+        and the descriptor closed in ``finally``.
+
+        Raises:
+            StorageError: The lock path is unsafe or locking failed.
+        """
+        lock = self._lock_path(session_id)
+        flags = os.O_RDWR | os.O_CREAT | _O_BINARY | _O_NOFOLLOW
+        try:
+            fd = os.open(lock, flags, 0o666)
+        except OSError as exc:
+            raise StorageError(f"Failed to open processing ledger lock: {lock}", cause=exc) from exc
+
+        try:
+            try:
+                _acquire_exclusive(fd)
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to acquire processing ledger lock: {lock}", cause=exc
+                ) from exc
+            try:
+                yield
+            finally:
+                _release_exclusive(fd)
+        finally:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
     # ── Append ────────────────────────────────────────────────────────────
 
     def append_ledger_line(self, session_id: str, content: str) -> None:
         """Append one complete newline-terminated ledger line.
+
+        The append encodes the complete line once to UTF-8 and performs exactly
+        one ``O_APPEND`` write under the per-session interprocess lock.  A
+        short write fails closed and never appends the remainder; the ledger is
+        never truncated or repaired in place.
 
         Raises:
             StorageError: The content is not newline-terminated, the path is
@@ -238,20 +339,49 @@ class ObsidianPostSessionProcessingStore:
         if ledger.exists() and not ledger.is_file():
             raise StorageError(f"Processing ledger is not a regular file: {ledger}")
 
-        try:
-            with open(ledger, mode="a", encoding="utf-8", newline="") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-        except OSError as exc:
-            raise StorageError(
-                f"Failed to append to processing ledger: {ledger}", cause=exc
-            ) from exc
+        data = content.encode("utf-8")
+
+        with self._ledger_lock(session_id):
+            self._validate_topology()
+            if ledger.is_symlink():
+                raise StorageError(f"Processing ledger is a symlink, rejected for safety: {ledger}")
+            fd: int | None = None
+            try:
+                fd = os.open(
+                    ledger,
+                    os.O_WRONLY | os.O_APPEND | os.O_CREAT | _O_BINARY | _O_NOFOLLOW,
+                    0o666,
+                )
+                written = os.write(fd, data)
+                if written != len(data):
+                    with contextlib.suppress(OSError):
+                        os.fsync(fd)
+                    raise StorageError(
+                        f"Short write appending to processing ledger ({written} of "
+                        f"{len(data)} bytes): {ledger}"
+                    )
+                os.fsync(fd)
+            except StorageError:
+                raise
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to append to processing ledger: {ledger}", cause=exc
+                ) from exc
+            finally:
+                if fd is not None:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        pass
 
     # ── Read ──────────────────────────────────────────────────────────────
 
     def read_ledger_if_present(self, session_id: str) -> str | None:
         """Read the raw ledger text, or ``None`` when not created.
+
+        The read observes the ledger only while holding the same interprocess
+        lock an appender holds, so it can never observe an in-progress
+        application ledger write.
 
         Raises:
             StorageError: The path is unsafe or the ledger is unreadable.
@@ -268,15 +398,20 @@ class ObsidianPostSessionProcessingStore:
         if not ledger.is_file():
             raise StorageError(f"Processing ledger is not a regular file: {ledger}")
 
-        try:
-            with open(ledger, encoding="utf-8", newline="") as handle:
-                return handle.read()
-        except UnicodeDecodeError as exc:
-            raise StorageError(
-                f"Processing ledger contains invalid UTF-8: {ledger}", cause=exc
-            ) from exc
-        except OSError as exc:
-            raise StorageError(f"Failed to read processing ledger: {ledger}", cause=exc) from exc
+        with self._ledger_lock(session_id):
+            if ledger.is_symlink():
+                raise StorageError(f"Processing ledger is a symlink, rejected for safety: {ledger}")
+            try:
+                with open(ledger, encoding="utf-8", newline="") as handle:
+                    return handle.read()
+            except UnicodeDecodeError as exc:
+                raise StorageError(
+                    f"Processing ledger contains invalid UTF-8: {ledger}", cause=exc
+                ) from exc
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to read processing ledger: {ledger}", cause=exc
+                ) from exc
 
     def ledger_exists(self, session_id: str) -> bool:
         """Whether a regular ledger file currently exists for the session.
@@ -290,7 +425,10 @@ class ObsidianPostSessionProcessingStore:
         ledger = self._ledger_path(session_id)
         if ledger.is_symlink():
             raise StorageError(f"Processing ledger is a symlink, rejected for safety: {ledger}")
-        return ledger.exists() and ledger.is_file()
+        if not ledger.exists():
+            return False
+        with self._ledger_lock(session_id):
+            return ledger.exists() and ledger.is_file()
 
 
 __all__ = ["ObsidianPostSessionProcessingStore", "PostSessionProcessingStore"]
