@@ -1312,8 +1312,15 @@ solves same-attempt execution ownership; it does not replace the ledger.
 a per-session interprocess lock (`processing/ledger.lock`; POSIX
 `fcntl.flock(LOCK_EX)` / Windows `msvcrt.locking(LK_NBLCK)` retry loop).  The
 lock file is synchronization infrastructure only: no payload, not state, not
-evidence, not an artifact slot, never audited; it is always released in
-`finally`.  The append encodes the complete line once and performs exactly one
+evidence, not an artifact slot, never audited; the descriptor is always closed
+in `finally` and the lock is always released.  The Windows retry loop retries
+only classified lock *contention* (`errno.EACCES`/`errno.EDEADLK` or the
+sharing/lock-violation `winerror` values); every other `OSError` is a permanent
+failure that propagates and is mapped to `StorageError`, never spun on.  An
+unlock failure on an otherwise successful operation is a `StorageError`; when
+the locked operation already failed, a secondary unlock failure is suppressed so
+the primary failure is preserved.  The append encodes the complete line once and
+performs exactly one
 `O_APPEND|O_CREAT|O_BINARY` `os.write`; a short write fails closed and never
 appends the remainder, and the ledger is never truncated or repaired.  Platform
 imports are isolated so the storage module imports on Windows and POSIX.
@@ -1363,6 +1370,12 @@ Summary and Recap, extraction provenance and the full S11-05 change plan
 truth, not a parallel ChangeSet and not a processing-state authority; it is
 referenced by an `artifact_persisted` event and hash-verified on restart.
 
+`schema_version` is exactly `Literal[1]` (`POST_SESSION_WORKFLOW_SCHEMA_VERSION
+= 1`).  A hash-consistent persisted artifact carrying any other integer
+(`0`, `2`, ...) is not valid workflow evidence: it fails closed as
+`WORKFLOW_EVIDENCE_INVALID` via terminal integrity.  No migration is performed
+and existing v1 artifacts are unchanged.
+
 `MAX_WORKFLOW_ARTIFACT_BYTES = 2_000_000` is validated over the exact canonical
 UTF-8 bytes that would be persisted (justified by the bounded S11-03 extraction
 of at most 500 000 chars); exceeding it fails closed with no write and an
@@ -1396,6 +1409,14 @@ apply authority.  A proposal surviving a crash may remain reviewable, but its
 existence never makes Stage-11 infer `COMPLETED`; a `STARTED`/`FAILED` attempt
 stays `STARTED`/`FAILED` per the ledger.  No Stage-10 ownership gate or parallel
 ChangeSet format is introduced.
+
+For a structurally completed `NO_CHANGES` terminal, terminal integrity verifies
+**both** that no `proposal_persisted` ledger event was recorded **and** that no
+Stage-10 proposal artifact exists for the attempt's deterministic changeset id
+`cs_<session_ref>_<attempt_id>` (via `ChangeSetStore.read_proposal_if_present`).
+An orphan proposal file without a `proposal_persisted` event fails closed as
+`UNEXPECTED_PROPOSAL`, as does malformed/unreadable candidate state.  The orphan
+is neither deleted nor mutated and never alters the ledger fold.
 
 ### 28.11 Failure recording and typed wording (accepted correction C5)
 

@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+
+import pytest
 
 from dnd_assistant.application.post_session_attempt_state import (
     AttemptState,
@@ -233,6 +236,57 @@ def test_invalid_workflow_evidence_fails(vault_root, audit_service) -> None:
     result = _verify(vault_root, replaced)
     assert result.ok is False
     assert result.reason is TerminalIntegrityReason.WORKFLOW_EVIDENCE_INVALID
+
+
+@pytest.mark.parametrize("version", [0, 2])
+def test_unsupported_workflow_schema_version_fails(vault_root, audit_service, version: int) -> None:
+    create_completed_session(vault_root, audit_service)
+    events = _build_no_changes(vault_root)
+    workflow = _slot(events, PersistedArtifactKind.WORKFLOW)
+    original = (vault_root / workflow.relative_path).read_text(encoding="utf-8")
+    tampered = original.replace('"schema_version":1', f'"schema_version":{version}', 1)
+    assert tampered != original
+    # The tampered artifact is well-formed JSON carrying the unsupported version,
+    # so a WORKFLOW_EVIDENCE_INVALID result cannot come from a JSON parse failure.
+    assert json.loads(tampered)["schema_version"] == version
+    (vault_root / workflow.relative_path).write_text(tampered, encoding="utf-8", newline="")
+    bad = workflow.model_copy(update={"content_hash": artifact_content_hash(tampered)})
+    replaced = tuple(
+        bad
+        if isinstance(e, ArtifactPersisted) and e.artifact_kind is PersistedArtifactKind.WORKFLOW
+        else e
+        for e in events
+    )
+    result = _verify(vault_root, replaced)
+    assert result.ok is False
+    assert result.reason is TerminalIntegrityReason.WORKFLOW_EVIDENCE_INVALID
+
+
+def test_orphan_no_changes_proposal_fails(vault_root, audit_service) -> None:
+    create_completed_session(vault_root, audit_service)
+    events = _build_no_changes(vault_root)
+    candidate_id = f"cs_S001_{_ATT}"
+    # Proposal artifact exists under the deterministic attempt-owned id, but no
+    # proposal_persisted ledger event was recorded.
+    ObsidianChangeSetStore(vault_root).create_proposal(candidate_id, "{}\n")
+    assert not any(isinstance(e, ProposalPersisted) for e in events)
+
+    result = _verify(vault_root, events)
+    assert result.ok is False
+    assert result.reason is TerminalIntegrityReason.UNEXPECTED_PROPOSAL
+
+
+def test_unreadable_orphan_candidate_fails_closed(vault_root, audit_service) -> None:
+    create_completed_session(vault_root, audit_service)
+    events = _build_no_changes(vault_root)
+    candidate_id = f"cs_S001_{_ATT}"
+    changesets_dir = ObsidianChangeSetStore(vault_root).changesets_dir
+    changesets_dir.mkdir(parents=True, exist_ok=True)
+    (changesets_dir / f"{candidate_id}.proposal.json").mkdir()
+
+    result = _verify(vault_root, events)
+    assert result.ok is False
+    assert result.reason is TerminalIntegrityReason.UNEXPECTED_PROPOSAL
 
 
 def test_unexpected_proposal_fails(vault_root, audit_service) -> None:

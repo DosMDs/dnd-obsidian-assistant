@@ -40,6 +40,7 @@ This module belongs to the storage layer and must not import from:
 from __future__ import annotations
 
 import contextlib
+import errno
 import os
 import sys
 import time
@@ -50,6 +51,35 @@ from typing import Protocol, runtime_checkable
 from dnd_assistant.errors import StorageError
 from dnd_assistant.storage.paths import _resolve_vault_root
 from dnd_assistant.storage.session_paths import resolve_session_storage_paths
+
+# ── Lock contention classification ─────────────────────────────────────────
+#
+# ``msvcrt.locking(LK_NBLCK, ...)`` fails with a plain ``OSError``.  A *held*
+# region (lock contention) must be retried; every other ``OSError`` (bad
+# descriptor, invalid argument, I/O failure, ...) is a permanent failure and
+# must propagate so ``_ledger_lock`` can map it to ``StorageError``.  The
+# classifier uses stable ``errno``/``winerror`` values only and never parses
+# exception messages.  On this platform the observed contention shape is
+# ``OSError(errno=EACCES)`` with ``winerror is None``; ``EDEADLK`` and the
+# Windows sharing/lock-violation codes are accepted as contention for
+# robustness across Windows versions.
+
+_LOCK_CONTENTION_ERRNOS: frozenset[int] = frozenset({errno.EACCES, errno.EDEADLK})
+_LOCK_CONTENTION_WINERRORS: frozenset[int] = frozenset(
+    {
+        32,  # ERROR_SHARING_VIOLATION
+        33,  # ERROR_LOCK_VIOLATION
+    }
+)
+
+
+def _is_lock_contention(exc: OSError) -> bool:
+    """Whether ``exc`` denotes lock contention (retry) rather than hard failure."""
+    if exc.errno is not None and exc.errno in _LOCK_CONTENTION_ERRNOS:
+        return True
+    winerror = getattr(exc, "winerror", None)
+    return winerror is not None and winerror in _LOCK_CONTENTION_WINERRORS
+
 
 # ── Platform-specific interprocess lock backends ───────────────────────────
 #
@@ -67,15 +97,14 @@ if sys.platform == "win32":  # pragma: no cover - platform specific
             try:
                 msvcrt.locking(fd, msvcrt.LK_NBLCK, 1)
                 return
-            except OSError:
+            except OSError as exc:
+                if not _is_lock_contention(exc):
+                    raise
                 time.sleep(0.01)
 
     def _release_exclusive(fd: int) -> None:
         os.lseek(fd, 0, os.SEEK_SET)
-        try:
-            msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
-        except OSError:
-            pass
+        msvcrt.locking(fd, msvcrt.LK_UNLCK, 1)
 
 else:
 
@@ -286,11 +315,17 @@ class ObsidianPostSessionProcessingStore:
 
         The lock file is synchronization infrastructure only: it is never
         interpreted as processing state, ledger evidence or an artifact slot,
-        and it is never written to the audit log.  The lock is always released
-        and the descriptor closed in ``finally``.
+        and it is never written to the audit log.  The descriptor is always
+        closed in ``finally`` and the lock is always released.
+
+        Release policy: an unlock failure on an otherwise successful operation
+        becomes ``StorageError``; when the locked operation already failed, a
+        secondary unlock failure is suppressed so the primary failure is
+        preserved.
 
         Raises:
-            StorageError: The lock path is unsafe or locking failed.
+            StorageError: The lock path is unsafe, acquisition failed, or an
+                unlock failed on an otherwise successful operation.
         """
         lock = self._lock_path(session_id)
         flags = os.O_RDWR | os.O_CREAT | _O_BINARY | _O_NOFOLLOW
@@ -308,8 +343,19 @@ class ObsidianPostSessionProcessingStore:
                 ) from exc
             try:
                 yield
-            finally:
+            except BaseException:
+                # The locked operation already failed.  Release best-effort and
+                # preserve the primary failure instead of replacing it with a
+                # secondary unlock error.
+                with contextlib.suppress(OSError):
+                    _release_exclusive(fd)
+                raise
+            try:
                 _release_exclusive(fd)
+            except OSError as exc:
+                raise StorageError(
+                    f"Failed to release processing ledger lock: {lock}", cause=exc
+                ) from exc
         finally:
             try:
                 os.close(fd)

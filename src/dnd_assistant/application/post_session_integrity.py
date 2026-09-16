@@ -173,8 +173,23 @@ def verify_terminal_integrity(
             or workflow.change_plan.changeset_fingerprint.digest != fingerprint.digest
         ):
             return _fail(TerminalIntegrityReason.WORKFLOW_EVIDENCE_INCONSISTENT)
-    elif fold.proposal is not None:
-        return _fail(TerminalIntegrityReason.UNEXPECTED_PROPOSAL)
+    else:
+        if fold.proposal is not None:
+            return _fail(TerminalIntegrityReason.UNEXPECTED_PROPOSAL)
+        # A NO_CHANGES terminal additionally requires that no orphan Stage-10
+        # proposal exists for this attempt's deterministic changeset id, even
+        # when no proposal_persisted ledger event was recorded.  The orphan's
+        # existence is integrity evidence only: it never alters the ledger fold
+        # and is never deleted or mutated by verification.
+        candidate_id = f"cs_{started.session_ref}_{fold.attempt_id}"
+        try:
+            orphan_text = changeset_store.read_proposal_if_present(candidate_id)
+        except StorageError:
+            # Malformed/unreadable candidate state fails closed, never treated
+            # as absent.
+            return _fail(TerminalIntegrityReason.UNEXPECTED_PROPOSAL)
+        if orphan_text is not None:
+            return _fail(TerminalIntegrityReason.UNEXPECTED_PROPOSAL)
 
     return TerminalIntegrityResult(ok=True)
 

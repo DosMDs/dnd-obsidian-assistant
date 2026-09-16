@@ -117,6 +117,19 @@ def test_diagnostic_schema_rejects_overlong_detail() -> None:
         )
 
 
+def test_schema_version_one_is_accepted() -> None:
+    assert POST_SESSION_WORKFLOW_SCHEMA_VERSION == 1
+    assert _evidence().schema_version == 1
+
+
+@pytest.mark.parametrize("version", [0, 2])
+def test_non_current_schema_version_is_rejected(version: int) -> None:
+    payload = _evidence().model_dump(mode="json")
+    payload["schema_version"] = version
+    with pytest.raises(PydanticValidationError):
+        AttemptWorkflowEvidence.model_validate(payload)
+
+
 def test_empty_recap_placeholder_is_deterministic_and_textless() -> None:
     assert EMPTY_RECAP_ARTIFACT_TEXT
     assert EMPTY_RECAP_ARTIFACT_TEXT == persistence.EMPTY_RECAP_ARTIFACT_TEXT

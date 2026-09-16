@@ -24,7 +24,7 @@ This module belongs to the domain layer and must not import from:
 
 from __future__ import annotations
 
-from typing import Annotated, Final
+from typing import Annotated, Final, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 
@@ -38,8 +38,14 @@ from dnd_assistant.domain.post_session_artifacts import RenderOutcome
 
 # ── Schema version and bounds ─────────────────────────────────────────────
 
-POST_SESSION_WORKFLOW_SCHEMA_VERSION: Final[int] = 1
-"""Explicit workflow-evidence schema contract version."""
+POST_SESSION_WORKFLOW_SCHEMA_VERSION: Final = 1
+"""Explicit workflow-evidence schema contract version.
+
+Only this exact version is accepted.  A persisted artifact carrying any other
+integer (including an older ``0`` or an unknown future ``2``) is not
+deserializable workflow evidence and is treated as ``WORKFLOW_EVIDENCE_INVALID``
+by terminal integrity verification.  No migration is performed.
+"""
 
 MAX_WORKFLOW_ARTIFACT_BYTES: Final[int] = 2_000_000
 """Hard fail-closed byte ceiling for the persisted workflow artifact.
@@ -154,7 +160,7 @@ class WorkflowChangePlan(BaseModel):
 class AttemptWorkflowEvidence(BaseModel):
     """Complete immutable workflow evidence for one processing attempt."""
 
-    schema_version: int = Field(ge=0)
+    schema_version: Literal[1] = POST_SESSION_WORKFLOW_SCHEMA_VERSION
     session_ref: NonEmptyStr
     attempt_id: NonEmptyStr
     input_fingerprint: Sha256Fingerprint
