@@ -456,3 +456,140 @@ not filesystem authority.  Its current validation accepts a `C:/...`
 drive-form string (it only rejects a leading `/`, backslashes and
 empty/`.`/`..` segments), so S12-03 must not treat it as a safe filesystem
 path without its own path-safety layer.
+
+## 17. S12-03 record — materialization / rebuild / staleness / corruption
+
+```text
+Task:      S12-03 — materialization + rebuild/staleness/corruption
+Routing:   PLAN_REQUIRED -> accepted corrected PLAN -> BUILD
+Branch:    feat/campaign-state
+Baseline:  028a156ae517a3856e4d4709e6f06d5a555b1f0c (S12-02-C1)
+```
+
+### Physical layout
+
+```text
+<vault>/State/World State.md                  managed derived artifact
+<vault>/State/Recently Touched.md             managed derived artifact
+<vault>/State/.campaign-state-manifest.json   derived manifest (commit marker)
+```
+
+The manifest is colocated but dot-prefixed so `State/` stays human Markdown in
+Obsidian. A single managed root keeps "delete all managed Campaign State files"
+an unambiguous reset and gives clean `MISSING` semantics. The manifest is never
+part of its own artifact inventory. No `Active Quests`/`Active Threads`/
+`Party`/`Current Location` files are created: those semantics remain
+unavailable and must not be fabricated. The artifact set renders even with zero
+completed sessions, so a successful generation always has a non-empty
+inventory.
+
+### Artifact identity / filesystem authority
+
+`CampaignStateArtifact` (domain, `WORLD_STATE` / `RECENTLY_TOUCHED`) is the
+trusted allowlist. Physical destinations come exclusively from trusted fixed
+Python tables (`storage/derived_state.py::ARTIFACT_FILENAMES` +
+`MANIFEST_FILENAME`). Manifest `relative_path` values are inventory/validation
+data only: no code path resolves or joins them to the filesystem. The reader
+requires the manifest inventory to equal the renderer-owned expected set
+exactly (no missing/extra/duplicate/`C:/...`/traversal entries).
+
+### Rendering contract
+
+Pure, deterministic, UTF-8, `\n`-only, exactly one trailing newline,
+model-free, wall-clock-free, filesystem-free; owned by
+`application/campaign_state_render.py` (no Markdown formatting in domain).
+
+- `World State.md`: current world tick, optional derived `GameDate`, generation
+  fingerprint. The date renders the **generic** domain shape
+  (`year=…, month=…, day=…, hour=…, minute=…` or
+  `year=…, intercalary_day=…, hour=…, minute=…`) with no Gregorian
+  month-number assumptions.
+- `Recently Touched.md`: entity id, type, display name, visibility, revision and
+  source session ids for **`Visibility.PLAYER` references only**.
+- One deterministic inline-escaping rule (`escape_inline`) backslash-escapes
+  Markdown metacharacters and CR/LF for every user-controlled value (names, ids,
+  session ids, calendar names), so a value can never alter the template.
+
+### Visibility
+
+S12-02 source collection stays internally all-visibility. The human-readable
+`State/*.md` files are player-facing Vault material and must not persist
+`Visibility.DM`/`SYSTEM` references; `Recently Touched.md` renders PLAYER
+references only, and tests assert DM/SYSTEM names and stable ids never occur in
+rendered/persisted artifact bytes. S12-04 still owns the reusable player-safe
+consumer projection.
+
+### Manifest v2 / versioning
+
+`DerivedStateManifest` schema → 2, adding `render_version`
+(`CAMPAIGN_STATE_RENDER_VERSION`). Source-snapshot identity
+(`input_fingerprint`, which binds `recent_session_limit` and the complete
+`CalendarDefinition` fingerprint) is never overloaded with presentation format
+version. `recent_session_limit` and the `CalendarDefinition` are **not**
+persisted: caller/current trusted configuration is re-supplied and re-bound at
+verification. No persisted S12-01 manifest existed, so no physical migration.
+
+### Publication protocol
+
+```text
+initial S12-02 build
+→ deterministic render candidate
+→ fresh S12-02 build with the same derivation configuration
+→ fingerprints differ: abort (CampaignStateSourceChangedError), zero writes
+→ fingerprints equal: fresh build accepted source witness
+→ inspect existing generation against witness
+→ fully current: ALREADY_CURRENT (zero publication writes)
+→ otherwise publish candidate artifacts, manifest LAST
+```
+
+No cross-repository atomic snapshot is claimed: canonical sources may still
+change during publication, so read-time freshness verification remains
+mandatory and a just-published generation may immediately classify `STALE`.
+Partial/mixed generations are never `CURRENT`; the manifest is the commit
+marker. No publication lock is required for the MVP.
+
+### Read-time verification / statuses
+
+`MISSING`, `OUTDATED`, `CORRUPT`, `UNVERIFIABLE`, `STALE`, `CURRENT`.
+
+```text
+safe topology
+→ manifest/schema/render version/exact inventory
+→ exact stored artifact hashes match manifest
+→ fresh S12-02 derivation (caller config)
+→ fingerprint differs: STALE
+→ fingerprint equal: deterministically re-render the fresh state and compare
+  exact bytes with every stored artifact
+→ any byte mismatch: CORRUPT
+→ exact match only: CURRENT
+```
+
+Manifest hashes are **not** a trust anchor: re-render comparison detects
+coordinated manual edits that change both Markdown and the manifest hash.
+Unsafe topology/symlink conditions fail closed with `StorageError` and are not
+normalized to stale/corrupt statuses. `UNVERIFIABLE` preserves the underlying
+source/storage cause.
+
+### No audit
+
+Derived Campaign State rebuilds do **not** append canonical
+`_system/audit/audit.jsonl` records: State is non-canonical, rebuilds are
+repeatable under identical canonical truth, and writing canonical audit for a
+derived refresh would pollute the log. Diagnostics live in the result/status
+objects. No new audit subsystem and no `AuditContext` requirement.
+
+### Literal evidence
+
+| Criterion | Literal evidence |
+|---|---|
+| deterministic render / LF-only / generic date | `tests/unit/test_campaign_state_render.py` |
+| player-only State bytes / DM-SYSTEM negative | `test_campaign_state_render.py`, `tests/integration/test_campaign_state_materialization.py` |
+| manifest v2 + `render_version` | `tests/unit/test_campaign_state_manifest.py`, `test_campaign_state_render.py` |
+| store path/symlink/directory safety, payload-set, CR rejection | `tests/unit/test_campaign_state_store.py` |
+| publication gate, `ALREADY_CURRENT`, coordinated edit, malicious manifest path, statuses | `tests/unit/test_campaign_state_materialization.py` |
+| freshness, repair, deterministic rebuild, calendar, canonical read-only, manifest-last | `tests/integration/test_campaign_state_materialization.py` |
+| layer boundaries | `tests/contract/test_campaign_state_boundaries.py` (render/materialization/store) |
+
+Not implemented (deferred): CLI, model calls, canonical ChangeSet operations,
+TimelineEvent persistence, CalendarDefinition persistence, locking framework,
+S12-04 consumer projection.

@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S12-02 + S12-02-C1)
+**Last updated:** 2026-09-16 (S12-03)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
-**Active stage:** Stage 12 — Campaign State (S12-03 next)
+**Active stage:** Stage 12 — Campaign State (S12-04 next)
 **Current branch:** `feat/campaign-state`
 
 ## Status model
@@ -70,10 +70,22 @@ important NPCs, party goals, unresolved threads, upcoming deadlines) are
 **unavailable** and omitted; session `touched_entities` is reported only as
 recently touched, never as current/active/important.
 
-Next: S12-03 — materialization + rebuild/staleness/corruption (`State/*.md`).
-S12-03 must re-derive and compare the fingerprint immediately before
-publication and again at read time; a successful apply is not itself an
-independent staleness signal.
+S12-03 delivered physical derived-state persistence:
+`State/World State.md`, `State/Recently Touched.md` and
+`State/.campaign-state-manifest.json` (manifest written last). A fresh
+pre-publication re-derivation gates publication (fingerprint mismatch aborts,
+zero writes); read-time verification safely classifies
+`MISSING`/`OUTDATED`/`CORRUPT`/`UNVERIFIABLE`/`STALE`/`CURRENT`, requiring an
+exact deterministic re-render byte match (manifest hashes are not a trust
+anchor). Manifest schema v2 separates `render_version` from the source-input
+fingerprint. State files are player-facing: DM/SYSTEM references are excluded
+from rendered bytes; internal source collection stays all-visibility. Rebuilds
+append no canonical audit. No model call, no canonical ChangeSet operation and
+no CLI were introduced.
+
+Next: S12-04 — visibility projection + focused consumer integration. A
+successful apply is not itself an independent staleness signal; a fresh
+derivation's fingerprint comparison determines it.
 
 ## Current blockers and prerequisites
 
@@ -123,8 +135,8 @@ process-crash (not machine/power-loss) semantics of newly created entries.
 S12-00 DONE — architecture/contracts/kickoff
 S12-01 DONE — typed derived-state contract (CampaignState v2 + manifest/fingerprint)
 S12-02 DONE — deterministic source collection / evidence binding
-S12-03 Next — materialization + rebuild/staleness/corruption
-S12-04      — visibility projection + focused consumer integration
+S12-03 DONE — materialization + rebuild/staleness/corruption
+S12-04 Next — visibility projection + focused consumer integration
 S12-05      — hardening / failure injection
 S12-06      — full Stage-12 review / completion
 ```

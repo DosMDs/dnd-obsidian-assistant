@@ -41,9 +41,16 @@ canonical evidence.
    a deterministic input fingerprint over the exact canonical inputs. Entity
    `Revision` optimistic-concurrency semantics are not reused; there is no
    concurrency writer for a derived projection.
-5. **Derived-state manifest.** A manifest binds the generation fingerprint, the
-   file inventory, and per-file content hashes; it enables staleness, corruption
-   and manual-edit detection.
+5. **Derived-state manifest.** A manifest binds the source-snapshot generation
+   fingerprint, the file inventory, and per-file content hashes. Manifest schema
+   v2 additionally binds a separate `render_version` (artifact-format identity,
+   distinct from the source-input fingerprint). Read-time verification is
+   **re-render based**, not hash-trust based: a generation is `CURRENT` only when
+   a fresh source derivation has a matching fingerprint *and* the
+   deterministically re-rendered expected bytes equal every stored artifact,
+   which detects coordinated manual edits of both Markdown and manifest hash.
+   The manifest is the publication commit marker (written last) at
+   `State/.campaign-state-manifest.json`.
 6. **Dedicated storage boundary.** Derived-State persistence uses a trusted
    derived-state store (path safety, atomic replacement, symlink safety).
    Application code does not receive arbitrary filesystem access. The canonical
@@ -61,9 +68,22 @@ canonical evidence.
 9. **Calendar.** `CalendarService` remains the sole owner of campaign-time
    arithmetic. A missing `CalendarDefinition` yields the raw tick and no
    fabricated date.
-10. **ChangeSet.** Only a successful apply can make the projection stale.
-    Unapplied/approved proposals do not affect derived state. No `CampaignState`
-    ChangeSet operation is introduced.
+10. **ChangeSet.** A successful apply does not itself make the projection
+    stale. A successful apply may change canonical projection inputs; a fresh
+    derivation then recomputes the source identity and a fingerprint mismatch
+    determines staleness. An unrelated successful apply that leaves every bound
+    source unchanged leaves the fingerprint unchanged. Unapplied/approved
+    proposals do not affect derived state. No `CampaignState` ChangeSet
+    operation is introduced.
+11. **Player-facing State.** The human-readable `State/*.md` files are
+    player-facing Vault material and must not contain DM/SYSTEM entity
+    references; rendering admits only `Visibility.PLAYER` references. S12-02
+    source collection remains internally all-visibility, and S12-04 owns the
+    reusable player-safe consumer projection.
+12. **No canonical audit for derived rebuilds.** Derived-state publication does
+    not append canonical `_system/audit/audit.jsonl` records; State is
+    non-canonical and rebuildable, and canonical audit must not be polluted by
+    derived refreshes.
 
 The purely on-demand-only alternative is rejected for Stage 12: it would not
 provide the durable, human-readable compact memory the roadmap already reserves,

@@ -183,6 +183,97 @@ def test_application_campaign_state_source_is_provider_neutral() -> None:
     _assert_provider_neutral(_SOURCE_MODULE)
 
 
+# ── application/campaign_state_render (S12-03) ─────────────────────────────
+
+_RENDER_MODULE = "dnd_assistant.application.campaign_state_render"
+_FORBIDDEN_RENDER_STDLIB = {"pathlib", "os"}
+
+
+def test_application_campaign_state_render_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_RENDER_MODULE)
+
+
+def test_application_campaign_state_render_does_not_import_storage_at_runtime() -> None:
+    _clean_import(_RENDER_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(m for m in loaded if m.startswith("dnd_assistant.storage"))
+    assert not offending, f"application.campaign_state_render imported storage: {offending}"
+
+
+def test_application_campaign_state_render_has_no_filesystem_stdlib() -> None:
+    targets = _module_import_targets(_RENDER_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_RENDER_STDLIB
+    )
+    assert not offending, f"application.campaign_state_render stdlib: {offending}"
+
+
+def test_application_campaign_state_render_allows_hashlib_and_json() -> None:
+    targets = _module_import_targets(_RENDER_MODULE)
+    assert "hashlib" in targets
+    assert "json" in targets
+
+
+def test_application_campaign_state_render_is_provider_neutral() -> None:
+    _assert_provider_neutral(_RENDER_MODULE)
+
+
+# ── application/campaign_state_materialization (S12-03) ────────────────────
+
+_MATERIALIZATION_MODULE = "dnd_assistant.application.campaign_state_materialization"
+_FORBIDDEN_MATERIALIZATION_STDLIB = {"pathlib", "os", "hashlib", "json"}
+
+
+def test_application_campaign_state_materialization_imports_no_upper_layers() -> None:
+    _assert_no_upper_layers(_MATERIALIZATION_MODULE)
+
+
+def test_application_campaign_state_materialization_has_no_storage_runtime_import() -> None:
+    _clean_import(_MATERIALIZATION_MODULE)
+    loaded = _modules_loaded()
+    offending = sorted(m for m in loaded if m.startswith("dnd_assistant.storage"))
+    assert not offending, (
+        f"application.campaign_state_materialization imported storage at runtime: {offending}"
+    )
+
+
+def test_application_campaign_state_materialization_has_no_filesystem_stdlib() -> None:
+    targets = _module_import_targets(_MATERIALIZATION_MODULE)
+    offending = sorted(
+        target for target in targets if target.split(".")[0] in _FORBIDDEN_MATERIALIZATION_STDLIB
+    )
+    assert not offending, f"application.campaign_state_materialization stdlib: {offending}"
+
+
+def test_application_campaign_state_materialization_is_provider_neutral() -> None:
+    _assert_provider_neutral(_MATERIALIZATION_MODULE)
+
+
+# ── storage/derived_state (S12-03) ─────────────────────────────────────────
+
+_STORE_MODULE = "dnd_assistant.storage.derived_state"
+
+
+def test_storage_derived_state_imports_no_application_or_upper_layers() -> None:
+    _clean_import(_STORE_MODULE)
+    loaded = _modules_loaded()
+    forbidden = (
+        "dnd_assistant.application",
+        "dnd_assistant.models",
+        "dnd_assistant.tools",
+        "dnd_assistant.retrieval",
+        "dnd_assistant.cli",
+    )
+    offending = sorted(
+        m for m in loaded if any(m == layer or m.startswith(f"{layer}.") for layer in forbidden)
+    )
+    assert not offending, f"storage.derived_state imported forbidden layers: {offending}"
+
+
+def test_storage_derived_state_is_provider_neutral() -> None:
+    _assert_provider_neutral(_STORE_MODULE)
+
+
 # ── promoted foundational value types keep Stage-10/11 imports working ─────
 
 

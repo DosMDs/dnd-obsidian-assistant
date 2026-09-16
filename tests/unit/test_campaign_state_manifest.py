@@ -26,6 +26,7 @@ def _artifact(path: str = "Party.md", digest: str = "b" * 64) -> DerivedStateArt
 
 def _manifest(**overrides: object) -> DerivedStateManifest:
     kwargs: dict[str, object] = {
+        "render_version": "1",
         "input_fingerprint": _FINGERPRINT,
         "artifacts": (_artifact(),),
     }
@@ -36,14 +37,26 @@ def _manifest(**overrides: object) -> DerivedStateManifest:
 class TestManifestConstruction:
     def test_minimal_manifest(self) -> None:
         manifest = _manifest()
-        assert manifest.schema_version == 1
+        assert manifest.schema_version == 2
         assert manifest.state_schema_version == 2
+        assert manifest.render_version == "1"
         assert manifest.input_fingerprint == _FINGERPRINT
         assert manifest.artifacts == (_artifact(),)
 
     def test_requires_generation_fingerprint(self) -> None:
         with pytest.raises(ValidationError):
-            DerivedStateManifest(artifacts=(_artifact(),))  # type: ignore[call-arg]
+            DerivedStateManifest(render_version="1", artifacts=(_artifact(),))  # type: ignore[call-arg]
+
+    def test_requires_render_version(self) -> None:
+        with pytest.raises(ValidationError):
+            DerivedStateManifest(input_fingerprint=_FINGERPRINT, artifacts=(_artifact(),))  # type: ignore[call-arg]
+
+    @pytest.mark.parametrize("version", [1, 3, "2"])
+    def test_only_manifest_schema_version_two_accepted(self, version: object) -> None:
+        with pytest.raises(ValidationError):
+            DerivedStateManifest.model_validate(
+                {**_manifest().model_dump(), "schema_version": version}
+            )
 
     def test_requires_at_least_one_artifact(self) -> None:
         with pytest.raises(ValidationError, match="at least one artifact"):

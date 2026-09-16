@@ -23,6 +23,7 @@ This module belongs to the domain layer and must not import from:
 from __future__ import annotations
 
 from collections.abc import Iterable
+from enum import StrEnum
 from typing import Annotated, Any, Literal, cast
 
 from pydantic import (
@@ -322,6 +323,20 @@ class CampaignStateInputIdentity(BaseModel):
 # ── Derived-state manifest ────────────────────────────────────────────────
 
 
+class CampaignStateArtifact(StrEnum):
+    """Typed identity of one managed Campaign State artifact slot.
+
+    This is a trusted allowlist key, never a filesystem path.  Physical
+    destinations are owned by the storage layer and mapped exclusively from
+    these members; a manifest's logical ``relative_path`` values are
+    validation/inventory data only and must never be resolved against the
+    filesystem.
+    """
+
+    WORLD_STATE = "world_state"
+    RECENTLY_TOUCHED = "recently_touched"
+
+
 class DerivedStateArtifact(BaseModel):
     """One logical artifact in a materialized generation.
 
@@ -341,8 +356,14 @@ class DerivedStateArtifact(BaseModel):
 class DerivedStateManifest(BaseModel):
     """Logical identity and artifact inventory of one materialized generation.
 
-    The manifest binds the generation fingerprint and the rendered artifact
-    inventory; it never contains filesystem paths, atomic-replace mechanics or
+    The manifest binds the **source-snapshot identity**
+    (``input_fingerprint``), the **artifact-format identity**
+    (``render_version``) and the rendered artifact inventory.  Source identity
+    and format identity are deliberately separate: changing Markdown rendering
+    while canonical sources stay identical changes ``render_version`` (and
+    artifact bytes) without changing ``input_fingerprint``.
+
+    The manifest never contains filesystem paths, atomic-replace mechanics or
     physical write concerns (those belong to S12-03).  ``artifacts`` is
     set-like: ordering is canonicalized deterministically (ascending logical
     path, duplicate-free) and must contain at least one artifact so a stale or
@@ -351,8 +372,9 @@ class DerivedStateManifest(BaseModel):
     belong to S12-03.
     """
 
-    schema_version: Literal[1] = 1
+    schema_version: Literal[2] = 2
     state_schema_version: Literal[2] = 2
+    render_version: PrintableNonEmptyStr
     input_fingerprint: Sha256Fingerprint
     artifacts: tuple[DerivedStateArtifact, ...]
 
@@ -374,6 +396,7 @@ __all__ = [
     "CampaignEntityReference",
     "CampaignSessionSource",
     "CampaignState",
+    "CampaignStateArtifact",
     "CampaignStateInputIdentity",
     "CampaignWorldTimeSource",
     "DerivedStateArtifact",
