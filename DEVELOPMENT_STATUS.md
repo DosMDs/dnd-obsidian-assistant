@@ -1,37 +1,22 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S11-09 completion)
+**Last updated:** 2026-09-16 (S12-00 kickoff)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 9 `DONE`; Stage 10 `DONE`; Stage 11 `DONE`
-**Active stage:** none — Stage 11 complete; Stage 12 not started
+**Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
+**Active stage:** Stage 12 — Campaign State (S12-00)
 **Active migration:** PAIM — `ACCEPTED`, complete
-**Current branch:** `feat/post-session-processor`
-**Reference main SHA (PAIM behavioral/rollback reference):** `f424a0f659afd5f8bcbce55c4d280cc8e621133f`
+**Current branch:** `feat/campaign-state`
 
 ## Status model
 
-Use only:
-
-- `NOT STARTED`
-- `IN PROGRESS`
-- `BLOCKED`
-- `DONE`
+Use only: `NOT STARTED`, `IN PROGRESS`, `BLOCKED`, `DONE`.
 
 A task is not `DONE` merely because code was generated. Completion requires the
-implementation/documentation requested, relevant checks, final diff review,
-commit, push and upstream verification according to repository policy.
+requested implementation/documentation, relevant checks, final diff review and,
+when required, commit/push/upstream verification.
 
-## Policy
-
-This file stores **current roadmap state**, not a detailed historical report.
-
-Detailed records belong in:
-
-```text
-docs/stages/       stage plan/history/evidence
-docs/migrations/   migration plan/history/evidence
-docs/adr/          architecture decisions
-```
+This file stores **current roadmap state**, not a detailed history. Detailed
+records live in `docs/stages/`, `docs/migrations/`, `docs/adr/` and Git.
 
 ## Stage overview
 
@@ -49,203 +34,93 @@ docs/adr/          architecture decisions
 | 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
-| 12. Campaign State | NOT STARTED | — |
+| 12. Campaign State | IN PROGRESS | `docs/stages/12_CAMPAIGN_STATE.md` |
 | 13. Bootstrap | NOT STARTED | — |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current state
+## Current state — Stage 12
 
-### Stage 10 — ChangeSet `DONE`
+S12-00 `DONE` — architecture/contracts/kickoff. Campaign State is a
+**materialized derived projection** persisted as human-readable `State/*.md`,
+produced by trusted Python derivation over canonical Vault/session/world-time
+evidence. It is not a canonical aggregate, is discardable/rebuildable, has no
+canonical mutation surface and no model call in the MVP. Architecture:
+`docs/adr/0007-campaign-state-materialized-derived-projection.md` and
+`docs/stages/12_CAMPAIGN_STATE.md`.
 
-S10-00..S10-07 all `DONE`; completion verdict `STAGE10_READY_FOR_COMPLETION`,
-merge readiness `MERGE_READY`. Stage 10 delivered the trusted ChangeSet pipeline:
+Fields with no canonical/evidence source (current location, active quests,
+important NPCs, party goals, unresolved threads, upcoming deadlines) are
+**unavailable** and omitted; session `touched_entities` is reported only as
+recently touched, never as current/active/important.
 
-```text
-domain/changeset.py                    immutable ChangeSet/operation schemas
-application/changeset_validation.py    pure repository-backed validator / whole-batch preflight
-application/changeset_review.py        review DTOs, SHA-256 fingerprint, approval/rejection binding
-application/changeset_apply.py         applier with fresh preflight, revision/conflict safety
-application/changeset_store.py         durable proposal/approval artifact store
-application/changeset_status.py        applicability gate + append-only apply-attempt audit
-storage/changeset_store.py             artifact persistence
-cli/changeset.py                       `dnd changeset` save/review/approve/reject/apply/status
-```
-
-Architecture decision: `docs/adr/0006-changeset-review-apply-boundary.md`.
-Detailed task history/evidence: `docs/stages/10_CHANGESET.md`.
-
-### R1 recovery-ownership known limitation — resolved
-
-R1 (classification B) was the Stage-11 prerequisite that an intent-only ChangeSet
-audit record with a real `session_ref` could enter global session-recovery
-`unresolved_audit_intent` blocking with no repair action. Resolved on branch
-`feat/r1-changeset-recovery-ownership` by the application-owned partition
-`application/changeset_recovery.py`, which narrows **blocking scope only**:
-
-- `SessionRecoveryService.inspect_runtime()` still returns the complete raw report;
-- `inspect_runtime_partition()` separates `blocking` from `externally_owned` for
-  mutation preflight consumers only;
-- `storage/session_recovery/*` is unchanged; the affected ChangeSet stays
-  permanently UNCONFIRMED/blocked; no repair/replay/resume/rollback command exists.
-
-Resolution verdict `R1_RECOVERY_READY`; evidence in
-`docs/stages/10_CHANGESET.md` (R1 resolution section).
-
-### Stage 11 — Post-session Processor `DONE`
-
-S11-00 `DONE` — architecture/contracts/kickoff accepted
-(`S11_ARCHITECTURE_READY`). S11-01 `DONE` — post-session input + durable
-processing schemas: typed prepared-input identity/fingerprint, trusted attempt
-identity, append-only processing-ledger schemas/storage, deterministic
-model-free eligibility. S11-02 `DONE` — deterministic context assembly:
-touched-only selection, exact-ID entity resolution, current canonical entity
-projection (schema v2, adds `type`), eligibility-revision binding, centralized
-fail-closed context bounds. S11-03 `DONE` — bounded heavy-model structured
-extraction: trusted request derivation from prepared input, application-owned
-`PostSessionExtractionModel` protocol, untrusted versioned extraction schema,
-Python semantic evidence/entity binding, Pydantic AI adapter with zero project
-tools and output/tool retries 0, `POST_SESSION` model role/factory. S11-04
-`DONE` — in-memory Summary/Recap generation: structurally distinct
-`SummaryRenderRequest`/`RecapRenderRequest`, deterministic player-safe Recap
-authorization requiring a PLAYER hint plus at least one player-visible
-canonical binding, whole-claim exclusion of non-player/unresolved/SYSTEM
-material, SYSTEM exclusion from Summary, complete provenance binding before any
-model call, deterministic EMPTY outcome with zero model calls, Pydantic AI
-rendering adapter with zero project tools and retries 0. S11-05 `DONE` —
-deterministic, model-free post-session ChangeSet production over the accepted
-extraction: `create_entity` (Python-owned defaults + deterministic
-candidate-scoped `EntityId` allocator) and `append_fact` (whole-claim exact
-binding), type-aware exact name/alias resolution over canonical Vault data,
-full prepared-vs-current stale detection (never rebased), whole-Vault duplicate
-prevention including SYSTEM, exact duplicate-fact suppression, final Stage-10
-`validate_changeset` preflight, explicit NO_CHANGES, and zero writes (no
-persistence/review/apply). S11-06 `DONE` — crash-aware durable processing:
-structural attempt-state fold (separate from terminal integrity verification),
-atomic per-attempt claim, portable interprocess ledger lock + single-write
-append hardening, immutable per-attempt Summary/Recap/workflow persistence,
-durable Python-owned EMPTY recap placeholder, Stage-10 proposal persistence
-orchestration, same-attempt terminal idempotency with current-input binding,
-interrupted/orphan-claim fail-closed policy, bounded typed failure recording,
-and the decision that legacy `Session.processed`/`processed_model_profile`/
-`processing_status` remain unchanged/non-authoritative. The ledger
-is unaudited durable workflow evidence under
-`_system/raw/sessions/<id>/processing/` and does not participate in global
-`unresolved_audit_intent` recovery. S11-07 `DONE` — focused CLI orchestration:
-`dnd session process` (exactly one of `SESSION_ID`/`--latest`, deterministic
-latest-completed selection, POST_SESSION-role profile/factory only, one trusted
-attempt id per invocation, recovery preflight before model work, truthful
-Russian result/exit-code rendering, proposal-only boundary) and read-only
-ledger-authoritative `dnd session outputs` that reuses `fold_attempt_state` +
-`verify_terminal_integrity` (fail closed, no artifact bodies). No
-approve/apply, no latest Summary/Recap projection, no canonical entity mutation. S11-08 `DONE` — test-heavy failure-injection
-hardening: fault stores + abrupt `BaseException` crash windows, ordinary
-`AttemptStarted` append-uncertainty vs stronger terminal-append uncertainty,
-artifact read-back orphan semantics, typed extraction/rendering failure
-categories end-to-end, all `TerminalIntegrityReason` cases via `session
-outputs`, structural ledger/proposal corruption fail-closed, durable
-Summary/Recap privacy canaries, deterministic same-attempt single-owner and
-different-attempt concurrency, interrupted/rerun matrices, applied-create
-cross-stage duplicate prevention, R1 ownership regressions, path/symlink and
-Unicode hardening, and `session outputs` never printing artifact bodies. No
-production change was required. S11-09 `DONE` — full Stage-11 historical and
-architecture-conformance review: 15 Stage-11-owned commits (0 unrelated), no
-blocking production defect, all invariants accepted, one bounded
-test-harness-only correction (concurrency reader deadline/liveness), full range
-and change inventory verified from Git, all quality gates green. Detailed
-architecture, invariants, task map, review and evidence:
-`docs/stages/11_POST_SESSION_PROCESSOR.md`. Stage 11 complete; next: Stage 12
-planning/kickoff.
-
-## Accepted reference baseline
-
-`f424a0f659afd5f8bcbce55c4d280cc8e621133f` is the behavioral/rollback reference
-for the PAIM migration. Git/main provides that reference; no duplicate production
-runtime is retained for rollback.
-
-## Production architecture (current)
-
-```text
-CLI (cli/ask.py)
-→ PydanticAIAgentRuntime (application/pydantic_ai_agent_runtime.py)
-→ DndAgentRunPreparer / DndAgentPolicy
-→ PydanticAIToolBridge
-→ ToolExecutor (tools/executor.py)
-→ services
-→ VaultRepository
-```
-
-PAIM-15 verdict `ACCEPTED`: production `dnd ask` uses the Pydantic AI runtime;
-`ToolExecutor`, `DndAgentPolicy`, authorization, exposure policy and Vault
-boundaries remain project-owned. The superseded custom/reference agent runtime
-(`FastAgent`, `AgentLoop`, `AgentToolExecutionService`) was retired by
-`PAIM-RETIRE-01`. `ModelGateway` + native Ollama remain non-agent provider
-infrastructure. `tests/contract/test_boundaries.py` enforces the accepted
-dependency shape.
-
-Details: `docs/migrations/001_PYDANTIC_AI_RUNTIME.md`,
-`docs/adr/0003-pydantic-ai-runtime-migration.md`.
+Next: S12-01 — typed derived-state contract (`CampaignState` v2 + manifest /
+input fingerprint).
 
 ## Current blockers and prerequisites
 
 ```text
 No confirmed blocker for Stage 12.
-R1 Stage-11 prerequisite remains resolved by the application-owned ownership partition.
-Stage 11 is DONE; next is Stage 12 planning/kickoff (Campaign State).
+Known source gaps (accepted limitations, not blockers):
+  TimelineEvent has no persistence/collection -> upcoming_deadlines unavailable.
+  No canonical CalendarDefinition source -> game date omitted unless supplied.
+  No canonical status/importance/selection vocabulary for quests/NPCs/location.
 ```
 
-## Known limitations affecting future work
+## Maintainability constraints
 
 ```text
-tests/contract/test_boundaries.py is at the 1000-line ceiling (zero headroom).
-cli/changeset.py (666 lines) is close to the 700-line production ceiling.
-Symlink safety tests may skip on Windows hosts without symlink capability;
-no in-repo CI evidence guarantees symlink-capable execution.
-Parent-directory fsync is not implemented; current durable-write evidence proves
-process-crash (not machine/power-loss) semantics of newly created directory entries.
-```
-
-## Immediate next step
-
-```text
-Stage 10 — ChangeSet (DONE)
-Stage 11 — Post-session Processor (DONE)
-  S11-00 DONE — architecture/contracts/kickoff
-  S11-01 DONE — post-session input + durable processing schemas
-  S11-02 DONE — deterministic context assembly + entity resolution
-  S11-03 DONE — heavy-model structured extraction mechanism
-  S11-04 DONE — Summary/Recap production + visibility filtering
-  S11-05 DONE — ChangeSet producer integration + ambiguity policy
-  S11-06 DONE — persistence/rerun/failure semantics
-  S11-07 DONE — CLI orchestration / end-to-end flow
-  S11-08 DONE — hardening / failure injection
-  S11-09 DONE — full Stage-11 review / completion
-Stage 12 — Campaign State (NOT STARTED)
+tests/contract/test_boundaries.py is at the 1000-line ceiling (zero headroom);
+add new boundary coverage in a focused new test module instead.
+Production modules: hard 700-line limit with pinned legacy exceptions.
+cli/changeset.py (666) is close to the production ceiling.
+Symlink safety tests may skip on Windows hosts without symlink capability.
+Parent-directory fsync is not implemented; durable-write evidence proves
+process-crash (not machine/power-loss) semantics of newly created entries.
 ```
 
 ## Operational invariants
 
 - Obsidian Vault is the only campaign Source of Truth; all Vault writes flow
   through `ToolExecutor` / domain-application services / `VaultRepository`.
-- LLM/framework output is untrusted until validated by Python. Framework tool
+- LLM/framework output is untrusted until validated by Python; framework
   exposure/filtering/approval is not an authorization boundary.
 - Domain/storage must not depend on Ollama, Pydantic AI or any concrete
-  provider. Runtime LLM/agent code must never receive arbitrary filesystem or
-  shell access to the Vault.
+  provider; runtime LLM/agent code never receives arbitrary Vault filesystem or
+  shell access.
+- `SearchService` is player-visible only; internal derivation uses the trusted
+  all-visibility `VaultRepository` read boundary.
+- Derived stores (FTS index, and later `State/*.md`) are always rebuildable from
+  canonical Vault/raw data.
+- Production `dnd ask` uses the Pydantic AI runtime; project-owned boundaries
+  (`ToolExecutor`, policy, authorization, Vault) remain custom. Details:
+  `docs/adr/0003-pydantic-ai-runtime-migration.md`.
 - Quality gates for any change: `uv run pytest`, `uv run ruff check .`,
-  `uv run ruff format --check .`, and `uv run pyright` with 0 errors. A green
-  pytest does not override Pyright failure.
+  `uv run ruff format --check .`, `uv run pyright` (0 errors). A green pytest
+  does not override Pyright failure.
+
+## Immediate next step
+
+```text
+S12-00 DONE — architecture/contracts/kickoff
+S12-01 Next  — typed derived-state contract (CampaignState v2 + manifest/fingerprint)
+S12-02       — deterministic source collection / evidence binding
+S12-03       — materialization + rebuild/staleness/corruption
+S12-04       — visibility projection + focused consumer integration
+S12-05       — hardening / failure injection
+S12-06       — full Stage-12 review / completion
+```
 
 ## Documentation map
 
 | File | Role |
 |---|---|
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state |
-| `docs/stages/09_FAST_AGENT.md` | Detailed Stage-9 history/reference behavior |
-| `docs/stages/10_CHANGESET.md` | Stage-10 architecture record, task map, R1 resolution |
-| `docs/stages/11_POST_SESSION_PROCESSOR.md` | Stage-11 architecture, invariants, task map, history, completion record |
-| `docs/adr/0006-changeset-review-apply-boundary.md` | ChangeSet review/apply architecture decision |
-| `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` | PAIM task plan/history/evidence |
+| `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
+| `docs/adr/0007-campaign-state-materialized-derived-projection.md` | Campaign State architecture decision |
+| `docs/stages/11_POST_SESSION_PROCESSOR.md` | Stage-11 architecture/history |
+| `docs/stages/10_CHANGESET.md` | Stage-10 architecture/history |
+| `docs/adr/0006-changeset-review-apply-boundary.md` | ChangeSet review/apply decision |
+| `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` | PAIM plan/history/evidence |
 | `docs/adr/0003-pydantic-ai-runtime-migration.md` | Migration architecture/rollback decision |
 | `AGENTS.md` | Always-on OpenCode development invariants |
-| `.opencode/skills/pydantic-ai-migration/SKILL.md` | PAIM implementation/review workflow |
-| `docs/migrations/002_OPENCODE_DEVELOPMENT_TOOLING.md` | OpenCode development-tooling cutover record |
+| `docs/development/` | Durable development policies (lazy) |
