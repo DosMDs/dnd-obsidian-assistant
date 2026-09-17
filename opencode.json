@@ -112,6 +112,8 @@
 		  "git merge-base *": "allow",
 		  "git rev-list": "allow",
 		  "git rev-list *": "allow",
+		  "git checkout": "allow",
+		  "git checkout *": "allow",
 
           "git branch": "allow",
           "git branch --list": "allow",
