@@ -89,11 +89,22 @@ class CommandScope:
 class CommandContext:
     """Read-only presentation context passed to predicates.
 
-    ``context_id`` is the active screen's declared ``CONTEXT_ID`` (empty string
-    when a screen declares none).
+    ``context_id`` is the active screen/pane context id (empty string when a
+    screen declares none).  The remaining fields are **cached presentation
+    state** used only to decide whether an action is currently worth offering:
+
+    - ``busy_owner`` is the current exclusive in-flight owner (or ``None``);
+    - ``has_active_session`` mirrors the last trusted session read;
+    - ``write_intent_available`` is whether the launch-time agent-WRITE ceiling
+      permits the assistant mode toggle.
+
+    None of these fields is authorization.
     """
 
     context_id: str = ""
+    busy_owner: str | None = None
+    has_active_session: bool = False
+    write_intent_available: bool = False
 
 
 def scopes_overlap(left: CommandScope, right: CommandScope) -> bool:
@@ -116,6 +127,8 @@ class CommandHost(Protocol):
 
     The host is the presentation app. Handlers receive it explicitly so the
     semantic model stays framework-free and unit-testable with a fake host.
+    Each domain-facing host method is a thin dispatch delegation; capability
+    work lives in the capability view/presenter objects.
     """
 
     def quit_app(self) -> None:
@@ -126,6 +139,33 @@ class CommandHost(Protocol):
 
     def show_help(self) -> None:
         """Show the key/help panel."""
+
+    def navigate_to(self, view_id: str) -> None:
+        """Switch the primary view by stable view id."""
+
+    def assistant_submit(self) -> None:
+        """Submit the current assistant query."""
+
+    def assistant_toggle_write(self) -> None:
+        """Toggle the per-request assistant WRITE intent."""
+
+    def session_refresh(self) -> None:
+        """Refresh the session status display."""
+
+    def session_start(self) -> None:
+        """Start a session."""
+
+    def session_note(self) -> None:
+        """Record the note text from the session view."""
+
+    def session_end(self) -> None:
+        """End the active session."""
+
+    def campaign_state_reload(self) -> None:
+        """Re-inspect the Campaign-State display."""
+
+    def campaign_state_rebuild(self) -> None:
+        """Explicitly rebuild (ensure-current) the derived Campaign-State."""
 
 
 Handler = Callable[[CommandHost], None]
@@ -237,8 +277,65 @@ def _help(host: CommandHost) -> None:
     host.show_help()
 
 
+def _view_assistant(host: CommandHost) -> None:
+    host.navigate_to("assistant")
+
+
+def _view_session(host: CommandHost) -> None:
+    host.navigate_to("session")
+
+
+def _view_campaign_state(host: CommandHost) -> None:
+    host.navigate_to("campaign-state")
+
+
+def _assistant_submit(host: CommandHost) -> None:
+    host.assistant_submit()
+
+
+def _assistant_toggle_write(host: CommandHost) -> None:
+    host.assistant_toggle_write()
+
+
+def _session_refresh(host: CommandHost) -> None:
+    host.session_refresh()
+
+
+def _session_start(host: CommandHost) -> None:
+    host.session_start()
+
+
+def _session_note(host: CommandHost) -> None:
+    host.session_note()
+
+
+def _session_end(host: CommandHost) -> None:
+    host.session_end()
+
+
+def _campaign_state_reload(host: CommandHost) -> None:
+    host.campaign_state_reload()
+
+
+def _campaign_state_rebuild(host: CommandHost) -> None:
+    host.campaign_state_rebuild()
+
+
+def _idle(context: CommandContext) -> bool:
+    """Presentation predicate: no exclusive operation in flight."""
+    return context.busy_owner is None
+
+
+def _has_active_session(context: CommandContext) -> bool:
+    return context.has_active_session
+
+
+def _no_active_session(context: CommandContext) -> bool:
+    return not context.has_active_session
+
+
 def default_commands() -> tuple[SemanticCommand, ...]:
-    """Return the TUI-03 production shell command inventory."""
+    """Return the production TUI command inventory (TUI-03 shell + TUI-04)."""
     return (
         SemanticCommand(
             id="app.quit",
@@ -246,6 +343,7 @@ def default_commands() -> tuple[SemanticCommand, ...]:
             description="Закрыть приложение",
             handler=_quit,
             default_keys=("ctrl+q",),
+            enabled=_idle,
         ),
         SemanticCommand(
             id="app.command-palette",
@@ -261,6 +359,93 @@ def default_commands() -> tuple[SemanticCommand, ...]:
             description="Показать справку и сочетания клавиш",
             handler=_help,
             default_keys=("?", "f1"),
+        ),
+        SemanticCommand(
+            id="view.assistant",
+            title="Ассистент",
+            description="Переключиться на вкладку ассистента",
+            handler=_view_assistant,
+            default_keys=("f2",),
+        ),
+        SemanticCommand(
+            id="view.session",
+            title="Сессия",
+            description="Переключиться на вкладку сессии",
+            handler=_view_session,
+            default_keys=("f3",),
+        ),
+        SemanticCommand(
+            id="view.campaign-state",
+            title="Состояние кампании",
+            description="Переключиться на вкладку состояния кампании",
+            handler=_view_campaign_state,
+            default_keys=("f4",),
+        ),
+        SemanticCommand(
+            id="assistant.submit",
+            title="Отправить запрос",
+            description="Отправить текущий запрос ассистенту",
+            handler=_assistant_submit,
+            scope=CommandScope.screen("assistant"),
+            enabled=_idle,
+        ),
+        SemanticCommand(
+            id="assistant.toggle-write",
+            title="Режим записи ассистента",
+            description="Переключить разрешение записи для следующего запроса",
+            handler=_assistant_toggle_write,
+            scope=CommandScope.screen("assistant"),
+            applicable=lambda context: context.write_intent_available,
+            enabled=_idle,
+        ),
+        SemanticCommand(
+            id="session.refresh",
+            title="Обновить статус сессии",
+            description="Прочитать текущий статус сессии",
+            handler=_session_refresh,
+            scope=CommandScope.screen("session"),
+        ),
+        SemanticCommand(
+            id="session.start",
+            title="Начать сессию",
+            description="Начать новую игровую сессию",
+            handler=_session_start,
+            scope=CommandScope.screen("session"),
+            applicable=_no_active_session,
+            enabled=_idle,
+        ),
+        SemanticCommand(
+            id="session.note",
+            title="Добавить заметку",
+            description="Добавить заметку в активную сессию",
+            handler=_session_note,
+            scope=CommandScope.screen("session"),
+            applicable=_has_active_session,
+            enabled=_idle,
+        ),
+        SemanticCommand(
+            id="session.end",
+            title="Завершить сессию",
+            description="Завершить активную сессию",
+            handler=_session_end,
+            scope=CommandScope.screen("session"),
+            applicable=_has_active_session,
+            enabled=_idle,
+        ),
+        SemanticCommand(
+            id="campaign-state.reload",
+            title="Обновить отображение",
+            description="Повторно проверить состояние кампании",
+            handler=_campaign_state_reload,
+            scope=CommandScope.screen("campaign-state"),
+        ),
+        SemanticCommand(
+            id="campaign-state.rebuild",
+            title="Перестроить состояние",
+            description="Перестроить производное состояние кампании",
+            handler=_campaign_state_rebuild,
+            scope=CommandScope.screen("campaign-state"),
+            enabled=_idle,
         ),
     )
 

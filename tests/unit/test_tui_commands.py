@@ -45,6 +45,33 @@ class FakeHost:
     def show_help(self) -> None:
         self.calls.append("help")
 
+    def navigate_to(self, view_id: str) -> None:
+        self.calls.append(f"navigate:{view_id}")
+
+    def assistant_submit(self) -> None:
+        self.calls.append("assistant.submit")
+
+    def assistant_toggle_write(self) -> None:
+        self.calls.append("assistant.toggle-write")
+
+    def session_refresh(self) -> None:
+        self.calls.append("session.refresh")
+
+    def session_start(self) -> None:
+        self.calls.append("session.start")
+
+    def session_note(self) -> None:
+        self.calls.append("session.note")
+
+    def session_end(self) -> None:
+        self.calls.append("session.end")
+
+    def campaign_state_reload(self) -> None:
+        self.calls.append("campaign-state.reload")
+
+    def campaign_state_rebuild(self) -> None:
+        self.calls.append("campaign-state.rebuild")
+
 
 def _noop(host: CommandHost) -> None:
     _ = host
@@ -340,17 +367,133 @@ class TestPaletteEligibility:
 
 
 class TestDefaultInventory:
+    EXPECTED_IDS = {
+        "app.quit",
+        "app.command-palette",
+        "app.help",
+        "view.assistant",
+        "view.session",
+        "view.campaign-state",
+        "assistant.submit",
+        "assistant.toggle-write",
+        "session.refresh",
+        "session.start",
+        "session.note",
+        "session.end",
+        "campaign-state.reload",
+        "campaign-state.rebuild",
+    }
+
     def test_ids_titles_and_keys(self) -> None:
         inventory = {command.id: command for command in DEFAULT_COMMANDS}
-        assert set(inventory) == {"app.quit", "app.command-palette", "app.help"}
+        assert set(inventory) == self.EXPECTED_IDS
         assert inventory["app.quit"].default_keys == ("ctrl+q",)
         assert inventory["app.command-palette"].default_keys == ("ctrl+p",)
         assert inventory["app.command-palette"].palette is False
         assert inventory["app.help"].default_keys == ("?", "f1")
+        assert inventory["view.assistant"].default_keys == ("f2",)
+        assert inventory["view.session"].default_keys == ("f3",)
+        assert inventory["view.campaign-state"].default_keys == ("f4",)
         assert DEFAULT_REGISTRY.get("app.help") is inventory["app.help"]
+
+    def test_view_commands_are_scoped(self) -> None:
+        inventory = {command.id: command for command in DEFAULT_COMMANDS}
+        assert inventory["assistant.submit"].scope.context_id == "assistant"
+        assert inventory["assistant.toggle-write"].scope.context_id == "assistant"
+        assert inventory["session.start"].scope.context_id == "session"
+        assert inventory["session.note"].scope.context_id == "session"
+        assert inventory["session.end"].scope.context_id == "session"
+        assert inventory["campaign-state.reload"].scope.context_id == "campaign-state"
+        assert inventory["campaign-state.rebuild"].scope.context_id == "campaign-state"
 
     def test_handlers_invoke_host_operations(self) -> None:
         host = FakeHost()
         for command in DEFAULT_COMMANDS:
             command.handler(host)
-        assert host.calls == ["quit", "palette", "help"]
+        assert host.calls == [
+            "quit",
+            "palette",
+            "help",
+            "navigate:assistant",
+            "navigate:session",
+            "navigate:campaign-state",
+            "assistant.submit",
+            "assistant.toggle-write",
+            "session.refresh",
+            "session.start",
+            "session.note",
+            "session.end",
+            "campaign-state.reload",
+            "campaign-state.rebuild",
+        ]
+
+
+class TestBusyPredicates:
+    def _dispatcher_for(self, *command_ids: str, context: CommandContext) -> SemanticDispatcher:
+        registry = CommandRegistry(
+            tuple(command for command in DEFAULT_COMMANDS if command.id in command_ids)
+        )
+        return SemanticDispatcher(registry, FakeHost(), lambda: context)
+
+    def test_exclusive_commands_cannot_execute_while_busy(self) -> None:
+        session_context = CommandContext(
+            context_id="session",
+            busy_owner="assistant",
+            has_active_session=True,
+        )
+        session_dispatcher = self._dispatcher_for(
+            "session.start",
+            "session.note",
+            "session.end",
+            context=session_context,
+        )
+        for command_id in ("session.note", "session.end"):
+            assert session_dispatcher.evaluate(command_id) is CommandAvailability.DISABLED
+            assert session_dispatcher.dispatch(command_id) is DispatchResult.DISABLED
+        # session.start is inapplicable while a session is active; either way it
+        # must not execute while the gate is held.
+        assert session_dispatcher.dispatch("session.start") is not DispatchResult.EXECUTED
+
+        for command_id, context_id in (
+            ("assistant.submit", "assistant"),
+            ("campaign-state.rebuild", "campaign-state"),
+        ):
+            context = CommandContext(context_id=context_id, busy_owner="assistant")
+            dispatcher = self._dispatcher_for(command_id, context=context)
+            assert dispatcher.evaluate(command_id) is CommandAvailability.DISABLED
+            assert dispatcher.dispatch(command_id) is DispatchResult.DISABLED
+
+    def test_read_only_commands_available_while_busy(self) -> None:
+        context = CommandContext(context_id="session", busy_owner="assistant")
+        dispatcher = self._dispatcher_for("session.refresh", context=context)
+        assert dispatcher.evaluate("session.refresh") is CommandAvailability.ENABLED
+
+    def test_session_mutation_in_flight_blocks_assistant(self) -> None:
+        context = CommandContext(context_id="assistant", busy_owner="session")
+        dispatcher = self._dispatcher_for("assistant.submit", context=context)
+        assert dispatcher.evaluate("assistant.submit") is CommandAvailability.DISABLED
+
+    def test_write_toggle_inapplicable_without_ceiling(self) -> None:
+        context = CommandContext(context_id="assistant", write_intent_available=False)
+        dispatcher = self._dispatcher_for("assistant.toggle-write", context=context)
+        assert dispatcher.evaluate("assistant.toggle-write") is (CommandAvailability.INAPPLICABLE)
+
+    def test_write_toggle_applicable_with_ceiling(self) -> None:
+        context = CommandContext(context_id="assistant", write_intent_available=True)
+        dispatcher = self._dispatcher_for("assistant.toggle-write", context=context)
+        assert dispatcher.evaluate("assistant.toggle-write") is CommandAvailability.ENABLED
+
+    def test_session_applicability_tracks_active_session(self) -> None:
+        no_session = self._dispatcher_for(
+            "session.start", "session.note", context=CommandContext(context_id="session")
+        )
+        assert no_session.evaluate("session.start") is CommandAvailability.ENABLED
+        assert no_session.evaluate("session.note") is CommandAvailability.INAPPLICABLE
+
+        active = self._dispatcher_for(
+            "session.start",
+            "session.note",
+            context=CommandContext(context_id="session", has_active_session=True),
+        )
+        assert active.evaluate("session.start") is CommandAvailability.INAPPLICABLE
+        assert active.evaluate("session.note") is CommandAvailability.ENABLED

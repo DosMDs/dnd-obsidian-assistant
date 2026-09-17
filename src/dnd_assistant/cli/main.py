@@ -45,13 +45,60 @@ app.command(name="ask")(_ask_command)
 
 
 @app.command(name="tui")
-def _tui() -> None:
+def _tui(
+    vault: Path = typer.Option(  # noqa: B008
+        ...,
+        "--vault",
+        help="Путь к корню Obsidian Vault.",
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        readable=True,
+        resolve_path=True,
+    ),
+    config: Path = typer.Option(  # noqa: B008
+        ...,
+        "--config",
+        help="Путь к machine-local TOML файлу конфигурации модели.",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+    ),
+    profile: str = typer.Option(  # noqa: B008
+        ...,
+        "--profile",
+        help="Имя профиля модели (должен иметь роль AGENT).",
+    ),
+    allow_write: bool = typer.Option(  # noqa: B008
+        False,
+        "--allow-write",
+        help=(
+            "Разрешить запись в Vault для инструментов модели (потолок записи "
+            "ассистента). Явные действия с сессией этим флагом не ограничиваются."
+        ),
+    ),
+) -> None:
     """Запустить интерактивный текстовый интерфейс (Textual TUI)."""
+    vault_root = vault.resolve(strict=False)
+
+    if not vault_root.is_dir():
+        typer.echo(
+            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
 
     # Deferred import: a normal CLI import must not load the TUI/Textual.
     from dnd_assistant.tui.launcher import run
 
-    run()
+    run(
+        vault_root=vault_root,
+        config_path=config,
+        profile_name=profile,
+        allow_agent_write=allow_write,
+    )
 
 
 # ── Index command group ─────────────────────────────────────────────────────

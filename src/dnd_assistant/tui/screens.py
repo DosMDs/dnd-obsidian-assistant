@@ -1,7 +1,9 @@
-"""Production TUI shell screen (TUI-03).
+"""Production TUI main screen (TUI-03 shell evolved in TUI-04).
 
-A minimal, stable host for later track tasks. It composes only shell chrome and
-a placeholder body: it opens no Vault/model/session state.
+Presentation-only.  The screen hosts the three primary capability views in a
+native Textual ``TabbedContent`` so navigation introduces no deep screen stack
+and no custom navigation framework.  The active pane id is the semantic
+command context id.
 """
 
 from __future__ import annotations
@@ -11,21 +13,41 @@ from typing import ClassVar
 from textual.app import ComposeResult
 from textual.binding import BindingType
 from textual.screen import Screen
-from textual.widgets import Footer, Header, Static
+from textual.widgets import Footer, Header, TabbedContent, TabPane
 
-__all__ = ["ShellScreen"]
+from dnd_assistant.tui.assistant import AssistantView
+from dnd_assistant.tui.campaign_state import CampaignStateView
+from dnd_assistant.tui.session import SessionView
+
+__all__ = ["MainScreen"]
 
 
-class ShellScreen(Screen[None]):
-    """The default production shell screen."""
+class MainScreen(Screen[None]):
+    """The default production screen with the three primary views."""
 
-    CONTEXT_ID: ClassVar[str] = "shell"
-    """Presentation context id used by screen/context command scope."""
+    CONTEXT_ID: ClassVar[str] = "assistant"
+    """Fallback context id when no tab is active yet."""
 
     BINDINGS: ClassVar[list[BindingType]] = []
-    """Screen-level bindings (none yet; registry commands are app-level)."""
+    """Screen-level bindings (none; registry commands are app-level)."""
 
     def compose(self) -> ComposeResult:
         yield Header(show_clock=False)
-        yield Static("D&D Session Assistant", id="shell-body")
+        with TabbedContent(id="primary-tabs", initial="assistant"):
+            with TabPane("Ассистент", id="assistant"):
+                yield AssistantView(id="assistant-view")
+            with TabPane("Сессия", id="session"):
+                yield SessionView(id="session-view")
+            with TabPane("Состояние кампании", id="campaign-state"):
+                yield CampaignStateView(id="campaign-state-view")
         yield Footer()
+
+    def on_mount(self) -> None:
+        """Ask the app to wire capability views once they are mounted."""
+        wire = getattr(self.app, "_wire_capability_views", None)
+        if callable(wire):
+            wire()
+
+    def current_context_id(self) -> str:
+        """Return the active primary-view context id."""
+        return self.query_one(TabbedContent).active or self.CONTEXT_ID

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (TUI-03)
+**Last updated:** 2026-09-17 (TUI-04)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
 **Active work:** Textual TUI Architecture Track (next: TUI-04); Stage 13 — Bootstrap is gated on TUI-track completion
@@ -56,9 +56,14 @@ capability-oriented shared composition seams (new UI-agnostic
 TUI-03 `DONE` — production Textual app shell, semantic command registry +
 single dispatcher, registry-derived bindings, command palette, footer
 discoverability, global/context scope, presentation predicates, focus safety and
-lazy `dnd tui` launcher (new `dnd_assistant.tui` package).
-Dependency-ordered track: TUI-00 … TUI-06. Next: TUI-04 — primary
-assistant/session/Campaign-State integration (read + write paths).
+lazy `dnd tui` launcher (new `dnd_assistant.tui` package). TUI-04 `DONE` —
+primary assistant / session / Campaign-State integration (real read and write
+paths): per-submission assistant runtime lifetime, recovery preflight parity,
+agent-WRITE ceiling, trusted session writes with `source="tui"` audit,
+PLAYER-safe Campaign-State rendering, `MainScreen`/`TabbedContent` navigation,
+thread-worker hosting with exactly-once resource cleanup and a cross-capability
+in-flight gate. Dependency-ordered track: TUI-00 … TUI-06. Next: TUI-05 —
+interaction / cross-platform / error-recovery hardening.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is

@@ -514,6 +514,169 @@ are omitted. No custom palette widget. No fallback was needed.
 - TUI-04 integration (assistant/session/Campaign-State, Vault, workers,
   write-capable actions) not started.
 
+## Durable record — TUI-04 (2026-09-17)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`.
+- Primary assistant / session / Campaign-State integration with real read and
+  write paths through the accepted trusted services. No Stage-13 work.
+- Changed files:
+  ```text
+  src/dnd_assistant/composition/audit_context.py (new)
+  src/dnd_assistant/composition/campaign_state.py (new)
+  src/dnd_assistant/tui/services.py (new)
+  src/dnd_assistant/tui/inflight.py (new)
+  src/dnd_assistant/tui/view.py (new)
+  src/dnd_assistant/tui/assistant.py (new)
+  src/dnd_assistant/tui/session.py (new)
+  src/dnd_assistant/tui/campaign_state.py (new)
+  src/dnd_assistant/tui/screens.py
+  src/dnd_assistant/tui/app.py
+  src/dnd_assistant/tui/commands.py
+  src/dnd_assistant/tui/launcher.py
+  src/dnd_assistant/cli/main.py
+  src/dnd_assistant/cli/session.py
+  tests/unit/test_composition_audit_context.py (new)
+  tests/unit/test_composition_campaign_state.py (new)
+  tests/unit/test_tui_inflight.py (new)
+  tests/unit/test_tui_services.py (new)
+  tests/unit/test_tui_commands.py
+  tests/unit/test_cli_tui_launcher.py
+  tests/integration/test_tui_assistant.py (new)
+  tests/integration/test_tui_session.py (new)
+  tests/integration/test_tui_campaign_state.py (new)
+  tests/integration/test_tui_shell.py
+  tests/contract/test_tui_boundaries.py
+  ```
+- No `pyproject.toml`/`uv.lock`/`opencode.json`/`.opencode/**` change; Textual
+  stays `8.2.8`; `tests/contract/test_boundaries.py` not grown.
+
+### Production TUI module map (physical lines)
+
+```text
+tui/app.py             273   app lifecycle, launch-services wiring, hosts/dispatch
+tui/commands.py        454   semantic registry + CommandHost/CommandContext (Textual-free)
+tui/dispatch.py        125   single dispatcher (unchanged)
+tui/bindings.py         84   registry → Binding adapter (unchanged)
+tui/screens.py          53   MainScreen + TabbedContent
+tui/view.py            166   CapabilityView worker/gate base + TuiHost protocol
+tui/inflight.py         69   single-owner presentation in-flight gate (Textual-free)
+tui/services.py        252   launch context, capability protocols/adapters (Textual-free)
+tui/assistant.py       200   assistant view
+tui/session.py         262   session view
+tui/campaign_state.py  160   Campaign-State view
+tui/launcher.py         31   run() entry point
+composition/audit_context.py     54   shared presentation-neutral AuditContext factory
+composition/campaign_state.py   167   Campaign-State capability + PLAYER-safe view DTO
+cli/main.py            185   `dnd tui` options (lazy)
+cli/session.py         280   thin audit wrappers over the shared factory
+```
+
+### Architecture summary
+
+- `dnd tui --vault --config --profile [--allow-write]` mirrors `dnd ask`
+  option semantics; lazy import preserved (normal CLI import does not load
+  TUI/Textual).
+- `TuiLaunchContext` is immutable; `TuiServices` is a bounded, named
+  three-capability bundle (`assistant`, `session`, `campaign_state`) with no
+  service locator and no mapping surface. Each view receives only the
+  capability it needs.
+- Assistant runtime lifetime is **per submission**: one
+  `compose_ask_runtime` → one `run` → one `close` (idempotent), and session
+  mode/audit identity is refreshed each call. No cached app/screen runtime.
+- `--allow-write` is the agent/model WRITE ceiling only. Explicit human session
+  mutations always use their deterministic trusted paths; the UI write toggle
+  is presentation intent and the immutable per-submission snapshot is the only
+  `allow_write` input to composition.
+- Assistant preflight uses `compose_recovery_service(...).inspect_runtime_partition()`:
+  blocking issues prevent model composition/run; externally-owned issues are a
+  non-blocking hint. Session mutations use the same trusted partition.
+- A single-owner `InFlightGate` serializes assistant submission, session
+  start/note/end and Campaign-State rebuild at the presentation level (assistant
+  in flight blocks session mutation/rebuild and vice versa). Read-only session
+  status refresh and Campaign-State inspect are independent. This is UX
+  serialization, not the trust boundary.
+- Synchronous trusted work runs in Textual thread workers
+  (`exit_on_error=False`); worker callables return values only and never touch
+  UI. Expected `DndAssistantError` becomes a Russian error DTO; unexpected
+  exceptions are re-raised on the event loop and stay observable/test-failing.
+  Quit while work is in flight is refused; TUI-04 exposes no cancellation.
+- Campaign-State TUI renders only `PlayerCampaignStateView` (exact trusted
+  status + PLAYER-projected recently-touched references). The view carries no
+  internal `CampaignState`, manifest, fingerprint, provenance, cause or raw
+  detail; non-CURRENT statuses show no semantic data. The interactive
+  capability reuses `FAST_AGENT_RECENT_SESSION_LIMIT` (5); Stage-12 ownership
+  unchanged.
+- Navigation uses native `TabbedContent` (Ассистент/Сессия/Состояние кампании)
+  in one `MainScreen`; the active pane id is the semantic command context.
+- One class-level `SEMANTIC_REGISTRY`, one dispatcher, registry-derived
+  `BINDINGS`; buttons and input submission converge on the same semantic
+  command IDs.
+
+### Production semantic command inventory (TUI-04 additions)
+
+| ID | title | scope | default keys | palette |
+|---|---|---|---|---|
+| `view.assistant` | Ассистент | global | `f2` | yes |
+| `view.session` | Сессия | global | `f3` | yes |
+| `view.campaign-state` | Состояние кампании | global | `f4` | yes |
+| `assistant.submit` | Отправить запрос | assistant | — | yes |
+| `assistant.toggle-write` | Режим записи ассистента | assistant | — | yes |
+| `session.refresh` | Обновить статус сессии | session | — | yes |
+| `session.start` | Начать сессию | session | — | yes |
+| `session.note` | Добавить заметку | session | — | yes |
+| `session.end` | Завершить сессию | session | — | yes |
+| `campaign-state.reload` | Обновить отображение | campaign-state | — | yes |
+| `campaign-state.rebuild` | Перестроить состояние | campaign-state | — | yes |
+
+Existing `app.quit` (now in-flight gated), `app.command-palette`, `app.help`
+retained. All registry bindings remain non-priority.
+
+### Framework/evidence notes
+
+- Headless `App.run_test()` via `asyncio.run`; `textual==8.2.8`; no async pytest
+  plugin. `TabbedContent` works directly (no fallback needed).
+- Assistant integration (fakes at the capability boundary): READ default and
+  one run; explicit WRITE snapshot; CLARIFY rendering; blocking recovery → zero
+  model run; externally-owned hint; expected error keeps app usable; unexpected
+  error observable; worker runs off-loop and UI applies on `MainThread`;
+  duplicate submit starts one worker; assistant↔session↔Campaign-State mutual
+  in-flight exclusion; focused input Cyrillic/`?` focus safety.
+- Assistant lifetime unit evidence: close exactly once on success, expected
+  error and unexpected post-composition error; composition failure propagates
+  with no close; WRITE without ceiling rejected before compose.
+- Session integration (real temporary Vault, production composition): full
+  start/note/end write path, canonical `S001` metadata status `completed`,
+  `touched_entities == ["npc-varos", "item-001"]` unchanged, note text
+  persisted, audit `source="tui"` with `tui-session-start-`/`tui-note-`/
+  `tui-session-end-` operation IDs; blocking recovery prevents `start`.
+- Campaign-State integration (real temporary Vault): `rebuild`/`inspect` return
+  `CURRENT` with only the PLAYER entity; DM/SYSTEM entities absent from the
+  rendered body; all six statuses map to distinct Russian labels; non-CURRENT
+  views expose no entity data; no invented categories.
+- CLI audit provenance preserved (`source="cli"`, `_now_utc`/
+  `_new_operation_id` compatibility) and composition reuse of
+  `FAST_AGENT_RECENT_SESSION_LIMIT` asserted literally.
+- Boundary coverage extended in `tests/contract/test_tui_boundaries.py`:
+  Campaign-State view imports no materialization/projection/storage/pathlib; TUI
+  capability modules import no CLI; `commands/dispatch/inflight/services` stay
+  Textual-free; `TuiServices` exposes no locator surface; player-safe view field
+  set; in-flight gate has no queue.
+- Gates: focused TUI/assistant/session/Campaign-State/composition suites 195
+  passed; full suite `6861 passed, 131 skipped`; Ruff check/format clean;
+  Pyright 0 errors; `git diff --check` clean. One transient full-suite failure
+  in `test_campaign_state_materialization` (Windows `shutil.rmtree` timing) was
+  observed once, then passed in isolation, in a unit+integration run and in two
+  subsequent canonical full runs.
+
+### Limitations / deferrals
+
+- Real-terminal Windows/macOS smoke matrix, resize/narrow layout, paste/
+  multiline, cancellation UX and final error polish remain TUI-05.
+- TUI-04 exposes no user cancellation affordance; quit is refused while trusted
+  work is in flight.
+- TUI-05 (hardening) and TUI-06 (review/Stage-13 handoff) not started.
+
 ## Stage-13 gate
 
 Stage 13 Bootstrap must not begin until the TUI track has completed normal

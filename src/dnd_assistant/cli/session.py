@@ -9,12 +9,16 @@ rendering, CLI ``AuditContext`` identity and ``typer`` exit mapping.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
-from uuid import uuid4
 
 import typer
 
+from dnd_assistant.composition.audit_context import (
+    build_audit_context,
+    new_operation_id,
+    now_utc,
+)
 from dnd_assistant.composition.session_runtime import (
     compose_recovery_service,
     compose_session_runtime,
@@ -22,20 +26,21 @@ from dnd_assistant.composition.session_runtime import (
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.storage.audit import AuditContext
 
-# ── Time and ID helpers (testable via monkeypatch) ─────────────────────────
+# ── AuditContext factory ──────────────────────────────────────────────────
+# Time/operation-id construction is shared with the Textual TUI through
+# ``dnd_assistant.composition.audit_context``.  The thin ``_now_utc`` /
+# ``_new_operation_id`` wrappers preserve the CLI helper names used by tests;
+# CLI provenance stays ``source="cli"``.
 
 
 def _now_utc() -> datetime:
     """Return the current UTC time with timezone awareness."""
-    return datetime.now(UTC)
+    return now_utc()
 
 
 def _new_operation_id(prefix: str) -> str:
     """Return a unique operation ID with a readable prefix."""
-    return f"{prefix}-{uuid4().hex}"
-
-
-# ── AuditContext factory ──────────────────────────────────────────────────
+    return new_operation_id(prefix)
 
 
 def _build_audit_context(source: str, prefix: str) -> AuditContext:
@@ -49,13 +54,7 @@ def _build_audit_context(source: str, prefix: str) -> AuditContext:
         A new ``AuditContext`` with current time, unique operation ID,
         and no model/prompt metadata.
     """
-    return AuditContext(
-        operation_id=_new_operation_id(prefix),
-        real_time=_now_utc(),
-        source=source,
-        model_profile=None,
-        prompt_version=None,
-    )
+    return build_audit_context(source=source, prefix=prefix)
 
 
 # ── Recovery preflight (CLI presentation) ─────────────────────────────────

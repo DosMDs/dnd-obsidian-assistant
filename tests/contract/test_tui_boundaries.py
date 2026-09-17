@@ -211,6 +211,74 @@ def test_semantic_command_module_documents_predicates_as_presentation() -> None:
     assert "never an authorization boundary" in doc
 
 
+# ── TUI-04 capability modules keep the privacy/UI boundaries ─────────────────
+
+
+def _imports(path: Path) -> set[str]:
+    return _module_import_targets(path)
+
+
+def test_campaign_state_view_does_not_import_materialization_or_storage() -> None:
+    """The player-facing Campaign-State view must not see internal state."""
+    targets = _imports(TUI_ROOT / "campaign_state.py")
+    forbidden = (
+        "dnd_assistant.application.campaign_state_materialization",
+        "dnd_assistant.application.campaign_state_projection",
+        "dnd_assistant.application.campaign_state_source",
+        "dnd_assistant.storage",
+        "pathlib",
+    )
+    for target in targets:
+        for prefix in forbidden:
+            assert not _is_or_under(target, prefix), (
+                f"tui/campaign_state.py imports internal implementation: {target}"
+            )
+
+
+def test_capability_views_do_not_import_cli() -> None:
+    for name in ("assistant.py", "session.py", "campaign_state.py", "services.py", "view.py"):
+        targets = _imports(TUI_ROOT / name)
+        assert not any(_is_or_under(target, CLI_PACKAGE) for target in targets), (
+            f"tui/{name} imports CLI"
+        )
+
+
+def test_textual_free_tui_modules_stay_framework_free() -> None:
+    for name in ("commands.py", "dispatch.py", "inflight.py", "services.py"):
+        path = TUI_ROOT / name
+        if not path.is_file():
+            continue
+        roots = {target.split(".")[0] for target in _imports(path)}
+        assert TEXTUAL_ROOT not in roots, f"tui/{name} must stay Textual-free"
+
+
+def test_services_bundle_has_no_service_locator_surface() -> None:
+    from dnd_assistant.tui.services import TuiServices
+
+    for name in ("get_service", "get", "__getitem__", "registry"):
+        assert not hasattr(TuiServices, name), (
+            f"TuiServices must not expose service-locator surface {name!r}"
+        )
+
+
+def test_player_campaign_state_view_has_only_player_safe_fields() -> None:
+    from dnd_assistant.composition.campaign_state import PlayerCampaignStateView
+
+    field_names = {field.name for field in dataclasses.fields(PlayerCampaignStateView)}
+    assert field_names == {"status", "recently_touched"}
+    for forbidden in ("state", "manifest", "fingerprint", "cause", "detail", "visibility"):
+        assert forbidden not in field_names
+
+
+def test_in_flight_gate_is_textual_free_and_has_no_queue() -> None:
+    from dnd_assistant.tui.inflight import InFlightGate
+
+    targets = _imports(TUI_ROOT / "inflight.py")
+    assert TEXTUAL_ROOT not in {target.split(".")[0] for target in targets}
+    for name in ("put", "enqueue", "queue", "schedule", "submit"):
+        assert not hasattr(InFlightGate, name)
+
+
 # ── Detector self-tests (guards must not be vacuous) ─────────────────────────
 
 

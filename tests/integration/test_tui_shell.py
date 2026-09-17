@@ -13,7 +13,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import warnings
-from collections.abc import Coroutine
+from collections.abc import Coroutine, Sequence
+from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
@@ -21,8 +22,19 @@ from textual.binding import Binding, BindingType
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
+from dnd_assistant.application.agent_contracts import AgentTextOutcome
+from dnd_assistant.application.session_recovery import RecoveryPartition
+from dnd_assistant.composition.campaign_state import (
+    CampaignStateStatus,
+    PlayerCampaignStateView,
+)
+from dnd_assistant.domain.session import Session
+from dnd_assistant.domain.types import EntityId
+from dnd_assistant.storage.session_events import RawSessionEvent
 from dnd_assistant.tui.app import DEFAULT_BINDINGS, DndTuiApp
+from dnd_assistant.tui.assistant import AssistantView
 from dnd_assistant.tui.bindings import CommandBindingError, build_bindings, semantic_action
+from dnd_assistant.tui.campaign_state import CampaignStateView
 from dnd_assistant.tui.commands import (
     DEFAULT_REGISTRY,
     CommandHost,
@@ -31,9 +43,56 @@ from dnd_assistant.tui.commands import (
     SemanticCommand,
 )
 from dnd_assistant.tui.dispatch import CommandAvailability, DispatchResult
-from dnd_assistant.tui.screens import ShellScreen
+from dnd_assistant.tui.screens import MainScreen
+from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
+from dnd_assistant.tui.session import SessionView
 
 _CYRILLIC = "Привет"
+_LAUNCH = TuiLaunchContext(
+    vault_root=Path("vault"),
+    config_path=Path("config.toml"),
+    profile_name="test-agent",
+    allow_agent_write=False,
+)
+
+
+class _ShellFakeAssistant:
+    def run(self, query: str, *, allow_agent_write: bool) -> AgentTextOutcome:
+        raise AssertionError("shell test must not run the assistant")
+
+
+class _ShellFakeSession:
+    def recovery_partition(self) -> RecoveryPartition:
+        return RecoveryPartition(blocking=(), externally_owned=())
+
+    def status(self) -> Session | None:
+        return None
+
+    def start(self) -> Session:
+        raise AssertionError("shell test must not mutate sessions")
+
+    def note(self, text: str) -> RawSessionEvent:
+        raise AssertionError("shell test must not mutate sessions")
+
+    def end(self, touched_entity_ids: Sequence[EntityId]) -> Session:
+        raise AssertionError("shell test must not mutate sessions")
+
+
+class _ShellFakeCampaign:
+    def inspect(self) -> PlayerCampaignStateView:
+        return PlayerCampaignStateView(status=CampaignStateStatus.MISSING)
+
+    def rebuild(self) -> PlayerCampaignStateView:
+        return PlayerCampaignStateView(status=CampaignStateStatus.CURRENT, recently_touched=())
+
+
+def _test_services() -> TuiServices:
+    return TuiServices(
+        launch=_LAUNCH,
+        assistant=_ShellFakeAssistant(),
+        session=_ShellFakeSession(),
+        campaign_state=_ShellFakeCampaign(),
+    )
 
 
 def _run(coro: Coroutine[Any, Any, None]) -> None:
@@ -145,7 +204,7 @@ class _TestApp(DndTuiApp):
     DEFAULT_SCREEN: ClassVar[type[Screen[None]]] = _TestScreen
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(_test_services())
         self.recorded: list[str] = []
 
     def quit_app(self) -> None:
@@ -174,7 +233,7 @@ class _FocusApp(DndTuiApp):
     DEFAULT_SCREEN: ClassVar[type[Screen[None]]] = _FocusScreen
 
     def __init__(self) -> None:
-        super().__init__()
+        super().__init__(_test_services())
         self.help_calls = 0
 
     def show_help(self) -> None:
@@ -187,21 +246,41 @@ class _FocusApp(DndTuiApp):
 class TestProductionShell:
     def test_mount_widgets_and_clean_shutdown(self) -> None:
         async def scenario() -> None:
-            app = DndTuiApp()
+            app = DndTuiApp(_test_services())
             async with app.run_test(size=(80, 24)):
                 assert app.is_running
-                assert isinstance(app.screen, ShellScreen)
+                assert isinstance(app.screen, MainScreen)
                 assert app.query_one(Header) is not None
                 assert app.query_one(Footer) is not None
-                assert app.query_one("#shell-body", Static) is not None
+                assert app.query_one(AssistantView) is not None
+                assert app.query_one(SessionView) is not None
+                assert app.query_one(CampaignStateView) is not None
             assert not app.is_running
             assert list(app.workers) == []
 
         _run(scenario())
 
+    def test_primary_view_navigation_contexts(self) -> None:
+        async def scenario() -> None:
+            app = DndTuiApp(_test_services())
+            async with app.run_test(size=(80, 24)) as pilot:
+                await pilot.pause()
+                assert app._current_context().context_id == "assistant"
+                app.run_semantic_command("view.session")
+                await pilot.pause()
+                assert app._current_context().context_id == "session"
+                app.run_semantic_command("view.campaign-state")
+                await pilot.pause()
+                assert app._current_context().context_id == "campaign-state"
+                app.run_semantic_command("view.assistant")
+                await pilot.pause()
+                assert app._current_context().context_id == "assistant"
+
+        _run(scenario())
+
     def test_footer_metadata_derives_from_registry(self) -> None:
         async def scenario() -> None:
-            app = DndTuiApp()
+            app = DndTuiApp(_test_services())
             async with app.run_test(size=(80, 24)):
                 palette_command = DEFAULT_REGISTRY.get("app.command-palette")
                 assert palette_command is not None
@@ -219,7 +298,7 @@ class TestProductionShell:
             assert binding.priority is False
 
         async def scenario() -> None:
-            app = DndTuiApp()
+            app = DndTuiApp(_test_services())
             async with app.run_test(size=(80, 24)):
                 for active in app.active_bindings.values():
                     key = active.binding.key
@@ -452,23 +531,37 @@ class TestContextScope:
 
 class TestRegistryAuthority:
     def test_app_constructor_has_no_registry_override(self) -> None:
-        parameters = inspect.signature(DndTuiApp.__init__).parameters
-        assert set(parameters) == {"self"}
+        parameters = set(inspect.signature(DndTuiApp.__init__).parameters)
+        assert "self" in parameters
+        # TUI-04 injects an immutable launch-services bundle only; the semantic
+        # registry remains class-level and cannot be overridden per instance.
+        forbidden = {
+            "registry",
+            "semantic_registry",
+            "commands",
+            "bindings",
+            "dispatcher",
+        }
+        assert not (parameters & forbidden)
 
     def test_production_dispatcher_uses_class_registry(self) -> None:
-        app = DndTuiApp()
+        app = DndTuiApp(_test_services())
         assert app.semantic_registry is DndTuiApp.SEMANTIC_REGISTRY
         assert app.semantic_registry is DEFAULT_REGISTRY
 
     def test_production_binding_ids_come_from_class_registry(self) -> None:
-        registry_ids = {command.id for command in DndTuiApp.SEMANTIC_REGISTRY.commands}
+        keyed_ids = {
+            command.id for command in DndTuiApp.SEMANTIC_REGISTRY.commands if command.default_keys
+        }
         binding_ids = {
             binding.id
             for binding in DEFAULT_BINDINGS
             if isinstance(binding, Binding) and binding.id is not None
         }
         assert binding_ids
-        assert binding_ids == registry_ids
+        assert binding_ids == keyed_ids
+        assert "view.assistant" in binding_ids
+        assert "app.quit" in binding_ids
 
     def test_test_subclass_uses_class_registry_without_constructor_argument(self) -> None:
         app = _TestApp()

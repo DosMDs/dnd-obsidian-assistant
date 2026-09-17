@@ -1,31 +1,36 @@
-"""Production Textual app shell (TUI-03).
+"""Production Textual app (TUI-03 shell, extended in TUI-04).
 
 Presentation-only: the app owns no canonical semantics and no write policy.
-Registry metadata feeds bindings, the command palette and footer hints; every
-command resolves through one :class:`SemanticDispatcher`.
+It owns the immutable launch context, the shared in-flight gate and one
+semantic dispatcher.  Domain-facing command handlers are thin delegations to
+the capability views; capability work, worker hosting and UI updates stay in
+those views.
 
 Command palette ownership
 -------------------------
 
 ``ENABLE_COMMAND_PALETTE`` is disabled so Textual does not auto-install a
-``priority=True`` ``ctrl+p`` binding. ``ctrl+p`` is instead a registry-owned
+``priority=True`` ``ctrl+p`` binding.  ``ctrl+p`` is instead a registry-owned
 ordinary alias for the ``app.command-palette`` semantic command, which pushes
-Textual's :class:`~textual.command.CommandPalette`. This keeps physical keys as
-replaceable aliases and keeps a single dispatch path.
+Textual's :class:`~textual.command.CommandPalette`.  This keeps physical keys
+as replaceable aliases and keeps a single dispatch path.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 from functools import partial
-from typing import ClassVar, cast
+from typing import Any, ClassVar, TypeVar, cast
 
 from textual.app import App, SystemCommand
 from textual.binding import BindingType
 from textual.command import CommandPalette
 from textual.screen import Screen
+from textual.widgets import TabbedContent
 
+from dnd_assistant.tui.assistant import AssistantView
 from dnd_assistant.tui.bindings import build_bindings
+from dnd_assistant.tui.campaign_state import CampaignStateView
 from dnd_assistant.tui.commands import (
     DEFAULT_REGISTRY,
     CommandContext,
@@ -36,16 +41,22 @@ from dnd_assistant.tui.dispatch import (
     DispatchResult,
     SemanticDispatcher,
 )
-from dnd_assistant.tui.screens import ShellScreen
+from dnd_assistant.tui.inflight import InFlightGate
+from dnd_assistant.tui.screens import MainScreen
+from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
+from dnd_assistant.tui.session import SessionView
+from dnd_assistant.tui.view import CapabilityView
 
 __all__ = ["DndTuiApp", "DEFAULT_BINDINGS"]
 
 
 DEFAULT_BINDINGS: list[BindingType] = list(build_bindings(DEFAULT_REGISTRY))
 
+_ViewT = TypeVar("_ViewT", bound=CapabilityView)
+
 
 class DndTuiApp(App[None]):
-    """The production D&D Session Assistant TUI shell."""
+    """The production D&D Session Assistant TUI."""
 
     TITLE = "D&D Session Assistant"
 
@@ -58,29 +69,102 @@ class DndTuiApp(App[None]):
     BINDINGS: ClassVar[list[BindingType]] = DEFAULT_BINDINGS
     """Registry-derived bindings (never hand-maintained)."""
 
-    DEFAULT_SCREEN: ClassVar[type[Screen[None]]] = ShellScreen
+    DEFAULT_SCREEN: ClassVar[type[Screen[None]]] = MainScreen
     """The screen class mounted as the initial shell."""
 
-    def __init__(self) -> None:
+    def __init__(self, services: TuiServices) -> None:
         super().__init__()
+        self._services = services
+        self._gate = InFlightGate()
+        self._has_active_session = False
+        self._wired = False
         self._dispatcher = SemanticDispatcher(self.SEMANTIC_REGISTRY, self, self._current_context)
 
-    # ── Lifecycle / shell ───────────────────────────────────────────────────
+    # ── Lifecycle / wiring ──────────────────────────────────────────────────
 
     def get_default_screen(self) -> Screen[None]:
-        """Mount the production shell screen as the initial screen."""
+        """Mount the production main screen as the initial screen."""
         return self.DEFAULT_SCREEN(id="shell")
 
+    def on_mount(self) -> None:
+        """Wire capability views after the initial screen is mounted."""
+        self._wire_capability_views()
+
+    def _wire_capability_views(self) -> None:
+        if self._wired:
+            return
+        views = list(self.query(CapabilityView))
+        if not views:
+            return
+        self._wired = True
+        for view in views:
+            view.configure(host=self, gate=self._gate)
+        for assistant_view in self.query(AssistantView):
+            assistant_view.set_capabilities(
+                assistant=self._services.assistant,
+                session=self._services.session,
+            )
+        for session_view in self.query(SessionView):
+            session_view.set_capabilities(session=self._services.session)
+        for campaign_view in self.query(CampaignStateView):
+            campaign_view.set_capabilities(campaign_state=self._services.campaign_state)
+        self.refresh_command_state()
+        for session_view in self.query(SessionView):
+            session_view.refresh_status()
+        for campaign_view in self.query(CampaignStateView):
+            campaign_view.reload()
+
+    # ── TuiHost surface ─────────────────────────────────────────────────────
+
+    @property
+    def launch_context(self) -> TuiLaunchContext:
+        """The immutable launch context."""
+        return self._services.launch
+
+    def acquire_exclusive(self, owner: str) -> bool:
+        return self._gate.acquire(owner)
+
+    def release_exclusive(self, owner: str) -> None:
+        self._gate.release(owner)
+
+    def set_active_session(self, active: bool) -> None:
+        self._has_active_session = active
+        self.refresh_command_state()
+
+    def refresh_command_state(self) -> None:
+        """Re-evaluate Textual action state from presentation predicates."""
+        self.refresh_bindings()
+
+    def notify_user(self, message: str, *, severity: str = "warning") -> None:
+        self.notify(message, severity=severity)  # type: ignore[arg-type]
+
+    # ── Command context ─────────────────────────────────────────────────────
+
     def _current_context(self) -> CommandContext:
-        screen_stack = self.screen_stack
-        screen = screen_stack[-1] if screen_stack else None
-        context_id = getattr(screen, "CONTEXT_ID", "") if screen is not None else ""
-        return CommandContext(context_id=context_id)
+        return self._context_for(self.screen)
+
+    def _context_for(self, screen: Screen[Any] | None) -> CommandContext:
+        context_id = ""
+        if screen is not None:
+            resolver = getattr(screen, "current_context_id", None)
+            if callable(resolver):
+                context_id = str(resolver())
+            else:
+                context_id = str(getattr(screen, "CONTEXT_ID", ""))
+        return CommandContext(
+            context_id=context_id,
+            busy_owner=self._gate.owner,
+            has_active_session=self._has_active_session,
+            write_intent_available=self._services.launch.allow_agent_write,
+        )
 
     # ── CommandHost implementation ──────────────────────────────────────────
 
     def quit_app(self) -> None:
-        """Request application shutdown."""
+        """Request shutdown unless trusted work is in flight."""
+        if self._gate.is_busy:
+            self.notify_user("Операция выполняется. Дождитесь завершения.")
+            return
         self.exit()
 
     def open_command_palette(self) -> None:
@@ -91,6 +175,58 @@ class DndTuiApp(App[None]):
     def show_help(self) -> None:
         """Show the key/help panel."""
         self.action_show_help_panel()
+
+    def navigate_to(self, view_id: str) -> None:
+        """Switch the primary view by stable id."""
+        tabs = next(iter(self.query(TabbedContent)), None)
+        if tabs is None:
+            return
+        tabs.active = view_id
+        self.refresh_command_state()
+
+    def assistant_submit(self) -> None:
+        view = self._first(AssistantView)
+        if view is not None:
+            view.submit_request()
+
+    def assistant_toggle_write(self) -> None:
+        view = self._first(AssistantView)
+        if view is not None:
+            view.toggle_write()
+
+    def session_refresh(self) -> None:
+        view = self._first(SessionView)
+        if view is not None:
+            view.refresh_status()
+
+    def session_start(self) -> None:
+        view = self._first(SessionView)
+        if view is not None:
+            view.start_session()
+
+    def session_note(self) -> None:
+        view = self._first(SessionView)
+        if view is not None:
+            view.add_note()
+
+    def session_end(self) -> None:
+        view = self._first(SessionView)
+        if view is not None:
+            view.end_session()
+
+    def campaign_state_reload(self) -> None:
+        view = self._first(CampaignStateView)
+        if view is not None:
+            view.reload()
+
+    def campaign_state_rebuild(self) -> None:
+        view = self._first(CampaignStateView)
+        if view is not None:
+            view.rebuild()
+
+    def _first(self, view_type: type[_ViewT]) -> _ViewT | None:
+        matches = list(self.query(view_type))
+        return matches[0] if matches else None
 
     # ── Semantic dispatch integration ───────────────────────────────────────
 
@@ -128,7 +264,7 @@ class DndTuiApp(App[None]):
 
     def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
         """Yield registry-derived command palette entries for a calling screen."""
-        context = CommandContext(context_id=getattr(screen, "CONTEXT_ID", ""))
+        context = self._context_for(screen)
         for command in self._dispatcher.palette_commands(context):
             yield SystemCommand(
                 command.title,
