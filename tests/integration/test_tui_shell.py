@@ -11,6 +11,7 @@ matching the repository idiom; no async pytest plugin is used.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import warnings
 from collections.abc import Coroutine
 from typing import Any, ClassVar
@@ -144,7 +145,7 @@ class _TestApp(DndTuiApp):
     DEFAULT_SCREEN: ClassVar[type[Screen[None]]] = _TestScreen
 
     def __init__(self) -> None:
-        super().__init__(registry=TEST_REGISTRY)
+        super().__init__()
         self.recorded: list[str] = []
 
     def quit_app(self) -> None:
@@ -442,5 +443,58 @@ class TestContextScope:
                 assert app._dispatcher.evaluate("test.elsewhere") is (
                     CommandAvailability.INAPPLICABLE
                 )
+
+        _run(scenario())
+
+
+# ── Single registry authority (no divergent instance registry) ───────────────
+
+
+class TestRegistryAuthority:
+    def test_app_constructor_has_no_registry_override(self) -> None:
+        parameters = inspect.signature(DndTuiApp.__init__).parameters
+        assert set(parameters) == {"self"}
+
+    def test_production_dispatcher_uses_class_registry(self) -> None:
+        app = DndTuiApp()
+        assert app.semantic_registry is DndTuiApp.SEMANTIC_REGISTRY
+        assert app.semantic_registry is DEFAULT_REGISTRY
+
+    def test_production_binding_ids_come_from_class_registry(self) -> None:
+        registry_ids = {command.id for command in DndTuiApp.SEMANTIC_REGISTRY.commands}
+        binding_ids = {
+            binding.id
+            for binding in DEFAULT_BINDINGS
+            if isinstance(binding, Binding) and binding.id is not None
+        }
+        assert binding_ids
+        assert binding_ids == registry_ids
+
+    def test_test_subclass_uses_class_registry_without_constructor_argument(self) -> None:
+        app = _TestApp()
+        assert app.semantic_registry is _TestApp.SEMANTIC_REGISTRY
+        assert app.semantic_registry is TEST_REGISTRY
+        assert app.semantic_registry is not DndTuiApp.SEMANTIC_REGISTRY
+
+    def test_binding_and_palette_paths_reach_same_registry(self) -> None:
+        async def scenario() -> None:
+            app = _TestApp()
+            async with app.run_test(size=(80, 24)) as pilot:
+                assert app.semantic_registry is TEST_REGISTRY
+                app.set_focus(None)
+                await pilot.pause()
+                await pilot.press("z")
+                await pilot.pause()
+                assert app.recorded == ["help"]
+                assert app.semantic_registry is TEST_REGISTRY
+
+                app.open_command_palette()
+                await pilot.pause()
+                await pilot.press(*"альфа")
+                await pilot.pause()
+                await pilot.press("enter")
+                await pilot.pause()
+                assert app.recorded == ["help", "palette", "help"]
+                assert app.semantic_registry is TEST_REGISTRY
 
         _run(scenario())

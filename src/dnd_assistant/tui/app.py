@@ -61,10 +61,9 @@ class DndTuiApp(App[None]):
     DEFAULT_SCREEN: ClassVar[type[Screen[None]]] = ShellScreen
     """The screen class mounted as the initial shell."""
 
-    def __init__(self, registry: CommandRegistry | None = None) -> None:
+    def __init__(self) -> None:
         super().__init__()
-        self._semantic_registry = registry if registry is not None else self.SEMANTIC_REGISTRY
-        self._dispatcher = SemanticDispatcher(self._semantic_registry, self, self._current_context)
+        self._dispatcher = SemanticDispatcher(self.SEMANTIC_REGISTRY, self, self._current_context)
 
     # ── Lifecycle / shell ───────────────────────────────────────────────────
 
@@ -94,6 +93,15 @@ class DndTuiApp(App[None]):
         self.action_show_help_panel()
 
     # ── Semantic dispatch integration ───────────────────────────────────────
+
+    @property
+    def semantic_registry(self) -> CommandRegistry:
+        """The single class-level semantic registry authority for this app class.
+
+        Bindings (``BINDINGS``) and the dispatcher/palette both resolve against
+        this one registry; there is no instance-level registry override.
+        """
+        return self._dispatcher.registry
 
     def run_semantic_command(self, command_id: str) -> DispatchResult:
         """Dispatch a semantic command through the single dispatcher."""
