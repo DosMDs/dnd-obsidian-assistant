@@ -45,10 +45,17 @@ def _joined(state) -> str:
 
 
 class TestWorldState:
-    def test_contains_tick_and_fingerprint(self) -> None:
+    def test_contains_tick_and_no_internal_fingerprint(self) -> None:
         text = _artifacts(make_state(_FP, tick=150))[CampaignStateArtifact.WORLD_STATE]
         assert "- Current world tick: 150" in text
-        assert f"- Generation fingerprint: {_FP}" in text
+        # S12-05: the internal all-visibility generation fingerprint must never
+        # appear in PLAYER-facing bytes (it changed when only DM/SYSTEM evidence
+        # changed) and is not replaced by another player fingerprint.
+        assert _FP not in text
+        assert "fingerprint" not in text
+
+    def test_render_version_is_three(self) -> None:
+        assert CAMPAIGN_STATE_RENDER_VERSION == "3"
 
     def test_game_date_omitted_when_absent(self) -> None:
         text = _artifacts(make_state(_FP))[CampaignStateArtifact.WORLD_STATE]

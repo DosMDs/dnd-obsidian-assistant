@@ -140,3 +140,34 @@ State without changing the core ADR:
    `current_world_tick` remains the only model-facing world-time field, and the
    changed deterministic USER contract is identified by `agent-v3` rather than
    silently retaining `agent-v2`.
+
+## Update — S12-05 (2026-09-17)
+
+S12-05 hardened the accepted pipeline without changing the core decision.
+
+1. **Player-facing noninterference is a durable rule.** Two generations whose
+   PLAYER-visible evidence is identical while DM/SYSTEM evidence differs must
+   produce equal PLAYER-facing output (`State/*.md` bytes, player projection,
+   Fast-Agent memory, and the actual model USER payload). The
+   all-visibility-derived generation fingerprint was therefore removed from
+   `State/World State.md` and not replaced; artifact-format identity was bumped
+   to render version `"3"` (source identity, manifest schema and `agent-v3`
+   unchanged). `MISSING/OUTDATED/CORRUPT/UNVERIFIABLE/STALE/CURRENT` is
+   unchanged.
+2. **Manifest is an internal technical artifact.** `State/.campaign-state-manifest.json`
+   is the internal integrity/freshness and publication marker, outside the
+   PLAYER semantic-output equality contract. It intentionally binds the
+   all-visibility `input_fingerprint` and may differ under hidden-only canonical
+   changes; dot-prefixing, Obsidian hiding and SHA opacity are not claimed as
+   confidentiality.
+3. **Derived-state parent authorization is redirect-safe.** The `State/`
+   directory must be a real, non-redirecting directory contained within the
+   resolved Vault root; symlinks and Windows directory junctions/reparse
+   redirects are rejected on read and before every managed replacement, with the
+   residual OS-level TOCTOU retained (not a filesystem transaction).
+4. **Hard links are accepted.** `os.replace` swaps the managed directory entry,
+   so the other hard-link name keeps its original inode/content.
+5. **No publication lock.** Deterministic writer interleavings, reader races and
+   cross-generation replay never produce a false `CURRENT`; the accepted
+   no-lock MVP is retained because manifest-last publication plus hash and
+   deterministic re-render verification is sufficient.

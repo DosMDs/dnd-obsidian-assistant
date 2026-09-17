@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-16 (S12-04)
+**Last updated:** 2026-09-17 (S12-05)
 **Current milestone:** `v0.3-dev — Fast Assistant`
 **Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
-**Active stage:** Stage 12 — Campaign State (S12-05 next)
+**Active stage:** Stage 12 — Campaign State (S12-06 next)
 **Current branch:** `feat/campaign-state`
 
 ## Status model
@@ -101,9 +101,26 @@ READ-only `dnd ask` may maintain derived `State/*` files (non-canonical cache
 maintenance) without canonical mutation, canonical audit, or model WRITE
 authorization.
 
-Next: S12-05 — hardening / failure injection. A successful apply is not itself
-an independent staleness signal; a fresh derivation's fingerprint comparison
-determines it.
+S12-05 delivered the hardening / failure-injection pass over the accepted
+S12-02→S12-04 pipeline (no new semantics, consumer, CLI, model call or
+dependency). Hidden-data noninterference is now proven by equality, not sentinel
+absence: the all-visibility generation fingerprint was removed from PLAYER-facing
+`State/World State.md` (render version bumped `"2"`→`"3"`; derivation version,
+manifest schema and `agent-v3` unchanged; render `"2"` is `OUTDATED`). The
+dot-prefixed manifest is documented as an **internal** integrity/freshness
+artifact outside the PLAYER equality contract (no confidentiality claim).
+`ObsidianDerivedStateStore` now applies full existing-`State/` authorization
+(not symlink, not junction/reparse, real directory, resolved containment) on
+every read and before every managed replacement, closing a Windows-junction
+escape; hard links are accepted because `os.replace` swaps the directory entry.
+Deterministic interleavings, reader races, publication-phase failure injection
+and cross-generation replay never produce a false `CURRENT`, so the no-lock MVP
+is retained. Lazy provider repairs `MISSING/STALE/CORRUPT/OUTDATED`; source
+failures before `publish()` write nothing; audit taxonomy unchanged.
+
+Next: S12-06 — full Stage-12 review / completion. A successful apply is not
+itself an independent staleness signal; a fresh derivation's fingerprint
+comparison determines it.
 
 ## Current blockers and prerequisites
 
@@ -155,8 +172,8 @@ S12-01 DONE — typed derived-state contract (CampaignState v2 + manifest/finger
 S12-02 DONE — deterministic source collection / evidence binding
 S12-03 DONE — materialization + rebuild/staleness/corruption
 S12-04 DONE — visibility projection + focused Fast-Agent consumer integration
-S12-05 Next — hardening / failure injection
-S12-06      — full Stage-12 review / completion
+S12-05 DONE — hardening / failure injection / cross-platform safety
+S12-06 Next — full Stage-12 review / completion
 ```
 
 ## Documentation map

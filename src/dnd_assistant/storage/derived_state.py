@@ -19,9 +19,11 @@ Filesystem authority:
   fixed manifest name; manifest ``RelativeArtifactPath`` values are never
   resolved or joined to the filesystem;
 - the ``State/`` directory is created exactly (never an arbitrary tree) and is
-  always required to be a real, non-symlink directory inside the Vault root;
-- managed leaves must be regular non-symlink files; unrelated user files under
-  ``State/`` are preserved and never swept;
+  always required to be a real, non-redirecting directory contained inside the
+  resolved Vault root; symlinks and Windows directory junctions / redirecting
+  reparse points are rejected wherever a directory object is encountered;
+- managed leaves must be regular non-symlink, non-junction files; unrelated user
+  files under ``State/`` are preserved and never swept;
 - each artifact is written with the shared atomic text primitive and the
   manifest is written **last** as the generation commit marker.
 
@@ -143,20 +145,29 @@ class ObsidianDerivedStateStore:
 
     # ── Topology ──────────────────────────────────────────────────────────
 
-    def _resolve_existing_state_dir(self) -> Path | None:
-        """Return the validated existing ``State/`` directory, or ``None``.
+    def _authorize_existing_state_dir(self, state: Path) -> Path:
+        """Fully authorize an existing ``State/`` directory, or fail closed.
+
+        The single authoritative topology check shared by the read and write
+        paths.  An existing ``State/`` must be a real, non-redirecting directory
+        whose resolved location is contained within the trusted resolved Vault
+        root.  Symlinks, Windows directory junctions / redirecting reparse
+        points, non-directories and out-of-Vault resolutions are all rejected.
 
         Raises:
-            StorageError: ``State`` exists but is a symlink, is not a
-                directory, or resolves outside the Vault root.
+            StorageError: Any topology requirement is violated.
         """
-        state = self.state_dir
-        # Symlink identity is checked before exists(): a dangling symlink has
-        # is_symlink() == True but exists() == False.
+        # Redirect identity is checked before exists(): a dangling symlink or
+        # junction may report exists() == False while still redirecting.
         if state.is_symlink():
             raise StorageError(f"State directory is a symlink, rejected for safety: {state}")
+        if state.is_junction():
+            raise StorageError(
+                "State directory is a directory junction/reparse redirect, "
+                f"rejected for safety: {state}"
+            )
         if not state.exists():
-            return None
+            raise StorageError(f"State path does not exist: {state}")
         if not state.is_dir():
             raise StorageError(f"State path is not a directory: {state}")
         try:
@@ -167,45 +178,71 @@ class ObsidianDerivedStateStore:
             ) from None
         return state
 
-    def _ensure_state_dir(self) -> Path:
-        """Return the validated ``State/`` directory, creating it if absent.
+    def _resolve_existing_state_dir(self) -> Path | None:
+        """Return the fully authorized existing ``State/`` directory, or ``None``.
 
         Raises:
-            StorageError: The Vault root vanished, ``State`` is unsafe, or
+            StorageError: ``State`` exists but is unsafe (symlink, junction,
+                non-directory, or resolves outside the Vault root).
+        """
+        state = self.state_dir
+        # Redirect identity is checked before exists(): a dangling symlink or
+        # junction may report exists() == False while still redirecting.
+        if state.is_symlink() or state.is_junction():
+            return self._authorize_existing_state_dir(state)
+        if not state.exists():
+            return None
+        return self._authorize_existing_state_dir(state)
+
+    def _ensure_state_dir(self) -> Path:
+        """Return the fully authorized ``State/`` directory, creating it if absent.
+
+        State-absent state machine::
+
+            State absent
+            -> ensure the candidate itself is not an existing redirecting object
+            -> mkdir exact State/
+            -> full existing-State authorization
+
+        State exists
+            -> full existing-State authorization
+
+        Raises:
+            StorageError: The Vault root vanished, the topology is unsafe, or
                 creation failed.
         """
         if not self._vault_root.is_dir():
             raise StorageError(f"Vault root is no longer a directory: {self._vault_root}")
 
         state = self.state_dir
-        if state.is_symlink():
-            raise StorageError(f"State directory is a symlink, rejected for safety: {state}")
-        if state.exists():
-            if not state.is_dir():
-                raise StorageError(f"State path exists but is not a directory: {state}")
-            return state
+
+        # Existing redirecting object (symlink/junction, live or dangling) or an
+        # existing normal path: run the full existing-State authorization.
+        if state.is_symlink() or state.is_junction() or state.exists():
+            return self._authorize_existing_state_dir(state)
 
         try:
             state.mkdir(exist_ok=False)
         except FileExistsError:
-            if state.is_symlink() or not state.is_dir():
-                raise StorageError(f"State path appeared as an unsafe directory: {state}") from None
+            # Lost a creation race: authorize whatever object now occupies the path.
+            return self._authorize_existing_state_dir(state)
         except OSError as exc:
             raise StorageError(f"Failed to create State directory: {state}", cause=exc) from exc
 
-        if state.is_symlink() or not state.is_dir():
-            raise StorageError(f"State path is not a safe directory: {state}")
-        return state
+        return self._authorize_existing_state_dir(state)
 
     def _safe_leaf(self, state: Path, filename: str) -> Path:
-        """Return a validated managed leaf path (never a symlink).
+        """Return a validated managed leaf path (never a symlink/junction).
 
         Raises:
-            StorageError: The leaf is a symlink (live or dangling).
+            StorageError: The leaf is a symlink (live or dangling) or a
+                directory junction/reparse redirect.
         """
         leaf = state / filename
         if leaf.is_symlink():
             raise StorageError(f"Managed State leaf is a symlink, rejected: {leaf}")
+        if leaf.is_junction():
+            raise StorageError(f"Managed State leaf is a junction, rejected: {leaf}")
         return leaf
 
     # ── Read ──────────────────────────────────────────────────────────────

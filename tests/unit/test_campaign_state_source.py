@@ -508,6 +508,12 @@ def test_invalid_selection_limit_fails_closed(limit: object) -> None:
     assert err.value.reason is CampaignStateSourceReason.INVALID_SELECTION_LIMIT
 
 
+def test_selection_limit_at_ceiling_accepted() -> None:
+    # Exactly at the safety ceiling is accepted; only above it fails closed.
+    result = _build(limit=MAX_RECENT_SESSIONS)
+    assert result.identity.recent_session_limit == MAX_RECENT_SESSIONS
+
+
 def test_selection_limit_above_ceiling_fails_closed() -> None:
     with pytest.raises(CampaignStateSourceError) as err:
         _build(limit=MAX_RECENT_SESSIONS + 1)

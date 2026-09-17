@@ -790,3 +790,181 @@ Deferred beyond S12-04: S12-05 hardening/failure injection, S12-06 review.
 No model call in derivation; model-assisted narrative, semantic ranking,
 TimelineEvent/CalendarDefinition persistence, new ChangeSet operations, DM mode
 and Web UI remain out of scope.
+
+## 19. S12-05 record — hardening / failure injection / cross-platform safety
+
+```text
+Task:      S12-05 — Campaign State hardening / failure injection
+Routing:   PLAN_REQUIRED -> accepted PLAN (+ architect corrections) -> BUILD
+Branch:    feat/campaign-state
+Baseline:  b501ee6d0ef2ceae95f418ca2325d9f9fd5d4ea1 (S12-04)
+```
+
+S12-05 adds no Campaign State semantics, no consumer, no CLI command, no model
+call and no dependency. It hardens the accepted S12-02→S12-04 pipeline and fixes
+concrete defects found by adversarial tests.
+
+### PLAYER hidden-data noninterference + render v3
+
+S12-04 tests only proved known DM/SYSTEM *sentinels are absent*. S12-05 proves
+the stronger property: two internal generations whose PLAYER-visible evidence is
+identical while hidden evidence differs (ids, names, revisions, provenance,
+count, ordering) must produce **equal** PLAYER-facing output.
+
+A concrete side channel was found and removed: `State/World State.md` rendered
+`- Generation fingerprint: <input_fingerprint>` and `input_fingerprint` is
+derived from the all-visibility source identity, so a hidden-only canonical
+change altered a PLAYER-facing artifact. The generation line is removed and no
+player-facing replacement fingerprint is introduced (no consumer needs one;
+integrity/freshness remain in the manifest and deterministic re-render
+verification). This changes rendered bytes, so
+`CAMPAIGN_STATE_RENDER_VERSION` is bumped `"2"` → `"3"`.
+`CAMPAIGN_STATE_DERIVATION_VERSION`, the manifest schema version, the
+`CampaignState` schema version and `agent-v3` are unchanged. A stored render
+version `"2"` classifies `OUTDATED`.
+
+Pairwise equality is asserted for: `State/*.md` artifact bytes,
+`PlayerCampaignState`, `AgentCampaignMemory`, exact `build_agent_request` USER
+JSON, and the first **actual** Pydantic AI `UserPromptPart`. Adding 100 hidden
+references changes none of `total_recently_touched`, `truncated`, included
+PLAYER entities, model payload bytes or PLAYER Markdown bytes.
+
+### Manifest visibility semantics
+
+`State/.campaign-state-manifest.json` stays in place and is documented as an
+**internal technical integrity/freshness artifact**, outside the PLAYER
+semantic-output equality contract. It intentionally contains hidden-dependent
+metadata through the all-visibility `input_fingerprint` and therefore may differ
+under hidden-only canonical changes. Dot-prefixing, Obsidian hiding and SHA
+opacity are **not** claimed to provide confidentiality.
+
+### State-directory authorization (junction / reparse / containment)
+
+`ObsidianDerivedStateStore` previously relied on `Path.is_symlink()` plus a
+resolved-containment check that only the **read** path performed.
+`_ensure_state_dir` (the write path) checked neither junction/reparse identity
+nor resolved containment, so a Windows directory junction at `State/` could
+redirect managed writes outside the Vault. Corrected state machine:
+
+```text
+State absent
+-> ensure candidate is not an existing redirecting object
+-> mkdir exact State/
+-> full existing-State authorization
+State exists -> full existing-State authorization
+```
+
+Full existing-State authorization requires: not symlink, not junction/reparse,
+real directory, and resolved path contained within the trusted resolved Vault
+root. It is applied to the existing normal path, the `FileExistsError` race
+branch, immediately after successful `mkdir`, `_resolve_existing_state_dir`, and
+every mutation-time `_ensure_state_dir()` call that precedes each artifact and
+manifest replacement. `_safe_leaf` also rejects a junction leaf. The shared
+atomic writer is unchanged; the residual OS-level TOCTOU between authorization
+and `os.replace` is retained and not claimed as a filesystem transaction.
+
+### Publication failure injection / reader races / concurrency
+
+Every injected scenario models both the stored/partial generation **and** the
+current canonical-source epoch, and expected status follows actual verifier
+order (manifest/schema/render/inventory → artifact hashes → fresh derivation →
+fingerprint → deterministic re-render). Corrected distinctions:
+
+```text
+old generation A untouched + canonical source B        -> STALE
+artifact B differs from old manifest A hash            -> CORRUPT
+hidden-only change, identical PLAYER bytes, manifest A -> STALE
+full artifacts+manifest B + canonical source B         -> CURRENT
+source unchanged, exact generation intact              -> legitimate CURRENT
+failure after successful manifest replace              -> post-commit CURRENT
+```
+
+Deterministic (no timing/sleep) writer interleavings around artifact 1,
+artifact 2 and manifest-last never produce a false `CURRENT`; a coherent stale
+generation is `STALE` and a coherent current generation is `CURRENT`. Reader
+races couple the observed snapshot to a fresh witness: a coherent old snapshot
+is `STALE` when the fresh source is B and `CURRENT` only when the source is still
+A. `CURRENT` is verification of the observed generation against the fresh source
+witness at verification time, never a lease. No false-CURRENT state was found,
+so the accepted **no-lock MVP remains valid**; no locking framework was added.
+
+### Hard links
+
+A managed-leaf hard link is accepted. `os.replace` swaps the managed directory
+entry, so the other hard-link name keeps its original inode/content; the
+outside object is not mutated. Rejecting hard links would have been unfounded.
+
+### Source-failure / lazy-consumer recovery
+
+Injected `CampaignStateSourceError` and `StorageError` at initial and fresh
+pre-publication derivation produce **zero** new publication before `publish()`
+is reached; a previously valid generation is never deliberately destroyed.
+The lazy provider repairs `MISSING`, `STALE`, `CORRUPT` and `OUTDATED (render
+v2)` and returns a PLAYER projection on the next turn. `CampaignStateSourceChangedError`
+and `WORLD_TIME_UNAVAILABLE` → `None`; malformed canonical evidence, other source
+errors, `StorageError` and unsafe topology propagate fail-closed. No retry loop.
+
+### Unicode / Markdown / hard limits
+
+Adversarial-but-valid printable corpus (Cyrillic, non-BMP emoji, NFC/NFD,
+combining marks incl. leading U+0301, Markdown metacharacters mixed with
+Unicode, long multibyte names/ids) proves exact UTF-8 serialization with **no
+implicit normalization**, NFC ≠ NFD, same input → identical bytes, and no
+partial UTF-8 truncation in Fast-Agent compactness. Composed Markdown attacks
+cannot create attacker-controlled headings/list/quote/table structure. Actually
+non-printable values (newline, NUL, U+200B) are rejected at the canonical domain
+boundary; validators were not weakened. Large-input ceilings fail closed with no
+silent truncation; Fast-Agent compactness remains the only explicit truncation.
+
+### Audit / READ-only / wording
+
+Successful, partially failed and repaired derived maintenance appends no
+canonical audit. A production-composition READ `dnd ask` run keeps
+`Permission.READ`, exposes only READ tools, repairs derived `State/*` and leaves
+canonical bytes and canonical audit unchanged. `AgentContextBuilder`'s stale
+"strictly read-only" wording is reconciled to: no canonical mutation, no
+model/tool execution, optional trusted provider may maintain noncanonical derived
+`State/*`. Error taxonomy (`MISSING/OUTDATED/CORRUPT/UNVERIFIABLE/STALE/CURRENT`)
+is unchanged.
+
+### Literal evidence
+
+| Criterion | Literal evidence |
+|---|---|
+| PLAYER pairwise noninterference (bytes/projection/memory/USER JSON) | `tests/unit/test_campaign_state_visibility_noninterference.py` |
+| no fingerprint line / render v3 | `tests/unit/test_campaign_state_render.py` |
+| first actual UserPromptPart equality / READ composition | `tests/integration/test_campaign_state_agent_noninterference.py` |
+| junction/containment/race-branch/hard-link | `tests/integration/test_campaign_state_cross_platform_safety.py` |
+| publication phase matrix + source-failure zero-write + audit | `tests/unit/test_campaign_state_failure_injection.py` |
+| deterministic interleavings / reader races / replay | `tests/integration/test_campaign_state_concurrency.py` |
+| Unicode + Markdown adversarial | `tests/unit/test_campaign_state_render_adversarial.py` |
+| lazy recovery / junction fail-closed | `tests/integration/test_campaign_state_agent_noninterference.py` |
+| selection ceiling boundary | `tests/unit/test_campaign_state_source.py` |
+| render v2 → OUTDATED | `tests/unit/test_campaign_state_materialization.py` + lazy recovery |
+
+### Changed files
+
+```text
+src/dnd_assistant/storage/derived_state.py                  (junction/containment)
+src/dnd_assistant/application/campaign_state_render.py      (fingerprint removal, render v3)
+src/dnd_assistant/application/agent_context.py              (wording only)
+tests/unit/test_campaign_state_render.py                    (modified)
+tests/unit/test_campaign_state_source.py                    (modified)
+tests/unit/test_campaign_state_visibility_noninterference.py (new)
+tests/unit/test_campaign_state_failure_injection.py         (new)
+tests/unit/test_campaign_state_render_adversarial.py        (new)
+tests/integration/test_campaign_state_cross_platform_safety.py (new)
+tests/integration/test_campaign_state_concurrency.py        (new)
+tests/integration/test_campaign_state_agent_noninterference.py (new)
+docs/stages/12_CAMPAIGN_STATE.md, docs/adr/0007-...md, DEVELOPMENT_STATUS.md
+```
+
+No new third-party dependency. `tests/contract/test_boundaries.py` unchanged.
+The real Windows directory-junction test runs on this host (junctions are
+creatable without privilege); POSIX/privileged symlink tests skip where the host
+lacks capability and are reported as such, never as verified coverage.
+
+Deferred beyond S12-05: nothing further in hardening; S12-06 owns the full
+Stage-12 review/completion. Model-assisted narrative, semantic ranking,
+TimelineEvent/CalendarDefinition persistence, new ChangeSet operations, DM mode
+and Web UI remain out of scope.

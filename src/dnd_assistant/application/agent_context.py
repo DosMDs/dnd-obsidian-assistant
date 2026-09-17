@@ -1,7 +1,15 @@
-"""Deterministic read-only Fast-Agent context builder.
+"""Deterministic Fast-Agent context builder.
 
 This module provides immutable application-layer context snapshots for the
-future Fast Agent.  It composes only already accepted data sources:
+Fast Agent.  Its contract is:
+
+- no canonical mutation;
+- no model/tool execution;
+- an optional trusted Campaign State provider may maintain noncanonical derived
+  ``State/*`` artifacts (derived-cache maintenance), which is not canonical
+  mutation and not model authorization.
+
+It composes only already accepted data sources:
 
 - ``SearchService`` for player-visible entity retrieval.
 - ``VaultRepository.get_entity()`` for entity materialisation.
@@ -11,11 +19,12 @@ future Fast Agent.  It composes only already accepted data sources:
 - an optional ``PlayerCampaignStateProvider`` capability for the compact,
   player-safe Campaign State ``campaign_memory`` (S12-04).
 
-The builder is strictly read-only, synchronous, provider-neutral, and
-performs zero model/tool/prompt work.  It never receives repositories, a
+The builder is synchronous, provider-neutral, performs zero model/tool/prompt
+work, and never mutates canonical data.  It never receives repositories, a
 derived-state store or materialization internals for Campaign State: the
-provider is the sole Campaign State dependency and returns an already
-player-safe projection.
+provider is the sole Campaign State dependency, returns an already player-safe
+projection, and (being a trusted derived-cache capability) may lazily
+create/repair noncanonical ``State/*`` files.
 
 Runtime imports are deferred to avoid eagerly loading ``dnd_assistant.models``,
 ``dnd_assistant.tools``, or ``dnd_assistant.cli`` at module-import time.
@@ -208,13 +217,14 @@ def _extract_event_text(
 
 
 class AgentContextBuilder:
-    """Deterministic read-only compact context builder.
+    """Deterministic compact context builder.
 
     Composes accepted retrieval, storage, and domain services into an
     immutable ``AgentContext`` snapshot.
 
-    The builder is synchronous, provider-neutral, and performs zero model
-    or tool work.
+    The builder performs no canonical mutation and no model or tool work.  Its
+    optional trusted Campaign State provider may maintain noncanonical derived
+    ``State/*`` artifacts.
     """
 
     def __init__(

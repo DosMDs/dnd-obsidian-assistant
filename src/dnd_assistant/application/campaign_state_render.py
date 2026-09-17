@@ -51,12 +51,20 @@ from dnd_assistant.errors import ValidationError
 
 # ── Format identity ───────────────────────────────────────────────────────
 
-CAMPAIGN_STATE_RENDER_VERSION: Final[str] = "2"
+CAMPAIGN_STATE_RENDER_VERSION: Final[str] = "3"
 """Artifact/renderer format version persisted as ``manifest.render_version``.
 
 Bump whenever rendered artifact bytes or the managed artifact set can change
 without a change to the canonical source-snapshot identity.  This is distinct
 from ``CAMPAIGN_STATE_DERIVATION_VERSION`` (source identity).
+
+Render ``"3"`` (S12-05): the internal all-visibility generation fingerprint is
+no longer written into the PLAYER-facing ``State/World State.md`` bytes.  That
+digest was a function of DM/SYSTEM evidence, so hidden-only canonical changes
+could alter a PLAYER-facing artifact.  Source identity remains in the manifest
+(``input_fingerprint``) and freshness/integrity remain enforced by deterministic
+re-render comparison; no player-facing replacement fingerprint is introduced.
+A generation persisted with render version ``"2"`` is classified ``OUTDATED``.
 """
 
 _MANIFEST_SCHEMA_VERSION: Final[int] = 2
@@ -177,7 +185,6 @@ def _render_world_state(state: CampaignState) -> str:
     ]
     if state.current_game_date is not None:
         lines.append(f"- Current game date: {render_game_date(state.current_game_date)}")
-    lines.append(f"- Generation fingerprint: {state.input_fingerprint.digest}")
     return "\n".join(lines) + "\n"
 
 
