@@ -1,8 +1,10 @@
 """CLI session commands — session start/status/end and note.
 
 This module owns the ``session`` Typer subgroup and the ``note`` root command.
-No application or domain logic lives here — only CLI presentation and
-runtime composition.
+No application or domain logic lives here — only CLI presentation. Concrete
+dependency construction is delegated to
+``dnd_assistant.composition.session_runtime``; this module keeps only Russian
+rendering, CLI ``AuditContext`` identity and ``typer`` exit mapping.
 """
 
 from __future__ import annotations
@@ -13,16 +15,12 @@ from uuid import uuid4
 
 import typer
 
-from dnd_assistant.application.changeset_recovery import ChangeSetIntentOwnershipGate
-from dnd_assistant.application.session_recovery import SessionRecoveryService
-from dnd_assistant.application.session_runtime import SessionRuntimeService
+from dnd_assistant.composition.session_runtime import (
+    compose_recovery_service,
+    compose_session_runtime,
+)
 from dnd_assistant.errors import DndAssistantError
-from dnd_assistant.storage.audit import AuditContext, AuditService
-from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
-from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
-from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataRepository
-from dnd_assistant.storage.session_recovery import ObsidianSessionRecoveryRepository
-from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
+from dnd_assistant.storage.audit import AuditContext
 
 # ── Time and ID helpers (testable via monkeypatch) ─────────────────────────
 
@@ -60,52 +58,10 @@ def _build_audit_context(source: str, prefix: str) -> AuditContext:
     )
 
 
-# ── Runtime composition ───────────────────────────────────────────────────
-
-
-def _compose_runtime(vault_root: Path) -> SessionRuntimeService:
-    """Compose a fully wired ``SessionRuntimeService`` for a Vault root.
-
-    Args:
-        vault_root: The resolved Vault root path.
-
-    Returns:
-        A ready-to-use ``SessionRuntimeService``.
-    """
-    audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
-    audit_service = AuditService(str(audit_log_path))
-
-    session_repo = ObsidianSessionMetadataRepository(vault_root, audit_service)
-    event_repo = ObsidianSessionEventRepository(vault_root, audit_service)
-    world_time_repo = ObsidianWorldTimeRepository(vault_root, audit_service)
-
-    return SessionRuntimeService(session_repo, world_time_repo, event_repo)
-
-
-def _compose_recovery(vault_root: Path) -> SessionRecoveryService:
-    """Compose a ``SessionRecoveryService`` for recovery preflight.
-
-    The ChangeSet ownership gate narrows blocking scope only: conclusively
-    ChangeSet-owned intent-only audit records are delegated to
-    ``dnd changeset status`` / the ChangeSet applicability gate instead of
-    wedging unrelated mutations.  Raw inspection remains available through
-    ``inspect_runtime``.
-
-    Args:
-        vault_root: The resolved Vault root path.
-
-    Returns:
-        A ready-to-use ``SessionRecoveryService``.
-    """
-    audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
-    audit_service = AuditService(str(audit_log_path))
-
-    recovery_repo = ObsidianSessionRecoveryRepository(vault_root, audit_service)
-    ownership_gate = ChangeSetIntentOwnershipGate(
-        ObsidianChangeSetStore(vault_root),
-        read_audit_records=audit_service.read_all,
-    )
-    return SessionRecoveryService(recovery_repo, ownership_gate=ownership_gate)
+# ── Recovery preflight (CLI presentation) ─────────────────────────────────
+# Concrete session/recovery composition is owned by
+# ``dnd_assistant.composition.session_runtime``; this CLI layer only maps the
+# trusted partition to Russian output and process exit codes.
 
 
 def _recovery_preflight(vault_root: Path) -> None:
@@ -122,7 +78,7 @@ def _recovery_preflight(vault_root: Path) -> None:
     Raises:
         typer.Exit: If blocking recovery issues exist.
     """
-    recovery_service = _compose_recovery(vault_root)
+    recovery_service = compose_recovery_service(vault_root)
     partition = recovery_service.inspect_runtime_partition()
 
     if partition.blocking:
@@ -182,7 +138,7 @@ def _session_start(
         _recovery_preflight(vault_root)
 
         audit = _build_audit_context("cli", "cli-session-start")
-        runtime = _compose_runtime(vault_root)
+        runtime = compose_session_runtime(vault_root)
         session = runtime.start_session(audit=audit)
 
         typer.echo(
@@ -215,7 +171,7 @@ def _session_status(
     try:
         _recovery_preflight(vault_root)
 
-        runtime = _compose_runtime(vault_root)
+        runtime = compose_session_runtime(vault_root)
         session = runtime.get_active_session()
 
         if session is None:
@@ -259,7 +215,7 @@ def _session_end(
         _recovery_preflight(vault_root)
 
         audit = _build_audit_context("cli", "cli-session-end")
-        runtime = _compose_runtime(vault_root)
+        runtime = compose_session_runtime(vault_root)
         session = runtime.end_session(
             touched_entity_ids=touched_id,
             audit=audit,
@@ -310,7 +266,7 @@ def _note_command(
         _recovery_preflight(vault_root)
 
         audit = _build_audit_context("cli", "cli-note")
-        runtime = _compose_runtime(vault_root)
+        runtime = compose_session_runtime(vault_root)
         event = runtime.record_note(text, audit=audit)
 
         safe_summary = text[:80] + ("…" if len(text) > 80 else "")

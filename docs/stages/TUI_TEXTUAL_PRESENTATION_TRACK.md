@@ -349,6 +349,52 @@ macOS is not claimed as locally verified. No new CI system was introduced.
 - TUI-02 (composition seams), TUI-03 (shell/registry/palette/bindings), TUI-04
   (integration) not started.
 
+## Durable record — TUI-02 (2026-09-17)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`.
+- Extracted the smallest capability-oriented shared composition seams required
+  by both Typer and the future Textual TUI. New UI-agnostic package
+  `src/dnd_assistant/composition/` (peer of `cli/`):
+  ```text
+  composition/__init__.py         package marker (no eager internal imports)
+  composition/agent_model.py      model/profile resolution + lifetime + model_tool AuditContext
+  composition/agent_runtime.py    AskRuntime + compose_ask_runtime + run graph
+  composition/session_runtime.py  compose_session_runtime + compose_recovery_service
+  ```
+- `cli/agent_runtime.py` is now a thin compatibility re-export shim (no
+  composition logic). `cli/session.py` keeps Russian rendering, `typer.echo`,
+  `typer.Exit`, CLI `AuditContext` identity and recovery presentation; concrete
+  session/recovery dependency construction moved to
+  `composition/session_runtime.py`.
+- Monkeypatch targets that need the concrete owner now patch
+  `dnd_assistant.composition.agent_runtime` rather than names rebound in the shim.
+- Explicitly deferred (no demonstrated shared need): `cli/changeset.py`,
+  `cli/post_session_runtime.py`, `cli/main.py` index composition, and a
+  standalone Campaign State composition seam.
+- Added `tests/contract/test_composition_boundaries.py` (static AST):
+  composition imports neither `typer`/`textual`/`cli`; `domain`, `application`,
+  `storage`, `retrieval`, `tools`, `models` do not import composition; the
+  package `__init__` has no eager internal imports.
+- Added `tests/unit/test_composition_session_runtime.py`, including a literal
+  filesystem byte-snapshot proof that recovery inspection is read-only.
+- Changed files:
+  ```text
+  src/dnd_assistant/composition/__init__.py
+  src/dnd_assistant/composition/agent_model.py
+  src/dnd_assistant/composition/agent_runtime.py
+  src/dnd_assistant/composition/session_runtime.py
+  src/dnd_assistant/cli/agent_runtime.py
+  src/dnd_assistant/cli/session.py
+  tests/unit/test_composition_session_runtime.py
+  tests/contract/test_composition_boundaries.py
+  tests/unit/test_cli_agent_runtime.py
+  docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
+  DEVELOPMENT_STATUS.md
+  ```
+- No `src/dnd_assistant/tui/**`, no ChangeSet/post-session/index composition,
+  no standalone Campaign State composition, no Stage-13 work.
+
 ## Stage-13 gate
 
 Stage 13 Bootstrap must not begin until the TUI track has completed normal

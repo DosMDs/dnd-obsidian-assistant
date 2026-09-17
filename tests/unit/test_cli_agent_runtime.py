@@ -501,7 +501,7 @@ class TestComposeAskRuntimeCleanup:
             raise StorageError("Audit path invalid")
 
         monkeypatch.setattr(
-            "dnd_assistant.cli.agent_runtime.AuditService.__init__",
+            "dnd_assistant.composition.agent_runtime.AuditService.__init__",
             _broken_audit,
         )
 
@@ -529,7 +529,7 @@ class TestComposeAskRuntimeCleanup:
             raise StorageError("Session state unavailable")
 
         monkeypatch.setattr(
-            "dnd_assistant.cli.agent_runtime.ObsidianSessionMetadataRepository.get_active_session",
+            "dnd_assistant.composition.agent_runtime.ObsidianSessionMetadataRepository.get_active_session",
             _broken_get_active,
         )
 
@@ -557,7 +557,7 @@ class TestComposeAskRuntimeCleanup:
             raise RuntimeError("Unexpected composition error")
 
         monkeypatch.setattr(
-            "dnd_assistant.cli.agent_runtime.PydanticAIAgentRuntime.__init__",
+            "dnd_assistant.composition.agent_runtime.PydanticAIAgentRuntime.__init__",
             _broken_agent_runtime,
         )
 
@@ -587,7 +587,7 @@ class TestComposeAskRuntimeCleanup:
             raise StorageError("Cannot read session state")
 
         monkeypatch.setattr(
-            "dnd_assistant.cli.agent_runtime.ObsidianSessionMetadataRepository.get_active_session",
+            "dnd_assistant.composition.agent_runtime.ObsidianSessionMetadataRepository.get_active_session",
             _broken_get_active,
         )
 

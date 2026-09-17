@@ -1,0 +1,381 @@
+"""Shared agent runtime composition — dependency wiring and model lifetime (TUI-02).
+
+This module owns the UI-agnostic composition for the ``dnd ask`` assistant
+capability.  It was extracted from the former ``cli/agent_runtime.py`` so that
+both the Typer CLI and the future Textual TUI invoke the same trusted
+composition without importing ``dnd_assistant.cli``.  It is NOT a general
+Bootstrap framework (Stage 13 remains separate).
+
+It composes the accepted concrete repositories, services, and tool layers into
+the project-owned Pydantic AI runtime boundary:
+
+::
+
+    build_pydantic_ai_ollama_model(profile)          # framework model
+    PydanticAIToolBridge(registry=tool_registry)     # ToolRegistry → ToolExecutor
+    DndAgentRunPreparer(context_builder, catalog, bridge)
+    PydanticAIAgentRuntime(run_preparer, model)      # Pydantic AI run loop
+
+Authorization and policy remain project-owned: every side effect still flows
+through ``DndAgentPolicy`` admission and ``ToolExecutor``.
+
+Model cleanup is guaranteed through a small context-manager runtime object
+(``AskRuntime``) and ``contextlib.ExitStack`` during composition.
+"""
+
+from __future__ import annotations
+
+from contextlib import ExitStack
+from pathlib import Path
+from typing import Any
+
+from pydantic_ai.models import Model
+
+from dnd_assistant.application.agent_context import AgentContextBuilder
+from dnd_assistant.application.campaign_state_consumer import (
+    FAST_AGENT_RECENT_SESSION_LIMIT,
+    RebuildPlayerCampaignStateProvider,
+)
+from dnd_assistant.application.changeset_recovery import ChangeSetIntentOwnershipGate
+from dnd_assistant.application.pydantic_ai_agent_runtime import PydanticAIAgentRuntime
+from dnd_assistant.application.pydantic_ai_run_deps import DndAgentRunPreparer
+from dnd_assistant.application.pydantic_ai_tool_bridge import PydanticAIToolBridge
+from dnd_assistant.application.session_recovery import SessionRecoveryService
+from dnd_assistant.application.session_runtime import SessionRuntimeService
+from dnd_assistant.composition.agent_model import (
+    _build_agent_model,
+    _build_ask_audit_context,
+    _close_model,
+    _load_profile,
+)
+from dnd_assistant.retrieval.index import SqliteFtsIndex
+from dnd_assistant.retrieval.search import VaultSearchService
+from dnd_assistant.storage.audit import AuditService
+from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
+from dnd_assistant.storage.derived_state import ObsidianDerivedStateStore
+from dnd_assistant.storage.session_events import ObsidianSessionEventRepository
+from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataRepository
+from dnd_assistant.storage.session_recovery import ObsidianSessionRecoveryRepository
+from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
+from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
+from dnd_assistant.tools.catalog import build_tool_registry_schema
+from dnd_assistant.tools.entity_mutations import register_entity_mutation_tools
+from dnd_assistant.tools.entity_reads import register_entity_read_tools
+from dnd_assistant.tools.registry import ToolRegistry
+from dnd_assistant.tools.session_mutations import register_session_mutation_tools
+from dnd_assistant.tools.session_reads import register_session_read_tools
+from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
+
+# ── AskRuntime ─────────────────────────────────────────────────────────────
+
+
+class AskRuntime:
+    """Composed runtime for one assistant invocation.
+
+    Owns the lifetime of all composed dependencies.  ``close()`` must be
+    called after the command completes to release model resources.
+
+    Attributes:
+        agent_runtime: The fully wired ``PydanticAIAgentRuntime``.
+        model: The Pydantic AI ``Model`` used by the runtime.
+        recovery_service: The ``SessionRecoveryService`` for preflight.
+        vault_root: The resolved Vault root path.
+        audit_service: The audit service (may be ``None`` for READ-only).
+        execution_context: The ``ExecutionContext`` for this invocation.
+    """
+
+    def __init__(self, runtime: _RuntimeComponents) -> None:
+        self._model = runtime.model
+        self._model_closed = False
+        self.agent_runtime = runtime.agent_runtime
+        self.recovery_service = runtime.recovery_service
+        self.vault_root = runtime.vault_root
+        self.audit_service = runtime.audit_service
+        self._execution_context: ExecutionContext | None = None
+
+    @property
+    def model(self) -> Model:
+        """The Pydantic AI ``Model`` instance backing the agent runtime."""
+        return self._model
+
+    @property
+    def execution_context(self) -> ExecutionContext:
+        """The ExecutionContext for this invocation.
+
+        Raises:
+            RuntimeError: If the context has not been set (programming error).
+        """
+        if self._execution_context is None:
+            raise RuntimeError("execution_context not set — compose_ask_runtime must set it")
+        return self._execution_context
+
+    def close(self) -> None:
+        """Release model resources.
+
+        Safe to call multiple times — only the first call has an effect.
+        """
+        if not self._model_closed:
+            self._model_closed = True
+            _close_model(self._model)
+
+
+# ── Internal component bundle ──────────────────────────────────────────────
+
+
+class _RuntimeComponents:
+    """Internal bundle of composed components before AskRuntime wrapping."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self.model: Model = kwargs["model"]
+        self.agent_runtime: PydanticAIAgentRuntime = kwargs["agent_runtime"]
+        self.recovery_service: SessionRecoveryService = kwargs["recovery_service"]
+        self.vault_root: Path = kwargs["vault_root"]
+        self.audit_service: AuditService | None = kwargs.get("audit_service")
+
+
+# ── Session-mode derivation ────────────────────────────────────────────────
+
+
+def _derive_session_context(
+    session_repository: ObsidianSessionMetadataRepository,
+) -> tuple[SessionMode, str | None]:
+    """Determine the current session mode and optional session ID from one trusted read.
+
+    Uses a single ``get_active_session()`` call for both the session mode
+    and the active session ID (used for audit context).
+
+    Returns:
+        A tuple of ``(SessionMode, active_session_id_or_None)``.
+
+    Raises:
+        StorageError: Propagated from the repository.
+        ValidationError: Propagated from the repository.
+    """
+    active = session_repository.get_active_session()
+    if active is not None:
+        return SessionMode.ACTIVE_SESSION, active.session.id
+    return SessionMode.NO_ACTIVE_SESSION, None
+
+
+# ── 12-tool registry builder ──────────────────────────────────────────────
+
+
+def _build_ask_tool_registry(
+    *,
+    search_service: VaultSearchService,
+    repository: ObsidianVaultRepository,
+    runtime_service: SessionRuntimeService,
+    recovery_service: SessionRecoveryService,
+    session_repository: ObsidianSessionMetadataRepository,
+    event_repository: ObsidianSessionEventRepository,
+) -> ToolRegistry:
+    """Build the production tool registry (12 tools, no calendar/world-time).
+
+    This registry contains exactly the 12 currently composable entity and
+    session tools.  The six calendar/world-time tools are deferred until a
+    canonical campaign calendar-definition startup source exists.
+
+    Returns:
+        A ``ToolRegistry`` with exactly 12 registered tools.
+    """
+    registry = ToolRegistry()
+
+    register_entity_read_tools(
+        registry,
+        search_service=search_service,
+        repository=repository,
+    )
+
+    register_entity_mutation_tools(
+        registry,
+        search_service=search_service,
+        repository=repository,
+    )
+
+    register_session_read_tools(
+        registry,
+        runtime_service=runtime_service,
+        session_repository=session_repository,
+        event_repository=event_repository,
+    )
+
+    register_session_mutation_tools(
+        registry,
+        runtime_service=runtime_service,
+        recovery_service=recovery_service,
+    )
+
+    return registry
+
+
+# ── Main composition ───────────────────────────────────────────────────────
+
+
+def compose_ask_runtime(
+    *,
+    vault_root: Path,
+    config_path: Path,
+    profile_name: str,
+    allow_write: bool = False,
+    model_factory: Any = None,
+) -> AskRuntime:
+    """Compose the full ``AskRuntime`` for one assistant invocation.
+
+    Args:
+        vault_root: The resolved Vault root path.
+        config_path: Path to the machine-local TOML config file.
+        profile_name: The exact model profile name to select.
+        allow_write: If ``True``, grant WRITE permission and build an
+            AuditContext.  Default is READ-only.
+        model_factory: Optional override for the agent model factory (used
+            in tests to inject a deterministic Pydantic AI ``Model``).
+            Defaults to ``_build_agent_model``.
+
+    Returns:
+        A fully wired ``AskRuntime``.  Caller must call ``.close()`` after
+        use.
+
+    Raises:
+        DndAssistantError: Profile loading, composition, or model
+            construction fails.
+    """
+    # 1. Load and validate profile
+    profile = _load_profile(config_path, profile_name)
+
+    # 2. Build the Pydantic AI model with ExitStack for deterministic
+    #    cleanup before AskRuntime is returned.
+    factory = model_factory or _build_agent_model
+    model = factory(profile)
+
+    with ExitStack() as stack:
+        stack.callback(_close_model, model)
+
+        # 3. Compose storage/repository layer
+        audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+        audit_service = AuditService(str(audit_log_path))
+
+        vault_repository = ObsidianVaultRepository(
+            vault_root=str(vault_root),
+            audit_service=audit_service,
+        )
+
+        session_repository = ObsidianSessionMetadataRepository(vault_root, audit_service)
+        event_repository = ObsidianSessionEventRepository(vault_root, audit_service)
+        world_time_repository = ObsidianWorldTimeRepository(vault_root, audit_service)
+        recovery_repository = ObsidianSessionRecoveryRepository(vault_root, audit_service)
+
+        # 4. Compose application services
+        runtime_service = SessionRuntimeService(
+            session_repository,
+            world_time_repository,
+            event_repository,
+        )
+        recovery_service = SessionRecoveryService(
+            recovery_repository,
+            ownership_gate=ChangeSetIntentOwnershipGate(
+                ObsidianChangeSetStore(vault_root),
+                read_audit_records=audit_service.read_all,
+            ),
+        )
+
+        # 5. Compose retrieval
+        fts_index = SqliteFtsIndex(vault_root=str(vault_root))
+        search_service = VaultSearchService(
+            repository=vault_repository,
+            lexical_index=fts_index,
+        )
+
+        # 6. Compose tool registry (12 tools — no calendar/world-time)
+        tool_registry = _build_ask_tool_registry(
+            search_service=search_service,
+            repository=vault_repository,
+            runtime_service=runtime_service,
+            recovery_service=recovery_service,
+            session_repository=session_repository,
+            event_repository=event_repository,
+        )
+
+        # 7. Build tool catalog and project-owned Pydantic bridge.
+        #    The bridge owns ToolExecutor; every side effect still flows
+        #    through DndAgentPolicy admission and ToolExecutor.
+        tool_catalog = build_tool_registry_schema(tool_registry)
+        tool_bridge = PydanticAIToolBridge(registry=tool_registry)
+
+        # 8. Build context builder.
+        #    Campaign State is exposed only through the player-safe provider
+        #    capability: the builder never receives repositories, the store or
+        #    materialization internals.  The provider lazily ensures the
+        #    derived generation on first read (non-canonical cache maintenance).
+        derived_state_store = ObsidianDerivedStateStore(vault_root)
+        campaign_state_provider = RebuildPlayerCampaignStateProvider(
+            vault_repository=vault_repository,
+            session_repository=session_repository,
+            world_time_repository=world_time_repository,
+            derived_state_store=derived_state_store,
+            recent_session_limit=FAST_AGENT_RECENT_SESSION_LIMIT,
+            calendar_definition=None,
+        )
+        context_builder = AgentContextBuilder(
+            search_service=search_service,
+            vault_repository=vault_repository,
+            session_repository=session_repository,
+            event_repository=event_repository,
+            world_time_repository=world_time_repository,
+            campaign_state_provider=campaign_state_provider,
+        )
+
+        # 9. Build the project-owned Pydantic AI run boundary
+        run_preparer = DndAgentRunPreparer(
+            context_builder=context_builder,
+            tool_catalog=tool_catalog,
+            tool_bridge=tool_bridge,
+        )
+        agent_runtime = PydanticAIAgentRuntime(
+            run_preparer=run_preparer,
+            model=model,
+        )
+
+        # 10. Determine session context from one trusted read.
+        #     Both session mode and optional session ID come from a single
+        #     ``get_active_session()`` call.
+        session_mode, active_session_id = _derive_session_context(session_repository)
+
+        if allow_write:
+            from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
+
+            audit_ctx = _build_ask_audit_context(
+                model_profile=profile_name,
+                prompt_version=PROMPT_VERSION,
+                session_id=active_session_id,
+            )
+            execution_context = ExecutionContext(
+                granted_permission=Permission.WRITE,
+                session_mode=session_mode,
+                audit=audit_ctx,
+            )
+        else:
+            audit_ctx = None
+            execution_context = ExecutionContext(
+                granted_permission=Permission.READ,
+                session_mode=session_mode,
+                audit=None,
+            )
+
+        # 11. Store execution context on runtime for later use
+        components = _RuntimeComponents(
+            model=model,
+            agent_runtime=agent_runtime,
+            recovery_service=recovery_service,
+            vault_root=vault_root,
+            audit_service=audit_service if allow_write else None,
+        )
+
+        runtime = AskRuntime(components)
+        runtime._execution_context = execution_context
+        runtime._profile_name = profile_name  # type: ignore[attr-defined]
+
+        # Transfer model ownership to AskRuntime — ExitStack will NOT
+        # close the model on normal exit.
+        stack.pop_all()
+
+    return runtime

@@ -288,7 +288,7 @@ class TestAskDirectRespond:
         scripted.add_response(_respond("Варос — опытный следопыт."))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Кто такой Варос?", vault_root, config_path)
@@ -308,7 +308,7 @@ class TestAskDirectClarify:
         scripted.add_response(_clarify("Какого именно Вароса вы имеете в виду?"))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Обнови Вароса", vault_root, config_path)
@@ -331,7 +331,7 @@ class TestAskReadTool:
         scripted.add_response(_respond("Сессия активна."))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Какая сессия активна?", vault_root, config_path)
@@ -354,7 +354,7 @@ class TestAskReadOnlyBlocksWrite:
         scripted.add_response(_tool_call_response("record_note", {"text": "Test note"}))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct("Запиши заметку", vault_root, config_path)
@@ -379,7 +379,7 @@ class TestAskWriteTool:
         scripted.add_response(_respond("Заметка сохранена."))
 
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = _invoke_ask_direct(
@@ -551,7 +551,7 @@ class TestAskCliRunnerParserBacked:
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
@@ -581,7 +581,7 @@ class TestAskCliRunnerParserBacked:
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
@@ -614,7 +614,7 @@ class TestAskCliRunnerParserBacked:
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
@@ -646,7 +646,7 @@ class TestAskCliRunnerParserBacked:
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
@@ -684,7 +684,7 @@ class TestAskCliRunnerParserBacked:
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime._build_agent_model",
+            "dnd_assistant.composition.agent_runtime._build_agent_model",
             side_effect=_fake_model_factory(scripted),
         ):
             result = runner.invoke(
@@ -854,7 +854,7 @@ class TestAskCliRunnerProviderCleanup:
 
         runner = CliRunner()
         with patch(
-            "dnd_assistant.cli.agent_runtime.AuditService.__init__",
+            "dnd_assistant.composition.agent_runtime.AuditService.__init__",
             _broken_audit_init,
         ):
             result = runner.invoke(
