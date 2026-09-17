@@ -262,6 +262,93 @@ and Stage-13 unblock.
 - Stage 13/14 remain `NOT STARTED`; Stage 13 is gated on TUI-track completion
   and independent acceptance.
 
+## Durable record — TUI-01 (2026-09-17)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`.
+- **Qualification result: `PASS`.** Exact pin: `textual==8.2.8` (latest stable,
+  released 2026-06-30). No additional test-runner dependency was added.
+- Changed files:
+  ```text
+  pyproject.toml
+  uv.lock
+  tests/integration/test_textual_qualification.py
+  tests/contract/test_textual_boundaries.py
+  docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
+  DEVELOPMENT_STATUS.md
+  ```
+- No production `src/dnd_assistant/tui/**`, no composition extraction, no command
+  registry, no real screens, no assistant/session/Campaign-State integration, no
+  Stage-13 work.
+
+### External metadata evidence (`EXTERNALLY_VERIFIED`)
+
+- Textual `8.2.8`, MIT license, `requires_python = "<4.0,>=3.9"`, classifiers
+  Python 3.9–3.14 (incl. 3.12), Operating System macOS/Windows 10/Windows 11/
+  Linux.
+- Wheel `textual-8.2.8-py3-none-any.whl` (platform-independent packaging).
+- Resolved runtime additions are all `py3-none-any`: `textual` 8.2.8,
+  `linkify-it-py` 2.2.0, `mdit-py-plugins` 0.6.1, `platformdirs` 4.11.9 (plus
+  already-present `markdown-it-py`, `pygments`, `rich`, `typing-extensions`).
+  No `tree-sitter` entry, no `[syntax]` extra, no Node/Bun/TypeScript/Electron.
+
+### Local runtime evidence (`LOCAL_VERIFIED`, Windows host, Python 3.12.11)
+
+- Lock determinism: first `uv lock` produced `uv.lock` SHA-256
+  `35ACA7102A288BD44EBD7928409125C014470C61CBBDD883E6FAA6658AF066A3`
+  (size 264213); a second `uv lock` left the same bytes/hash unchanged;
+  `uv lock --check` exit 0.
+- `uv run python` reports Python 3.12.11 and `textual.__version__ == "8.2.8"`.
+- Headless qualification tests
+  (`tests/integration/test_textual_qualification.py`, 10 tests) prove:
+  construct/mount/start/shutdown; Cyrillic round-trip in `Input` and `TextArea`
+  multiline; deterministic `run_test(size=...)` and `pilot.resize_terminal`;
+  ordinary binding exactly-once; full command-palette selection reaches the same
+  shared semantic counter; thread worker `RUNNING → SUCCESS` with loop
+  responsiveness while blocked; error worker (`exit_on_error=False`) raising
+  `WorkerFailed` then `ERROR` with `ValueError` and app recovery; cancellation
+  raising `WorkerCancelled` → `CANCELLED` with a separate cooperative
+  thread-termination signal and `calls == 1` (no framework retry). `app.workers`
+  was empty after shutdown (additional evidence).
+- `tests/contract/test_textual_boundaries.py` (static AST) proves no
+  domain/storage/tools/models/application module imports Textual, with
+  non-vacuous detector self-tests.
+- No async pytest plugin is used: `run_test()` is driven synchronously via
+  `asyncio.run`, matching the existing repository idiom. `pytest-asyncio` was not
+  added.
+- Gates: focused tests 14 passed; full suite `6657 passed, 131 skipped`; Ruff
+  check/format clean; Pyright 0 errors; `git diff --check` clean.
+
+### Platform evidence classification
+
+```text
+Windows local headless qualification        LOCAL_VERIFIED
+Textual/package/compatibility metadata      EXTERNALLY_VERIFIED
+macOS local real-terminal execution         SKIPPED_CAPABILITY (deferred to TUI-05)
+```
+
+macOS is not claimed as locally verified. No new CI system was introduced.
+
+### Framework findings carried forward to TUI-03
+
+- Focus safety holds for ordinary (non-priority) bindings: a focused text input
+  consumes printable keys and does not trigger app-level single-key bindings.
+  A `priority=True` single-key binding would bypass the focused widget, so
+  production single-key bindings must not be priority.
+- The command palette already shares one callback with the binding, which fits
+  the planned single semantic-command registry; TUI-01 does not build it.
+- Synchronous trusted calls are hosted with thread workers (`thread=True`);
+  cancellation is cooperative and is neither rollback nor retry.
+- 8.2.7–8.2.8 extended/Kitty key changes are risk-discovery only; no
+  Kitty/leader/chord behavior was adopted and no production hotkeys were frozen.
+
+### Limitations / deferrals
+
+- Local macOS real-terminal execution `SKIPPED_CAPABILITY`; real-terminal
+  cross-platform smoke matrix remains TUI-05.
+- TUI-02 (composition seams), TUI-03 (shell/registry/palette/bindings), TUI-04
+  (integration) not started.
+
 ## Stage-13 gate
 
 Stage 13 Bootstrap must not begin until the TUI track has completed normal

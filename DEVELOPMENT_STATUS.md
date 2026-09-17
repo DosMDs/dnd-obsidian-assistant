@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (TUI-00)
+**Last updated:** 2026-09-17 (TUI-01)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
-**Active work:** Textual TUI Architecture Track (next: TUI-01); Stage 13 — Bootstrap is gated on TUI-track completion
+**Active work:** Textual TUI Architecture Track (next: TUI-02); Stage 13 — Bootstrap is gated on TUI-track completion
 **Current branch:** `feat/textual-tui`
 
 ## Status model
@@ -49,8 +49,10 @@ presentation track, followed by Stage 13 and Stage 14. The track is recorded in
 `docs/adr/0008-textual-tui-presentation-architecture.md`.
 
 TUI-00 `DONE` — repository presentation architecture / ADR / track alignment
-(docs-only). Dependency-ordered track: TUI-00 … TUI-06. Next: TUI-01 — Textual
-dependency qualification + minimal spike.
+(docs-only). TUI-01 `DONE` — Textual dependency qualification + minimal spike;
+`textual==8.2.8` pinned with result `PASS`. Dependency-ordered track:
+TUI-00 … TUI-06. Next: TUI-02 — smallest capability-oriented shared composition
+seams.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
