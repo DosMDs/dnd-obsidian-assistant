@@ -389,6 +389,7 @@ macOS is not claimed as locally verified. No new CI system was introduced.
   tests/unit/test_composition_session_runtime.py
   tests/contract/test_composition_boundaries.py
   tests/unit/test_cli_agent_runtime.py
+  tests/integration/test_cli_ask_mocked.py
   docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
   DEVELOPMENT_STATUS.md
   ```

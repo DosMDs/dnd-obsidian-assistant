@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (TUI-01)
+**Last updated:** 2026-09-17 (TUI-02)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
 **Active work:** Textual TUI Architecture Track (next: TUI-03); Stage 13 — Bootstrap is gated on TUI-track completion
