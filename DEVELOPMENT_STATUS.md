@@ -1,10 +1,10 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (S12-06)
-**Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 12 `DONE`; Stage 13 `NOT STARTED`
-**Active stage:** Stage 12 — Campaign State (`DONE`); next Stage 13 — Bootstrap
-**Current branch:** `feat/campaign-state`
+**Last updated:** 2026-09-17 (TUI-00)
+**Current milestone:** `v0.4.5-dev — Interactive TUI`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
+**Active work:** Textual TUI Architecture Track (next: TUI-01); Stage 13 — Bootstrap is gated on TUI-track completion
+**Current branch:** `feat/textual-tui`
 
 ## Status model
 
@@ -34,8 +34,29 @@ records live in `docs/stages/`, `docs/migrations/`, `docs/adr/` and Git.
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
-| 13. Bootstrap | NOT STARTED | — |
+| Textual TUI Architecture Track (non-numbered) | IN PROGRESS | `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
+| 13. Bootstrap | NOT STARTED | Gated on TUI-track completion (not `BLOCKED`) |
 | 14. Evals / Hardening | NOT STARTED | — |
+
+## Current work — Textual TUI Architecture Track
+
+After Stage 12, the accepted product direction is a post-Stage-12 Textual TUI
+presentation track, followed by Stage 13 and Stage 14. The track is recorded in
+`docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md`; the architecture decision is
+`docs/adr/0008-textual-tui-presentation-architecture.md`.
+
+TUI-00 `DONE` — repository presentation architecture / ADR / track
+alignment (docs-only). Dependency-ordered track: TUI-00 … TUI-06.
+
+Textual is presentation-only. Obsidian Vault remains the only campaign Source of
+Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
+the side-effect authorization boundary, and Typer remains supported for
+scripting, administration, bootstrap, recovery, diagnostics and evals. UI
+enabled/visible state is never authorization.
+
+Stage 13 must not begin until the TUI track has completed normal implementation,
+review, repository integration/status reconciliation and independent acceptance
+(TUI-06). Stage 13 is `NOT STARTED` and gated, not `BLOCKED`.
 
 ## Current state — Stage 12
 
@@ -129,14 +150,19 @@ recomputed) is `CORRUPT`, never `CURRENT`; a manifest `os.replace` failure
 through the real shared `atomic_write_text` leaves no temp orphan, preserves
 the previous manifest bytes and never yields `CURRENT`; and an unrelated
 `State/My Notes.md` survives a real source-changed rebuild while the managed
-generation stays `CURRENT`. Stage 12 is `DONE`; Stage 13 — Bootstrap is next.
+generation stays `CURRENT`. Stage 12 is `DONE`; the Textual TUI Architecture
+Track is the next roadmap work (Stage 13 follows after the track completion
+gate).
 A successful apply is not itself an independent staleness signal; a fresh
 derivation's fingerprint comparison determines it.
 
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for Stage 12 (Stage 12 DONE).
+No confirmed blocker for Stage 13.
+Sequencing gate (not a blocker): Stage 13 must not begin until the Textual TUI
+  Architecture Track completes implementation, review, integration/status
+  reconciliation and independent acceptance (TUI-06).
 Known source gaps (accepted limitations, not blockers):
   TimelineEvent has no persistence/collection -> upcoming_deadlines unavailable.
   No canonical CalendarDefinition source -> game date omitted unless supplied.
@@ -185,7 +211,9 @@ S12-03 DONE — materialization + rebuild/staleness/corruption
 S12-04 DONE — visibility projection + focused Fast-Agent consumer integration
 S12-05 DONE — hardening / failure injection / cross-platform safety
 S12-06 DONE — full Stage-12 review / completion
-Next: Stage 13 — Bootstrap (NOT STARTED)
+TUI-00 DONE — repository presentation architecture / ADR / track alignment (docs-only)
+Next: TUI-01 — Textual dependency qualification + minimal spike
+Stage 13 — Bootstrap (NOT STARTED; gated on TUI-track completion, not BLOCKED)
 ```
 
 ## Documentation map
@@ -194,7 +222,9 @@ Next: Stage 13 — Bootstrap (NOT STARTED)
 |---|---|
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
+| `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` | Textual TUI track plan/history/evidence (TUI-00…TUI-06) |
 | `docs/adr/0007-campaign-state-materialized-derived-projection.md` | Campaign State architecture decision |
+| `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/stages/11_POST_SESSION_PROCESSOR.md` | Stage-11 architecture/history |
 | `docs/stages/10_CHANGESET.md` | Stage-10 architecture/history |
 | `docs/adr/0006-changeset-review-apply-boundary.md` | ChangeSet review/apply decision |

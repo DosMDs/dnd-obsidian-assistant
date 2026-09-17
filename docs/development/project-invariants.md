@@ -18,6 +18,12 @@ the user interface. Workflow/gate discipline lives in
 - Derived stores such as SQLite FTS, caches and embeddings must always be
   rebuildable from canonical Vault/raw data.
 - Prefer the smallest implementation that preserves these boundaries.
+- Presentation (Typer CLI, Textual TUI) is a replaceable mechanism layered
+  above application/composition. Domain, storage, tools, models and application
+  must never depend on Textual or on any presentation host. UI
+  enabled/visible/focus state is presentation guidance only and is never an
+  authorization boundary; every write-capable UI action still flows through
+  `ToolExecutor` / ChangeSet / revision / permission / audit / `VaultRepository`.
 - The always-on trust boundary (ToolExecutor authority, no arbitrary Vault
   filesystem/shell access) is defined in `AGENTS.md`.
 
@@ -28,6 +34,13 @@ the user interface. Workflow/gate discipline lives in
   model-facing structured data.
 - Keep Typer/Rich concerns in `cli/`; do not put business logic in CLI
   callbacks.
+- Keep Textual concerns in the presentation/composition host; do not put
+  business or write policy in widgets, key handlers, command-palette handlers or
+  ephemeral UI state. Typer and Textual must invoke the same shared
+  application/composition capabilities. Important operations use stable semantic
+  command IDs through one centralized dispatch surface (bindings, palette,
+  context actions, footer hints and help must not reimplement a command
+  independently).
 - Keep orchestration in `application/`, deterministic business rules in
   `domain/`, Markdown/YAML persistence, audit and locking in `storage/`, and
   Ollama-specific behavior behind `ModelGateway` providers in `models/`.
@@ -61,6 +74,12 @@ entities; sessions and raw JSONL logging; safe Vault read/write; exact/fuzzy/
 SQLite FTS search; generic deterministic calendar; Ollama ModelGateway; a fast
 agent with a limited Tool Registry; post-session processing; Summary and Recap;
 ChangeSet review/apply; existing-campaign bootstrap; pytest and basic model
+evals.
+
+A Textual TUI is accepted as a post-Stage-12 presentation track (see
+`docs/adr/0008-textual-tui-presentation-architecture.md`); it is
+presentation-only and does not change MVP domain/scope, and Typer remains
+supported for scripting, administration, bootstrap, recovery, diagnostics and
 evals.
 
 Do not add before demonstrated need:

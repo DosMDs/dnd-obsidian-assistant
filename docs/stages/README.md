@@ -28,6 +28,8 @@ Detailed ordinary stage records belong in `docs/stages/`. Cross-cutting migratio
 | Stage 9 — Fast Agent | `09_FAST_AGENT.md` |
 | Stage 10 — ChangeSet | `10_CHANGESET.md` |
 | Stage 11 — Post-session Processor | `11_POST_SESSION_PROCESSOR.md` |
+| Stage 12 — Campaign State | `12_CAMPAIGN_STATE.md` |
+| Textual TUI Architecture Track (non-numbered) | `TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 
 ## Active cross-cutting migration
 

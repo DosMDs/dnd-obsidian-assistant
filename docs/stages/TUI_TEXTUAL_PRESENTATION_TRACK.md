@@ -1,0 +1,269 @@
+# Textual TUI Architecture Track
+
+## Objective
+
+Introduce a first-class interactive terminal UI built with Textual, as a
+**presentation-only** front-end that shares trusted behavior with the existing
+Typer CLI, without changing the Obsidian Vault Source of Truth, the
+`ToolExecutor` authorization boundary, or any domain/storage/application
+contract.
+
+This document is the dependency-ordered plan, constraint record and history for
+the track. Current roadmap state lives in `DEVELOPMENT_STATUS.md`; the
+architecture decision lives in
+`docs/adr/0008-textual-tui-presentation-architecture.md`. This document does not
+duplicate mutable status.
+
+## Architectural position
+
+```text
+Typer CLI ───────┐
+                 ├──> shared composition + application-service boundary
+Textual TUI ─────┘
+                     ↓
+     application services → ToolExecutor / ChangeSet → domain / storage / Vault
+```
+
+- Textual is presentation-only. Screens, widgets, controllers, key handlers,
+  command-palette handlers and ephemeral UI state own no canonical semantics and
+  no write policy.
+- Typer remains the supported surface for scripting, administration, bootstrap,
+  recovery, diagnostics and evals. No second custom interactive REPL is planned.
+- Trusted behavior is already owned by `application/`, `domain/`, `storage/`,
+  `retrieval/` and `tools/`. The track adds a shared UI-agnostic composition
+  boundary above them.
+
+## Hard constraints
+
+```text
+Obsidian Vault = only canonical campaign Source of Truth
+Python         = trusted domain/application/storage logic
+ToolExecutor   = trusted side-effect authorization boundary
+LLM/framework  = replaceable untrusted mechanism
+Textual        = replaceable presentation mechanism
+```
+
+Forbidden dependency direction:
+
+```text
+domain      -> textual   FORBIDDEN
+storage     -> textual   FORBIDDEN
+tools       -> textual   FORBIDDEN
+models      -> textual   FORBIDDEN
+application -> textual   FORBIDDEN
+```
+
+- UI `enabled` / `visible` / focus / screen state is presentation guidance only
+  and is **never** authorization.
+- All write-capable paths preserve `ToolExecutor`, ChangeSet review/apply,
+  revision checks, permission/session checks, audit and `VaultRepository`.
+- Stage-12 Campaign State semantics are unchanged. Recently touched entities are
+  never reinterpreted as current location, active quests, important NPCs, party
+  goals, unresolved threads or deadlines.
+
+## Semantic command architecture
+
+Command/hotkey architecture is a foundation requirement, not later polish.
+
+- Important operations use stable **semantic command IDs**.
+- One centralized semantic command registry/dispatch surface feeds:
+  ```text
+  hotkeys / key bindings
+  command palette
+  context actions
+  footer hints
+  help / discoverability
+  ```
+  These surfaces must not implement the same command independently.
+- Conceptual per-command metadata (final field set may evolve in TUI-03):
+  ```text
+  id            stable semantic command ID
+  title/help    Russian user-facing label + description
+  scope         global | screen/context
+  applicable    context predicate (screen/selection present?)
+  enabled       enabled predicate (presentation guidance only)
+  handler       invokes an application/composition capability
+  default_keys  physical-key aliases (replaceable, never canonical)
+  palette       visible in command palette yet/no
+  ```
+- Physical key bindings are replaceable aliases for semantic commands.
+- Global commands are separated from context/screen commands.
+- Ordinary bindings plus the semantic command registry and command palette are
+  the required foundation. Leader/chord bindings are **optional**: only
+  qualified/adopted if a concrete UX need justifies it and cross-platform
+  evidence supports it.
+- Every semantic command resolves to exactly one handler; exactly-once
+  invocation must be provable in headless tests.
+
+## Focus safety
+
+Focused text/multiline input must not leak ordinary typing into single-key
+global commands. This requires deterministic Textual headless evidence in a
+later task; it is not deferred to polish.
+
+## Async/worker boundary
+
+- The trusted synchronous runtime/services are not rewritten async.
+- Textual workers/async facilities host existing synchronous calls while
+  preserving:
+  ```text
+  responsive UI
+  exactly-once invocation
+  no implicit side-effect retry
+  explicit cancellation semantics
+  usable recovery after exception
+  existing ToolExecutor/runtime safety invariants
+  ```
+- Cancellation is a UI decision; it is never rollback or retry of a started
+  write.
+- The adapter lives in the presentation/composition host layer, not in
+  domain/application/storage/tools.
+
+## Testing and cross-platform evidence strategy
+
+Deterministic headless evidence uses Textual `App.run_test()` / `Pilot`.
+Screenshots are not the primary semantic-correctness strategy. The track must
+eventually prove, with literal assertions/counters:
+
+```text
+semantic command -> intended action
+hotkey exactly once
+palette and hotkey reach the same semantic action
+disabled/context-inapplicable command does not execute
+focused input does not leak global single-key commands
+screen transitions
+resize/narrow layout remains usable
+worker responsiveness
+completion/error/cancel recovery
+write-capable UI action reaches the existing trusted authorization path
+no Textual dependency leak into trusted lower layers
+```
+
+The "no dependency leak" proof belongs in a focused new boundary test module,
+because `tests/contract/test_boundaries.py` is at its 1000-line ceiling.
+
+Real-terminal smoke matrix (manual; recorded honestly as manual):
+
+```text
+Windows Terminal — primary
+macOS terminal/iTerm-class — first-class
+Unicode/Cyrillic
+paste/multiline
+resize
+```
+
+A skipped platform is reported as a capability skip, never as verified coverage.
+
+## Maintainability constraints
+
+- Production modules: hard 700 physical lines; Test modules: hard 1000 physical
+  lines (`tests/contract/test_maintainability.py`).
+- Apply decomposition pressure before the limits.
+- `tests/contract/test_boundaries.py` must not grow; add focused new TUI
+  boundary tests instead.
+- `cli/changeset.py` (666) and `cli/agent_runtime.py` (498) are near the soft
+  review threshold; TUI-02 extraction must not grow them past the hard limit.
+
+## Task map
+
+```text
+TUI-00  repository presentation architecture / ADR / track alignment        docs-only
+TUI-01  Textual dependency qualification + minimal spike (pin only on pass)
+TUI-02  smallest capability-oriented shared composition seams (UI-agnostic)
+TUI-03  app shell + semantic command registry + palette + bindings + focus safety
+TUI-04  primary assistant/session/Campaign-State integration (read + write paths)
+TUI-05  interaction / cross-platform / error-recovery hardening + selected screens
+TUI-06  full track review / status cleanup / Stage-13 handoff
+```
+
+Dependency order is `TUI-00 → TUI-01 → TUI-02 → TUI-03 → TUI-04 → TUI-05 →
+TUI-06`. TUI-02 is Textual-independent and could run in parallel with TUI-01,
+but sequential execution is preferred to avoid pre-committing to a pin. No task
+may collapse the track.
+
+### TUI-00 — repository presentation architecture / ADR / track alignment
+
+Docs-only. Records the accepted direction, the presentation/application
+boundary, dependency rules, semantic command/focus/async/testing constraints and
+the Stage-13 gate. No dependency, production code, composition refactor or
+Stage-13 work.
+
+### TUI-01 — Textual dependency qualification + minimal spike
+
+Qualify an **exact candidate Textual release** against at least:
+
+```text
+Python 3.12+
+uv resolution + lockfile determinism
+Windows primary environment (Windows Terminal)
+macOS first-class environment (terminal/iTerm-class)
+Unicode / Cyrillic
+App startup / shutdown
+reactive / widget composition
+multiline input
+focus behavior
+resize / narrow terminal
+workers / background operations
+command palette
+bindings
+App.run_test()
+Pilot
+```
+
+Also qualify Textual's **test-integration strategy**. `pytest-asyncio` or any
+other new async-test dependency is **not presumed mandatory**; add one later
+only if qualification demonstrates a concrete need. Pin Textual only after
+qualification succeeds. No Node/Bun/TypeScript/Electron.
+
+### TUI-02 — smallest capability-oriented shared composition seams
+
+Extract the **smallest set of capability-oriented composition seams actually
+required by both Typer and Textual** from `cli/`, and rewire Typer with no
+behavior change. A monolithic composition root/facade that eagerly consolidates
+all current CLI wiring is rejected. Current candidate composition sites:
+`cli/agent_runtime.py`, `cli/session.py`, `cli/changeset.py`,
+`cli/post_session_runtime.py`, `cli/main.py`. Textual is not required in the
+core for this task.
+
+### TUI-03 — app shell + semantic command registry + palette + bindings + focus safety
+
+Textual app shell, centralized semantic command registry/dispatch, command
+palette, bindings and headless focus-safety tests.
+
+### TUI-04 — primary assistant / session / Campaign-State integration
+
+Wire assistant, session and Campaign-State views. Write-capable actions only
+through the existing trusted authorization path.
+
+### TUI-05 — interaction / cross-platform / error-recovery hardening
+
+Resize/narrow layout, Unicode/Cyrillic, paste/multiline, cancel/error recovery,
+and the real-terminal smoke matrix.
+
+### TUI-06 — full track review / status cleanup / Stage-13 handoff
+
+Full track review, documentation/status reconciliation, independent acceptance,
+and Stage-13 unblock.
+
+## Durable record — TUI-00 (2026-09-17)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`.
+- Docs-only BUILD. Changed files:
+  ```text
+  DEVELOPMENT_STATUS.md
+  docs/adr/0008-textual-tui-presentation-architecture.md
+  docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
+  docs/stages/README.md
+  docs/development/project-invariants.md
+  ```
+- No dependency change, no production code, no composition refactor, no Stage-13
+  work.
+- Stage 13/14 remain `NOT STARTED`; Stage 13 is gated on TUI-track completion
+  and independent acceptance.
+
+## Stage-13 gate
+
+Stage 13 Bootstrap must not begin until the TUI track has completed normal
+implementation, review, repository integration/status reconciliation and
+independent acceptance (TUI-06). Stage 13 is `NOT STARTED`, not `BLOCKED`.
