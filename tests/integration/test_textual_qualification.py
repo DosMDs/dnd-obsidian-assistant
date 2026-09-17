@@ -98,12 +98,21 @@ def _blocking_error(started: threading.Event, release: threading.Event) -> str:
     raise ValueError("qualification-boom")
 
 
-def _blocking_cancel(started: threading.Event, exited: threading.Event) -> str:
+def _blocking_cancel(
+    started: threading.Event,
+    observed_cancel: threading.Event,
+    exited: threading.Event,
+    calls: list[object],
+) -> str:
+    calls.append(object())
     started.set()
     worker = get_current_worker()
     while not worker.is_cancelled:
         time.sleep(0.002)
-    exited.set()
+    observed_cancel.set()
+    # Cooperative exit: confirm cancellation, then signal termination.
+    if worker.is_cancelled:
+        exited.set()
     return "cancelled"
 
 
@@ -300,9 +309,11 @@ class TestWorkers:
             app = _QualificationApp()
             async with app.run_test(size=(60, 20)) as pilot:
                 started = threading.Event()
+                observed_cancel = threading.Event()
                 exited = threading.Event()
+                calls: list[object] = []
                 worker: Worker[str] = app.run_worker(
-                    lambda: _blocking_cancel(started, exited),
+                    lambda: _blocking_cancel(started, observed_cancel, exited, calls),
                     thread=True,
                     exit_on_error=False,
                 )
@@ -317,10 +328,15 @@ class TestWorkers:
 
                 assert isinstance(raised, WorkerCancelled)
                 assert worker.state is WorkerState.CANCELLED
-                # A CANCELLED thread may still be running; prove cooperative exit.
+                # The controlled callable itself observed cancellation...
+                assert await asyncio.to_thread(observed_cancel.wait, _WAIT_TIMEOUT), (
+                    "cancelled qualification callable did not observe cancellation"
+                )
+                # ...and reached its cooperative-exit signal (thread terminated).
                 assert await asyncio.to_thread(exited.wait, _WAIT_TIMEOUT), (
                     "cancelled qualification thread did not terminate"
                 )
+                assert len(calls) == 1, "callable must run exactly once (no framework retry)"
                 await pilot.pause()
 
         _run(scenario())
