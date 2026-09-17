@@ -3,7 +3,7 @@
 **Last updated:** 2026-09-17 (TUI-04)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
-**Active work:** Textual TUI Architecture Track (next: TUI-04); Stage 13 — Bootstrap is gated on TUI-track completion
+**Active work:** Textual TUI Architecture Track (next: TUI-05); Stage 13 — Bootstrap is gated on TUI-track completion
 **Current branch:** `feat/textual-tui`
 
 ## Status model

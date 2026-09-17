@@ -6,18 +6,25 @@ recently-touched references.  Internal ``CampaignState``, manifest,
 fingerprint, provenance, cause and raw detail are structurally absent.
 
 Status labels are fixed Russian renderings of the trusted status enum; no raw
-inspection detail is forwarded.  Inspection is a gated read; rebuild is the
-explicit exclusive derived-maintenance operation.
+inspection detail is forwarded.
+
+Inspection **and** rebuild are exclusive operations sharing the Campaign-State
+in-flight owner.  Publication replaces managed artifacts individually and
+writes the manifest last, so a concurrent inspect could observe a mixed
+generation and transiently classify a valid in-progress publication as
+``CORRUPT``.  Presentation-level serialization is deliberately conservative; it
+is not the trusted consistency/authorization boundary.  Assistant execution can
+lazily rebuild Campaign State through its provider, so the same shared gate also
+serializes inspect against assistant submission and session mutation.
 """
 
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
 from textual.widgets import Button, Static
-from textual.worker import Worker, WorkerState
 
 from dnd_assistant.composition.campaign_state import (
     CampaignStateStatus,
@@ -32,8 +39,6 @@ from dnd_assistant.tui.services import (
 from dnd_assistant.tui.view import CapabilityView
 
 __all__ = ["CampaignStateView", "render_campaign_state_view", "STATUS_LABELS"]
-
-_READ_GROUP = "campaign-state-read"
 
 STATUS_LABELS: dict[CampaignStateStatus, str] = {
     CampaignStateStatus.MISSING: "не создано",
@@ -67,7 +72,7 @@ class CampaignStateView(CapabilityView):
 
     WORKER_OWNER = EXCLUSIVE_CAMPAIGN_STATE
 
-    def __init__(self, **kwargs: object) -> None:
+    def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._capability: CampaignStateCapabilityProtocol | None = None
 
@@ -95,16 +100,8 @@ class CampaignStateView(CapabilityView):
     # ── Command entry points ────────────────────────────────────────────────
 
     def reload(self) -> None:
-        """Read-only inspection (not gated)."""
-        if self._capability is None:
-            return
-        self.run_worker(
-            self._run_inspect,
-            name="campaign-state.inspect",
-            group=_READ_GROUP,
-            thread=True,
-            exit_on_error=False,
-        )
+        """Exclusive inspection (serialized against publication and writes)."""
+        self._start_exclusive(name="campaign-state.inspect", work=self._run_inspect)
 
     def rebuild(self) -> None:
         """Explicit exclusive derived rebuild."""
@@ -132,22 +129,6 @@ class CampaignStateView(CapabilityView):
 
     def _handle_result(self, result: object) -> None:
         self._apply(cast(CampaignStateOutcome, result))
-
-    def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
-        super().on_worker_state_changed(event)
-        worker = event.worker
-        if worker.group != _READ_GROUP:
-            return
-        if event.state not in (
-            WorkerState.SUCCESS,
-            WorkerState.ERROR,
-            WorkerState.CANCELLED,
-        ):
-            return
-        if event.state is WorkerState.SUCCESS:
-            self._apply(cast(CampaignStateOutcome, worker.result))
-        elif event.state is WorkerState.ERROR and worker.error is not None:
-            raise worker.error
 
     def _apply(self, outcome: CampaignStateOutcome) -> None:
         error_widget = self.query_one("#campaign-state-error", Static)

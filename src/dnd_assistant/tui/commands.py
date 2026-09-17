@@ -438,6 +438,7 @@ def default_commands() -> tuple[SemanticCommand, ...]:
             description="Повторно проверить состояние кампании",
             handler=_campaign_state_reload,
             scope=CommandScope.screen("campaign-state"),
+            enabled=_idle,
         ),
         SemanticCommand(
             id="campaign-state.rebuild",

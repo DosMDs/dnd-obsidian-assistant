@@ -463,10 +463,16 @@ class TestBusyPredicates:
             assert dispatcher.evaluate(command_id) is CommandAvailability.DISABLED
             assert dispatcher.dispatch(command_id) is DispatchResult.DISABLED
 
-    def test_read_only_commands_available_while_busy(self) -> None:
+    def test_session_status_refresh_available_while_busy(self) -> None:
         context = CommandContext(context_id="session", busy_owner="assistant")
         dispatcher = self._dispatcher_for("session.refresh", context=context)
         assert dispatcher.evaluate("session.refresh") is CommandAvailability.ENABLED
+
+    def test_campaign_state_reload_disabled_while_busy(self) -> None:
+        context = CommandContext(context_id="campaign-state", busy_owner="assistant")
+        dispatcher = self._dispatcher_for("campaign-state.reload", context=context)
+        assert dispatcher.evaluate("campaign-state.reload") is CommandAvailability.DISABLED
+        assert dispatcher.dispatch("campaign-state.reload") is DispatchResult.DISABLED
 
     def test_session_mutation_in_flight_blocks_assistant(self) -> None:
         context = CommandContext(context_id="assistant", busy_owner="session")

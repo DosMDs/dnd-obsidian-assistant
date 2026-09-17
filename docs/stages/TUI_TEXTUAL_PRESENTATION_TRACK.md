@@ -555,7 +555,7 @@ are omitted. No custom palette widget. No fallback was needed.
 
 ```text
 tui/app.py             273   app lifecycle, launch-services wiring, hosts/dispatch
-tui/commands.py        454   semantic registry + CommandHost/CommandContext (Textual-free)
+tui/commands.py        455   semantic registry + CommandHost/CommandContext (Textual-free)
 tui/dispatch.py        125   single dispatcher (unchanged)
 tui/bindings.py         84   registry → Binding adapter (unchanged)
 tui/screens.py          53   MainScreen + TabbedContent
@@ -564,7 +564,7 @@ tui/inflight.py         69   single-owner presentation in-flight gate (Textual-f
 tui/services.py        252   launch context, capability protocols/adapters (Textual-free)
 tui/assistant.py       200   assistant view
 tui/session.py         262   session view
-tui/campaign_state.py  160   Campaign-State view
+tui/campaign_state.py  141   Campaign-State view (inspect + rebuild both gated)
 tui/launcher.py         31   run() entry point
 composition/audit_context.py     54   shared presentation-neutral AuditContext factory
 composition/campaign_state.py   167   Campaign-State capability + PLAYER-safe view DTO
@@ -591,11 +591,25 @@ cli/session.py         280   thin audit wrappers over the shared factory
 - Assistant preflight uses `compose_recovery_service(...).inspect_runtime_partition()`:
   blocking issues prevent model composition/run; externally-owned issues are a
   non-blocking hint. Session mutations use the same trusted partition.
-- A single-owner `InFlightGate` serializes assistant submission, session
-  start/note/end and Campaign-State rebuild at the presentation level (assistant
-  in flight blocks session mutation/rebuild and vice versa). Read-only session
-  status refresh and Campaign-State inspect are independent. This is UX
-  serialization, not the trust boundary.
+- A single-owner `InFlightGate` serializes the exclusive operations at the
+  presentation level:
+  ```text
+  exclusive gate:
+    assistant submission
+    session start/note/end
+    Campaign-State inspect/rebuild
+  independent read:
+    session status refresh
+  ```
+  Campaign-State inspect is gated because publication replaces managed
+  artifacts individually and writes the manifest last; a concurrent inspect
+  could transiently classify a valid in-progress publication as `CORRUPT`.
+  Assistant execution may lazily rebuild Campaign State through its provider, so
+  the shared gate also serializes inspect against assistant submission and
+  session mutation (and against another inspect). The `campaign-state.reload`
+  command carries the `_idle` presentation predicate so it is disabled while any
+  exclusive operation is active. This is UX serialization, not the trusted
+  consistency/authorization boundary.
 - Synchronous trusted work runs in Textual thread workers
   (`exit_on_error=False`); worker callables return values only and never touch
   UI. Expected `DndAssistantError` becomes a Russian error DTO; unexpected
@@ -654,6 +668,18 @@ retained. All registry bindings remain non-priority.
   `CURRENT` with only the PLAYER entity; DM/SYSTEM entities absent from the
   rendered body; all six statuses map to distinct Russian labels; non-CURRENT
   views expose no entity data; no invented categories.
+- Campaign-State presentation concurrency contract (deterministic blocking fake
+  capabilities, no timing-sensitive filesystem race): assistant in flight →
+  `campaign-state.reload` not executed and inspect calls `0`; inspect in flight
+  → `assistant.submit`, `session.start` and `campaign-state.rebuild` not
+  executed; rebuild in flight → reload not executed; duplicate reload while
+  inspect is running → exactly one inspect call; successful inspect releases the
+  gate, renders and allows later assistant/rebuild to execute; expected
+  `DndAssistantError` releases the gate with a Russian error and a usable app;
+  unexpected inspect exception is released by normal worker-state handling and
+  stays observable/test-failing. `tests/unit/test_tui_commands.py` additionally
+  proves `campaign-state.reload` is `DISABLED` while the gate is held and that
+  `session.refresh` remains available.
 - CLI audit provenance preserved (`source="cli"`, `_now_utc`/
   `_new_operation_id` compatibility) and composition reuse of
   `FAST_AGENT_RECENT_SESSION_LIMIT` asserted literally.
@@ -662,12 +688,13 @@ retained. All registry bindings remain non-priority.
   capability modules import no CLI; `commands/dispatch/inflight/services` stay
   Textual-free; `TuiServices` exposes no locator surface; player-safe view field
   set; in-flight gate has no queue.
-- Gates: focused TUI/assistant/session/Campaign-State/composition suites 195
-  passed; full suite `6861 passed, 131 skipped`; Ruff check/format clean;
-  Pyright 0 errors; `git diff --check` clean. One transient full-suite failure
-  in `test_campaign_state_materialization` (Windows `shutil.rmtree` timing) was
-  observed once, then passed in isolation, in a unit+integration run and in two
-  subsequent canonical full runs.
+- Gates: focused corrected TUI/assistant/session/Campaign-State/composition/
+  boundary suites 126 passed; full suite `6869 passed, 131 skipped`; Ruff
+  check/format clean; Pyright 0 errors; `git diff --check` clean. One transient
+  full-suite failure in `test_campaign_state_materialization` (Windows
+  `shutil.rmtree` timing) was observed once during initial TUI-04 development,
+  then passed in isolation, in a unit+integration run and in subsequent
+  canonical full runs.
 
 ### Limitations / deferrals
 
