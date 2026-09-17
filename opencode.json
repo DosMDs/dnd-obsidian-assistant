@@ -83,6 +83,8 @@
           "where*": "allow",
           "which*": "allow",
           "Get-Command*": "allow",
+		  "echo": "allow",
+		  "echo *": "allow",
 
           "rg *": "allow",
           "grep *": "allow",

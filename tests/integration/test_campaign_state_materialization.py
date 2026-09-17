@@ -379,6 +379,50 @@ class TestRepairAndPartial:
         )
 
 
+# ── Unrelated State preservation ──────────────────────────────────────────
+
+
+class TestUnrelatedStatePreservation:
+    def test_unrelated_state_note_survives_rebuild(self, tmp_path: Path) -> None:
+        from dnd_assistant.application.campaign_state_materialization import (
+            CampaignStateStatus,
+            inspect_campaign_state,
+        )
+
+        services = _services(tmp_path)
+        create_entity(services, make_entity("npc-aria"))
+        close_session(
+            services, "S001", finish=BASE_START + timedelta(hours=1), touched=("npc-aria",)
+        )
+
+        services.store.state_dir.mkdir()
+        note = services.store.state_dir / "My Notes.md"
+        note.write_text("player notes", encoding="utf-8")
+
+        rebuild(services)
+        assert note.read_text(encoding="utf-8") == "player notes"
+
+        # Canonical source change forces a real re-publication of generation B.
+        services.world_time.set_current_world_time(
+            999,
+            expected_revision=1,
+            audit=make_audit_context(operation_id="wt-set", real_time=BASE_START),
+        )
+        rebuild(services)
+        assert note.read_text(encoding="utf-8") == "player notes"
+
+        assert (
+            inspect_campaign_state(
+                vault_repository=services.vault,
+                session_repository=services.metadata,
+                world_time_repository=services.world_time,
+                derived_state_store=services.store,
+                recent_session_limit=5,
+            ).status
+            is CampaignStateStatus.CURRENT
+        )
+
+
 # ── Calendar ──────────────────────────────────────────────────────────────
 
 

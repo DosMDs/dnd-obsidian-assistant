@@ -137,6 +137,25 @@ def _fault_before_or_after(
     monkeypatch.setattr(ds, "atomic_write_text", hook)
 
 
+def _fail_manifest_replace(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make the shared atomic ``os.replace`` fail only for the manifest leaf.
+
+    Patches the real ``dnd_assistant.storage.atomic.os.replace`` seam so the
+    actual shared ``atomic_write_text`` implementation runs (create temp, write,
+    fsync, validate) and only the final atomic swap of the manifest fails.
+    """
+    import dnd_assistant.storage.atomic as atomic_mod
+
+    original = atomic_mod.os.replace
+
+    def failing_replace(src: str, dst: str) -> None:
+        if Path(dst).name == MANIFEST_FILENAME:
+            raise OSError(30, "Read-only file system")
+        original(src, dst)
+
+    monkeypatch.setattr(atomic_mod.os, "replace", failing_replace)
+
+
 def _tmp_files(store: ObsidianDerivedStateStore) -> list[Path]:
     if not store.state_dir.is_dir():
         return []
@@ -296,6 +315,36 @@ class TestPostCommitManifest:
 
         _patch_build(monkeypatch, [hidden])
         assert _inspect(services, services.store).status is CampaignStateStatus.CURRENT
+
+
+class TestManifestReplaceFailure:
+    def test_manifest_os_replace_failure_never_false_current(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        services = _services(tmp_path)
+        _publish_state(services.store, make_state(_FP_A, tick=100))
+        before_manifest = services.store.read_manifest_text()
+        assert before_manifest is not None
+
+        _fail_manifest_replace(monkeypatch)
+
+        changed = make_build_result(_FP_B, tick=999)
+        _patch_build(monkeypatch, [changed, changed])
+        with pytest.raises(StorageError):
+            _rebuild(services, services.store)
+
+        # The failed atomic swap cleans its temp file and leaves the previous
+        # manifest bytes untouched.
+        assert _tmp_files(services.store) == []
+        assert services.store.read_manifest_text() == before_manifest
+
+        # Artifacts B were published before the manifest swap failed, so the
+        # observed mixed generation (artifacts B + manifest A) must never be
+        # CURRENT against fresh source witness B.
+        _patch_build(monkeypatch, [changed])
+        status = _inspect(services, services.store).status
+        assert status is CampaignStateStatus.CORRUPT
+        assert status is not CampaignStateStatus.CURRENT
 
 
 # ── Source-derivation failures: zero publication ───────────────────────────

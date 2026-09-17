@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (S12-05)
+**Last updated:** 2026-09-17 (S12-06)
 **Current milestone:** `v0.3-dev — Fast Assistant`
-**Roadmap position:** Stage 11 `DONE`; Stage 12 `IN PROGRESS`
-**Active stage:** Stage 12 — Campaign State (S12-06 next)
+**Roadmap position:** Stage 12 `DONE`; Stage 13 `NOT STARTED`
+**Active stage:** Stage 12 — Campaign State (`DONE`); next Stage 13 — Bootstrap
 **Current branch:** `feat/campaign-state`
 
 ## Status model
@@ -33,7 +33,7 @@ records live in `docs/stages/`, `docs/migrations/`, `docs/adr/` and Git.
 | 9. Fast Agent | DONE | `docs/stages/09_FAST_AGENT.md` |
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
-| 12. Campaign State | IN PROGRESS | `docs/stages/12_CAMPAIGN_STATE.md` |
+| 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | 13. Bootstrap | NOT STARTED | — |
 | 14. Evals / Hardening | NOT STARTED | — |
 
@@ -118,14 +118,25 @@ and cross-generation replay never produce a false `CURRENT`, so the no-lock MVP
 is retained. Lazy provider repairs `MISSING/STALE/CORRUPT/OUTDATED`; source
 failures before `publish()` write nothing; audit taxonomy unchanged.
 
-Next: S12-06 — full Stage-12 review / completion. A successful apply is not
-itself an independent staleness signal; a fresh derivation's fingerprint
-comparison determines it.
+S12-06 `DONE` — full Stage-12 historical review/completion. The complete
+S12-00→S12-05 range was reviewed (architecture, domain/schema, source
+collection, fingerprint identity, materialization/path authority, status/
+concurrency, PLAYER noninterference, Fast-Agent/agent-v3, search isolation,
+ChangeSet isolation, calendar, line counts). Three literal completion
+regressions were added with no production-code change: both-artifact
+coordinated tamper (both Markdown artifacts edited, both manifest hashes
+recomputed) is `CORRUPT`, never `CURRENT`; a manifest `os.replace` failure
+through the real shared `atomic_write_text` leaves no temp orphan, preserves
+the previous manifest bytes and never yields `CURRENT`; and an unrelated
+`State/My Notes.md` survives a real source-changed rebuild while the managed
+generation stays `CURRENT`. Stage 12 is `DONE`; Stage 13 — Bootstrap is next.
+A successful apply is not itself an independent staleness signal; a fresh
+derivation's fingerprint comparison determines it.
 
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for Stage 12.
+No confirmed blocker for Stage 12 (Stage 12 DONE).
 Known source gaps (accepted limitations, not blockers):
   TimelineEvent has no persistence/collection -> upcoming_deadlines unavailable.
   No canonical CalendarDefinition source -> game date omitted unless supplied.
@@ -173,7 +184,8 @@ S12-02 DONE — deterministic source collection / evidence binding
 S12-03 DONE — materialization + rebuild/staleness/corruption
 S12-04 DONE — visibility projection + focused Fast-Agent consumer integration
 S12-05 DONE — hardening / failure injection / cross-platform safety
-S12-06 Next — full Stage-12 review / completion
+S12-06 DONE — full Stage-12 review / completion
+Next: Stage 13 — Bootstrap (NOT STARTED)
 ```
 
 ## Documentation map

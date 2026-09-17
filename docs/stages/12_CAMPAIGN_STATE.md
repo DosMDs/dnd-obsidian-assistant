@@ -968,3 +968,93 @@ Deferred beyond S12-05: nothing further in hardening; S12-06 owns the full
 Stage-12 review/completion. Model-assisted narrative, semantic ranking,
 TimelineEvent/CalendarDefinition persistence, new ChangeSet operations, DM mode
 and Web UI remain out of scope.
+
+## 20. S12-06 record — full Stage-12 historical review / completion
+
+```text
+Task:      S12-06 — full Stage-12 historical review / completion
+Routing:   PLAN_REQUIRED (PLAN only) -> accepted PLAN -> BUILD
+Branch:    feat/campaign-state
+Baseline:  fb55a3bb9fff33fb2dcc586ee824fca526bac4c5 (S12-05)
+```
+
+S12-06 is a review/completion task, not a feature task. The complete Stage-12
+historical range was reviewed:
+
+```text
+aec41021..fb55a3bb
+aec41021 pre-Stage-12   fee00dab S12-00  0fbd7e70 S12-01  e3f62db4 S12-02
+028a156a S12-02-C1      aa366c9d S12-03  7b6d63f9 S12-03-C1
+b501ee6d S12-04         fb55a3bb S12-05
+```
+
+Every commit was classified Stage-12 implementation/correction/documentation;
+no concurrent-unrelated or unexpected commit exists. Architecture, domain/schema,
+source collection, fingerprint identity, materialization/path authority,
+status/concurrency, PLAYER noninterference, Fast-Agent/agent-v3 consistency,
+search/retrieval isolation, ChangeSet/post-session isolation, calendar authority,
+dependency direction and line counts were all revalidated against the final
+code. No production defect, architecture-boundary violation, or reachable
+false-`CURRENT` path was found.
+
+### Completion evidence added (no production change)
+
+The independent review identified two places where the S12-05 wording was
+stronger than the literal committed evidence, plus one criterion lacking
+end-to-end literal coverage. Three focused regressions were added:
+
+| Gap | Literal evidence |
+|---|---|
+| both-artifact coordinated tamper | `tests/unit/test_campaign_state_materialization.py::TestIntegrityVerification::test_both_artifact_coordinated_edit_is_never_current` |
+| manifest `os.replace` failure through real atomic writer | `tests/unit/test_campaign_state_failure_injection.py::TestManifestReplaceFailure::test_manifest_os_replace_failure_never_false_current` |
+| unrelated `State/` note preservation across rebuild | `tests/integration/test_campaign_state_materialization.py::TestUnrelatedStatePreservation::test_unrelated_state_note_survives_rebuild` |
+
+The manifest-replacement regression patches only the destination-conditional
+`dnd_assistant.storage.atomic.os.replace` seam, so the actual shared
+`atomic_write_text` lifecycle (temp create/write/fsync/validate) executes;
+only the final manifest swap fails. It proves: `StorageError`, no temp orphan,
+previous manifest bytes unchanged, and a mixed artifacts-B/manifest-A generation
+that is `CORRUPT` and never `CURRENT` against fresh witness B.
+
+### Local git config change
+
+`opencode.json` carried a user-authorized local manual change
+(`agent.build.permission.bash`: `"echo": "allow"`, `"echo *": "allow"`),
+classified `USER_AUTHORIZED_LOCAL_CONFIG_CHANGE` and included in the S12-06
+commit. It is development-environment configuration only and is **not** Campaign
+State acceptance evidence.
+
+### Changed files
+
+```text
+tests/unit/test_campaign_state_materialization.py       (both-artifact tamper regression)
+tests/unit/test_campaign_state_failure_injection.py     (manifest os.replace regression)
+tests/integration/test_campaign_state_materialization.py (unrelated-State preservation)
+docs/stages/12_CAMPAIGN_STATE.md, DEVELOPMENT_STATUS.md (S12-06 completion record)
+opencode.json                                            (user-authorized local config)
+```
+
+Production-code changes: **NONE**. No new dependency, CLI command, model
+capability, ChangeSet operation, CalendarDefinition/TimelineEvent persistence,
+lock, semantics or Stage-13 work. `tests/contract/test_boundaries.py` is
+untouched (1000-line ceiling).
+
+### Quality gates (development host)
+
+```text
+focused S12-06 regressions: 3 passed
+focused Stage-12 suite:     467 passed, 7 skipped
+uv run pytest:              see S12-06 BUILD Final Report (0 failures)
+uv run ruff check .:        clean
+uv run ruff format --check .: clean
+uv run pyright:             0 errors
+git diff --check:           clean
+```
+
+Platform-capability symlink skips (POSIX/privileged) are reported as
+`SKIPPED_CAPABILITY`, never as verified coverage.
+
+Verdict: Stage 12 — Campaign State is `DONE`; the no-lock MVP, no parent-directory
+fsync, residual OS-level TOCTOU, no canonical CalendarDefinition source, no
+TimelineEvent persistence and internal-manifest semantics remain accepted
+limitations. Next: Stage 13 — Bootstrap (do not start from this task).

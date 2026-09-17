@@ -209,6 +209,37 @@ class TestIntegrityVerification:
         inspection = _inspect(services, services.store)
         assert inspection.status is CampaignStateStatus.CORRUPT
 
+    def test_both_artifact_coordinated_edit_is_never_current(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        services = _services(tmp_path)
+        _publish_state(services.store, make_state(_FP_A))
+
+        # Edit BOTH managed Markdown artifacts and recompute BOTH manifest hashes
+        # so the manifest is internally self-consistent with the tampered bytes.
+        edited = {
+            ARTIFACT_FILENAMES[CampaignStateArtifact.WORLD_STATE]: b"# World State\n\nTampered.\n",
+            ARTIFACT_FILENAMES[CampaignStateArtifact.RECENTLY_TOUCHED]: b"# Touched\n\nTampered.\n",
+        }
+        digest_by_path: dict[str, str] = {}
+        for filename, data in edited.items():
+            (services.store.state_dir / filename).write_bytes(data)
+            digest_by_path[f"State/{filename}"] = hashlib.sha256(data).hexdigest()
+
+        def mutate(data: dict) -> None:
+            for entry in data["artifacts"]:
+                entry["content_hash"] = {
+                    "algorithm": "sha256",
+                    "digest": digest_by_path[entry["relative_path"]],
+                }
+
+        _rewrite_manifest(services.store, mutate)
+        _patch_build(monkeypatch, [make_build_result(_FP_A)])
+
+        # Deterministic re-render comparison catches the coordinated edit even
+        # though both stored hashes and the manifest agree.
+        assert _inspect(services, services.store).status is CampaignStateStatus.CORRUPT
+
     def test_edited_bytes_with_unchanged_manifest_hash_is_corrupt(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
