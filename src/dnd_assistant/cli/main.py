@@ -41,6 +41,19 @@ app.command(name="note")(_note_command)
 
 app.command(name="ask")(_ask_command)
 
+# ── TUI command ─────────────────────────────────────────────────────────────
+
+
+@app.command(name="tui")
+def _tui() -> None:
+    """Запустить интерактивный текстовый интерфейс (Textual TUI)."""
+
+    # Deferred import: a normal CLI import must not load the TUI/Textual.
+    from dnd_assistant.tui.launcher import run
+
+    run()
+
+
 # ── Index command group ─────────────────────────────────────────────────────
 
 index_app = typer.Typer(

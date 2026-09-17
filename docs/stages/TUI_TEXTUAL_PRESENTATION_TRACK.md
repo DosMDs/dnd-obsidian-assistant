@@ -396,6 +396,124 @@ macOS is not claimed as locally verified. No new CI system was introduced.
 - No `src/dnd_assistant/tui/**`, no ChangeSet/post-session/index composition,
   no standalone Campaign State composition, no Stage-13 work.
 
+## Durable record — TUI-03 (2026-09-17)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`.
+- Production Textual app shell, central semantic command registry/single
+  dispatcher, registry-derived bindings and command palette, footer
+  discoverability, global/context scope, `applicable`/`enabled` presentation
+  predicates, focus safety and a lazy `dnd tui` launcher. New package
+  `src/dnd_assistant/tui/`.
+- Changed files:
+  ```text
+  src/dnd_assistant/tui/__init__.py
+  src/dnd_assistant/tui/commands.py
+  src/dnd_assistant/tui/dispatch.py
+  src/dnd_assistant/tui/bindings.py
+  src/dnd_assistant/tui/screens.py
+  src/dnd_assistant/tui/app.py
+  src/dnd_assistant/tui/launcher.py
+  src/dnd_assistant/cli/main.py
+  tests/unit/test_tui_commands.py
+  tests/integration/test_tui_shell.py
+  tests/contract/test_tui_boundaries.py
+  tests/unit/test_cli_tui_launcher.py
+  docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
+  DEVELOPMENT_STATUS.md
+  ```
+- No `pyproject.toml`/`uv.lock` change (Textual stays `8.2.8`, no new
+  dependency), no composition change, no worker manager, no assistant/session/
+  Campaign-State integration, no write path, no Stage-13 work.
+
+### Production TUI module map (physical lines)
+
+```text
+tui/__init__.py       23   package marker; no eager internal imports
+tui/commands.py      269   semantic model, scope/context, registry, validation, inventory (Textual-free)
+tui/dispatch.py      125   single dispatcher + availability/result enums (Textual-free)
+tui/bindings.py       84   registry -> Textual Binding adapter + effective-key guard
+tui/screens.py        31   ShellScreen (Header/body/Footer)
+tui/app.py           129   DndTuiApp lifecycle + palette/check_action integration
+tui/launcher.py       16   run() entry point
+cli/main.py          138   adds lazy `dnd tui` command
+```
+
+### Production semantic command inventory (initial)
+
+| ID | title | description | scope | default keys | palette |
+|---|---|---|---|---|---|
+| `app.quit` | Выход | Закрыть приложение | global | `ctrl+q` | yes |
+| `app.command-palette` | Палитра команд | Открыть палитру команд | global | `ctrl+p` | no |
+| `app.help` | Справка | Показать справку и сочетания клавиш | global | `?`, `f1` | yes |
+
+### Stable semantic ID grammar
+
+```text
+segment := [a-z][a-z0-9]*(?:-[a-z0-9]+)*
+id      := segment(?:\.segment)+
+```
+
+Rejected: `-app.quit`, `app-.quit`, `app..quit`, `app.command--palette`,
+`App.quit`, `app_quit`, `app`, `.app.quit`, `app.`, `app.9quit`.
+
+### Registry validation (fail fast)
+
+Duplicate ID, invalid ID grammar, empty title/description, missing/non-callable
+handler, screen scope without a context, empty key alias, duplicate alias within
+one command, and raw key-alias collision across commands with overlapping scopes
+are all rejected before the app runs. The Textual binding adapter additionally
+rejects collisions after Textual's own key normalization (e.g. `?` vs
+`question_mark`) for overlapping scopes, using a framework `BindingsMap` rather
+than a duplicated normalization table; non-overlapping screen contexts may reuse
+an effective key.
+
+### Dispatch path
+
+```text
+physical key -> semantic_dispatch('<id>') -> App.action_semantic_dispatch ─┐
+palette item -> SystemCommand callback -> App.run_semantic_command ────────┤
+                                                                          ↓
+                                                    one SemanticDispatcher
+                                                                          ↓
+                                                    one registered handler
+```
+
+### Palette approach
+
+`ENABLE_COMMAND_PALETTE=False`; `ctrl+p` is a registry-owned ordinary binding
+for `app.command-palette`, whose handler pushes Textual's production
+`CommandPalette`. `App.get_system_commands` yields registry-derived entries only.
+`palette=False`, context-inapplicable, disabled and `applicable=False` commands
+are omitted. No custom palette widget. No fallback was needed.
+
+### Framework/evidence notes
+
+- `textual==8.2.8`; no `pytest-asyncio`. Headless `App.run_test()` via
+  `asyncio.run`.
+- Focus safety: focused `Input`/`TextArea` consume printable keys
+  (`isprintable()`), so the printable global `?` does not dispatch while typing;
+  Cyrillic typing round-trips. All registry-generated bindings are
+  `priority=False`.
+- Scope machinery proven with test-only screens/registries; no fake production
+  campaign screens.
+- Lazy launch: `dnd tui`; importing `dnd_assistant.cli.main` does not load
+  `dnd_assistant.tui`/`textual` (literal subprocess assertion + AST guard).
+- Boundary: trusted layers/composition do not import TUI; TUI does not import
+  CLI; `commands.py`/`dispatch.py` stay Textual-free.
+- Presentation predicates documented as UX-only (`applicable`/`enabled`) and
+  structurally guarded: `SemanticCommand` has no authorization/policy field and
+  the dispatcher imports no write-capable layer.
+- Gates: focused TUI suites 77 passed; TUI-01/TUI-02/TUI-03 regression suites
+  692 passed; full suite 6769 passed, 131 skipped; Ruff check/format clean;
+  Pyright 0 errors; `git diff --check` clean.
+
+### Limitations / deferrals
+
+- Real-terminal Windows/macOS smoke matrix remains TUI-05; macOS is not claimed.
+- TUI-04 integration (assistant/session/Campaign-State, Vault, workers,
+  write-capable actions) not started.
+
 ## Stage-13 gate
 
 Stage 13 Bootstrap must not begin until the TUI track has completed normal
