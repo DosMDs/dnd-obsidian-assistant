@@ -13,6 +13,7 @@ from pathlib import Path
 from typer.testing import CliRunner
 
 from dnd_assistant.cli.main import app as dnd_app
+from dnd_assistant.errors import StorageError
 from dnd_assistant.tui import launcher
 
 
@@ -118,6 +119,67 @@ def test_dnd_tui_missing_vault_directory_exits_nonzero(tmp_path: Path) -> None:
     )
     # Typer rejects the nonexistent --vault path at parse time.
     assert result.exit_code == 2
+
+
+def test_dnd_tui_expected_launch_error_maps_to_russian_exit_one(
+    monkeypatch, tmp_path: Path
+) -> None:
+    def failing_run(
+        *,
+        vault_root: Path,
+        config_path: Path,
+        profile_name: str,
+        allow_agent_write: bool = False,
+    ) -> None:
+        raise StorageError("vault недоступен")
+
+    monkeypatch.setattr(launcher, "run", failing_run)
+
+    result = CliRunner().invoke(
+        dnd_app,
+        [
+            "tui",
+            "--vault",
+            str(_make_vault(tmp_path)),
+            "--config",
+            str(_make_config(tmp_path)),
+            "--profile",
+            "test-agent",
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "Ошибка запуска TUI" in result.stderr
+    assert "vault недоступен" in result.stderr
+
+
+def test_dnd_tui_unexpected_launch_error_propagates(monkeypatch, tmp_path: Path) -> None:
+    def failing_run(
+        *,
+        vault_root: Path,
+        config_path: Path,
+        profile_name: str,
+        allow_agent_write: bool = False,
+    ) -> None:
+        raise RuntimeError("launch-boom")
+
+    monkeypatch.setattr(launcher, "run", failing_run)
+
+    result = CliRunner().invoke(
+        dnd_app,
+        [
+            "tui",
+            "--vault",
+            str(_make_vault(tmp_path)),
+            "--config",
+            str(_make_config(tmp_path)),
+            "--profile",
+            "test-agent",
+        ],
+    )
+
+    assert isinstance(result.exception, RuntimeError)
+    assert "launch-boom" in str(result.exception)
 
 
 def test_cli_import_does_not_eagerly_import_tui_or_textual() -> None:

@@ -17,9 +17,10 @@ from typing import cast
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal
-from textual.widgets import Button, Input, Static
+from textual.widgets import Button, Static, TextArea
 
 from dnd_assistant.errors import DndAssistantError
+from dnd_assistant.tui.errors import render_expected_error
 from dnd_assistant.tui.inflight import EXCLUSIVE_ASSISTANT
 from dnd_assistant.tui.services import (
     AssistantCapability,
@@ -71,7 +72,7 @@ class AssistantView(CapabilityView):
     def compose(self) -> ComposeResult:
         yield Static("Ассистент", id="assistant-title")
         yield Static("Режим: только чтение", id="assistant-mode")
-        yield Input(placeholder="Запрос к ассистенту…", id="assistant-query")
+        yield TextArea(id="assistant-query", soft_wrap=True, tab_behavior="focus")
         yield Static("", id="assistant-output")
         yield Static("", id="assistant-hint")
         with Horizontal(id="assistant-actions"):
@@ -99,10 +100,6 @@ class AssistantView(CapabilityView):
         elif event.button.id == "assistant-toggle-write":
             self.host.run_semantic_command("assistant.toggle-write")
 
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "assistant-query":
-            self.host.run_semantic_command("assistant.submit")
-
     # ── Command entry points ────────────────────────────────────────────────
 
     def toggle_write(self) -> None:
@@ -116,11 +113,15 @@ class AssistantView(CapabilityView):
         self._sync_mode()
 
     def submit_request(self) -> None:
-        """Capture one immutable submission snapshot and start one worker."""
+        """Capture one immutable submission snapshot and start one worker.
+
+        Emptiness is checked with ``strip()``; the value passed to the trusted
+        capability is the original ``TextArea`` text, never a stripped copy.
+        """
         if self._assistant is None or self._session is None:
             return
-        query = self.query_one("#assistant-query", Input).value.strip()
-        if not query:
+        query = self.query_one("#assistant-query", TextArea).text
+        if not query.strip():
             self.host.notify_user("Введите запрос.")
             return
         allow_agent_write = self._write_intent
@@ -141,7 +142,10 @@ class AssistantView(CapabilityView):
         try:
             partition = self._session.recovery_partition()
         except DndAssistantError as exc:
-            return AssistantOutcome(kind=AssistantOutcomeKind.ERROR, message=f"Ошибка: {exc}")
+            return AssistantOutcome(
+                kind=AssistantOutcomeKind.ERROR,
+                message=render_expected_error(exc),
+            )
 
         if partition.blocking:
             return AssistantOutcome(
@@ -156,7 +160,7 @@ class AssistantView(CapabilityView):
         except DndAssistantError as exc:
             return AssistantOutcome(
                 kind=AssistantOutcomeKind.ERROR,
-                message=f"Ошибка: {exc}",
+                message=render_expected_error(exc),
                 hint=hint,
             )
 
@@ -170,13 +174,11 @@ class AssistantView(CapabilityView):
 
     def _handle_result(self, result: object) -> None:
         outcome = cast(AssistantOutcome, result)
-        prefix = ""
-        if outcome.kind is AssistantOutcomeKind.CLARIFY:
-            prefix = "Уточнение: "
-        elif outcome.kind is AssistantOutcomeKind.ERROR:
-            prefix = ""
+        prefix = "Уточнение: " if outcome.kind is AssistantOutcomeKind.CLARIFY else ""
         self.query_one("#assistant-output", Static).update(prefix + outcome.message)
         self.query_one("#assistant-hint", Static).update(outcome.hint or "")
+        if outcome.kind is AssistantOutcomeKind.RESPOND:
+            self.query_one("#assistant-query", TextArea).clear()
         self._sync_controls()
 
     # ── Presentation sync ───────────────────────────────────────────────────

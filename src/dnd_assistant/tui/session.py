@@ -21,7 +21,9 @@ from dnd_assistant.domain.session import Session
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.storage.session_events import RawSessionEvent
 from dnd_assistant.tui.assistant import render_blocking_recovery
+from dnd_assistant.tui.errors import render_expected_error
 from dnd_assistant.tui.inflight import EXCLUSIVE_SESSION
+from dnd_assistant.tui.inputs import SingleLineInput, TouchedEntitiesInput
 from dnd_assistant.tui.services import SessionCapability, SessionOutcome
 from dnd_assistant.tui.view import CapabilityView
 
@@ -43,14 +45,18 @@ class SessionView(CapabilityView):
         super().__init__(**kwargs)
         self._session: SessionCapability | None = None
         self._has_active_session = False
+        self._pending_op: str | None = None
 
     # ── Composition / wiring ────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
         yield Static("Сессия", id="session-title")
         yield Static("Статус не загружен.", id="session-status")
-        yield Input(placeholder="Текст заметки…", id="session-note-input")
-        yield Input(placeholder="ID затронутых сущностей (через запятую)…", id="session-touched")
+        yield SingleLineInput(placeholder="Текст заметки…", id="session-note-input")
+        yield TouchedEntitiesInput(
+            placeholder="ID затронутых сущностей (через запятую)…",
+            id="session-touched",
+        )
         with Horizontal(id="session-actions"):
             yield Button("Обновить", id="session-refresh")
             yield Button("Начать", id="session-start", variant="primary")
@@ -94,16 +100,22 @@ class SessionView(CapabilityView):
         )
 
     def start_session(self) -> None:
-        self._start_exclusive(name="session.start", work=self._run_start)
+        self._pending_op = "session.start"
+        if not self._start_exclusive(name="session.start", work=self._run_start):
+            self._pending_op = None
 
     def add_note(self) -> None:
         text = self.query_one("#session-note-input", Input).value
-        self._start_exclusive(name="session.note", work=partial(self._run_note, text))
+        self._pending_op = "session.note"
+        if not self._start_exclusive(name="session.note", work=partial(self._run_note, text)):
+            self._pending_op = None
 
     def end_session(self) -> None:
         raw = self.query_one("#session-touched", Input).value
         touched = _parse_touched_ids(raw)
-        self._start_exclusive(name="session.end", work=partial(self._run_end, touched))
+        self._pending_op = "session.end"
+        if not self._start_exclusive(name="session.end", work=partial(self._run_end, touched)):
+            self._pending_op = None
 
     # ── Workers (synchronous trusted work; no UI access) ────────────────────
 
@@ -112,7 +124,7 @@ class SessionView(CapabilityView):
         try:
             session = self._session.status()
         except DndAssistantError as exc:
-            return SessionOutcome(ok=False, message=f"Ошибка: {exc}")
+            return SessionOutcome(ok=False, message=render_expected_error(exc))
         if session is None:
             return SessionOutcome(ok=True, message="Активной сессии нет.", active_session=False)
         return SessionOutcome(ok=True, message=_render_session(session), active_session=True)
@@ -179,14 +191,23 @@ class SessionView(CapabilityView):
 
     def _handle_result(self, result: object) -> None:
         outcome = cast(SessionOutcome, result)
+        pending_op = self._pending_op
+        self._pending_op = None
         self.query_one("#session-output", Static).update(outcome.message)
         self.query_one("#session-hint", Static).update(outcome.hint or "")
         if outcome.active_session is not None:
             self._set_active_session(outcome.active_session)
         if outcome.ok:
-            self.query_one("#session-note-input", Input).value = ""
+            self._clear_success_input(pending_op)
             self.refresh_status()
         self._sync_controls()
+
+    def _clear_success_input(self, pending_op: str | None) -> None:
+        """Clear exactly the input owned by the operation that succeeded."""
+        if pending_op == "session.note":
+            self.query_one("#session-note-input", Input).value = ""
+        elif pending_op == "session.end":
+            self.query_one("#session-touched", Input).value = ""
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
         super().on_worker_state_changed(event)
@@ -259,4 +280,4 @@ def _render_end(session: Session, touched_count: int) -> str:
 
 
 def _error_outcome(exc: DndAssistantError, hint: str | None = None) -> SessionOutcome:
-    return SessionOutcome(ok=False, message=f"Ошибка: {exc}", hint=hint)
+    return SessionOutcome(ok=False, message=render_expected_error(exc), hint=hint)

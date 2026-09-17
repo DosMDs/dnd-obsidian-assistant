@@ -28,6 +28,9 @@ class MainScreen(Screen[None]):
     CONTEXT_ID: ClassVar[str] = "assistant"
     """Fallback context id when no tab is active yet."""
 
+    AUTO_FOCUS: ClassVar[str | None] = "#assistant-query"
+    """Focus the useful assistant composer on launch (not the tab bar)."""
+
     BINDINGS: ClassVar[list[BindingType]] = []
     """Screen-level bindings (none; registry commands are app-level)."""
 

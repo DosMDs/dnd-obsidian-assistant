@@ -236,15 +236,34 @@ def test_campaign_state_view_does_not_import_materialization_or_storage() -> Non
 
 
 def test_capability_views_do_not_import_cli() -> None:
-    for name in ("assistant.py", "session.py", "campaign_state.py", "services.py", "view.py"):
-        targets = _imports(TUI_ROOT / name)
+    for name in (
+        "assistant.py",
+        "session.py",
+        "campaign_state.py",
+        "services.py",
+        "view.py",
+        "inputs.py",
+        "errors.py",
+        "styles.py",
+    ):
+        path = TUI_ROOT / name
+        if not path.is_file():
+            continue
+        targets = _imports(path)
         assert not any(_is_or_under(target, CLI_PACKAGE) for target in targets), (
             f"tui/{name} imports CLI"
         )
 
 
 def test_textual_free_tui_modules_stay_framework_free() -> None:
-    for name in ("commands.py", "dispatch.py", "inflight.py", "services.py"):
+    for name in (
+        "commands.py",
+        "dispatch.py",
+        "inflight.py",
+        "services.py",
+        "errors.py",
+        "styles.py",
+    ):
         path = TUI_ROOT / name
         if not path.is_file():
             continue
@@ -277,6 +296,36 @@ def test_in_flight_gate_is_textual_free_and_has_no_queue() -> None:
     assert TEXTUAL_ROOT not in {target.split(".")[0] for target in targets}
     for name in ("put", "enqueue", "queue", "schedule", "submit"):
         assert not hasattr(InFlightGate, name)
+
+
+# ── TUI-05 hardening boundaries ──────────────────────────────────────────────
+
+
+def test_paste_hardening_uses_public_event_surface() -> None:
+    """Input paste hardening must use the public ``on_paste`` handler.
+
+    Pinned Textual 8.2.8 dispatches a subclass private ``_on_paste`` alongside
+    the base handler; the public surface plus ``prevent_default`` is the
+    supported suppression path.
+    """
+    source = (TUI_ROOT / "inputs.py").read_text(encoding="utf-8")
+    assert "def on_paste" in source
+    assert "def _on_paste" not in source
+
+
+def test_no_trusted_worker_cancellation_in_production_tui() -> None:
+    """No production TUI code may cancel trusted thread work."""
+    offenders: list[str] = []
+    for path in _tui_files():
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "cancel"
+            ):
+                offenders.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")
+    assert not offenders, f"production TUI calls cancel(): {offenders}"
 
 
 # ── Detector self-tests (guards must not be vacuous) ─────────────────────────

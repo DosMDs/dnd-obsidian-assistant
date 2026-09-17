@@ -31,6 +31,7 @@ from dnd_assistant.composition.campaign_state import (
     PlayerCampaignStateView,
 )
 from dnd_assistant.errors import DndAssistantError
+from dnd_assistant.tui.errors import render_expected_error
 from dnd_assistant.tui.inflight import EXCLUSIVE_CAMPAIGN_STATE
 from dnd_assistant.tui.services import (
     CampaignStateCapabilityProtocol,
@@ -114,7 +115,7 @@ class CampaignStateView(CapabilityView):
         try:
             view = self._capability.inspect()
         except DndAssistantError as exc:
-            return CampaignStateOutcome(ok=False, error_message=f"Ошибка: {exc}")
+            return CampaignStateOutcome(ok=False, error_message=render_expected_error(exc))
         return CampaignStateOutcome(ok=True, view=view)
 
     def _run_rebuild(self) -> CampaignStateOutcome:
@@ -122,7 +123,7 @@ class CampaignStateView(CapabilityView):
         try:
             view = self._capability.rebuild()
         except DndAssistantError as exc:
-            return CampaignStateOutcome(ok=False, error_message=f"Ошибка: {exc}")
+            return CampaignStateOutcome(ok=False, error_message=render_expected_error(exc))
         return CampaignStateOutcome(ok=True, view=view)
 
     # ── Event-loop UI update ────────────────────────────────────────────────

@@ -394,6 +394,7 @@ class TestDefaultInventory:
         assert inventory["view.assistant"].default_keys == ("f2",)
         assert inventory["view.session"].default_keys == ("f3",)
         assert inventory["view.campaign-state"].default_keys == ("f4",)
+        assert inventory["assistant.submit"].default_keys == ("f5",)
         assert DEFAULT_REGISTRY.get("app.help") is inventory["app.help"]
 
     def test_view_commands_are_scoped(self) -> None:

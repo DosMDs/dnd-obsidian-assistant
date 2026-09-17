@@ -281,7 +281,12 @@ class TestProductionShell:
     def test_footer_metadata_derives_from_registry(self) -> None:
         async def scenario() -> None:
             app = DndTuiApp(_test_services())
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
+                # The assistant TextArea is auto-focused, so Textual filters the
+                # printable global `?` binding from the active set (focus safety).
+                # Clear focus to observe the application-level binding metadata.
+                app.set_focus(None)
+                await pilot.pause()
                 palette_command = DEFAULT_REGISTRY.get("app.command-palette")
                 assert palette_command is not None
                 active = app.active_bindings

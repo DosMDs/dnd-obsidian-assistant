@@ -137,11 +137,17 @@ class CapabilityView(Widget):
         worker = event.worker
         if worker.group != self.WORKER_OWNER:
             return
-        if event.state not in (
-            WorkerState.SUCCESS,
-            WorkerState.ERROR,
-            WorkerState.CANCELLED,
-        ):
+        if event.state is WorkerState.CANCELLED:
+            # Fail closed. A thread worker cannot be forcibly cancelled: pinned
+            # Textual marks the worker CANCELLED while the underlying callable
+            # may still be running. Cancellation is therefore *not* proof of
+            # completion, so the exclusive gate and busy state stay held. The
+            # production TUI exposes no user cancellation and never calls
+            # Worker.cancel(); this branch only guards an unexpected teardown
+            # cancellation so a conflicting exclusive operation can never start.
+            return
+
+        if event.state not in (WorkerState.SUCCESS, WorkerState.ERROR):
             return
 
         self._busy = False
@@ -152,14 +158,13 @@ class CapabilityView(Widget):
 
         if event.state is WorkerState.SUCCESS:
             self._handle_result(worker.result)
-        elif event.state is WorkerState.ERROR:
+        else:
             error = worker.error
             # Expected DndAssistantError is converted to a result DTO inside
             # the worker wrapper; anything reaching here is unexpected and must
             # stay observable rather than being silently ignored.
             if error is not None:
                 raise error
-        # CANCELLED: TUI-04 exposes no user cancellation affordance.
 
     def _handle_result(self, result: object) -> None:
         """Apply a successful worker result on the event loop."""

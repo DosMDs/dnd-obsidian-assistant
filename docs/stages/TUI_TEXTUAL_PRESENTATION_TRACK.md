@@ -704,6 +704,203 @@ retained. All registry bindings remain non-priority.
   work is in flight.
 - TUI-05 (hardening) and TUI-06 (review/Stage-13 handoff) not started.
 
+## Durable record — TUI-05 (2026-09-17)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`.
+- Starting HEAD: `d245ef35a12351efa2238f7957babae4f2687f90`. Final commit SHA
+  (reported in Final Report).
+- Interaction / cross-platform / error-recovery hardening. No TUI-06 or
+  Stage-13 work.
+- Changed files:
+  ```text
+  src/dnd_assistant/tui/errors.py (new)
+  src/dnd_assistant/tui/inputs.py (new)
+  src/dnd_assistant/tui/styles.py (new)
+  src/dnd_assistant/tui/app.py
+  src/dnd_assistant/tui/assistant.py
+  src/dnd_assistant/tui/campaign_state.py
+  src/dnd_assistant/tui/commands.py
+  src/dnd_assistant/tui/screens.py
+  src/dnd_assistant/tui/session.py
+  src/dnd_assistant/tui/view.py
+  src/dnd_assistant/cli/main.py
+  tests/unit/test_tui_errors.py (new)
+  tests/integration/test_tui_resize.py (new)
+  tests/integration/test_tui_paste.py (new)
+  tests/integration/test_tui_interaction.py (new)
+  tests/integration/test_tui_recovery.py (new)
+  tests/integration/test_tui_assistant.py
+  tests/integration/test_tui_campaign_state.py
+  tests/integration/test_tui_shell.py
+  tests/unit/test_tui_commands.py
+  tests/unit/test_cli_tui_launcher.py
+  tests/contract/test_tui_boundaries.py
+  docs/development/tui-terminal-smoke.md (new)
+  docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
+  DEVELOPMENT_STATUS.md
+  ```
+- No `pyproject.toml`/`uv.lock`/`opencode.json`/`.opencode/**` change; Textual
+  stays `8.2.8`; no new dependency; no `pytest-asyncio`;
+  `tests/contract/test_boundaries.py` not grown.
+
+### Terminal-size contract
+
+```text
+reference          100x30
+baseline            80x24
+minimum usable      60x20  (width >= 60 AND height >= 20)
+below minimum       degraded/scrollable, not claimed fully usable
+```
+
+Below the minimum the layout remains a degraded, scrollable form; no new
+screen/modal is introduced and full usability is not claimed.
+
+### Responsive strategy
+
+Native Textual breakpoints only. `DndTuiApp.HORIZONTAL_BREAKPOINTS` /
+`VERTICAL_BREAKPOINTS` are ascending minimum-size tables mapping to
+`-w-tiny/-w-narrow/-w-baseline/-w-reference` and
+`-h-tiny/-h-short/-h-baseline/-h-reference`; Textual's `Screen._on_resize`
+applies exactly one class per axis. `tui/styles.py` owns one Textual-free
+`RESPONSIVE_CSS` string assigned to `DndTuiApp.CSS` (packaged with the module;
+no external `.tcss`, no packaging change, no layout abstraction).
+At narrow/below-minimum widths the action rows stack vertically so no control
+is horizontally clipped.
+
+### Assistant multiline contract
+
+`AssistantView` uses a native `TextArea` (`soft_wrap=True`,
+`tab_behavior="focus"`). Enter inserts a newline and never submits; Tab moves
+focus out. Emptiness is checked with `.strip()`, but the value passed to the
+trusted assistant is the original `TextArea.text` with no stripping/trimming.
+Outcomes: `RESPOND` clears the editor; `CLARIFY`, expected error and blocking
+recovery retain it. No conversation persistence.
+
+### Paste contract
+
+`Input._on_paste` in pinned Textual silently keeps only the first pasted line;
+TUI-05 intercepts the public `Paste` surface (`on_paste`, `event.prevent_default()`
++ `event.stop()`) in `tui/inputs.py`. The private `_on_paste` hook is not used.
+`SingleLineInput` (session note) rejects multiline paste with a Russian warning
+and leaves the value unchanged (zero capability/canonical mutation).
+`TouchedEntitiesInput` normalizes line breaks to spaces, preserving literal ID
+tokens and order with no entity inference. Accepted text is inserted through the
+public `Input` editing API. Assistant `TextArea` paste preserves multiline text
+and never dispatches a binding.
+
+### Focus / tab order
+
+`MainScreen.AUTO_FOCUS = "#assistant-query"`. F2/F3/F4 (and palette
+navigation through `navigate_to`) focus the pane's primary control
+(assistant editor / session note / Campaign-State reload) via
+`call_after_refresh`; raw tab-bar arrow switching does not steal focus. Tab
+traversal reaches buttons; resize/expected errors preserve focus and editor
+content; palette/help close restores the previous focus.
+
+### Semantic binding change
+
+No new command IDs. A single ordinary non-priority alias `f5` is added to the
+existing `assistant.submit`. The authoritative submit surfaces remain the button
+and the command palette; `f5` is a best-effort convenience alias whose
+terminal-level portability is `SKIPPED_CAPABILITY` (see platform evidence).
+
+### CANCELLED fail-closed semantics
+
+`CapabilityView.on_worker_state_changed` now fails closed on
+`WorkerState.CANCELLED`: it does not clear busy, does not release the
+`InFlightGate` and does not interpret cancellation as completion/rollback.
+SUCCESS/ERROR retain the previous release-and-apply behavior. Pinned Textual
+thread workers cannot be forcibly cancelled (`worker.py` documents that
+cancelled work may still be running; `_run_threaded` uses an executor), so
+cancellation is never proof of completion. Production TUI exposes no user
+cancellation affordance and contains no `.cancel(...)` call (static guard).
+The synthetic-cancellation headless test cancels a worker solely from the test
+harness and proves the gate stays held; the test does not claim the app becomes
+normally reusable after an unsupported cancellation path.
+
+### Expected errors, input preservation, launch mapping
+
+`tui/errors.py` (Textual-free) maps stable `DndAssistantError` classes to
+Russian categories and renders `"{category}: {exc}"` plus an optional safe hint;
+it never parses message strings. Only expected `DndAssistantError` becomes a
+recoverable result; unexpected exceptions remain re-raised/observable.
+Per-operation clearing replaces the previous blanket clear: assistant clears
+only on RESPOND; session note clears only on a successful note; touched IDs
+clear only on a successful end. Expected errors retain input and permit exactly
+one manual retry with no automatic retry. `cli/main.py::_tui` maps an expected
+`DndAssistantError` raised during lazy `run(...)` to a Russian stderr message
+and `typer.Exit(1)`; unexpected exceptions propagate; normal CLI import does not
+eagerly import Textual/TUI.
+
+### Framework/evidence notes
+
+- Headless `App.run_test()` via `asyncio.run`; `textual==8.2.8`; no async pytest
+  plugin.
+- Breakpoint threshold tests at 59/60, 79/80, 99/100 and 11/12, 19/20, 29/30.
+- 60x20 proves: no crash, active context retained, editor reachable and
+  focusable, primary controls present, action rows stacked, native vertical
+  scrolling available.
+- reference→narrow→reference retains editor content, focus and active tab.
+- Paste is delivered to the `App` (the terminal driver path that
+  `App.on_event` forwards to the focused widget exactly once); synthetic
+  `Paste` is headless evidence only.
+- F5 dispatches `assistant.submit` exactly once in headless tests.
+- CANCELLED fail-closed: gate/busy remain held and a further exclusive
+  `assistant.submit` is not executed.
+- Busy semantic quit does not exit and the palette omits `Выход`; idle semantic
+  quit exits. Runtime binding audit confirms `ctrl+q` maps to
+  `semantic_dispatch('app.quit')` and no active binding resolves to the
+  framework `quit`/`help_quit`/`suspend` actions.
+- Gates: focused TUI-05 new suites 55 passed; TUI-01..TUI-04 TUI/composition/
+  qualification/boundary regression suites 218 passed; full suite
+  `6941 passed, 131 skipped`; Ruff check/format clean; Pyright 0 errors;
+  `git diff --check` clean.
+
+### Maintainability (physical lines)
+
+```text
+tui/app.py             321
+tui/assistant.py       202
+tui/campaign_state.py  142
+tui/commands.py        456
+tui/session.py         283
+tui/view.py            171
+tui/errors.py           64
+tui/inputs.py           67
+tui/styles.py           56
+tui/screens.py          56
+cli/main.py            189
+```
+
+All new/modified production modules are below the 700-line hard limit; all
+new/modified test modules are below the 1000-line hard limit; no legacy
+exception or global limit changed.
+
+### Platform evidence classification
+
+```text
+Windows local headless TUI-05 tests            LOCAL_VERIFIED
+Textual 8.2.8 API findings (source-inspected)  LOCAL_VERIFIED
+Windows Terminal real-terminal smoke           SKIPPED_CAPABILITY (non-interactive agent)
+macOS terminal / iTerm real-terminal smoke     SKIPPED_CAPABILITY (no macOS host)
+f5 terminal-level portability                  SKIPPED_CAPABILITY (headless dispatch only)
+```
+
+Manual real-terminal smoke protocol:
+`docs/development/tui-terminal-smoke.md` (disposable copy of
+`tests/fixtures/golden_test_vault/`; never a personal Vault). No real-terminal
+run was executed in this task; both platforms and f5 terminal portability are
+recorded `SKIPPED_CAPABILITY`, never as verified.
+
+### Limitations / deferrals
+
+- Real-terminal Windows/macOS smoke and terminal-level `f5` portability remain
+  `SKIPPED_CAPABILITY`, preserved for TUI-06.
+- External terminal/OS kill (SIGKILL-equivalent, machine shutdown) cannot be
+  prevented; only normal in-app shutdown paths are hardened.
+- TUI-06 (full track review / status cleanup / Stage-13 handoff) not started.
+
 ## Stage-13 gate
 
 Stage 13 Bootstrap must not begin until the TUI track has completed normal

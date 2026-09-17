@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from textual.widgets import Input, Static
+from textual.widgets import Static, TextArea
 
 from dnd_assistant.application.agent_contracts import AgentOutcomeKind, AgentTextOutcome
 from dnd_assistant.application.session_recovery import RecoveryPartition
@@ -162,7 +162,7 @@ def _output(app: DndTuiApp, widget_id: str) -> str:
 
 
 async def _submit(app: DndTuiApp, pilot: Any, query: str = "Кто такой Варос?") -> None:
-    app.query_one("#assistant-query", Input).value = query
+    app.query_one("#assistant-query", TextArea).text = query
     app.run_semantic_command("assistant.submit")
     await _drain(pilot, lambda: not app._gate.is_busy)
 
@@ -272,7 +272,7 @@ class TestErrorRecovery:
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
                 await _submit(app, pilot)
-                assert "Ошибка: сбой модели" in _output(app, "assistant-output")
+                assert "Ошибка модели: сбой модели" in _output(app, "assistant-output")
                 assert app._gate.is_busy is False
                 # App remains usable: a second submission is accepted.
                 await _submit(app, pilot)
@@ -286,7 +286,7 @@ class TestErrorRecovery:
             app = DndTuiApp(_services(assistant, RecordingSession()))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.query_one("#assistant-query", Input).value = "q"
+                app.query_one("#assistant-query", TextArea).text = "q"
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, lambda: not app._gate.is_busy)
 
@@ -325,7 +325,7 @@ class TestWorkerBoundary:
             app = DndTuiApp(_services(assistant, RecordingSession()))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.query_one("#assistant-query", Input).value = "q"
+                app.query_one("#assistant-query", TextArea).text = "q"
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, started.is_set)
                 # Rapid duplicate activation while busy must not start a second run.
@@ -356,7 +356,7 @@ class TestCrossCapabilityExclusion:
             app = DndTuiApp(services)
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.query_one("#assistant-query", Input).value = "q"
+                app.query_one("#assistant-query", TextArea).text = "q"
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, started.is_set)
 
@@ -417,7 +417,7 @@ class TestCrossCapabilityExclusion:
 
                 app.run_semantic_command("view.assistant")
                 await pilot.pause()
-                app.query_one("#assistant-query", Input).value = "q"
+                app.query_one("#assistant-query", TextArea).text = "q"
                 assert app.run_semantic_command("assistant.submit") is not DispatchResult.EXECUTED
                 assert assistant.calls == []
 
@@ -442,12 +442,12 @@ class TestFocusSafety:
             _HelpCountingApp.help_calls = 0
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                field = app.query_one("#assistant-query", Input)
+                field = app.query_one("#assistant-query", TextArea)
                 field.focus()
                 await pilot.pause()
                 await pilot.press("П", "р", "и", "в", "е", "т", "?")
                 await pilot.pause()
                 assert _HelpCountingApp.help_calls == 0
-                assert "?" in field.value
+                assert "?" in field.text
 
         _run(scenario())

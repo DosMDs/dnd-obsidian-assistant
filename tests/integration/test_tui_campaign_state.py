@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from textual.widgets import Input, Static
+from textual.widgets import Static, TextArea
 
 from dnd_assistant.application.agent_contracts import AgentOutcomeKind, AgentTextOutcome
 from dnd_assistant.application.session_recovery import RecoveryPartition
@@ -412,7 +412,7 @@ class TestCampaignStateConcurrency:
                 # Later exclusive operations may execute.
                 app.run_semantic_command("view.assistant")
                 await pilot.pause()
-                app.query_one("#assistant-query", Input).value = "q"
+                app.query_one("#assistant-query", TextArea).text = "q"
                 assert app.run_semantic_command("assistant.submit") is DispatchResult.EXECUTED
                 await _ready(pilot, app)
                 assert assistant.calls == [("q", False)]

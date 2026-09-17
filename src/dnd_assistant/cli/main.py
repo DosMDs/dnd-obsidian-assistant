@@ -14,7 +14,7 @@ from dnd_assistant.cli.ask import _ask_command
 from dnd_assistant.cli.changeset import changeset_app
 from dnd_assistant.cli.post_session import register_session_process_commands
 from dnd_assistant.cli.session import _note_command, session_app
-from dnd_assistant.errors import StorageError
+from dnd_assistant.errors import DndAssistantError, StorageError
 from dnd_assistant.retrieval.index import SqliteFtsIndex
 from dnd_assistant.storage.audit import AuditService
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
@@ -93,12 +93,16 @@ def _tui(
     # Deferred import: a normal CLI import must not load the TUI/Textual.
     from dnd_assistant.tui.launcher import run
 
-    run(
-        vault_root=vault_root,
-        config_path=config,
-        profile_name=profile,
-        allow_agent_write=allow_write,
-    )
+    try:
+        run(
+            vault_root=vault_root,
+            config_path=config,
+            profile_name=profile,
+            allow_agent_write=allow_write,
+        )
+    except DndAssistantError as exc:
+        typer.echo(f"Ошибка запуска TUI: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
 
 # ── Index command group ─────────────────────────────────────────────────────

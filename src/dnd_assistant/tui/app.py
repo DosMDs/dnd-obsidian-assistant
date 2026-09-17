@@ -25,6 +25,7 @@ from typing import Any, ClassVar, TypeVar, cast
 from textual.app import App, SystemCommand
 from textual.binding import BindingType
 from textual.command import CommandPalette
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import TabbedContent
 
@@ -45,6 +46,7 @@ from dnd_assistant.tui.inflight import InFlightGate
 from dnd_assistant.tui.screens import MainScreen
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
 from dnd_assistant.tui.session import SessionView
+from dnd_assistant.tui.styles import RESPONSIVE_CSS
 from dnd_assistant.tui.view import CapabilityView
 
 __all__ = ["DndTuiApp", "DEFAULT_BINDINGS"]
@@ -54,11 +56,41 @@ DEFAULT_BINDINGS: list[BindingType] = list(build_bindings(DEFAULT_REGISTRY))
 
 _ViewT = TypeVar("_ViewT", bound=CapabilityView)
 
+_PRIMARY_FOCUS: dict[str, str] = {
+    "assistant": "#assistant-query",
+    "session": "#session-note-input",
+    "campaign-state": "#campaign-state-reload",
+}
+"""Post-navigation focus target per primary view context id."""
+
 
 class DndTuiApp(App[None]):
     """The production D&D Session Assistant TUI."""
 
     TITLE = "D&D Session Assistant"
+
+    CSS: ClassVar[str] = RESPONSIVE_CSS
+    """Responsive presentation styles (packaged with the module, no asset)."""
+
+    HORIZONTAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] | None = [
+        (0, "-w-tiny"),
+        (60, "-w-narrow"),
+        (80, "-w-baseline"),
+        (100, "-w-reference"),
+    ]
+    """Ascending minimum-width classes applied to the active Screen.
+
+    Contract: reference 100x30, baseline 80x24, minimum usable 60x20; below
+    that the layout is a degraded scrollable form and is not claimed usable.
+    """
+
+    VERTICAL_BREAKPOINTS: ClassVar[list[tuple[int, str]]] | None = [
+        (0, "-h-tiny"),
+        (12, "-h-short"),
+        (20, "-h-baseline"),
+        (30, "-h-reference"),
+    ]
+    """Ascending minimum-height classes applied to the active Screen."""
 
     ENABLE_COMMAND_PALETTE: ClassVar[bool] = False
     """The palette is opened by the registry-owned ``app.command-palette``."""
@@ -177,12 +209,28 @@ class DndTuiApp(App[None]):
         self.action_show_help_panel()
 
     def navigate_to(self, view_id: str) -> None:
-        """Switch the primary view by stable id."""
+        """Switch the primary view by stable id and focus its primary control.
+
+        Focus is scheduled after the next refresh because Textual may defer the
+        active-pane display change; the target is then proven by headless tests.
+        """
         tabs = next(iter(self.query(TabbedContent)), None)
         if tabs is None:
             return
         tabs.active = view_id
         self.refresh_command_state()
+        self.call_after_refresh(self._focus_primary_view, view_id)
+
+    def _focus_primary_view(self, view_id: str) -> None:
+        selector = _PRIMARY_FOCUS.get(view_id)
+        if selector is None:
+            return
+        try:
+            target = self.query_one(selector)
+        except NoMatches:
+            return
+        if getattr(target, "focusable", False) and target.display:
+            target.focus()
 
     def assistant_submit(self) -> None:
         view = self._first(AssistantView)

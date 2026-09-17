@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (TUI-04)
+**Last updated:** 2026-09-17 (TUI-05)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
-**Active work:** Textual TUI Architecture Track (next: TUI-05); Stage 13 — Bootstrap is gated on TUI-track completion
+**Active work:** Textual TUI Architecture Track (next: TUI-06); Stage 13 — Bootstrap is gated on TUI-track completion
 **Current branch:** `feat/textual-tui`
 
 ## Status model
@@ -62,8 +62,19 @@ paths): per-submission assistant runtime lifetime, recovery preflight parity,
 agent-WRITE ceiling, trusted session writes with `source="tui"` audit,
 PLAYER-safe Campaign-State rendering, `MainScreen`/`TabbedContent` navigation,
 thread-worker hosting with exactly-once resource cleanup and a cross-capability
-in-flight gate. Dependency-ordered track: TUI-00 … TUI-06. Next: TUI-05 —
-interaction / cross-platform / error-recovery hardening.
+in-flight gate. TUI-05 `DONE` — interaction / cross-platform / error-recovery
+hardening: native breakpoint-driven responsive layout with an explicit
+terminal-size contract (reference 100x30, baseline 80x24, minimum usable 60x20,
+degraded scrollable below), `TextArea` assistant composer with explicit submit,
+hardened `Paste` handling for canonical-facing single-line fields, deterministic
+focus/tab-order policy, fail-closed `WorkerState.CANCELLED` semantics, a small
+Textual-free expected-error renderer, per-operation input preservation and a
+narrow launch-time `DndAssistantError` mapping. Dependency-ordered track:
+TUI-00 … TUI-06. Next: TUI-06 — full track review / status cleanup / Stage-13
+handoff. Real-terminal Windows/macOS smoke and terminal-level `f5` portability
+are recorded `SKIPPED_CAPABILITY` (non-interactive agent / no macOS host) and
+preserved for TUI-06; the manual protocol lives in
+`docs/development/tui-terminal-smoke.md`.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
@@ -90,6 +101,7 @@ independent acceptance (TUI-06).
 |---|---|
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state (this file) |
 | `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` | Textual TUI track plan/history/evidence (TUI-00…TUI-06) |
+| `docs/development/tui-terminal-smoke.md` | Manual real-terminal smoke protocol/classification |
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
 | `docs/adr/0007-campaign-state-materialized-derived-projection.md` | Campaign State architecture decision |

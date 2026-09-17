@@ -387,6 +387,7 @@ def default_commands() -> tuple[SemanticCommand, ...]:
             description="Отправить текущий запрос ассистенту",
             handler=_assistant_submit,
             scope=CommandScope.screen("assistant"),
+            default_keys=("f5",),
             enabled=_idle,
         ),
         SemanticCommand(
