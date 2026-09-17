@@ -31,14 +31,12 @@ Detailed ordinary stage records belong in `docs/stages/`. Cross-cutting migratio
 | Stage 12 — Campaign State | `12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | `TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 
-## Active cross-cutting migration
+## Cross-cutting migrations
 
-```text
-docs/migrations/001_PYDANTIC_AI_RUNTIME.md
-docs/adr/0003-pydantic-ai-runtime-migration.md
-```
-
-PAIM runs after accepted S9-06 and before S9-07/Stage 10. Stage 9 history remains in `09_FAST_AGENT.md`; PAIM evidence is not appended there except for concise linkage needed by the Stage-9 history.
+Cross-cutting architecture/runtime work that does not belong to a single stage is
+recorded under `docs/migrations/`, with the corresponding decision under
+`docs/adr/`. Migration records are historical plan/evidence; current roadmap and
+migration status is in `DEVELOPMENT_STATUS.md`.
 
 ## Provenance
 
