@@ -108,6 +108,10 @@
           "git ls-files *": "allow",
           "git worktree list": "allow",
           "git worktree list *": "allow",
+		  "git merge-base": "allow",
+		  "git merge-base *": "allow",
+		  "git rev-list": "allow",
+		  "git rev-list *": "allow",
 
           "git branch": "allow",
           "git branch --list": "allow",
