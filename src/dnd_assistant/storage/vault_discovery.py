@@ -11,9 +11,18 @@ Scope
 Discovery is **strictly read-only** with respect to canonical campaign state:
 
 - it never creates, mutates, deletes or audits anything;
-- it never follows symlinks, junctions or reparse redirects below the resolved
-  Vault root;
-- it never leaves the resolved Vault root.
+- detected descendant symlinks, junctions and reparse redirects are rejected
+  rather than followed;
+- descendants are re-authorized immediately before each scan/read and
+  containment is rechecked against the resolved Vault root;
+- ``O_NOFOLLOW`` protects the final opened file component where the platform
+  exposes it, but does not by itself make intermediate parent-component
+  traversal atomic against concurrent replacement;
+- these checks narrow but cannot atomically eliminate OS-level TOCTOU races
+  between authorization and the following path-based filesystem operation, so
+  no absolute atomic/no-follow guarantee is claimed.  The normal/static
+  redirect case fails closed; adversarial concurrent path replacement is a
+  documented residual OS-level TOCTOU limitation.
 
 Initialization precondition
 ===========================
@@ -347,11 +356,13 @@ class ObsidianVaultSourceReader:
         """Yield inventoried files, recording isolated traversal issues.
 
         Traversal is iterative (no recursion), never materializes a directory
-        with ``list()``, never follows symlinks or junctions, and records
-        isolated issues for redirects, depth limits, unreadable subdirectories
-        and non-regular files.  Every encountered directory entry counts
-        against ``max_inventory_entries``; overflow raises ``StorageError``
-        with no partial report.  A root read error is fatal.
+        with ``list()``, rejects detected descendant symlinks/junctions, and
+        records isolated issues for redirects, depth limits, unreadable
+        subdirectories and non-regular files.  A directory is re-authorized
+        immediately before its scan, which narrows but cannot atomically
+        eliminate OS-level TOCTOU races.  Every encountered directory entry
+        counts against ``max_inventory_entries``; overflow raises
+        ``StorageError`` with no partial report.  A root read error is fatal.
         """
         stack: list[tuple[Path, str]] = [(self._root, "")]
         encountered = 0
@@ -508,9 +519,14 @@ class ObsidianVaultSourceReader:
         application layer.
 
         The path is re-authorized against redirects and containment before the
-        read (best-effort TOCTOU fail-closed check).  The read never follows
-        symlinks on platforms exposing ``O_NOFOLLOW``; on platforms without it,
-        the pre-open redirect check is the residual best-effort guard.
+        read.  ``O_NOFOLLOW`` protects the final opened file component where the
+        platform exposes it, but does not make intermediate parent-component
+        traversal atomic against concurrent replacement.  These checks narrow
+        but cannot atomically eliminate OS-level TOCTOU races between
+        authorization and the following path-based open; no stronger
+        atomic/no-follow guarantee is claimed.  A detected static redirect
+        fails closed; adversarial concurrent replacement is a residual
+        OS-level limitation.
         """
         budget = self._limits.max_content_file_bytes if max_bytes is None else max_bytes
         budget = min(budget, self._limits.max_content_file_bytes)
@@ -605,7 +621,8 @@ def _read_bounded(path: Path, budget: int) -> _BoundedRead:
     stops after ``budget + 1`` bytes, so a file that grows between ``stat()``
     and the read still cannot cause an unbounded allocation.  Exact newline
     bytes are preserved (binary read; decoding is the caller's responsibility).
-    Uses ``O_NOFOLLOW`` where the platform exposes it.
+    ``O_NOFOLLOW`` protects the final opened component where the platform
+    exposes it; intermediate parent-component traversal is not made atomic.
 
     Raises:
         StorageError: The file disappeared, could not be opened, or a read

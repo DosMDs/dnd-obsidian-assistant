@@ -263,13 +263,17 @@ surface was added (the bootstrap user workflow belongs to S13-03).
   match casefold-equivalently, so `_SYSTEM/raw/...` is `APPLICATION_RAW` and
   never `USER_SOURCE`; case-distinct physical entries still retain
   deterministic `CASE_ALIAS` reporting.
-- **Safety:** the root is resolved once; descendant symlinks/junctions/reparse
-  redirects are never followed; each descendant directory is re-authorized
-  (not symlink/junction, contained, still a directory) immediately before its
-  scan, narrowing the OS-level TOCTOU window; reads re-authorize containment and
-  use `O_NOFOLLOW` where available; hidden dirs, `.obsidian`/`.git`, OS metadata
-  and editor temp/backup files are excluded (casefold-equivalently), while the
-  hidden Campaign State manifest is intentionally not blanket-excluded.
+- **Safety:** the root is resolved once; detected descendant
+  symlinks/junctions/reparse redirects are rejected rather than followed; each
+  descendant directory is re-authorized (not symlink/junction, contained, still
+  a directory) immediately before its scan, narrowing but not atomically
+  eliminating the OS-level TOCTOU window; reads re-authorize containment and use
+  `O_NOFOLLOW`, which protects the final opened file component where available
+  and does not make intermediate parent-component traversal atomic; hidden dirs,
+  `.obsidian`/`.git`, OS metadata and editor temp/backup files are excluded
+  (casefold-equivalently), while the hidden Campaign State manifest is
+  intentionally not blanket-excluded.  Static redirects fail closed; no
+  absolute atomic/no-follow guarantee is claimed.
 - **Bounds:** the `20_000` traversal ceiling bounds filesystem entries
   *encountered* (files, directories, redirects, excluded and non-regular
   entries), is enforced lazily without materializing a directory listing, and
@@ -324,10 +328,12 @@ capability:  real symlink/junction discovery tests are capability-gated
              (SKIPPED_CAPABILITY where the host cannot create links); the
              pre-descent re-authorization branch is additionally covered
              capability-independently via monkeypatched redirect presentation
-residual:    the pre-descent re-authorization narrows but cannot atomically
-             eliminate the OS-level TOCTOU window between the check and
-             os.scandir; on platforms without O_NOFOLLOW the pre-open redirect
-             check is the residual best-effort read guard
+residual:    re-authorization narrows but cannot atomically eliminate the
+             OS-level TOCTOU window between authorization and the following
+             path-based scan/open (adversarial concurrent replacement); static
+             redirects fail closed; O_NOFOLLOW protects only the final opened
+             file component where the platform exposes it and does not make
+             intermediate parent-component traversal atomic
 ```
 
 ## Stage-13 Source-of-Truth rules carried forward
