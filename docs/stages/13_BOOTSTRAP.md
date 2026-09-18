@@ -8,10 +8,10 @@ schemas. Current roadmap state lives in `DEVELOPMENT_STATUS.md`.
 
 ## Gate
 
-The Textual TUI prerequisite has been completed and integrated. TUI-06 performed
-the track review, status cleanup and Stage-13 handoff; `TUI-M01` fast-forwarded
-the accepted track into `main`. Stage 13 is ready to begin with `S13-01` but
-remains `NOT STARTED` until that task starts. Stage 13 is no longer gated.
+The Textual TUI prerequisite is satisfied (the accepted track was integrated
+by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01` is `DONE`; the next task is
+`S13-02 — Existing Vault Discovery / Analysis`. There is no current Stage-13
+blocker.
 
 ## Two different onboarding scenarios
 
@@ -64,11 +64,13 @@ S13-04  Bootstrap ChangeSet Review / Apply
 S13-05  Bootstrap Completion / Validation / Derived Rebuild
 ```
 
-These are planned task boundaries only, not yet implemented.
+These are dependency-ordered task boundaries. `S13-01` is implemented/`DONE`;
+`S13-02` … `S13-05` remain planned boundaries and are not yet implemented.
 
-## S13-01 — `dnd init` handoff requirements
+## S13-01 — original handoff requirements (historical)
 
-S13-01 is the first Stage-13 task. It must decide and test at least:
+Before implementation, the S13-01 handoff required the task to decide and test
+at least:
 
 ```text
 accepted input Vault states (empty directory vs existing Obsidian Vault)
