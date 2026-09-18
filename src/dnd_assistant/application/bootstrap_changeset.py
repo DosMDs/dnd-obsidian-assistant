@@ -137,16 +137,22 @@ def _normalized(value: str) -> str:
 def _proposal_id(
     campaign_id: str,
     input_fingerprint: Sha256Fingerprint,
+    *,
+    processor_version: str,
     model_profile: str | None,
+    prompt_version: str,
+    extraction_schema_version: int,
 ) -> str:
     import hashlib
     import json
 
     material = {
-        "producer_version": BOOTSTRAP_MAPPING_VERSION,
+        "producer_version": processor_version,
         "campaign_id": campaign_id,
         "input_fingerprint": input_fingerprint.digest,
         "model_profile": model_profile,
+        "prompt_version": prompt_version,
+        "extraction_schema_version": extraction_schema_version,
     }
     text = json.dumps(material, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
@@ -181,6 +187,8 @@ def produce_bootstrap_changeset(
     input_fingerprint: Sha256Fingerprint,
     model_profile: str | None,
     prompt_version: str,
+    processor_version: str,
+    extraction_schema_version: int,
 ) -> BootstrapMappingResult:
     """Produce an in-memory Stage-10 proposal or an explicit ``NO_CHANGES``.
 
@@ -219,7 +227,14 @@ def produce_bootstrap_changeset(
         prompt_version=prompt_version,
     )
     changeset = ChangeSet(
-        changeset_id=_proposal_id(campaign_id, input_fingerprint, model_profile),
+        changeset_id=_proposal_id(
+            campaign_id,
+            input_fingerprint,
+            processor_version=processor_version,
+            model_profile=model_profile,
+            prompt_version=prompt_version,
+            extraction_schema_version=extraction_schema_version,
+        ),
         provenance=provenance,
         session_ref=None,
         operations=tuple(operations),
@@ -317,6 +332,21 @@ def _build_creates(
                 BootstrapUnresolved(
                     reason=BootstrapUnresolvedReason.DUPLICATE_EXISTING_ENTITY,
                     detail=f"Allocated entity id {allocated_id!r} already exists canonically",
+                    candidate_id=candidate.candidate_id,
+                    entity_ids=(allocated_id,),
+                    source_refs=candidate.source_refs,
+                )
+            )
+            continue
+
+        if allocated_id in index.conflicting_ids:
+            unresolved.append(
+                BootstrapUnresolved(
+                    reason=BootstrapUnresolvedReason.CANONICAL_STATE_CONFLICT,
+                    detail=(
+                        f"Allocated entity id {allocated_id!r} matches a conflicting canonical "
+                        "identity; refusing to create against incomplete/conflicting canonical state"
+                    ),
                     candidate_id=candidate.candidate_id,
                     entity_ids=(allocated_id,),
                     source_refs=candidate.source_refs,

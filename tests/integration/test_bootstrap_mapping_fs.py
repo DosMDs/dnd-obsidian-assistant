@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -106,7 +107,7 @@ def test_mapping_persists_only_workflow_artifacts(tmp_path: Path) -> None:
         run.result,
         producer_version=run.processor_version,
         prompt_version=run.prompt_version,
-        extraction_schema_version=BOOTSTRAP_EVIDENCE_SCHEMA_VERSION,
+        extraction_schema_version=run.extraction_schema_version,
     )
     persist_bootstrap_evidence(ObsidianBootstrapEvidenceStore(tmp_path), record)
 
@@ -139,7 +140,7 @@ def test_rediscovery_fingerprint_is_unchanged_after_persistence(tmp_path: Path) 
             run.result,
             producer_version=run.processor_version,
             prompt_version=run.prompt_version,
-            extraction_schema_version=BOOTSTRAP_EVIDENCE_SCHEMA_VERSION,
+            extraction_schema_version=run.extraction_schema_version,
         ),
     )
 
@@ -182,3 +183,50 @@ def test_normal_repository_strictness_is_unchanged(tmp_path: Path) -> None:
     # The malformed historical note makes the strict repository fail closed.
     with pytest.raises(StorageError):
         repository.list_entities()
+
+
+def test_runtime_evidence_uses_extraction_schema_version(tmp_path: Path, monkeypatch) -> None:
+    from dnd_assistant.application.bootstrap_evidence import deserialize_bootstrap_evidence
+    from dnd_assistant.composition.bootstrap import BootstrapModelIdentity, BootstrapRuntime
+
+    _write_vault(tmp_path)
+    fake = FakeBootstrapModel(_extraction())
+
+    class _Adapter:
+        def __init__(self, *, model: object) -> None:
+            pass
+
+        def extract(self, request):  # type: ignore[no-untyped-def]
+            return fake.extract(request)
+
+    monkeypatch.setattr(
+        "dnd_assistant.application.pydantic_ai_bootstrap.PydanticAIBootstrapExtractionModel",
+        _Adapter,
+    )
+    dummy_model: Any = object()
+    runtime = BootstrapRuntime(
+        model=dummy_model,
+        model_identity=BootstrapModelIdentity(profile="heavy"),
+        vault_root=tmp_path,
+        profile_name="heavy",
+        changeset_store=ObsidianChangeSetStore(tmp_path),
+        evidence_store=ObsidianBootstrapEvidenceStore(tmp_path),
+    )
+    try:
+        result = runtime.run(_report(tmp_path), persist=True)
+    finally:
+        runtime.close()
+
+    assert result.run.extraction_schema_version == BOOTSTRAP_EXTRACTION_SCHEMA_VERSION
+    assert result.evidence_record is not None
+    assert result.evidence_record.extraction_schema_version == BOOTSTRAP_EXTRACTION_SCHEMA_VERSION
+    assert result.evidence_record.schema_version == BOOTSTRAP_EVIDENCE_SCHEMA_VERSION
+    assert result.run.result.changeset is not None
+    stored = ObsidianBootstrapEvidenceStore(tmp_path).read_evidence_if_present(
+        result.run.result.changeset.changeset_id
+    )
+    assert stored is not None
+    assert (
+        deserialize_bootstrap_evidence(stored).extraction_schema_version
+        == BOOTSTRAP_EXTRACTION_SCHEMA_VERSION
+    )

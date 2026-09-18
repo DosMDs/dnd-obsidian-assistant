@@ -41,6 +41,7 @@ class BootstrapExactIndex:
     """Deterministic exact index over one read-only canonical projection."""
 
     by_id: dict[str, CanonicalEntityView]
+    conflicting_ids: frozenset[str]
     ids_by_type_name: dict[tuple[EntityType, str], tuple[str, ...]]
     ids_by_type_alias: dict[tuple[EntityType, str], tuple[str, ...]]
     ids_by_name_any: dict[str, tuple[str, ...]]
@@ -79,8 +80,11 @@ def build_bootstrap_index(snapshot: CanonicalStateSnapshot) -> BootstrapExactInd
         for alias in conflict.normalized_aliases:
             _append_unique(alias_any, alias, conflict.entity_id)
 
+    conflicting_ids = frozenset(conflict.entity_id for conflict in snapshot.conflicts)
+
     return BootstrapExactIndex(
         by_id=by_id,
+        conflicting_ids=conflicting_ids,
         ids_by_type_name={k: tuple(v) for k, v in type_name.items()},
         ids_by_type_alias={k: tuple(v) for k, v in type_alias.items()},
         ids_by_name_any={k: tuple(v) for k, v in name_any.items()},

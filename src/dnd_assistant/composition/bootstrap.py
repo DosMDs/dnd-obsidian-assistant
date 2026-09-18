@@ -26,7 +26,6 @@ from pydantic_ai.models import Model
 
 from dnd_assistant.application.bootstrap_changeset import BootstrapMappingOutcome
 from dnd_assistant.application.bootstrap_evidence import (
-    BOOTSTRAP_EVIDENCE_SCHEMA_VERSION,
     BootstrapEvidenceRecord,
     EvidencePersistOutcome,
     build_bootstrap_evidence,
@@ -216,7 +215,7 @@ class BootstrapRuntime:
             run.result,
             producer_version=run.processor_version,
             prompt_version=run.prompt_version,
-            extraction_schema_version=BOOTSTRAP_EVIDENCE_SCHEMA_VERSION,
+            extraction_schema_version=run.extraction_schema_version,
             model_profile=run.model_identity.profile,
             model=run.model_identity.model,
             provider=run.model_identity.provider,

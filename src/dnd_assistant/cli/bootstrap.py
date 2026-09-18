@@ -66,6 +66,7 @@ _UNRESOLVED_LABELS: dict[BootstrapUnresolvedReason, str] = {
     BootstrapUnresolvedReason.DUPLICATE_FACT: "дубликат факта",
     BootstrapUnresolvedReason.SOURCE_SKIPPED: "источник пропущен",
     BootstrapUnresolvedReason.NON_CANONICAL_SOURCE: "неканонический исторический файл",
+    BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE: "каноническое состояние неполно",
 }
 
 _INCLUDED_CLASSES: Final[tuple[SourceClass, ...]] = (

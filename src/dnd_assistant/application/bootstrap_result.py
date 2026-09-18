@@ -46,6 +46,7 @@ class BootstrapUnresolvedReason(StrEnum):
     DUPLICATE_FACT = "duplicate_fact"
     SOURCE_SKIPPED = "source_skipped"
     NON_CANONICAL_SOURCE = "non_canonical_source"
+    CANONICAL_COVERAGE_INCOMPLETE = "canonical_coverage_incomplete"
 
 
 @dataclass(frozen=True, slots=True)

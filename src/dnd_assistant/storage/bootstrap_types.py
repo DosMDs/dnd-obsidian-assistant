@@ -40,6 +40,24 @@ def expected_entity_type(relative_path: str) -> EntityType | None:
     return None
 
 
+def is_managed_entity_namespace_path(relative_path: str) -> bool:
+    """Return whether a path is inside, equal to, or an ancestor of a managed
+    canonical entity namespace.
+
+    A discovery issue on such a path can hide regular canonical entity files
+    from recognition, so it makes canonical identity coverage incomplete.
+    """
+    parts = tuple(part.casefold() for part in relative_path.split("/"))
+    if not parts or parts == ("",):
+        return False
+    for prefix in _ENTITY_TYPE_BY_PREFIX:
+        if len(parts) >= len(prefix) and parts[: len(prefix)] == prefix:
+            return True
+        if len(prefix) >= len(parts) and prefix[: len(parts)] == parts:
+            return True
+    return False
+
+
 # ── Result types ──────────────────────────────────────────────────────────
 
 
@@ -82,4 +100,5 @@ __all__ = [
     "CanonicalCandidate",
     "CanonicalCandidateOutcome",
     "expected_entity_type",
+    "is_managed_entity_namespace_path",
 ]

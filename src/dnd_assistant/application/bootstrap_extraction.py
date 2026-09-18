@@ -30,6 +30,7 @@ This module belongs to the application layer and must not import from:
 
 from __future__ import annotations
 
+import hashlib
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import StrEnum
@@ -43,6 +44,9 @@ from dnd_assistant.application.bootstrap_input import (
 )
 from dnd_assistant.domain.bootstrap_extraction import (
     BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+    MAX_BOOTSTRAP_CANDIDATES,
+    MAX_BOOTSTRAP_CLAIMS,
+    MAX_BOOTSTRAP_REFERENCES,
     BootstrapClaim,
     BootstrapEntityCandidate,
     BootstrapEntityReference,
@@ -345,50 +349,103 @@ def run_bootstrap_extraction(
 # ── Deterministic batch merge ─────────────────────────────────────────────
 
 
+def _scoped_id(prefix: str, batch_index: int, local_id: str) -> str:
+    """Return a deterministic, bounded batch-scoped identifier.
+
+    Independent model calls cannot coordinate local ids, so trusted merge
+    scopes them by Python-owned batch index.  The result is bounded well below
+    ``MAX_REFERENCE_TOKEN_CHARS`` and is retry-stable for the same batch order.
+    """
+    digest = hashlib.sha256(f"{prefix}\x00{batch_index}\x00{local_id}".encode()).hexdigest()
+    return f"{prefix}{batch_index}_{digest[:24]}"
+
+
+def _scope_extraction(
+    extraction: BootstrapExtraction,
+    batch_index: int,
+) -> BootstrapExtraction:
+    """Namespace batch-local ids and conflict groups deterministically."""
+    candidates = tuple(
+        candidate.model_copy(
+            update={"candidate_id": _scoped_id("cand", batch_index, candidate.candidate_id)}
+        )
+        for candidate in extraction.candidates
+    )
+    claims: list[BootstrapClaim] = []
+    for claim in extraction.claims:
+        references = tuple(
+            reference.model_copy(
+                update={"reference_id": _scoped_id("ref", batch_index, reference.reference_id)}
+            )
+            for reference in claim.references
+        )
+        conflict_group = (
+            _scoped_id("grp", batch_index, claim.conflict_group)
+            if claim.conflict_group is not None
+            else None
+        )
+        claims.append(
+            claim.model_copy(
+                update={
+                    "claim_id": _scoped_id("clm", batch_index, claim.claim_id),
+                    "references": references,
+                    "conflict_group": conflict_group,
+                }
+            )
+        )
+    return extraction.model_copy(update={"candidates": candidates, "claims": tuple(claims)})
+
+
+def _validate_run_bounds(extraction: BootstrapExtraction) -> None:
+    """Enforce run-wide total text bounds through the typed failure contract."""
+    _validate_total_size(extraction)
+
+
 def merge_bootstrap_extractions(
     extractions: Sequence[BootstrapExtraction],
 ) -> BootstrapExtraction:
     """Merge validated batch extractions in deterministic batch order.
 
-    Candidate/claim/reference ids must be globally unique across batches; a
-    collision fails closed rather than silently renaming model output.
+    Independent batches cannot coordinate their local candidate/claim/reference
+    ids or conflict-group labels, so trusted merge deterministically scopes them
+    by batch index.  Two batches may therefore both legitimately return
+    ``candidate_id="c1"``, ``claim_id="claim1"`` or ``reference_id="r1"``, and
+    the same conflict-group label in unrelated batches does not create a false
+    cross-batch conflict.  Run-wide bounds are enforced through the typed
+    extraction failure contract.
     """
     candidates: list[BootstrapEntityCandidate] = []
     claims: list[BootstrapClaim] = []
-    seen_candidates: set[str] = set()
-    seen_claims: set[str] = set()
-    seen_refs: set[str] = set()
 
-    for extraction in extractions:
-        for candidate in extraction.candidates:
-            if candidate.candidate_id in seen_candidates:
-                raise BootstrapExtractionError(
-                    BootstrapExtractionFailureReason.DUPLICATE_CANDIDATE_ID,
-                    f"Duplicate candidate_id {candidate.candidate_id!r} across batches",
-                )
-            seen_candidates.add(candidate.candidate_id)
-            candidates.append(candidate)
-        for claim in extraction.claims:
-            if claim.claim_id in seen_claims:
-                raise BootstrapExtractionError(
-                    BootstrapExtractionFailureReason.DUPLICATE_CLAIM_ID,
-                    f"Duplicate claim_id {claim.claim_id!r} across batches",
-                )
-            seen_claims.add(claim.claim_id)
-            for reference in claim.references:
-                if reference.reference_id in seen_refs:
-                    raise BootstrapExtractionError(
-                        BootstrapExtractionFailureReason.DUPLICATE_REFERENCE_ID,
-                        f"Duplicate reference_id {reference.reference_id!r} across batches",
-                    )
-                seen_refs.add(reference.reference_id)
-            claims.append(claim)
+    for batch_index, extraction in enumerate(extractions):
+        scoped = _scope_extraction(extraction, batch_index)
+        candidates.extend(scoped.candidates)
+        claims.extend(scoped.claims)
 
-    return BootstrapExtraction(
+    if len(candidates) > MAX_BOOTSTRAP_CANDIDATES:
+        raise BootstrapExtractionError(
+            BootstrapExtractionFailureReason.OUTPUT_BOUNDS_EXCEEDED,
+            f"Merged candidate count {len(candidates)} exceeds {MAX_BOOTSTRAP_CANDIDATES}",
+        )
+    if len(claims) > MAX_BOOTSTRAP_CLAIMS:
+        raise BootstrapExtractionError(
+            BootstrapExtractionFailureReason.OUTPUT_BOUNDS_EXCEEDED,
+            f"Merged claim count {len(claims)} exceeds {MAX_BOOTSTRAP_CLAIMS}",
+        )
+    reference_count = sum(len(claim.references) for claim in claims)
+    if reference_count > MAX_BOOTSTRAP_REFERENCES:
+        raise BootstrapExtractionError(
+            BootstrapExtractionFailureReason.OUTPUT_BOUNDS_EXCEEDED,
+            f"Merged reference count {reference_count} exceeds {MAX_BOOTSTRAP_REFERENCES}",
+        )
+
+    merged = BootstrapExtraction(
         schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
         candidates=tuple(candidates),
         claims=tuple(claims),
     )
+    _validate_run_bounds(merged)
+    return merged
 
 
 __all__ = [

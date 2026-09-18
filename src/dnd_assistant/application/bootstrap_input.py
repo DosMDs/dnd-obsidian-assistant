@@ -141,21 +141,20 @@ def _order_key(entry: DiscoveredSource) -> tuple[int, str, str]:
     )
 
 
-def _render_batch_text(
-    campaign_id: str,
-    entries: list[DiscoveredSource],
-) -> tuple[str, tuple[str, ...]]:
-    blocks: list[str] = []
-    refs: list[str] = []
-    for entry in entries:
-        ref = source_ref(campaign_id, entry.relative_path)
-        refs.append(ref)
-        blocks.append(
-            f"SOURCE id={ref} class={entry.source_class.value} path={entry.relative_path}\n"
-            f"{entry.content_text or ''}\n"
-            f"END SOURCE id={ref}"
-        )
-    return "\n".join(blocks), tuple(refs)
+def _render_block(campaign_id: str, entry: DiscoveredSource) -> tuple[str, str]:
+    """Render one source exactly as the model will see it, plus its ref.
+
+    The rendered block includes the ``SOURCE`` marker, class/path metadata,
+    content and ``END SOURCE`` marker.  Batch bounding is enforced against the
+    exact joined representation so wrapper overhead cannot bypass the limit.
+    """
+    ref = source_ref(campaign_id, entry.relative_path)
+    block = (
+        f"SOURCE id={ref} class={entry.source_class.value} path={entry.relative_path}\n"
+        f"{entry.content_text or ''}\n"
+        f"END SOURCE id={ref}"
+    )
+    return block, ref
 
 
 def _fingerprint(
@@ -211,22 +210,24 @@ def prepare_bootstrap_input(report: VaultDiscoveryReport) -> BootstrapInputProje
 
     projections: list[BootstrapSourceProjection] = []
     batches: list[BootstrapBatch] = []
-    pending: list[DiscoveredSource] = []
+    pending_blocks: list[str] = []
+    pending_refs: list[str] = []
     pending_chars = 0
 
     def flush() -> None:
-        nonlocal pending, pending_chars
-        if not pending:
+        nonlocal pending_blocks, pending_refs, pending_chars
+        if not pending_blocks:
             return
-        text, refs = _render_batch_text(report.campaign_id, pending)
+        text = "\n".join(pending_blocks)
         batches.append(
             BootstrapBatch(
                 batch_id=f"batch_{len(batches)}",
                 request_text=text,
-                source_refs=refs,
+                source_refs=tuple(pending_refs),
             )
         )
-        pending = []
+        pending_blocks = []
+        pending_refs = []
         pending_chars = 0
 
     def skip(
@@ -267,9 +268,12 @@ def prepare_bootstrap_input(report: VaultDiscoveryReport) -> BootstrapInputProje
             )
             continue
 
-        content_chars = len(entry.content_text)
+        block, ref = _render_block(report.campaign_id, entry)
+        block_chars = len(block)
 
-        if content_chars > MAX_BOOTSTRAP_CONTEXT_CHARS:
+        # A single fully rendered source that cannot fit must be skipped whole;
+        # it is never truncated or split.
+        if block_chars > MAX_BOOTSTRAP_CONTEXT_CHARS:
             skip(entry, ref, BootstrapSourceSkipReason.TOO_LARGE)
             continue
 
@@ -277,14 +281,18 @@ def prepare_bootstrap_input(report: VaultDiscoveryReport) -> BootstrapInputProje
             skip(entry, ref, BootstrapSourceSkipReason.BATCH_LIMIT)
             continue
 
-        if pending and pending_chars + content_chars > MAX_BOOTSTRAP_CONTEXT_CHARS:
+        separator = 1 if pending_blocks else 0
+        projected_chars = pending_chars + separator + block_chars
+        if pending_blocks and projected_chars > MAX_BOOTSTRAP_CONTEXT_CHARS:
             flush()
             if len(batches) >= MAX_BOOTSTRAP_BATCHES:
                 skip(entry, ref, BootstrapSourceSkipReason.BATCH_LIMIT)
                 continue
+            projected_chars = block_chars
 
-        pending.append(entry)
-        pending_chars += content_chars
+        pending_blocks.append(block)
+        pending_refs.append(ref)
+        pending_chars = projected_chars
         projections.append(
             BootstrapSourceProjection(
                 source_ref=ref,

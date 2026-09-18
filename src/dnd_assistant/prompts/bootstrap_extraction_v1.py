@@ -1,9 +1,10 @@
 """Versioned bootstrap extraction prompt resource (S13-03).
 
 Owns the fixed instruction presented to the bootstrap heavy extraction model.
-The stable prompt id is bound into the semantic bootstrap input fingerprint and
-the proposal provenance; changing the instruction text requires changing this
-id so a changed prompt cannot silently reuse an old fingerprint.
+The stable prompt id is bound into the deterministic bootstrap proposal identity
+(and provenance), not into the semantic source-only input fingerprint; changing
+the instruction text requires changing this id so a changed prompt cannot
+silently reuse an old proposal identity.
 """
 
 from __future__ import annotations

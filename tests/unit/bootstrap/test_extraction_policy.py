@@ -16,6 +16,7 @@ from dnd_assistant.application.bootstrap_input import prepare_bootstrap_input
 from dnd_assistant.application.vault_discovery import SourceClass
 from dnd_assistant.domain.bootstrap_extraction import (
     BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+    MAX_BOOTSTRAP_CLAIMS,
     BootstrapClaim,
     BootstrapEntityReference,
     BootstrapExtraction,
@@ -108,26 +109,78 @@ def test_schema_version_mismatch_rejected() -> None:
     assert exc.value.reason is BootstrapExtractionFailureReason.UNSUPPORTED_SCHEMA_VERSION
 
 
-def test_merge_preserves_order_and_rejects_cross_batch_duplicates() -> None:
+def test_merge_scopes_batch_local_ids_deterministically() -> None:
     ref = "src_" + "a" * 32
+    reference = make_reference("r1", "Варос", EntityType.NPC, [ref])
     first = BootstrapExtraction(
         schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
         candidates=(make_candidate("c1", "A", EntityType.NPC, [ref]),),
+        claims=(make_claim("claim1", "fact", [ref], references=[reference]),),
     )
     second = BootstrapExtraction(
         schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
-        candidates=(make_candidate("c2", "B", EntityType.ITEM, [ref]),),
+        candidates=(make_candidate("c1", "B", EntityType.ITEM, [ref]),),
+        claims=(make_claim("claim1", "other", [ref], references=[reference]),),
     )
     merged = merge_bootstrap_extractions([first, second])
-    assert [c.candidate_id for c in merged.candidates] == ["c1", "c2"]
+    candidate_ids = [c.candidate_id for c in merged.candidates]
+    claim_ids = [c.claim_id for c in merged.claims]
+    reference_ids = [r.reference_id for c in merged.claims for r in c.references]
+    assert len(candidate_ids) == len(set(candidate_ids)) == 2
+    assert len(claim_ids) == len(set(claim_ids)) == 2
+    assert len(reference_ids) == len(set(reference_ids)) == 2
+    # Retry-stable and batch-order deterministic.
+    assert merge_bootstrap_extractions([first, second]) == merged
 
-    duplicate = BootstrapExtraction(
+
+def test_merge_does_not_create_false_cross_batch_conflict_group() -> None:
+    ref = "src_" + "a" * 32
+    first = BootstrapExtraction(
         schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
-        candidates=(make_candidate("c1", "A", EntityType.NPC, [ref]),),
+        claims=(make_claim("k1", "fact", [ref], conflict_group="g1"),),
     )
+    second = BootstrapExtraction(
+        schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+        claims=(make_claim("k1", "fact", [ref], conflict_group="g1"),),
+    )
+    merged = merge_bootstrap_extractions([first, second])
+    groups = [c.conflict_group for c in merged.claims]
+    assert groups[0] is not None and groups[1] is not None
+    assert groups[0] != groups[1]
+
+
+def test_merge_run_wide_claim_overflow_fails_typed() -> None:
+    ref = "src_" + "a" * 32
+    one = BootstrapExtraction(
+        schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+        claims=(make_claim("k1", "fact", [ref]),),
+    )
+    extractions = [one] * (MAX_BOOTSTRAP_CLAIMS + 1)
     with pytest.raises(BootstrapExtractionError) as exc:
-        merge_bootstrap_extractions([first, duplicate])
-    assert exc.value.reason is BootstrapExtractionFailureReason.DUPLICATE_CANDIDATE_ID
+        merge_bootstrap_extractions(extractions)
+    assert exc.value.reason is BootstrapExtractionFailureReason.OUTPUT_BOUNDS_EXCEEDED
+
+
+def test_merge_run_wide_total_char_overflow_fails_typed() -> None:
+    from dnd_assistant.application.bootstrap_extraction import (
+        MAX_BOOTSTRAP_EXTRACTION_TOTAL_CHARS,
+    )
+
+    ref = "src_" + "a" * 32
+    big = "x" * 4000
+    batches: list[BootstrapExtraction] = []
+    total = 0
+    while total <= MAX_BOOTSTRAP_EXTRACTION_TOTAL_CHARS:
+        batches.append(
+            BootstrapExtraction(
+                schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+                claims=(make_claim("k1", big, [ref]),),
+            )
+        )
+        total += len(big) + len(ref)
+    with pytest.raises(BootstrapExtractionError) as exc:
+        merge_bootstrap_extractions(batches)
+    assert exc.value.reason is BootstrapExtractionFailureReason.OUTPUT_BOUNDS_EXCEEDED
 
 
 def test_run_bootstrap_extraction_surfaces_model_failure() -> None:

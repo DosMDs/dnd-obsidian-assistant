@@ -21,7 +21,9 @@ from dataclasses import dataclass, replace
 from typing import Final
 
 from dnd_assistant.application.bootstrap_canonical import (
+    CanonicalCoverage,
     CanonicalStateSnapshot,
+    assess_canonical_coverage,
     build_canonical_snapshot,
 )
 from dnd_assistant.application.bootstrap_changeset import (
@@ -39,11 +41,15 @@ from dnd_assistant.application.bootstrap_input import (
     prepare_bootstrap_input,
 )
 from dnd_assistant.application.bootstrap_result import (
+    BootstrapMappingOutcome,
     BootstrapMappingResult,
     BootstrapUnresolved,
     BootstrapUnresolvedReason,
 )
 from dnd_assistant.application.vault_discovery import VaultDiscoveryReport
+from dnd_assistant.domain.bootstrap_extraction import (
+    BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+)
 from dnd_assistant.prompts.bootstrap_extraction_v1 import (
     BOOTSTRAP_EXTRACTION_PROMPT_ID,
 )
@@ -68,10 +74,12 @@ class BootstrapMappingRun:
 
     projection: BootstrapInputProjection
     snapshot: CanonicalStateSnapshot
+    coverage: CanonicalCoverage
     result: BootstrapMappingResult
     model_identity: BootstrapModelIdentity
     processor_version: str
     prompt_version: str
+    extraction_schema_version: int
 
 
 def _run_level_unresolved(
@@ -132,6 +140,18 @@ def _sort_unresolved(items: Sequence[BootstrapUnresolved]) -> tuple[BootstrapUnr
     )
 
 
+def _coverage_unresolved(coverage: CanonicalCoverage) -> list[BootstrapUnresolved]:
+    return [
+        BootstrapUnresolved(
+            reason=BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE,
+            detail=(
+                f"Canonical identity coverage incomplete at {issue.relative_path!r}: {issue.detail}"
+            ),
+        )
+        for issue in coverage.issues
+    ]
+
+
 def run_bootstrap_mapping(
     report: VaultDiscoveryReport,
     canonical_candidates: Sequence[CanonicalCandidate],
@@ -139,12 +159,16 @@ def run_bootstrap_mapping(
     *,
     processor_version: str = BOOTSTRAP_PROCESSOR_VERSION,
     prompt_version: str = BOOTSTRAP_EXTRACTION_PROMPT_ID,
+    extraction_schema_version: int = BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
     model_identity: BootstrapModelIdentity | None = None,
 ) -> BootstrapMappingRun:
     """Run the deterministic bootstrap mapping pipeline.
 
-    A model/batch failure fails closed (no proposal).  The result is in-memory
-    only; persistence is a separate service.
+    If canonical identity coverage is incomplete, no model call is made and a
+    typed ``NO_CHANGES`` result is returned with explicit coverage diagnostics:
+    the canonical state could not be fully established, so no mutation may be
+    authorized.  Otherwise a model/batch failure fails closed (no proposal).
+    The result is in-memory only; persistence is a separate service.
 
     Raises:
         BootstrapExtractionError: Model/framework/semantic validation failure.
@@ -153,6 +177,26 @@ def run_bootstrap_mapping(
     identity = model_identity or BootstrapModelIdentity()
     projection = prepare_bootstrap_input(report)
     snapshot = build_canonical_snapshot(canonical_candidates)
+    coverage = assess_canonical_coverage(report)
+
+    if not coverage.complete:
+        diagnostics = _sort_unresolved(
+            [*_coverage_unresolved(coverage), *_run_level_unresolved(projection, snapshot)]
+        )
+        result = BootstrapMappingResult(
+            outcome=BootstrapMappingOutcome.NO_CHANGES,
+            unresolved=diagnostics,
+        )
+        return BootstrapMappingRun(
+            projection=projection,
+            snapshot=snapshot,
+            coverage=coverage,
+            result=result,
+            model_identity=identity,
+            processor_version=processor_version,
+            prompt_version=prompt_version,
+            extraction_schema_version=extraction_schema_version,
+        )
 
     validated = [
         run_bootstrap_extraction(
@@ -162,6 +206,7 @@ def run_bootstrap_mapping(
                 batch,
                 processor_version=processor_version,
                 prompt_version=prompt_version,
+                extraction_schema_version=extraction_schema_version,
             ),
         )
         for batch in projection.batches
@@ -175,6 +220,8 @@ def run_bootstrap_mapping(
         input_fingerprint=projection.input_fingerprint,
         model_profile=identity.profile,
         prompt_version=prompt_version,
+        processor_version=processor_version,
+        extraction_schema_version=extraction_schema_version,
     )
 
     combined = _sort_unresolved([*result.unresolved, *_run_level_unresolved(projection, snapshot)])
@@ -183,10 +230,12 @@ def run_bootstrap_mapping(
     return BootstrapMappingRun(
         projection=projection,
         snapshot=snapshot,
+        coverage=coverage,
         result=result,
         model_identity=identity,
         processor_version=processor_version,
         prompt_version=prompt_version,
+        extraction_schema_version=extraction_schema_version,
     )
 
 

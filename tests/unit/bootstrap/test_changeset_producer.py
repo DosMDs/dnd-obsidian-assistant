@@ -38,14 +38,23 @@ def _cand(path: str, entity_id: str, entity_type: EntityType, name: str, **kwarg
     return parse_canonical_candidate(path, canonical_text(entity_id, entity_type, name, **kwargs))
 
 
-def _produce(snapshot, extraction):
+def _produce(
+    snapshot,
+    extraction,
+    *,
+    processor_version="bootstrap-mapping-v1",
+    prompt_version="bootstrap-extraction-v1",
+    extraction_schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+):
     return produce_bootstrap_changeset(
         snapshot,
         extraction,
         campaign_id="camp-1",
         input_fingerprint=_FP,
         model_profile="heavy",
-        prompt_version="bootstrap-extraction-v1",
+        prompt_version=prompt_version,
+        processor_version=processor_version,
+        extraction_schema_version=extraction_schema_version,
     )
 
 
@@ -220,3 +229,46 @@ def test_empty_extraction_yields_no_changes() -> None:
     assert result.outcome is BootstrapMappingOutcome.NO_CHANGES
     assert result.changeset is None
     assert result.changeset_fingerprint is None
+
+
+def test_conflicting_canonical_id_blocks_allocator_collision() -> None:
+    # The conflicting identity's id equals the allocator result for the
+    # proposed candidate, but its display name is different so name matching
+    # cannot block the create.  Only the explicit conflicting-id check can.
+    blocked = allocate_bootstrap_entity_id("camp-1", EntityType.NPC, "Real Name")
+    snapshot = _snapshot(
+        _cand("Characters/NPCs/a.md", blocked, EntityType.NPC, "Совсем другое имя"),
+        _cand("Characters/NPCs/b.md", blocked, EntityType.NPC, "Совсем другое имя"),
+    )
+    extraction = BootstrapExtraction(
+        schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+        candidates=(make_candidate("c1", "Real Name", EntityType.NPC, [_REF]),),
+    )
+    result = _produce(snapshot, extraction)
+    assert result.outcome is BootstrapMappingOutcome.NO_CHANGES
+    assert any(
+        item.reason is BootstrapUnresolvedReason.CANONICAL_STATE_CONFLICT
+        and item.entity_ids == (blocked,)
+        for item in result.unresolved
+    )
+
+
+def _csid(result) -> str:
+    assert result.changeset is not None
+    return result.changeset.changeset_id
+
+
+def test_proposal_id_is_sensitive_to_producer_identity() -> None:
+    extraction = BootstrapExtraction(
+        schema_version=BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
+        candidates=(make_candidate("c1", "Варос", EntityType.NPC, [_REF]),),
+    )
+    base = _csid(_produce(_snapshot(), extraction))
+    assert _csid(_produce(_snapshot(), extraction)) == base
+    assert (
+        _csid(_produce(_snapshot(), extraction, processor_version="bootstrap-mapping-v2")) != base
+    )
+    assert (
+        _csid(_produce(_snapshot(), extraction, prompt_version="bootstrap-extraction-v2")) != base
+    )
+    assert _csid(_produce(_snapshot(), extraction, extraction_schema_version=2)) != base

@@ -119,3 +119,16 @@ def test_malformed_persisted_evidence_is_storage_error(tmp_path: Path) -> None:
     assert store.read_evidence_if_present("cs_x") == "not json\n"
     with pytest.raises(StorageError):
         deserialize_bootstrap_evidence("not json\n")
+
+
+def test_evidence_extraction_version_is_independent_of_evidence_schema() -> None:
+    run = _run()
+    record = build_bootstrap_evidence(
+        run.projection,
+        run.result,
+        producer_version=run.processor_version,
+        prompt_version=run.prompt_version,
+        extraction_schema_version=7,
+    )
+    assert record.extraction_schema_version == 7
+    assert record.schema_version == 1

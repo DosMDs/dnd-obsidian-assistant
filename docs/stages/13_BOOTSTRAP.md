@@ -431,6 +431,33 @@ C12 immutable evidence sidecar retained
 C13 NO_CHANGES is not a completion claim
 ```
 
+### S13-03 correction pass (C1-C6)
+
+A focused correction pass tightened the accepted mapping architecture:
+
+```text
+C1 batching bounds the exact rendered model-visible batch text (markers,
+   class/path metadata, separators, source refs), not only source body length;
+   a single non-fitting rendered source is TOO_LARGE, never truncated/split
+C2 explicit canonical-coverage state from the S13-02 report: unreadable
+   ENTITY_CANDIDATE or a discovery issue on a managed entity namespace makes
+   coverage incomplete and returns typed NO_CHANGES with
+   canonical_coverage_incomplete diagnostics and no model call/mutation
+C3 conflicting canonical ids contribute an explicit blocked set; a proposed
+   create whose allocated id matches a conflicting identity is refused even
+   when the display name differs
+C4 changeset_id material includes processor_version, campaign_id, semantic
+   input fingerprint, model_profile, prompt_version and extraction schema
+   version; the semantic input fingerprint stays source-only
+C5 the evidence sidecar stores the bootstrap extraction schema version, not
+   the evidence-artifact schema version; the two version domains stay decoupled
+C6 trusted merge deterministically scopes batch-local candidate/claim/reference
+   ids and conflict groups by batch index, so independent batches may reuse
+   local ids without false cross-batch conflicts; run-wide candidate/claim/
+   reference/total-char bounds fail through the typed OUTPUT_BOUNDS_EXCEEDED
+   contract
+```
+
 ### Evidence (this task)
 
 ```text
@@ -447,14 +474,22 @@ integration: real temp-Vault mapping+persistence (only workflow artifacts
              rediscovery fingerprint stability after persistence, same-id
              different-content fail-closed, strict VaultRepository still fails
              closed on a malformed historical note, Russian CLI presentation,
-             dry-run persists nothing, no filesystem read after report
+             dry-run persists nothing, no filesystem read after report,
+             runtime evidence stores the extraction schema version
+correction:  rendered-batch-bound adversarial (many empty/tiny sources/long
+             paths), coverage fail-closed (unreadable ENTITY_CANDIDATE and
+             managed-namespace issue) with no model call, conflicting-id
+             collision with different display name, proposal-id sensitivity to
+             processor/prompt/extraction-schema version, evidence extraction
+             version independence, deterministic cross-batch id scoping and
+             false-conflict avoidance, run-wide typed overflow
 contract:    AST layer boundaries (domain/storage/application/adapter/
              composition/CLI); pure application modules hold no filesystem or
              YAML authority; binding does not import the player resolver
-gates:       pytest (7286 passed, 141 skipped), ruff check, ruff format --check,
+gates:       pytest (7298 passed, 141 skipped), ruff check, ruff format --check,
              pyright (0 errors), uv lock --check, git diff --check,
              maintainability contract (all production modules <=700 physical
-             lines; bootstrap_changeset decomposed to 563)
+             lines; bootstrap_changeset 593)
 ```
 
 ## Stage-13 Source-of-Truth rules carried forward

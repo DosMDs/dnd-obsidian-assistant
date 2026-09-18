@@ -134,3 +134,29 @@ def test_cyrillic_paths_and_content_are_stable() -> None:
     second = prepare_bootstrap_input(_report(source))
     assert first.input_fingerprint == second.input_fingerprint
     assert "Варос" in first.batches[0].request_text
+
+
+def test_rendered_batch_text_never_exceeds_bound() -> None:
+    # Many empty/tiny sources with long paths: wrapper/separator/path/ref
+    # overhead alone must still respect the rendered bound.
+    long_segment = "д" * 60
+    sources = [
+        make_source(f"Notes/{long_segment}/{index}.md", SourceClass.USER_SOURCE, "")
+        for index in range(4000)
+    ]
+    projection = prepare_bootstrap_input(_report(*sources))
+    assert projection.batches, "expected at least one batch"
+    assert len(projection.batches) > 1, "overhead must force multiple batches"
+    for batch in projection.batches:
+        assert len(batch.request_text) <= MAX_BOOTSTRAP_CONTEXT_CHARS
+
+
+def test_rendered_overhead_can_make_a_source_too_large() -> None:
+    # Content alone fits the budget, but the rendered wrapper pushes it over.
+    content = "x" * (MAX_BOOTSTRAP_CONTEXT_CHARS - 10)
+    long_path = "Notes/" + ("п" * 200) + ".md"
+    projection = prepare_bootstrap_input(
+        _report(make_source(long_path, SourceClass.USER_SOURCE, content))
+    )
+    assert projection.batches == ()
+    assert projection.sources[0].skip_reason is BootstrapSourceSkipReason.TOO_LARGE

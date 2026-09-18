@@ -28,6 +28,11 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+from dnd_assistant.application.vault_discovery import (
+    ContentReadStatus,
+    SourceClass,
+    VaultDiscoveryReport,
+)
 from dnd_assistant.domain.types import EntityType
 from dnd_assistant.retrieval.exact_matching import (
     extract_exact_aliases,
@@ -36,6 +41,7 @@ from dnd_assistant.retrieval.exact_matching import (
 from dnd_assistant.storage.bootstrap_types import (
     CanonicalCandidate,
     CanonicalCandidateOutcome,
+    is_managed_entity_namespace_path,
 )
 
 if TYPE_CHECKING:
@@ -47,8 +53,12 @@ __all__ = [
     "CanonicalCandidateIssue",
     "CanonicalConflictReason",
     "CanonicalConflictView",
+    "CanonicalCoverage",
+    "CanonicalCoverageIssue",
+    "CanonicalCoverageReason",
     "CanonicalEntityView",
     "CanonicalStateSnapshot",
+    "assess_canonical_coverage",
     "build_canonical_snapshot",
 ]
 
@@ -217,3 +227,85 @@ def _as_conflict(
         normalized_aliases=_aliases(document),
         reason=reason,
     )
+
+
+# ── Canonical coverage ────────────────────────────────────────────────────
+
+
+class CanonicalCoverageReason(StrEnum):
+    """Why canonical identity coverage cannot be fully established."""
+
+    ENTITY_CANDIDATE_UNREADABLE = "entity_candidate_unreadable"
+    """An ``ENTITY_CANDIDATE`` source could not be read, so an otherwise
+    canonical entity may be hidden from recognition."""
+
+    MANAGED_NAMESPACE_ISSUE = "managed_namespace_issue"
+    """A discovery issue on a managed entity-namespace path can hide regular
+    canonical files from the filesystem-free recognition step."""
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalCoverageIssue:
+    """One reason canonical identity coverage is incomplete."""
+
+    relative_path: str
+    reason: CanonicalCoverageReason
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class CanonicalCoverage:
+    """Explicit coverage state derived from the S13-02 discovery report.
+
+    When ``complete`` is false the canonical identity universe could not be
+    fully established, so no create/append mutation may be authorized.
+    """
+
+    complete: bool
+    issues: tuple[CanonicalCoverageIssue, ...] = ()
+
+
+def assess_canonical_coverage(report: VaultDiscoveryReport) -> CanonicalCoverage:
+    """Assess whether canonical identity coverage is complete.
+
+    Consumes only the S13-02 report: no second filesystem traversal.  A
+    skipped/failed ``ENTITY_CANDIDATE`` or a discovery issue on a managed
+    entity-namespace path makes coverage incomplete.  A skipped/failed
+    ``USER_SOURCE`` or ``SESSION_SOURCE`` does not.
+    """
+    issues: list[CanonicalCoverageIssue] = []
+
+    for entry in report.entries:
+        if entry.source_class is not SourceClass.ENTITY_CANDIDATE:
+            continue
+        if entry.content_status is ContentReadStatus.READ and entry.content_text is not None:
+            continue
+        issues.append(
+            CanonicalCoverageIssue(
+                relative_path=entry.relative_path,
+                reason=CanonicalCoverageReason.ENTITY_CANDIDATE_UNREADABLE,
+                detail=(
+                    "ENTITY_CANDIDATE content is unavailable "
+                    f"({entry.content_status.value}); canonical identity coverage is incomplete"
+                ),
+            )
+        )
+
+    for issue in report.issues:
+        if not is_managed_entity_namespace_path(issue.relative_path):
+            continue
+        issues.append(
+            CanonicalCoverageIssue(
+                relative_path=issue.relative_path,
+                reason=CanonicalCoverageReason.MANAGED_NAMESPACE_ISSUE,
+                detail=(
+                    f"Discovery issue {issue.code.value!r} on a managed entity namespace can hide "
+                    "canonical files; canonical identity coverage is incomplete"
+                ),
+            )
+        )
+
+    issues.sort(
+        key=lambda item: (item.relative_path.casefold(), item.relative_path, item.reason.value)
+    )
+    return CanonicalCoverage(complete=not issues, issues=tuple(issues))

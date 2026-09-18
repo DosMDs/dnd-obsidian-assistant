@@ -16,13 +16,15 @@ from dnd_assistant.application.bootstrap_mapping import (
     BootstrapModelIdentity,
     run_bootstrap_mapping,
 )
-from dnd_assistant.application.vault_discovery import SourceClass
+from dnd_assistant.application.bootstrap_result import BootstrapMappingOutcome
+from dnd_assistant.application.vault_discovery import ContentReadStatus, SourceClass
 from dnd_assistant.composition.bootstrap import canonical_candidates_from_report
 from dnd_assistant.domain.bootstrap_extraction import (
     BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
     BootstrapExtraction,
 )
 from dnd_assistant.domain.types import EntityType
+from dnd_assistant.storage.vault_discovery import DiscoveryIssue, DiscoveryIssueCode
 from tests.unit.bootstrap.helpers import (
     FakeBootstrapModel,
     canonical_text,
@@ -109,3 +111,67 @@ def test_default_run_is_no_changes_without_proposal() -> None:
     )
     assert run.result.changeset is None
     assert run.result.outcome.value == "no_changes"
+
+
+def test_unreadable_entity_candidate_fails_closed_without_model_call() -> None:
+    report = make_report(
+        _CAMP,
+        [
+            make_source(
+                "Characters/NPCs/hidden.md",
+                SourceClass.ENTITY_CANDIDATE,
+                None,
+                content_status=ContentReadStatus.SKIPPED,
+            ),
+            make_source("Notes/a.md", SourceClass.USER_SOURCE, "варос"),
+        ],
+    )
+    model = FakeBootstrapModel(_extraction())
+    run = run_bootstrap_mapping(report, canonical_candidates_from_report(report), model)
+    assert run.coverage.complete is False
+    assert run.result.outcome is BootstrapMappingOutcome.NO_CHANGES
+    assert run.result.changeset is None
+    assert model.requests == []
+    assert any(
+        item.reason is BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE
+        for item in run.result.unresolved
+    )
+
+
+def test_managed_namespace_discovery_issue_fails_closed() -> None:
+    report = make_report(
+        _CAMP,
+        [make_source("Notes/a.md", SourceClass.USER_SOURCE, "варос")],
+        issues=[DiscoveryIssue("Characters/NPCs/sneaky.md", DiscoveryIssueCode.UNSAFE_REDIRECT)],
+    )
+    model = FakeBootstrapModel(_extraction())
+    run = run_bootstrap_mapping(report, canonical_candidates_from_report(report), model)
+    assert run.coverage.complete is False
+    assert run.result.changeset is None
+    assert model.requests == []
+    assert any(
+        item.reason is BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE
+        for item in run.result.unresolved
+    )
+
+
+def test_skipped_user_source_does_not_break_coverage() -> None:
+    report = make_report(
+        _CAMP,
+        [
+            make_source(
+                "Notes/huge.md",
+                SourceClass.USER_SOURCE,
+                None,
+                content_status=ContentReadStatus.SKIPPED,
+            )
+        ],
+    )
+    run = run_bootstrap_mapping(
+        report, canonical_candidates_from_report(report), FakeBootstrapModel()
+    )
+    assert run.coverage.complete is True
+    assert run.result.outcome is BootstrapMappingOutcome.NO_CHANGES
+    assert any(
+        item.reason is BootstrapUnresolvedReason.SOURCE_SKIPPED for item in run.result.unresolved
+    )
