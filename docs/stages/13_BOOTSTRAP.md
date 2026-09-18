@@ -8,12 +8,10 @@ schemas. Current roadmap state lives in `DEVELOPMENT_STATUS.md`.
 
 ## Gate
 
-Stage 13 must not begin until the Textual TUI Architecture Track has completed
-normal implementation, review, repository integration/status reconciliation and
-independent acceptance. TUI-06 completes the review/status/handoff portion; the
-ff-only integration remains a separate task (`TUI-M01`). Stage 13 stays `NOT
-STARTED` and gated until independent acceptance of `TUI-M01`. Stage 13 is gated,
-not `BLOCKED`.
+The Textual TUI prerequisite has been completed and integrated. TUI-06 performed
+the track review, status cleanup and Stage-13 handoff; `TUI-M01` fast-forwarded
+the accepted track into `main`. Stage 13 is ready to begin with `S13-01` but
+remains `NOT STARTED` until that task starts. Stage 13 is no longer gated.
 
 ## Two different onboarding scenarios
 

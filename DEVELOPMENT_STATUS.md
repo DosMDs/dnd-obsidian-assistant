@@ -1,10 +1,10 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-18 (TUI-06)
+**Last updated:** 2026-09-18 (TUI-M01)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS` (integration pending); Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
-**Active work:** Textual TUI Architecture Track — TUI-06 `DONE`; next `TUI-M01` (ff-only integration); Stage 13 is gated on independent acceptance of `TUI-M01`
-**Current branch:** `feat/textual-tui`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
+**Active work:** none — Textual TUI track integrated; next `S13-01 — Vault Initialization Contract + dnd init`
+**Current branch:** `main`
 
 ## Status model
 
@@ -37,26 +37,22 @@ in `docs/development/project-invariants.md`.
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
-| Textual TUI Architecture Track (non-numbered) | IN PROGRESS | integration pending; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | NOT STARTED | Gated on `TUI-M01` acceptance (not `BLOCKED`); `docs/stages/13_BOOTSTRAP.md` |
+| Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
+| 13. Bootstrap | NOT STARTED | TUI prerequisite satisfied; next `S13-01`; `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current work — Textual TUI Architecture Track
+## Current work — none active
 
-TUI-00 … TUI-05 are `DONE`; TUI-06 (full track review / status cleanup /
-Stage-13 handoff / OpenCode inspection-permission hardening) is `DONE`. The
-implementation itself is complete and reviewed on `feat/textual-tui`. What
-remains is **repository integration**, which is deliberately kept as a separate
-bounded task:
+TUI-00 … TUI-06 are `DONE`; `TUI-M01` integrated the accepted track into `main`
+with a fast-forward-only merge and no code transformation. The Textual TUI
+Architecture Track is `DONE`.
 
 ```text
-next   TUI-M01 — ff-only integrate feat/textual-tui into main
+next   S13-01 — Vault Initialization Contract + dnd init
 ```
 
-`main` is an ancestor of the reviewed feature head, so a fast-forward-only
-integration path is available. Stage 13 remains gated until
-`TUI-M01` receives independent acceptance; only then does the next work become
-`S13-01 — Vault Initialization Contract + dnd init`.
+Stage 13 is ready to begin with `S13-01` but remains `NOT STARTED` until that
+task starts.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
@@ -68,8 +64,8 @@ enabled/visible state is never authorization.
 
 ```text
 No confirmed blocker for the Textual TUI Architecture Track or Stage 13.
-Sequencing gate (not a blocker): Stage 13 must not begin until TUI-M01
-integration is independently accepted.
+The former sequencing gate is satisfied: the Textual TUI prerequisite has been
+completed and integrated, so Stage 13 may begin with S13-01.
 Known carried-forward limitations (non-blocking for Stage 13):
   Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
   macOS real-terminal smoke                     SKIPPED_CAPABILITY

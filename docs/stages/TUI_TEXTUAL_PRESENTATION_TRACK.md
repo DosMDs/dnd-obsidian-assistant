@@ -1082,12 +1082,34 @@ TUI-M01 — ff-only integrate feat/textual-tui into main
 After independent acceptance of `TUI-M01`, the next work becomes
 `S13-01 — Vault Initialization Contract + dnd init`. No tag is created.
 
+## Durable record — TUI-M01 (2026-09-18)
+
+- Status: `DONE`.
+- Repository integration of the accepted Textual TUI Architecture Track into
+  `main`:
+  ```text
+  integration method:      ff-only (fast-forward-only)
+  source:                  feat/textual-tui
+  reviewed source head:    548892be5aab7501a5d407c220eb87d411ae8da0
+  target:                  main
+  result:                  accepted TUI track integrated without code transformation
+  track status:            DONE
+  next stage:              Stage 13
+  next task:               S13-01
+  ```
+- One docs-only status-reconciliation commit on `main` followed the
+  fast-forward (`docs: close Textual TUI track after integration`); it changed
+  only `DEVELOPMENT_STATUS.md`, `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md`
+  and `docs/stages/13_BOOTSTRAP.md`.
+- No production, test, config or dependency file was modified by `TUI-M01`; the
+  reviewed feature history is contained unchanged in `main`. No tag; the
+  `feat/textual-tui` branch is neither deleted nor rewritten.
+
 ## Stage-13 gate
 
-Stage 13 Bootstrap must not begin until the TUI track has completed normal
-implementation, review, repository integration/status reconciliation and
-independent acceptance. TUI-06 completed review, status cleanup and the Stage-13
-handoff; ff-only integration remains `TUI-M01`. Stage 13 is `NOT STARTED` and
-gated on independent acceptance of `TUI-M01`, not `BLOCKED`. The durable Stage-13
-handoff contract (including the non-negotiable split between `dnd init` and
-existing-campaign bootstrap) lives in `docs/stages/13_BOOTSTRAP.md`.
+The Textual TUI prerequisite has been completed and integrated: TUI-06 performed
+the review, status cleanup and handoff, and `TUI-M01` fast-forwarded the accepted
+track into `main`. Stage 13 is ready to begin with `S13-01` but remains `NOT
+STARTED` until that task starts. The durable Stage-13 handoff contract (including
+the non-negotiable split between `dnd init` and existing-campaign bootstrap)
+lives in `docs/stages/13_BOOTSTRAP.md`.
