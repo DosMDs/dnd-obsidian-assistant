@@ -209,6 +209,15 @@ run gates
   self-SHA, or create a second status-only/self-SHA commit. The commit SHA
   belongs in the Final Report; repository docs should use
   `(reported in Final Report)` or omit the current task SHA.
+- Current-status documentation must not store self-invalidating live Git values
+  whose value changes merely because the documenting correction itself is
+  committed. Examples: current branch ahead/behind commit counts, current
+  HEAD-relative distance used as durable status, or the current task commit SHA
+  inserted by a follow-up self-referential commit. Such values belong in the
+  Final Report or in historical evidence tied to an explicit immutable SHA or
+  range. Current status should store stable topology/state instead, e.g.
+  "integration pending", "the target is an ancestor of the feature head",
+  "a fast-forward-only integration path is available".
 - Use Conventional Commits, e.g. `feat: …`, `fix: …`, `test: …`,
   `docs: …`, `refactor: …`.
 

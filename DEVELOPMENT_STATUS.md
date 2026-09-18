@@ -53,8 +53,8 @@ bounded task:
 next   TUI-M01 — ff-only integrate feat/textual-tui into main
 ```
 
-`main` is an ancestor of the feature head, so a ff-only integration is
-available; `base-only = 0`, `head-only = 13`. Stage 13 remains gated until
+`main` is an ancestor of the reviewed feature head, so a fast-forward-only
+integration path is available. Stage 13 remains gated until
 `TUI-M01` receives independent acceptance; only then does the next work become
 `S13-01 — Vault Initialization Contract + dnd init`.
 
