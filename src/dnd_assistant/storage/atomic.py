@@ -74,7 +74,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from dnd_assistant.errors import StorageError
+from dnd_assistant.errors import ConflictError, StorageError
 
 # ── Public API ───────────────────────────────────────────────────────────────
 
@@ -117,6 +117,68 @@ def atomic_write_text(
         # exceptions (including OSError) propagate unchanged.
         validator(content)
         _os_replace(str(temp_path), str(target_path))
+    except StorageError:
+        raise
+    except Exception:
+        _cleanup_temp(temp_path)
+        raise
+    finally:
+        _cleanup_temp(temp_path)
+
+
+def exclusive_atomic_write_text(
+    target: str | Path,
+    content: str,
+    *,
+    validator: Callable[[str], object],
+) -> None:
+    """Atomically create ``target`` if and only if it does not already exist.
+
+    Unlike :func:`atomic_write_text`, this primitive never replaces an
+    existing target.  It is intended for canonical create-once commit
+    markers such as Vault initialization configuration.
+
+    The write lifecycle is:
+
+    1. Create a unique temporary file in the same directory as ``target``.
+    2. Write ``content`` encoded as UTF-8 with exact newline preservation.
+    3. Flush Python's buffered writer and ``os.fsync`` the file descriptor.
+    4. Close the temporary file.
+    5. Call ``validator(content)`` — may raise to abort publication.
+    6. ``os.link(temp_path, target_path)`` — atomic create-if-absent.
+    7. Unlink the temporary file (best-effort).
+
+    The target is published by a hard link, so it either does not exist or
+    contains the complete validated content; a partial or corrupt canonical
+    file cannot be produced.  There is deliberately **no** fallback to
+    ``open(target, "x")``, direct streaming, or ``os.replace``: those can
+    leave a partial commit marker or overwrite an existing target.
+
+    Args:
+        target: The destination file path (must be absolute).
+        content: The UTF-8 text content to write.
+        validator: A callable that receives the full ``content`` string
+            after the temporary file has been flushed, fsynced and closed
+            but before publication.  Raise to abort the write.
+
+    Raises:
+        ConflictError: The target already exists (including concurrent
+            creation).
+        StorageError: A filesystem or path precondition error occurred,
+            including a filesystem that does not support hard-link
+            publication.
+        *: Propagated unchanged from ``validator``.
+    """
+    target_path = _validate_target(target)
+    temp_path: Path | None = None
+
+    try:
+        temp_path = _create_temp(target_path)
+        _write_and_fsync(temp_path, content)
+        # validator runs outside any OSError-translation boundary so its
+        # exceptions (including OSError) propagate unchanged.
+        validator(content)
+        _exclusive_link(temp_path, target_path)
     except StorageError:
         raise
     except Exception:
@@ -232,6 +294,29 @@ def _os_replace(src: str, dst: str) -> None:
     except OSError as exc:
         raise StorageError(
             f"Failed to atomically replace {dst} with {src}",
+            cause=exc,
+        ) from exc
+
+
+def _exclusive_link(src: Path, dst: Path) -> None:
+    """Publish ``src`` as ``dst`` by hard link, failing if ``dst`` exists.
+
+    ``os.link`` is the create-if-absent publication step: it is atomic and
+    fails with ``FileExistsError`` when the destination already exists.
+
+    Raises:
+        ConflictError: The destination already exists.
+        StorageError: The filesystem does not support hard-link publication,
+            or the link operation failed.
+    """
+    try:
+        os.link(str(src), str(dst))
+    except FileExistsError:
+        raise ConflictError(f"Target already exists: {dst}") from None
+    except OSError as exc:
+        raise StorageError(
+            f"Failed to exclusively publish {dst} by hard link; the "
+            f"filesystem may not support hard-link publication",
             cause=exc,
         ) from exc
 

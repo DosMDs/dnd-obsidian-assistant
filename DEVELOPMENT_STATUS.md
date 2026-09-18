@@ -1,10 +1,10 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-18 (TUI-M01)
+**Last updated:** 2026-09-18 (S13-01)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
-**Active work:** none — Textual TUI track integrated; next `S13-01 — Vault Initialization Contract + dnd init`
-**Current branch:** `main`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `IN PROGRESS`; Stage 14 `NOT STARTED`
+**Active work:** `S13-01 — Vault Initialization Contract + dnd init` `DONE`; next `S13-02 — Existing Vault Discovery / Analysis`
+**Current branch:** `feat/bootstrap`
 
 ## Status model
 
@@ -38,21 +38,26 @@ in `docs/development/project-invariants.md`.
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | NOT STARTED | TUI prerequisite satisfied; next `S13-01`; `docs/stages/13_BOOTSTRAP.md` |
+| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; next `S13-02`; `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current work — none active
+## Current work — S13-01 `DONE`
 
-TUI-00 … TUI-06 are `DONE`; `TUI-M01` integrated the accepted track into `main`
-with a fast-forward-only merge and no code transformation. The Textual TUI
-Architecture Track is `DONE`.
+`S13-01 — Vault Initialization Contract + dnd init` is `DONE` on
+`feat/bootstrap` (not yet merged to `main`).  It added deterministic,
+model-free structural Vault initialization: the managed topology plus the
+canonical `_system/campaign.yaml` marker, with fail-closed collision/path
+policy, audited intent/committed lifecycle, exclusive config publication and
+strict idempotent re-run.  Stage 13 is `IN PROGRESS`.
 
 ```text
-next   S13-01 — Vault Initialization Contract + dnd init
+next   S13-02 — Existing Vault Discovery / Analysis
 ```
 
-Stage 13 is ready to begin with `S13-01` but remains `NOT STARTED` until that
-task starts.
+`dnd init` yields a **structurally initialized** Vault, not a session-ready
+one: `_system/world_time.json` is deliberately out of scope.  A deterministic
+Typer admin surface for the starting world tick is a recorded Stage-13
+follow-up decision; the existing `set_world_time` WRITE tool can initialize it.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
@@ -63,9 +68,10 @@ enabled/visible state is never authorization.
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for the Textual TUI Architecture Track or Stage 13.
-The former sequencing gate is satisfied: the Textual TUI prerequisite has been
-completed and integrated, so Stage 13 may begin with S13-01.
+No confirmed blocker for Stage 13.
+S13-01 is DONE; next planned task S13-02 is not started.
+Recorded Stage-13 follow-up (not a blocker):
+  deterministic Typer admin surface for starting world time
 Known carried-forward limitations (non-blocking for Stage 13):
   Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
   macOS real-terminal smoke                     SKIPPED_CAPABILITY

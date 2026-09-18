@@ -12,6 +12,7 @@ import typer
 
 from dnd_assistant.cli.ask import _ask_command
 from dnd_assistant.cli.changeset import changeset_app
+from dnd_assistant.cli.init import _init_command
 from dnd_assistant.cli.post_session import register_session_process_commands
 from dnd_assistant.cli.session import _note_command, session_app
 from dnd_assistant.errors import DndAssistantError, StorageError
@@ -40,6 +41,10 @@ app.command(name="note")(_note_command)
 # ── Ask root command ───────────────────────────────────────────────────────
 
 app.command(name="ask")(_ask_command)
+
+# ── Init root command ──────────────────────────────────────────────────────
+
+app.command(name="init")(_init_command)
 
 # ── TUI command ─────────────────────────────────────────────────────────────
 

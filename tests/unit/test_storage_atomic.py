@@ -9,8 +9,8 @@ from unittest import mock
 
 import pytest
 
-from dnd_assistant.errors import StorageError, ValidationError
-from dnd_assistant.storage.atomic import atomic_write_text
+from dnd_assistant.errors import ConflictError, StorageError, ValidationError
+from dnd_assistant.storage.atomic import atomic_write_text, exclusive_atomic_write_text
 
 
 def _make_target(tmp_path: Path, name: str = "target.md") -> Path:
@@ -603,3 +603,148 @@ class TestValidatorExceptionTransparency:
 
         parent_files = list(target.parent.iterdir())
         assert all(f == target for f in parent_files)
+
+
+# ── exclusive_atomic_write_text (S13-01) ─────────────────────────────────────
+
+
+class TestExclusiveAtomicWriteSuccess:
+    def test_create_missing_target(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        content = "schema_version: 1\ncampaign_id: camp_x\n"
+        exclusive_atomic_write_text(target, content, validator=lambda c: None)
+        assert target.exists()
+        assert target.read_text(encoding="utf-8") == content
+
+    def test_unicode_preservation(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        content = "Привет, мир! 日本語\n"
+        exclusive_atomic_write_text(target, content, validator=lambda c: None)
+        assert target.read_text(encoding="utf-8") == content
+
+    def test_no_temp_files_remain_after_success(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        exclusive_atomic_write_text(target, "content", validator=lambda c: None)
+        parent_files = list(target.parent.iterdir())
+        assert parent_files == [target]
+
+    def test_validator_called_before_link(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        events: list[str] = []
+        original_link = os.link
+
+        def patched_link(src: str, dst: str) -> None:
+            events.append("link")
+            original_link(src, dst)
+
+        def validator(_c: str) -> None:
+            events.append("validator")
+
+        import dnd_assistant.storage.atomic as atomic_mod
+
+        atomic_mod.os.link = patched_link  # type: ignore[attr-defined]
+        try:
+            exclusive_atomic_write_text(target, "content", validator=validator)
+        finally:
+            atomic_mod.os.link = original_link  # type: ignore[attr-defined]
+
+        assert events == ["validator", "link"]
+
+
+class TestExclusiveAtomicWriteConflict:
+    def test_existing_target_raises_conflict(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        target.write_text("ORIGINAL", encoding="utf-8")
+        with pytest.raises(ConflictError):
+            exclusive_atomic_write_text(target, "NEW", validator=lambda c: None)
+        assert target.read_text(encoding="utf-8") == "ORIGINAL"
+
+    def test_existing_target_leaves_no_temp(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        target.write_text("ORIGINAL", encoding="utf-8")
+        with pytest.raises(ConflictError):
+            exclusive_atomic_write_text(target, "NEW", validator=lambda c: None)
+        assert list(target.parent.iterdir()) == [target]
+
+    def test_second_create_raises_conflict(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        exclusive_atomic_write_text(target, "first", validator=lambda c: None)
+        with pytest.raises(ConflictError):
+            exclusive_atomic_write_text(target, "second", validator=lambda c: None)
+        assert target.read_text(encoding="utf-8") == "first"
+
+    def test_simulated_link_race_raises_conflict(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+
+        def racing_link(_src: str, _dst: str) -> None:
+            raise FileExistsError(17, "race")
+
+        import dnd_assistant.storage.atomic as atomic_mod
+
+        original_link = os.link
+        atomic_mod.os.link = racing_link  # type: ignore[attr-defined]
+        try:
+            with pytest.raises(ConflictError):
+                exclusive_atomic_write_text(target, "content", validator=lambda c: None)
+        finally:
+            atomic_mod.os.link = original_link  # type: ignore[attr-defined]
+
+        assert not target.exists()
+        assert list(target.parent.iterdir()) == []
+
+
+class TestExclusiveAtomicWriteFailure:
+    def test_unsupported_hardlink_raises_storage_error_without_target(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+
+        def unsupported_link(_src: str, _dst: str) -> None:
+            raise OSError(95, "operation not supported")
+
+        import dnd_assistant.storage.atomic as atomic_mod
+
+        original_link = os.link
+        atomic_mod.os.link = unsupported_link  # type: ignore[attr-defined]
+        try:
+            with pytest.raises(StorageError, match="hard-link"):
+                exclusive_atomic_write_text(target, "content", validator=lambda c: None)
+        finally:
+            atomic_mod.os.link = original_link  # type: ignore[attr-defined]
+
+        assert not target.exists()
+        assert list(target.parent.iterdir()) == []
+
+    def test_validator_failure_leaves_no_target(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        with pytest.raises(ValidationError, match="bad"):
+            exclusive_atomic_write_text(
+                target,
+                "content",
+                validator=lambda c: (_ for _ in ()).throw(ValidationError("bad")),
+            )
+        assert not target.exists()
+        assert list(target.parent.iterdir()) == []
+
+    def test_target_is_directory_rejected(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        target.mkdir()
+        with pytest.raises(StorageError):
+            exclusive_atomic_write_text(target, "content", validator=lambda c: None)
+
+    def test_parent_missing_rejected(self, tmp_path: Path) -> None:
+        target = tmp_path / "missing" / "config.yaml"
+        with pytest.raises(StorageError):
+            exclusive_atomic_write_text(target, "content", validator=lambda c: None)
+
+    def test_relative_target_rejected(self) -> None:
+        with pytest.raises(StorageError):
+            exclusive_atomic_write_text("relative.yaml", "content", validator=lambda c: None)
+
+    @pytest.mark.skipif(not _can_symlink(), reason="host cannot create symlinks")
+    def test_symlink_target_rejected(self, tmp_path: Path) -> None:
+        target = _make_target(tmp_path)
+        real = tmp_path / "real.yaml"
+        real.write_text("ORIGINAL", encoding="utf-8")
+        os.symlink(real, target)
+        with pytest.raises(StorageError):
+            exclusive_atomic_write_text(target, "content", validator=lambda c: None)
+        assert real.read_text(encoding="utf-8") == "ORIGINAL"

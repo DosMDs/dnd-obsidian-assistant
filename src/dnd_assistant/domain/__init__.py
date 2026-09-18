@@ -25,6 +25,7 @@ from dnd_assistant.domain.entity import Entity
 from dnd_assistant.domain.events import TemporalCertainty, TimelineEvent
 from dnd_assistant.domain.session import Session, SessionId
 from dnd_assistant.domain.types import (
+    CampaignId,
     EntityId,
     EntityType,
     KnowledgeStatus,
@@ -42,6 +43,7 @@ __all__: list[str] = [
     "CalendarMonth",
     "CalendarService",
     "CampaignEntityReference",
+    "CampaignId",
     "CampaignSessionSource",
     "CampaignState",
     "CampaignStateArtifact",

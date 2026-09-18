@@ -108,6 +108,38 @@ Usage in a Pydantic model::
 """
 
 
+# ── CampaignId ────────────────────────────────────────────────────────────
+
+
+def _validate_campaign_id(value: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError("CampaignId must be a string")
+    if not value:
+        raise ValueError("CampaignId must not be empty")
+    if value.strip() != value:
+        raise ValueError("CampaignId must not have leading or trailing whitespace")
+    if not value.isprintable():
+        raise ValueError("CampaignId must not contain non-printable characters")
+    return value
+
+
+CampaignId = Annotated[
+    str,
+    BeforeValidator(_validate_campaign_id),
+    Field(
+        description="A stable opaque campaign identity independent of display name",
+    ),
+]
+"""A stable opaque campaign identifier.
+
+CampaignId is deliberately loosely validated (non-empty printable string
+without surrounding whitespace), mirroring ``EntityId``.  It carries no
+mandated prefix or checksum so that human-authored campaign configuration
+written outside this application still validates.  Generation policy
+(uniqueness and format) belongs to the application layer.
+"""
+
+
 # ── Revision ──────────────────────────────────────────────────────────────
 
 Revision = Annotated[
