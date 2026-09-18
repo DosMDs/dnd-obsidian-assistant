@@ -12,6 +12,7 @@ from dnd_assistant.storage.vault_discovery import (
     DiscoveryIssueCode,
     DiscoveryLimits,
     ObsidianVaultSourceReader,
+    _read_bounded,
 )
 from dnd_assistant.storage.vault_initialization import serialize_new_campaign_config
 
@@ -193,21 +194,35 @@ class TestInventoryBounds:
         assert "a/b/c/d/deep.md" not in paths
         assert any(i.code is DiscoveryIssueCode.DEPTH_LIMIT for i in result.issues)
 
-    def test_entry_limit_at_exact_bound_passes(self, tmp_path: Path) -> None:
-        root = _make_vault(tmp_path)
-        _write_text(root, "a.md", "x")
-        _write_text(root, "b.md", "x")
-        default_count = len(ObsidianVaultSourceReader(root).inventory().entries)
-        reader = ObsidianVaultSourceReader(
-            root, DiscoveryLimits(max_inventory_entries=default_count)
-        )
-        assert len(reader.inventory().entries) == default_count
-
     def test_depth_limit_at_exact_bound_includes_file(self, tmp_path: Path) -> None:
         root = _make_vault(tmp_path)
         _write_text(root, "a/b.md", "x")
         reader = ObsidianVaultSourceReader(root, DiscoveryLimits(max_depth=2))
         assert "a/b.md" in {e.relative_path for e in reader.inventory().entries}
+
+    def test_traversal_ceiling_counts_directories(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        for index in range(5):
+            (root / f"emptydir{index}").mkdir()
+        reader = ObsidianVaultSourceReader(root, DiscoveryLimits(max_inventory_entries=3))
+        with pytest.raises(StorageError, match="exceeded"):
+            reader.inventory()
+
+    def test_traversal_ceiling_counts_excluded_entries(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        for index in range(5):
+            _write_text(root, f"scratch{index}.tmp", "x")
+        reader = ObsidianVaultSourceReader(root, DiscoveryLimits(max_inventory_entries=3))
+        with pytest.raises(StorageError, match="exceeded"):
+            reader.inventory()
+
+    def test_huge_directory_is_bounded_before_materialization(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        for index in range(200):
+            _write_text(root, f"note{index:04d}.md", "x")
+        reader = ObsidianVaultSourceReader(root, DiscoveryLimits(max_inventory_entries=10))
+        with pytest.raises(StorageError, match="exceeded"):
+            reader.inventory()
 
 
 # ── Bounded reads ────────────────────────────────────────────────────────────
@@ -237,6 +252,58 @@ class TestBoundedReads:
         assert result.text is None
         assert result.issue is not None
         assert result.issue.code is DiscoveryIssueCode.SKIPPED_OVERSIZE
+
+    def test_grown_file_read_is_bounded_at_read_time(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_vault(tmp_path)
+        path = _write_text(root, "grow.txt", "0123")
+        reader = ObsidianVaultSourceReader(root)
+        path.write_text("x" * 500, encoding="utf-8")
+
+        real_read = os.read
+        observed = {"bytes": 0}
+
+        def counting_read(descriptor: int, size: int) -> bytes:
+            data = real_read(descriptor, size)
+            observed["bytes"] += len(data)
+            return data
+
+        monkeypatch.setattr(os, "read", counting_read)
+        result = reader.read_text("grow.txt", max_bytes=10)
+
+        assert result.text is None
+        assert result.issue is not None
+        assert result.issue.code is DiscoveryIssueCode.SKIPPED_OVERSIZE
+        # At most the effective budget plus the one-byte overflow sentinel.
+        assert observed["bytes"] <= 11
+
+    def test_zero_budget_reads_empty_source(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        _write_text(root, "empty.txt", "")
+        result = ObsidianVaultSourceReader(root).read_text("empty.txt", max_bytes=0)
+        assert result.issue is None
+        assert result.text == ""
+
+    def test_read_bounded_primitive_stops_at_sentinel(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        path = tmp_path / "large.bin"
+        path.write_bytes(b"x" * 500)
+        real_read = os.read
+        observed = {"bytes": 0}
+
+        def counting_read(descriptor: int, size: int) -> bytes:
+            data = real_read(descriptor, size)
+            observed["bytes"] += len(data)
+            return data
+
+        monkeypatch.setattr(os, "read", counting_read)
+        result = _read_bounded(path, 10)
+
+        assert result.overflow is True
+        assert len(result.data) == 11
+        assert observed["bytes"] == 11
 
     def test_disappeared_source_reported(self, tmp_path: Path) -> None:
         root = _make_vault(tmp_path)
@@ -326,6 +393,35 @@ class TestRedirectSafety:
         paths = {e.relative_path for e in result.entries}
         assert "linked/inside.md" not in paths
         assert "normal.md" in paths
+        assert any(
+            i.relative_path == "linked" and i.code is DiscoveryIssueCode.UNSAFE_REDIRECT
+            for i in result.issues
+        )
+
+    def test_directory_redirect_reauthorized_before_descent(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        root = _make_vault(tmp_path)
+        _write_text(root, "linked/secret.md", "SECRET")
+        reader = ObsidianVaultSourceReader(root)
+        target = reader.vault_root / "linked"
+        real_is_symlink = Path.is_symlink
+
+        # Bypass the push-time redirect check so the only guard is the
+        # immediate pre-descent re-authorization, then present the directory
+        # as a redirect at descent time.
+        monkeypatch.setattr(
+            ObsidianVaultSourceReader, "_is_redirect", staticmethod(lambda _path: False)
+        )
+        monkeypatch.setattr(
+            Path,
+            "is_symlink",
+            lambda self: self == target or real_is_symlink(self),
+        )
+
+        result = reader.inventory()
+        paths = {e.relative_path for e in result.entries}
+        assert "linked/secret.md" not in paths
         assert any(
             i.relative_path == "linked" and i.code is DiscoveryIssueCode.UNSAFE_REDIRECT
             for i in result.issues

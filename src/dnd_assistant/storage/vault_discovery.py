@@ -28,9 +28,11 @@ Two phases
 ==========
 
 ``inventory()`` performs a safe, deterministic, bounded stat-only traversal
-(relative path, extension, size).  ``read_text()`` performs a bounded exact
-UTF-8 read for one already-inventoried relative path.  Filesystem discovery is
-never conflated with campaign semantic mapping.
+(relative path, extension, size).  ``read_text(relative_path, max_bytes)``
+performs an exact UTF-8 read that is bounded at read time by the supplied
+effective budget (``min`` of the per-file limit and the remaining aggregate
+budget) plus a one-byte overflow sentinel.  Filesystem discovery is never
+conflated with campaign semantic mapping.
 
 This module belongs to the storage layer and must not import from:
     application, models, tools, retrieval, cli, ollama, pydantic_ai, textual.
@@ -56,25 +58,35 @@ from dnd_assistant.storage.vault_initialization import (
 # ── Resource bounds ──────────────────────────────────────────────────────────
 
 MAX_INVENTORY_ENTRIES: Final[int] = 20_000
-"""Hard ceiling on inventoried files.  Overflow is a fatal resource failure."""
+"""Hard ceiling on filesystem entries encountered by traversal (files, \
+directories, redirects, excluded and non-regular entries).  Overflow is a \
+fatal resource failure with no partial report."""
 
 MAX_CONTENT_FILE_BYTES: Final[int] = 1_048_576
-"""Maximum bytes read from a single source (1 MiB)."""
+"""Maximum bytes retained from a single source (1 MiB)."""
 
 MAX_TOTAL_CONTENT_BYTES: Final[int] = 67_108_864
-"""Maximum aggregate bytes read across a single discovery run (64 MiB)."""
+"""Maximum aggregate bytes retained across a single discovery run (64 MiB)."""
 
 MAX_DEPTH: Final[int] = 32
 """Maximum directory nesting depth below the resolved Vault root."""
+
+_MAX_MARKER_BYTES: Final[int] = 65_536
+"""Bounded read budget for the trusted ``_system/campaign.yaml`` marker.
+
+Deliberately independent of the source-content budget so a low per-source
+limit cannot make a valid initialized Vault look unreadable.
+"""
 
 
 @dataclass(frozen=True, slots=True)
 class DiscoveryLimits:
     """Deterministic, testable resource bounds for one discovery run.
 
-    ``max_content_file_bytes`` and ``max_inventory_entries`` are enforced by
-    this storage capability.  ``max_total_content_bytes`` is enforced by the
-    application content phase, which owns the aggregate read decision.
+    ``max_inventory_entries`` and the per-read budget are enforced by this
+    storage capability.  ``max_total_content_bytes`` is enforced by the
+    application content phase, which passes the remaining aggregate budget into
+    :meth:`ObsidianVaultSourceReader.read_text` as the effective read cap.
     """
 
     max_inventory_entries: int = MAX_INVENTORY_ENTRIES
@@ -87,7 +99,7 @@ class DiscoveryLimits:
 
 _EXCLUDED_DIRECTORY_NAMES: Final[frozenset[str]] = frozenset({".obsidian", ".git"})
 _EXCLUDED_FILE_NAMES: Final[frozenset[str]] = frozenset(
-    {".DS_Store", "Thumbs.db", "desktop.ini", ".git"}
+    name.casefold() for name in (".DS_Store", "Thumbs.db", "desktop.ini", ".git")
 )
 _EXCLUDED_FILE_SUFFIXES: Final[tuple[str, ...]] = (".tmp", ".swp", ".bak")
 
@@ -98,22 +110,22 @@ def _is_excluded_name(name: str, *, is_directory: bool) -> bool:
     Policy:
 
     - ``.obsidian``/``.git`` and any hidden directory are excluded with their
-      whole subtree;
+      whole subtree (casefold-equivalent names included);
     - known OS metadata and editor temp/backup files are excluded;
     - other hidden *files* are **not** blanket-excluded, so explicitly known
       application artifacts such as the hidden Campaign State manifest are
       still discovered and classified deterministically by the caller.
     """
-    if name in _EXCLUDED_DIRECTORY_NAMES:
+    folded = name.casefold()
+    if folded in _EXCLUDED_DIRECTORY_NAMES:
         return True
     if is_directory and name.startswith("."):
         return True
-    if name in _EXCLUDED_FILE_NAMES:
+    if folded in _EXCLUDED_FILE_NAMES:
         return True
     if name.startswith("~") or name.endswith("~"):
         return True
-    lowered = name.casefold()
-    return any(lowered.endswith(suffix) for suffix in _EXCLUDED_FILE_SUFFIXES)
+    return any(folded.endswith(suffix) for suffix in _EXCLUDED_FILE_SUFFIXES)
 
 
 # ── Result types ─────────────────────────────────────────────────────────────
@@ -191,11 +203,14 @@ class VaultSourceReader(Protocol):
 
     def inventory(self) -> VaultSourceInventory: ...
 
-    def read_text(self, relative_path: str) -> SourceReadResult:
+    def read_text(self, relative_path: str, max_bytes: int | None = None) -> SourceReadResult:
         """Boundedly read one Vault-relative path as exact UTF-8.
 
-        This is a Vault-bounded primitive: it enforces path syntax, redirect
-        rejection and Vault containment only.  Inventory membership, source
+        ``max_bytes`` is the effective read budget (the caller passes the
+        ``min`` of the per-file limit and the remaining aggregate budget).  At
+        most ``max_bytes`` bytes are retained; one extra sentinel byte is read
+        only to detect overflow, which returns ``SKIPPED_OVERSIZE`` with no
+        text.  This is a Vault-bounded primitive: inventory membership, source
         eligibility and the exclusion policy are the caller's responsibility.
         """
         ...
@@ -291,7 +306,7 @@ class ObsidianVaultSourceReader:
         if not path.is_file():
             raise StorageError(f"campaign.yaml is not a regular file: {path}")
         try:
-            text = _read_utf8_text(path)
+            text = self._read_bounded_text(path, _MAX_MARKER_BYTES)
         except StorageError as exc:
             raise StorageError(f"Failed to read campaign.yaml: {path}", cause=exc) from exc
         return parse_campaign_config(text).campaign_id
@@ -301,9 +316,13 @@ class ObsidianVaultSourceReader:
     def inventory(self) -> VaultSourceInventory:
         """Deterministically inventory regular, non-redirecting files.
 
+        The ``max_inventory_entries`` ceiling bounds filesystem entries
+        encountered by traversal (including directories, redirects, excluded
+        and non-regular entries), not only successfully inventoried files.
+
         Raises:
             StorageError: The Vault root disappeared, the root could not be
-                read, or the inventory-entry ceiling was exceeded.  A ceiling
+                read, or the traversal-entry ceiling was exceeded.  A ceiling
                 overflow is fatal and yields no partial inventory.
         """
         if not self._root.is_dir():
@@ -311,16 +330,8 @@ class ObsidianVaultSourceReader:
 
         entries: list[InventoryEntry] = []
         issues: list[DiscoveryIssue] = []
-        count = 0
 
         for entry in self._walk(issues):
-            count += 1
-            if count > self._limits.max_inventory_entries:
-                raise StorageError(
-                    f"Vault source inventory exceeded {self._limits.max_inventory_entries} "
-                    f"entries at {entry.relative_path}; raise the limit explicitly or "
-                    f"reduce the Vault"
-                )
             entries.append(entry)
 
         issues.extend(self._case_alias_issues(entries))
@@ -335,61 +346,99 @@ class ObsidianVaultSourceReader:
     def _walk(self, issues: list[DiscoveryIssue]) -> Iterator[InventoryEntry]:
         """Yield inventoried files, recording isolated traversal issues.
 
-        Traversal is iterative (no recursion), never follows symlinks or
-        junctions, and records isolated issues for redirects, depth limits,
-        unreadable subdirectories and non-regular files.  A root read error is
-        fatal.
+        Traversal is iterative (no recursion), never materializes a directory
+        with ``list()``, never follows symlinks or junctions, and records
+        isolated issues for redirects, depth limits, unreadable subdirectories
+        and non-regular files.  Every encountered directory entry counts
+        against ``max_inventory_entries``; overflow raises ``StorageError``
+        with no partial report.  A root read error is fatal.
         """
         stack: list[tuple[Path, str]] = [(self._root, "")]
+        encountered = 0
         while stack:
             directory, rel_dir = stack.pop()
+
+            if rel_dir != "":
+                problem = self._authorize_directory(directory, rel_dir)
+                if problem is not None:
+                    issues.append(problem)
+                    continue
+
             try:
-                with os.scandir(directory) as scandir:
-                    raw_entries = list(scandir)
+                scandir = os.scandir(directory)
             except OSError:
                 if rel_dir == "":
                     raise StorageError(f"Failed to read Vault root: {directory}") from None
                 issues.append(DiscoveryIssue(rel_dir, DiscoveryIssueCode.UNREADABLE))
                 continue
 
-            for entry in raw_entries:
-                try:
-                    is_directory = entry.is_dir(follow_symlinks=False)
-                except OSError:
-                    is_directory = False
-                if _is_excluded_name(entry.name, is_directory=is_directory):
-                    continue
-                relative = f"{rel_dir}/{entry.name}" if rel_dir else entry.name
+            with scandir:
+                for entry in scandir:
+                    encountered += 1
+                    if encountered > self._limits.max_inventory_entries:
+                        raise StorageError(
+                            f"Vault source traversal exceeded "
+                            f"{self._limits.max_inventory_entries} encountered entries at "
+                            f"{rel_dir or '.'}; raise the limit explicitly or reduce the Vault"
+                        )
 
-                if self._is_redirect(entry.path):
-                    issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.UNSAFE_REDIRECT))
-                    continue
-
-                if is_directory:
-                    child_depth = relative.count("/") + 1
-                    if child_depth >= self._limits.max_depth:
-                        issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.DEPTH_LIMIT))
+                    try:
+                        is_directory = entry.is_dir(follow_symlinks=False)
+                    except OSError:
+                        is_directory = False
+                    if _is_excluded_name(entry.name, is_directory=is_directory):
                         continue
-                    stack.append((Path(entry.path), relative))
-                    continue
+                    relative = f"{rel_dir}/{entry.name}" if rel_dir else entry.name
 
-                try:
-                    is_file = entry.is_file(follow_symlinks=False)
-                except OSError:
-                    is_file = False
-                if not is_file:
-                    issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.NOT_A_REGULAR_FILE))
-                    continue
+                    if self._is_redirect(entry.path):
+                        issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.UNSAFE_REDIRECT))
+                        continue
 
-                size = self._safe_size(relative)
-                if size is None:
-                    issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.UNREADABLE))
-                    continue
-                yield InventoryEntry(
-                    relative_path=relative,
-                    extension=Path(entry.name).suffix.casefold(),
-                    size_bytes=size,
-                )
+                    if is_directory:
+                        child_depth = relative.count("/") + 1
+                        if child_depth >= self._limits.max_depth:
+                            issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.DEPTH_LIMIT))
+                            continue
+                        stack.append((Path(entry.path), relative))
+                        continue
+
+                    try:
+                        is_file = entry.is_file(follow_symlinks=False)
+                    except OSError:
+                        is_file = False
+                    if not is_file:
+                        issues.append(
+                            DiscoveryIssue(relative, DiscoveryIssueCode.NOT_A_REGULAR_FILE)
+                        )
+                        continue
+
+                    size = self._safe_size(relative)
+                    if size is None:
+                        issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.UNREADABLE))
+                        continue
+                    yield InventoryEntry(
+                        relative_path=relative,
+                        extension=Path(entry.name).suffix.casefold(),
+                        size_bytes=size,
+                    )
+
+    def _authorize_directory(self, directory: Path, relative: str) -> DiscoveryIssue | None:
+        """Re-authorize a descendant directory immediately before descent.
+
+        Redirect identity and containment are re-checked at pop time, after the
+        entry was pushed, so a directory replaced between discovery steps is not
+        descended.  This narrows but cannot atomically eliminate the OS-level
+        TOCTOU window between this check and ``os.scandir``.
+        """
+        try:
+            if directory.is_symlink() or directory.is_junction():
+                return DiscoveryIssue(relative, DiscoveryIssueCode.UNSAFE_REDIRECT)
+            if not directory.is_dir():
+                return DiscoveryIssue(relative, DiscoveryIssueCode.UNREADABLE)
+            directory.resolve(strict=False).relative_to(self._root)
+        except (OSError, ValueError):
+            return DiscoveryIssue(relative, DiscoveryIssueCode.UNSAFE_REDIRECT)
+        return None
 
     @staticmethod
     def _is_redirect(path: str) -> bool:
@@ -425,10 +474,33 @@ class ObsidianVaultSourceReader:
                     issues.append(DiscoveryIssue(path, DiscoveryIssueCode.CASE_ALIAS))
         return issues
 
+    def _read_bounded_text(self, path: Path, budget: int) -> str:
+        """Read exact UTF-8 text, bounded by ``budget`` bytes.
+
+        Raises:
+            StorageError: The file is unreadable, exceeds ``budget``, or is not
+                valid UTF-8 (a ``UnicodeDecodeError`` cause distinguishes the
+                latter).
+        """
+        bounded = _read_bounded(path, budget)
+        if bounded.overflow:
+            raise StorageError(f"File exceeds read budget ({budget} bytes): {path}")
+        try:
+            return bounded.data.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise StorageError(f"File is not valid UTF-8: {path}", cause=exc) from exc
+
     # ── Phase 2: bounded read ─────────────────────────────────────────────
 
-    def read_text(self, relative_path: str) -> SourceReadResult:
+    def read_text(self, relative_path: str, max_bytes: int | None = None) -> SourceReadResult:
         """Boundedly read one Vault-relative path as exact UTF-8.
+
+        ``max_bytes`` is the effective read budget (the application passes the
+        ``min`` of the per-file limit and the remaining aggregate budget).  The
+        read is bounded at read time: at most ``budget`` bytes are retained and
+        one sentinel byte is read only to detect overflow, which returns
+        ``SKIPPED_OVERSIZE`` with no text.  The pre-read ``stat()`` is only an
+        optimization and is never the safety bound.
 
         This is a Vault-bounded primitive: it enforces path syntax, redirect
         rejection and Vault containment, but does **not** verify that the path
@@ -440,6 +512,11 @@ class ObsidianVaultSourceReader:
         symlinks on platforms exposing ``O_NOFOLLOW``; on platforms without it,
         the pre-open redirect check is the residual best-effort guard.
         """
+        budget = self._limits.max_content_file_bytes if max_bytes is None else max_bytes
+        budget = min(budget, self._limits.max_content_file_bytes)
+        if budget < 0:
+            budget = 0
+
         parts = _relative_parts(relative_path)
         if parts is None:
             return SourceReadResult(
@@ -477,41 +554,65 @@ class ObsidianVaultSourceReader:
             return SourceReadResult(
                 None, DiscoveryIssue(relative_path, DiscoveryIssueCode.NOT_A_REGULAR_FILE)
             )
-        if info.st_size > self._limits.max_content_file_bytes:
+        # Optimization only: a declared size over either ceiling is already an
+        # explicit skip.  The bounded read below is the actual safety bound.
+        if info.st_size > self._limits.max_content_file_bytes or info.st_size > budget:
             return SourceReadResult(
                 None, DiscoveryIssue(relative_path, DiscoveryIssueCode.SKIPPED_OVERSIZE)
             )
 
         try:
-            text = _read_utf8_text(current)
+            bounded = _read_bounded(current, budget)
         except StorageError as exc:
             code = (
-                DiscoveryIssueCode.INVALID_UTF8
-                if isinstance(exc.__cause__, UnicodeDecodeError)
+                DiscoveryIssueCode.DISAPPEARED
+                if isinstance(exc.__cause__, FileNotFoundError)
                 else DiscoveryIssueCode.UNREADABLE
             )
             return SourceReadResult(None, DiscoveryIssue(relative_path, code))
 
-        if len(text.encode("utf-8")) > self._limits.max_content_file_bytes:
+        if bounded.overflow:
             return SourceReadResult(
                 None, DiscoveryIssue(relative_path, DiscoveryIssueCode.SKIPPED_OVERSIZE)
+            )
+        try:
+            text = bounded.data.decode("utf-8")
+        except UnicodeDecodeError:
+            return SourceReadResult(
+                None, DiscoveryIssue(relative_path, DiscoveryIssueCode.INVALID_UTF8)
             )
         return SourceReadResult(text, None)
 
 
-# ── Exact UTF-8 read helper ──────────────────────────────────────────────────
+# ── Bounded exact UTF-8 read primitives ──────────────────────────────────────
+
+_OVERFLOW_SENTINEL_BYTES: Final[int] = 1
+"""Minimum extra byte read to distinguish "fits exactly" from "exceeds"."""
 
 
-def _read_utf8_text(path: Path) -> str:
-    """Read exact UTF-8 text with newline preservation, never following links.
+@dataclass(frozen=True, slots=True)
+class _BoundedRead:
+    """Raw bounded-read outcome: bytes plus whether the budget was exceeded."""
 
-    Uses ``O_NOFOLLOW`` where the platform exposes it so a symlink substituted
-    between the pre-check and the open still fails closed.
+    data: bytes
+    overflow: bool
+
+
+def _read_bounded(path: Path, budget: int) -> _BoundedRead:
+    """Read at most ``budget`` bytes, or ``budget + 1`` when it overflows.
+
+    Never reads a source to EOF before enforcing its byte ceiling: the loop
+    stops after ``budget + 1`` bytes, so a file that grows between ``stat()``
+    and the read still cannot cause an unbounded allocation.  Exact newline
+    bytes are preserved (binary read; decoding is the caller's responsibility).
+    Uses ``O_NOFOLLOW`` where the platform exposes it.
 
     Raises:
-        StorageError: The file is unreadable or not valid UTF-8.  A
-            ``UnicodeDecodeError`` cause distinguishes the latter.
+        StorageError: The file disappeared, could not be opened, or a read
+            failed.  A ``FileNotFoundError`` cause distinguishes disappearance.
     """
+    effective = budget if budget > 0 else 0
+    limit = effective + _OVERFLOW_SENTINEL_BYTES
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0) | getattr(os, "O_NOFOLLOW", 0)
     try:
         descriptor = os.open(path, flags)
@@ -520,13 +621,22 @@ def _read_utf8_text(path: Path) -> str:
     except OSError as exc:
         raise StorageError(f"Failed to open source file: {path}", cause=exc) from exc
 
+    chunks: list[bytes] = []
+    remaining = limit
     try:
-        with os.fdopen(descriptor, "r", encoding="utf-8", newline="") as handle:
-            return handle.read()
-    except UnicodeDecodeError as exc:
-        raise StorageError(f"Source file is not valid UTF-8: {path}", cause=exc) from exc
+        while remaining > 0:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
     except OSError as exc:
         raise StorageError(f"Failed to read source file: {path}", cause=exc) from exc
+    finally:
+        os.close(descriptor)
+
+    data = b"".join(chunks)
+    return _BoundedRead(data=data, overflow=len(data) > effective)
 
 
 __all__ = [

@@ -258,40 +258,76 @@ surface was added (the bootstrap user workflow belongs to S13-03).
 - **`_system` minimum inclusion:** read the campaign marker; inventory
   `world_time.json` and raw/audit/ChangeSet/index/cache/trace content is
   classified ineligible and not content-read.
+- **Casefold reserved namespaces:** `_system`, `State`, `Sessions` and the entity
+  directories (plus managed `_system` subnamespaces and derived State leaves)
+  match casefold-equivalently, so `_SYSTEM/raw/...` is `APPLICATION_RAW` and
+  never `USER_SOURCE`; case-distinct physical entries still retain
+  deterministic `CASE_ALIAS` reporting.
 - **Safety:** the root is resolved once; descendant symlinks/junctions/reparse
-  redirects are never followed; reads re-authorize containment and use
-  `O_NOFOLLOW` where available; hidden dirs, `.obsidian`/`.git`, OS metadata and
-  editor temp/backup files are excluded, while the hidden Campaign State
-  manifest is intentionally not blanket-excluded.
-- **Bounds:** inventory entries `20_000` (overflow is a fatal `StorageError`
-  with **no partial report**), per-file content `1 MiB`, aggregate content
-  `64 MiB`, depth `32`.  Per-file/aggregate limits produce explicit
-  `SKIPPED`/issue states.  Content is read in deterministic Vault-relative
-  casefold + exact order.
+  redirects are never followed; each descendant directory is re-authorized
+  (not symlink/junction, contained, still a directory) immediately before its
+  scan, narrowing the OS-level TOCTOU window; reads re-authorize containment and
+  use `O_NOFOLLOW` where available; hidden dirs, `.obsidian`/`.git`, OS metadata
+  and editor temp/backup files are excluded (casefold-equivalently), while the
+  hidden Campaign State manifest is intentionally not blanket-excluded.
+- **Bounds:** the `20_000` traversal ceiling bounds filesystem entries
+  *encountered* (files, directories, redirects, excluded and non-regular
+  entries), is enforced lazily without materializing a directory listing, and
+  overflow is a fatal `StorageError` with **no partial report**.  Source reads
+  are bounded *at read time*: `read_text(relative_path, max_bytes)` retains at
+  most `min(per-file limit, remaining aggregate budget)` bytes and reads one
+  extra sentinel byte only to detect overflow.  Per-file content `1 MiB`,
+  aggregate content `64 MiB` (enforced against actual reads), depth `32`.
+  Per-file/aggregate limits produce explicit `SKIPPED`/issue states.  Content is
+  read in deterministic Vault-relative casefold + exact order.
 - **Failure isolation:** per-file unreadable/invalid-UTF-8/oversize/redirect
-  are isolated `DiscoveryIssue`s; only root/precondition/inventory-overflow are
+  are isolated `DiscoveryIssue`s; only root/precondition/traversal-overflow are
   fatal.
+
+### S13-02 correction pass
+
+A bounded correction pass tightened the trusted boundary after the initial
+commit: (C1) the read primitive no longer reads to EOF before enforcing the
+byte ceiling, (C2) the application passes the effective
+`min(per-file, remaining aggregate)` budget into the bounded read so a source
+growing between inventory and read cannot exceed the aggregate budget, (C3) the
+traversal ceiling now bounds encountered filesystem entries and no
+`list(scandir)` materialization occurs, (C4) descendant directories are
+re-authorized immediately before descent, and (C5) reserved namespaces are
+matched casefold-equivalently.
 
 ### Evidence (this task)
 
 ```text
 unit:        precondition, inventory, exclusions, hidden-manifest handling,
-             case-alias, deterministic Unicode/Cyrillic order, entry/depth
-             bounds, exact/handled reads, redirect rejection, classification,
+             case-alias, deterministic Unicode/Cyrillic order, traversal/depth
+             bounds (encountered-entry ceiling incl. directories and excluded
+             entries, huge-directory bound), bounded-read sentinel limit
+             (observed os.read bytes), zero-budget empty read, pre-descent
+             directory re-authorization, mixed-case reserved namespaces,
+             exact/handled reads, redirect rejection, classification,
              frontmatter probe, service policy
 integration: golden-Vault copytree classification, zero-write tree bytes+mtime
              and audit-bytes snapshot, no new paths, invalid-UTF-8 isolation,
              binary/unknown inventory-only, unterminated frontmatter, symlink
-             and junction not followed, no outside-Vault read, entry-overflow
-             fatal with no partial report, aggregate/per-file limits
-contract:    AST boundaries (no model/retrieval/TUI; no marker parser in
-             application; no repository/audit/markdown/entity import; Campaign
-             State layout ownership reuse; no filesystem mutation calls)
-gates:       pytest (7128 passed, 141 skipped), ruff check, ruff format --check,
+             and junction not followed, no outside-Vault read, traversal-overflow
+             fatal with no partial report, aggregate/per-file limits, source
+             growth after inventory cannot exceed the aggregate budget
+contract:    AST boundaries (no model/retrieval/TUI; no marker parser or
+             os/pathlib authority in application; no repository/audit/markdown/
+             entity import; Campaign State layout ownership reuse; no
+             filesystem mutation calls)
+gates:       pytest (7146 passed, 141 skipped), ruff check, ruff format --check,
              pyright (0 errors), uv lock --check, git diff --check,
              maintainability contract (no ceiling increased)
-capability:  Windows junction and symlink discovery tests are capability-gated
-             (SKIPPED_CAPABILITY where the host cannot create links)
+capability:  real symlink/junction discovery tests are capability-gated
+             (SKIPPED_CAPABILITY where the host cannot create links); the
+             pre-descent re-authorization branch is additionally covered
+             capability-independently via monkeypatched redirect presentation
+residual:    the pre-descent re-authorization narrows but cannot atomically
+             eliminate the OS-level TOCTOU window between the check and
+             os.scandir; on platforms without O_NOFOLLOW the pre-open redirect
+             check is the residual best-effort read guard
 ```
 
 ## Stage-13 Source-of-Truth rules carried forward

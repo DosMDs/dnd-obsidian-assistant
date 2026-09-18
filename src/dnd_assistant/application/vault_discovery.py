@@ -58,13 +58,16 @@ TEXT_SOURCE_EXTENSIONS: frozenset[str] = frozenset(
 _MARKDOWN_SOURCE_EXTENSIONS: frozenset[str] = frozenset({".md", ".markdown"})
 
 _ENTITY_PREFIXES: tuple[tuple[str, ...], ...] = tuple(
-    tuple(directory.value.split("/")) for directory in EntityDirectory
+    tuple(part.casefold() for part in directory.value.split("/")) for directory in EntityDirectory
 )
-"""Canonical entity-directory prefixes from the storage-owned mapping."""
+"""Casefolded canonical entity-directory prefixes from the storage mapping."""
 
-_DERIVED_STATE_LEAVES: frozenset[str] = frozenset(ARTIFACT_FILENAMES.values()) | {MANIFEST_FILENAME}
-"""Physical Campaign State leaves owned by ``storage.derived_state``."""
+_DERIVED_STATE_LEAVES: frozenset[str] = frozenset(
+    name.casefold() for name in (*ARTIFACT_FILENAMES.values(), MANIFEST_FILENAME)
+)
+"""Casefolded physical Campaign State leaves owned by ``storage.derived_state``."""
 
+_MANAGED_CONFIG_NAMES: frozenset[str] = frozenset({"campaign.yaml", "world_time.json"})
 _APPLICATION_CONTROL_NAMESPACES: frozenset[str] = frozenset({"audit", "changesets", "migrations"})
 _APPLICATION_DERIVED_NAMESPACES: frozenset[str] = frozenset({"indexes", "cache", "traces"})
 
@@ -207,27 +210,34 @@ def _under_entity_directory(parts: tuple[str, ...]) -> bool:
 def classify_source(relative_path: str) -> SourceClass:
     """Classify one Vault-relative POSIX path deterministically.
 
+    Reserved managed namespaces (``_system``, ``State``, ``Sessions`` and the
+    entity directories) are matched casefold-equivalently, so a path whose
+    components differ only in case from a protected namespace is classified at
+    least as restrictively as the canonical spelling.  For example
+    ``_SYSTEM/raw/...`` is ``APPLICATION_RAW``, never ``USER_SOURCE``.
+
     Application-owned ``_system``/``State`` namespaces take precedence over the
     extension policy, so raw/audit/ChangeSet/derived files are never treated as
     bootstrap source merely because their extension is text-readable.
     """
     parts = tuple(relative_path.split("/"))
+    folded = tuple(part.casefold() for part in parts)
     extension = _extension(parts)
-    first = parts[0]
+    first = folded[0]
 
     if first == "_system":
-        if len(parts) >= 2 and parts[1] == "raw":
+        if len(folded) >= 2 and folded[1] == "raw":
             return SourceClass.APPLICATION_RAW
-        if len(parts) >= 2 and parts[1] in _APPLICATION_CONTROL_NAMESPACES:
+        if len(folded) >= 2 and folded[1] in _APPLICATION_CONTROL_NAMESPACES:
             return SourceClass.APPLICATION_CONTROL
-        if len(parts) >= 2 and parts[1] in _APPLICATION_DERIVED_NAMESPACES:
+        if len(folded) >= 2 and folded[1] in _APPLICATION_DERIVED_NAMESPACES:
             return SourceClass.DERIVED
-        if len(parts) == 2 and parts[1] in {"campaign.yaml", "world_time.json"}:
+        if len(folded) == 2 and folded[1] in _MANAGED_CONFIG_NAMES:
             return SourceClass.APPLICATION_CONFIG
         return SourceClass.APPLICATION_CONTROL
 
-    if first == "State":
-        if len(parts) == 2 and parts[1] in _DERIVED_STATE_LEAVES:
+    if first == "state":
+        if len(folded) == 2 and folded[1] in _DERIVED_STATE_LEAVES:
             return SourceClass.DERIVED
         if extension in TEXT_SOURCE_EXTENSIONS:
             return SourceClass.USER_SOURCE
@@ -235,9 +245,9 @@ def classify_source(relative_path: str) -> SourceClass:
 
     if extension not in TEXT_SOURCE_EXTENSIONS:
         return SourceClass.UNSUPPORTED
-    if _under_entity_directory(parts):
+    if _under_entity_directory(folded):
         return SourceClass.ENTITY_CANDIDATE
-    if first == "Sessions":
+    if first == "sessions":
         return SourceClass.SESSION_SOURCE
     return SourceClass.USER_SOURCE
 
@@ -260,11 +270,15 @@ class VaultDiscoveryService:
         """Inventory, classify and boundedly read eligible sources.
 
         Content is read in the deterministic Vault-relative casefold + exact
-        order, so aggregate-limit decisions are repeatable.  Per-file and
-        aggregate limits produce explicit ``SKIPPED``/issue states; only the
-        storage inventory-entry ceiling is fatal.
+        order, so aggregate-limit decisions are repeatable.  Each read is
+        bounded by ``min(per-file limit, remaining aggregate budget)`` at read
+        time, so a source that grows between inventory and read still cannot
+        push retained bytes over the aggregate budget.  Per-file and aggregate
+        limits produce explicit ``SKIPPED``/issue states; only the storage
+        traversal-entry ceiling is fatal.
         """
         inventory = self._reader.inventory()
+        per_file = self._reader.limits.max_content_file_bytes
         max_total = self._reader.limits.max_total_content_bytes
 
         entries: list[DiscoveredSource] = []
@@ -278,24 +292,47 @@ class VaultDiscoveryService:
             text: str | None = None
 
             if source_class in _ELIGIBLE_SOURCE_CLASSES:
-                if total_bytes + item.size_bytes > max_total:
+                remaining = max_total - total_bytes
+                if remaining <= 0:
                     status = ContentReadStatus.SKIPPED
                     issues.append(
                         DiscoveryIssue(item.relative_path, DiscoveryIssueCode.AGGREGATE_LIMIT)
                     )
                 else:
-                    result = self._reader.read_text(item.relative_path)
+                    effective = min(per_file, remaining)
+                    result = self._reader.read_text(item.relative_path, effective)
                     if result.issue is not None:
-                        issues.append(result.issue)
                         if result.issue.code is DiscoveryIssueCode.SKIPPED_OVERSIZE:
                             status = ContentReadStatus.SKIPPED
+                            code = (
+                                DiscoveryIssueCode.AGGREGATE_LIMIT
+                                if effective < per_file
+                                else DiscoveryIssueCode.SKIPPED_OVERSIZE
+                            )
+                            issues.append(DiscoveryIssue(item.relative_path, code))
                         else:
                             status = ContentReadStatus.FAILED
+                            issues.append(result.issue)
+                    elif result.text is None:
+                        status = ContentReadStatus.FAILED
+                        issues.append(
+                            DiscoveryIssue(item.relative_path, DiscoveryIssueCode.UNREADABLE)
+                        )
                     else:
-                        text = result.text
-                        status = ContentReadStatus.READ
-                        if text is not None:
-                            total_bytes += len(text.encode("utf-8"))
+                        actual = len(result.text.encode("utf-8"))
+                        if actual > remaining:
+                            # Defensive aggregate guard for a non-conforming
+                            # reader; a bounded reader cannot reach this.
+                            status = ContentReadStatus.SKIPPED
+                            issues.append(
+                                DiscoveryIssue(
+                                    item.relative_path, DiscoveryIssueCode.AGGREGATE_LIMIT
+                                )
+                            )
+                        else:
+                            text = result.text
+                            status = ContentReadStatus.READ
+                            total_bytes += actual
                             if item.extension in _MARKDOWN_SOURCE_EXTENSIONS:
                                 frontmatter = probe_frontmatter(text)
 

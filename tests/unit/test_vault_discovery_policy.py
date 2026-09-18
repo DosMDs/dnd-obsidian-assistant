@@ -53,6 +53,19 @@ from dnd_assistant.storage.vault_discovery import (
         ("Characters/NPCs/map.png", SourceClass.UNSUPPORTED),
         ("Factions/logo.png", SourceClass.UNSUPPORTED),
         ("notes.weird", SourceClass.UNSUPPORTED),
+        # Reserved managed namespaces match casefold-equivalently.
+        ("_SYSTEM/raw/sessions/x/events.jsonl", SourceClass.APPLICATION_RAW),
+        ("_System/Audit/audit.jsonl", SourceClass.APPLICATION_CONTROL),
+        ("_SYSTEM/campaign.yaml", SourceClass.APPLICATION_CONFIG),
+        ("_SYSTEM/indexes/entities.sqlite3", SourceClass.DERIVED),
+        ("state/world state.MD", SourceClass.DERIVED),
+        ("STATE/RECENTLY TOUCHED.MD", SourceClass.DERIVED),
+        ("sessions/S001/Session.md", SourceClass.SESSION_SOURCE),
+        ("characters/npcs/a.md", SourceClass.ENTITY_CANDIDATE),
+        ("LOCATIONS/x.md", SourceClass.ENTITY_CANDIDATE),
+        # A lookalike namespace that is not casefold-equal is not protected.
+        ("_systemish/note.md", SourceClass.USER_SOURCE),
+        ("Statesman/note.md", SourceClass.USER_SOURCE),
     ],
 )
 def test_classify_source(relative_path: str, expected: SourceClass) -> None:
@@ -113,7 +126,7 @@ class _FakeReader:
             issues=self._issues,
         )
 
-    def read_text(self, relative_path: str) -> SourceReadResult:
+    def read_text(self, relative_path: str, max_bytes: int | None = None) -> SourceReadResult:
         value = self._contents[relative_path]
         if isinstance(value, SourceReadResult):
             return value

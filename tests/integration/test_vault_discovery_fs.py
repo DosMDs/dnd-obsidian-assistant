@@ -27,6 +27,8 @@ from dnd_assistant.storage.vault_discovery import (
     DiscoveryIssueCode,
     DiscoveryLimits,
     ObsidianVaultSourceReader,
+    SourceReadResult,
+    VaultSourceInventory,
 )
 from dnd_assistant.storage.vault_initialization import serialize_new_campaign_config
 
@@ -288,3 +290,49 @@ class TestResourceBounds:
         entry = _by_path(report)["big.txt"]
         assert entry.content_status is ContentReadStatus.SKIPPED
         assert any(i.code is DiscoveryIssueCode.SKIPPED_OVERSIZE for i in report.issues)
+
+    def test_growth_after_inventory_cannot_exceed_aggregate_budget(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        path = _write_text(root, "grow.md", "aaaa")
+        limits = DiscoveryLimits(max_content_file_bytes=1000, max_total_content_bytes=4)
+        inner = ObsidianVaultSourceReader(root, limits)
+
+        class _StaleSizeReader:
+            """Reports inventoried sizes, then grows the file before reads."""
+
+            def __init__(self, wrapped: ObsidianVaultSourceReader) -> None:
+                self._wrapped = wrapped
+
+            @property
+            def campaign_id(self) -> str:
+                return self._wrapped.campaign_id
+
+            @property
+            def limits(self) -> DiscoveryLimits:
+                return self._wrapped.limits
+
+            def inventory(self) -> VaultSourceInventory:
+                result = self._wrapped.inventory()
+                path.write_text("a" * 500, encoding="utf-8")
+                return result
+
+            def read_text(
+                self, relative_path: str, max_bytes: int | None = None
+            ) -> SourceReadResult:
+                return self._wrapped.read_text(relative_path, max_bytes)
+
+        report = VaultDiscoveryService(_StaleSizeReader(inner)).run()
+        retained = sum(
+            len(entry.content_text.encode("utf-8"))
+            for entry in report.entries
+            if entry.content_text is not None
+        )
+        assert retained <= limits.max_total_content_bytes
+
+        grown = _by_path(report)["grow.md"]
+        assert grown.content_status is ContentReadStatus.SKIPPED
+        assert grown.content_text is None
+        assert any(
+            i.relative_path == "grow.md" and i.code is DiscoveryIssueCode.AGGREGATE_LIMIT
+            for i in report.issues
+        )
