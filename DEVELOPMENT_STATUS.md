@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-18 (S13-01)
+**Last updated:** 2026-09-18 (S13-02)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `IN PROGRESS`; Stage 14 `NOT STARTED`
-**Active work:** `S13-01 — Vault Initialization Contract + dnd init` `DONE`; next `S13-02 — Existing Vault Discovery / Analysis`
+**Active work:** `S13-02 — Existing Vault Discovery / Analysis` `DONE`; next `S13-03 — Existing Campaign Bootstrap / Mapping`
 **Current branch:** `feat/bootstrap`
 
 ## Status model
@@ -38,20 +38,24 @@ in `docs/development/project-invariants.md`.
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; next `S13-02`; `docs/stages/13_BOOTSTRAP.md` |
+| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; S13-02 `DONE`; next `S13-03`; `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current work — S13-01 `DONE`
+## Current work — S13-02 `DONE`
 
-`S13-01 — Vault Initialization Contract + dnd init` is `DONE` on
-`feat/bootstrap` (not yet merged to `main`).  It added deterministic,
-model-free structural Vault initialization: the managed topology plus the
-canonical `_system/campaign.yaml` marker, with fail-closed collision/path
-policy, audited intent/committed lifecycle, exclusive config publication and
-strict idempotent re-run.  Stage 13 is `IN PROGRESS`.
+`S13-02 — Existing Vault Discovery / Analysis` is `DONE` on
+`feat/bootstrap` (not yet merged to `main`).  It added a strictly read-only,
+model-free discovery contract over an already initialized Vault: a trusted
+storage capability validates the S13-01 `_system/campaign.yaml` precondition,
+inventories source files with symlink/junction-safe deterministic traversal and
+explicit resource bounds, and boundedly reads eligible UTF-8 text sources.  The
+application layer classifies paths (candidate/managed source, session, user,
+application-owned, derived, unsupported) and returns an ephemeral typed report
+to S13-03.  No canonical write, no audit append and no CLI surface.  Stage 13
+remains `IN PROGRESS`.
 
 ```text
-next   S13-02 — Existing Vault Discovery / Analysis
+next   S13-03 — Existing Campaign Bootstrap / Mapping
 ```
 
 `dnd init` yields a **structurally initialized** Vault, not a session-ready
@@ -69,7 +73,7 @@ enabled/visible state is never authorization.
 
 ```text
 No confirmed blocker for Stage 13.
-S13-01 is DONE; next planned task S13-02 is not started.
+S13-01 and S13-02 are DONE; next planned task S13-03 is not started.
 Recorded Stage-13 follow-up (not a blocker):
   deterministic Typer admin surface for starting world time
 Known carried-forward limitations (non-blocking for Stage 13):
@@ -78,6 +82,7 @@ Known carried-forward limitations (non-blocking for Stage 13):
   f5 terminal-level portability                 SKIPPED_CAPABILITY
   external OS/process kill                      not preventable by the TUI
   thread-worker cancellation                    fail-closed, not rollback
+  Windows/macOS symlink-junction discovery       capability-gated tests
 ```
 
 ## Documentation map

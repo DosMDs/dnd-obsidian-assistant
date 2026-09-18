@@ -41,6 +41,16 @@ from dnd_assistant.storage.types import (
     VaultRepository,
     WorldTimeRepository,
 )
+from dnd_assistant.storage.vault_discovery import (
+    DiscoveryIssue,
+    DiscoveryIssueCode,
+    DiscoveryLimits,
+    InventoryEntry,
+    ObsidianVaultSourceReader,
+    SourceReadResult,
+    VaultSourceInventory,
+    VaultSourceReader,
+)
 from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
 from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
 
@@ -50,13 +60,18 @@ __all__: list[str] = [
     "AuditService",
     "DerivedStateStore",
     "DiscoveredEntityFile",
+    "DiscoveryIssue",
+    "DiscoveryIssueCode",
+    "DiscoveryLimits",
     "EntityDirectory",
     "EntityPatch",
+    "InventoryEntry",
     "ObsidianDerivedStateStore",
     "ObsidianSessionEventRepository",
     "ObsidianSessionMetadataRepository",
     "ObsidianSessionRecoveryRepository",
     "ObsidianVaultRepository",
+    "ObsidianVaultSourceReader",
     "ObsidianWorldTimeRepository",
     "RawSessionEvent",
     "RawSessionMetadata",
@@ -67,8 +82,11 @@ __all__: list[str] = [
     "SessionRecoveryReport",
     "SessionRecoveryRepository",
     "SessionStoragePaths",
+    "SourceReadResult",
     "VaultDocument",
     "VaultRepository",
+    "VaultSourceInventory",
+    "VaultSourceReader",
     "WorldTimeRepository",
     "atomic_write_text",
     "discover_entity_files",

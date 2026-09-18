@@ -1,6 +1,6 @@
 # Stage 13 — Bootstrap
 
-**Status:** `IN PROGRESS` (S13-01 `DONE`)
+**Status:** `IN PROGRESS` (S13-01 `DONE`, S13-02 `DONE`)
 
 This document is the durable Stage-13 handoff/plan contract produced by TUI-06.
 It is **not** Stage-13 implementation and contains no Stage-13 code, tests or
@@ -9,9 +9,9 @@ schemas. Current roadmap state lives in `DEVELOPMENT_STATUS.md`.
 ## Gate
 
 The Textual TUI prerequisite is satisfied (the accepted track was integrated
-by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01` is `DONE`; the next task is
-`S13-02 — Existing Vault Discovery / Analysis`. There is no current Stage-13
-blocker.
+by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01` and `S13-02` are `DONE`; the
+next task is `S13-03 — Existing Campaign Bootstrap / Mapping`. There is no
+current Stage-13 blocker.
 
 ## Two different onboarding scenarios
 
@@ -64,8 +64,9 @@ S13-04  Bootstrap ChangeSet Review / Apply
 S13-05  Bootstrap Completion / Validation / Derived Rebuild
 ```
 
-These are dependency-ordered task boundaries. `S13-01` is implemented/`DONE`;
-`S13-02` … `S13-05` remain planned boundaries and are not yet implemented.
+These are dependency-ordered task boundaries. `S13-01` and `S13-02` are
+implemented/`DONE`; `S13-03` … `S13-05` remain planned boundaries and are not
+yet implemented.
 
 ## S13-01 — original handoff requirements (historical)
 
@@ -211,6 +212,87 @@ gates:       pytest (7034 passed, 135 skipped), ruff check, ruff format --check,
              pyright (0 errors), uv lock --check, git diff --check
 ```
 
+
+## S13-02 — implementation record (`DONE`)
+
+S13-02 implemented a deterministic, model-free, **strictly read-only** discovery
+contract over an already initialized Vault.
+
+### Ownership
+
+```text
+storage/vault_discovery.py        inventory, redirect safety, bounded reads,
+                                  S13-01 precondition validation, fs issues
+application/vault_discovery.py    path classification, frontmatter probe,
+                                  ephemeral typed report, discovery service
+storage/__init__.py               re-exports the new storage discovery types
+```
+
+`vault_initialization.py`, `vault_repository.py`, `storage/paths.py`,
+`storage/markdown.py`, retrieval/models/tools/TUI and
+`tests/contract/test_boundaries.py` are unchanged.  No CLI or composition
+surface was added (the bootstrap user workflow belongs to S13-03).
+
+### Contract
+
+- **Initialized-Vault precondition:** the storage capability validates
+  `_system/campaign.yaml` with the S13-01 `parse_campaign_config` contract and
+  exposes the validated `campaign_id`; the application layer never opens or
+  parses the marker and receives no filesystem authority.
+- **Strictly read-only:** no directory creation, no canonical write, no audit
+  append, no ChangeSet/derived work.  The result is ephemeral.
+- **Path classification ≠ semantic validation:** a file under a managed entity
+  directory is `ENTITY_CANDIDATE`, not a proven Entity; canonical Entity
+  validation stays with the repository/mapping contract.  Other classes:
+  `SESSION_SOURCE`, `USER_SOURCE`, `APPLICATION_CONFIG`, `APPLICATION_RAW`,
+  `APPLICATION_CONTROL`, `DERIVED`, `UNSUPPORTED`.
+- **Source extensions** (opaque bounded text containers, no parsers):
+  `.md`, `.markdown`, `.txt`, `.json`, `.jsonl`, `.yaml`, `.yml`, `.csv`,
+  `.html`, `.htm`.  Application-owned `_system`/`State` namespaces take
+  precedence, so raw/audit/ChangeSet/derived files are never imported merely
+  because they are text-readable.
+- **Frontmatter** is structural only: `ABSENT`/`PRESENT`/`UNTERMINATED`; valid
+  delimiters with invalid YAML remain `PRESENT`.  No YAML parser runs.
+- **Derived Campaign State leaves** are recognized via the storage-owned
+  `ARTIFACT_FILENAMES` / `MANIFEST_FILENAME` (no duplicated path constants).
+- **`_system` minimum inclusion:** read the campaign marker; inventory
+  `world_time.json` and raw/audit/ChangeSet/index/cache/trace content is
+  classified ineligible and not content-read.
+- **Safety:** the root is resolved once; descendant symlinks/junctions/reparse
+  redirects are never followed; reads re-authorize containment and use
+  `O_NOFOLLOW` where available; hidden dirs, `.obsidian`/`.git`, OS metadata and
+  editor temp/backup files are excluded, while the hidden Campaign State
+  manifest is intentionally not blanket-excluded.
+- **Bounds:** inventory entries `20_000` (overflow is a fatal `StorageError`
+  with **no partial report**), per-file content `1 MiB`, aggregate content
+  `64 MiB`, depth `32`.  Per-file/aggregate limits produce explicit
+  `SKIPPED`/issue states.  Content is read in deterministic Vault-relative
+  casefold + exact order.
+- **Failure isolation:** per-file unreadable/invalid-UTF-8/oversize/redirect
+  are isolated `DiscoveryIssue`s; only root/precondition/inventory-overflow are
+  fatal.
+
+### Evidence (this task)
+
+```text
+unit:        precondition, inventory, exclusions, hidden-manifest handling,
+             case-alias, deterministic Unicode/Cyrillic order, entry/depth
+             bounds, exact/handled reads, redirect rejection, classification,
+             frontmatter probe, service policy
+integration: golden-Vault copytree classification, zero-write tree bytes+mtime
+             and audit-bytes snapshot, no new paths, invalid-UTF-8 isolation,
+             binary/unknown inventory-only, unterminated frontmatter, symlink
+             and junction not followed, no outside-Vault read, entry-overflow
+             fatal with no partial report, aggregate/per-file limits
+contract:    AST boundaries (no model/retrieval/TUI; no marker parser in
+             application; no repository/audit/markdown/entity import; Campaign
+             State layout ownership reuse; no filesystem mutation calls)
+gates:       pytest (7128 passed, 141 skipped), ruff check, ruff format --check,
+             pyright (0 errors), uv lock --check, git diff --check,
+             maintainability contract (no ceiling increased)
+capability:  Windows junction and symlink discovery tests are capability-gated
+             (SKIPPED_CAPABILITY where the host cannot create links)
+```
 
 ## Stage-13 Source-of-Truth rules carried forward
 
