@@ -1,17 +1,23 @@
 """Cross-capability in-flight safety gate (TUI-04).
 
 The assistant composition captures the active session mode/session identity at
-composition time, and Campaign-State rebuild has no publication lock.  A
-long-lived UI can therefore interleave an assistant run with a session mutation
-or a Campaign-State rebuild.  This narrow gate serializes exactly those
-exclusive operations at the **presentation** level:
+composition time, and Campaign-State publication replaces managed artifacts
+individually with the manifest written last.  A long-lived UI can therefore
+interleave an assistant run with a session mutation, a Campaign-State rebuild,
+or a Campaign-State inspection that could observe a mixed publication
+generation.  This narrow gate serializes exactly those exclusive operations at
+the **presentation** level:
 
 - assistant submission;
 - session start / note / end;
+- Campaign-State inspect / reload;
 - Campaign-State rebuild.
 
+Independent read (not gated): session status refresh.
+
 It is deliberately tiny: one owner token, no queue, no retry, no scheduler, no
-cancellation.  Read-only refresh/inspection bypasses the gate.
+cancellation.  Session status refresh is a safe repository read and bypasses the
+gate; Campaign-State inspection is gated (see above).
 
 This gate is presentation protection only.  It is never the trusted
 data-consistency/authorization boundary; repository/application revision and

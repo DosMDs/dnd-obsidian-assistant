@@ -242,8 +242,10 @@ and the real-terminal smoke matrix.
 
 ### TUI-06 — full track review / status cleanup / Stage-13 handoff
 
-Full track review, documentation/status reconciliation, independent acceptance,
-and Stage-13 unblock.
+Full track review, documentation/status reconciliation and independent
+acceptance, plus the durable Stage-13 handoff. Repository integration is kept as
+a separate bounded task (`TUI-M01`); Stage 13 remains gated until `TUI-M01` is
+independently accepted.
 
 ## Durable record — TUI-00 (2026-09-17)
 
@@ -702,7 +704,8 @@ retained. All registry bindings remain non-priority.
   multiline, cancellation UX and final error polish remain TUI-05.
 - TUI-04 exposes no user cancellation affordance; quit is refused while trusted
   work is in flight.
-- TUI-05 (hardening) and TUI-06 (review/Stage-13 handoff) not started.
+- TUI-05 (hardening) and TUI-06 (review/Stage-13 handoff) not started as of
+  TUI-04; both were completed in later tasks (see their durable records below).
 
 ## Durable record — TUI-05 (2026-09-17)
 
@@ -899,10 +902,192 @@ recorded `SKIPPED_CAPABILITY`, never as verified.
   `SKIPPED_CAPABILITY`, preserved for TUI-06.
 - External terminal/OS kill (SIGKILL-equivalent, machine shutdown) cannot be
   prevented; only normal in-app shutdown paths are hardened.
-- TUI-06 (full track review / status cleanup / Stage-13 handoff) not started.
+- TUI-06 (full track review / status cleanup / Stage-13 handoff) not started as
+  of TUI-05; completed in TUI-06 (see the record below).
+
+## Durable record — TUI-06 (2026-09-18)
+
+- Status: `DONE`.
+- Branch: `feat/textual-tui`. Starting HEAD:
+  `24c3896bd3888dc5d12a7d7d7cc49b66bac7e3b2` (TUI-05). Final commit SHA reported
+  in the Final Report.
+- Full track review / status cleanup / Stage-13 handoff / OpenCode
+  inspection-permission hardening. No Stage-13 implementation, no production
+  runtime behavior change, no merge to `main`.
+- Changed files:
+  ```text
+  opencode.json
+  DEVELOPMENT_STATUS.md
+  docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md
+  docs/stages/README.md
+  docs/stages/13_BOOTSTRAP.md (new)
+  src/dnd_assistant/tui/inflight.py (docstring only)
+  ```
+- No `pyproject.toml`/`uv.lock` change; Textual stays `8.2.8`;
+  `tests/contract/test_boundaries.py` not grown; no `.opencode/**` change.
+
+### Historical review range
+
+```text
+pre-track base (Stage-12 completion head)  f491411
+branch point relative to main              4ae7e61
+merge-base(main, feat/textual-tui)         4ae7e61
+base-only (main ahead)                     0
+head-only (feature ahead of main)          12
+full-track review range                    f491411..24c3896 (14 commits)
+```
+
+Commit inventory: TUI-00 (2), TUI-01 (2), TUI-02 (2), TUI-03 (2, one
+correction), TUI-04 (2, one correction), TUI-05 (1), plus three
+OpenCode/settings-only commits inside/adjacent to the range (`8198fda`,
+`71aa67f`, `4ae7e61`) touching only `opencode.json`. No unexpected auxiliary
+commit.
+
+### Final architecture verdict
+
+The track is architecturally complete at the reviewed head. Obsidian Vault
+remains the only canonical Source of Truth; Textual is presentation-only;
+`ToolExecutor`/ChangeSet/`VaultRepository` remain the write boundaries; one
+semantic command registry feeds one dispatcher, bindings and palette; the
+TUI-04/TUI-05 in-flight contract is intact (exclusive: assistant submission,
+session start/note/end, Campaign-State inspect/reload, Campaign-State rebuild;
+independent read: session status refresh); `CANCELLED` stays fail-closed; no
+production `.cancel(` call exists. No TUI-05 change weakened the TUI-00..TUI-04
+boundaries.
+
+### Closing documentation defect corrected
+
+`src/dnd_assistant/tui/inflight.py` module docstring was stale after the TUI-04
+correction `d245ef3`: it still claimed read-only inspection bypasses the gate
+and omitted Campaign-State inspection from the exclusive-operation list. The
+docstring was corrected to match the accepted contract (Campaign-State
+inspect/reload is exclusive; session status refresh is the independent read).
+Runtime behavior unchanged (comment-only diff).
+
+### OpenCode inspection-permission hardening
+
+`opencode.json` remains V1 syntax on the installed OpenCode `1.18.31` (no
+version upgrade, no model/default-agent change, no V2 migration). Verified
+matcher semantics from the installed tag source plus live probes:
+
+```text
+permission/index.ts evaluate() -> findLast   LAST MATCHING RULE WINS
+fromConfig() preserves JSON key order
+core/util/wildcard.ts -> anchored ^...$ with * -> .* (dotall)
+tool/shell.ts -> tree-sitter bash/PowerShell; one permission pattern per
+  command node; redirect text is folded into the command's pattern
+```
+
+Read-only Git surface expanded with precise subcommand forms (`git diff`,
+`git diff *`, `git diff-tree`/`git diff-tree *`, `git diff-index`, `git
+diff-files`, `git cat-file`, `git ls-tree`, `git for-each-ref`, `git show-ref`,
+`git name-rev`, `git grep`, `git check-ignore`, `git check-attr`, `git
+count-objects`, `git rev-list`, `git merge-base`, `git remote get-url`, safe
+`git reflog show` forms and branch/tag/config/stash listing forms) in both the
+plan and build agents. `git reflog*` is deliberately not used (would cover
+`reflog expire`/`delete`). Output-write and shell-redirection guards are placed
+**after** the broad read-only allows so they win by last-match:
+
+```text
+plan  agent: shell redirection > / >>            DENY
+             git --output write forms            DENY
+build agent: shell redirection > / >>            ASK
+             git --output write forms            ASK
+```
+
+Destructive denies remain after the redirect guards, so e.g.
+`git push --force > f` still resolves to `deny`. Verified probes (faithful port
+of the 1.18.31 `findLast` + `Wildcard.match` evaluator over the edited rules):
+plan `git diff-tree HEAD` → allow, `git diff-tree HEAD > out.txt` → deny,
+`git log --output=out.txt` → deny; build `git diff-tree HEAD` → allow,
+`git diff-tree HEAD > out.txt` → ask, `git log --output=out.txt` → ask.
+Arbitrary `ForEach-Object { ... }` remains `ask`; nested non-command side
+effects cannot be made safe by cmdlet-name checks. Pre-existing user-approved
+`git checkout *` rules are preserved and classified as authorized mutation, not
+read-only inspection.
+
+### Maintainability (physical lines)
+
+All production modules ≤ 700 and all test modules ≤ 1000; no ratchet exception
+added or raised and no global limit changed. `tests/contract/test_boundaries.py`
+remains exactly 1000 lines and unchanged across the track. `tui/commands.py`
+(456), `tui/app.py` (321), `tui/session.py` (283) remain the largest TUI
+production modules.
+
+### Platform evidence classification (unchanged, honest)
+
+```text
+Windows local headless TUI-06 review           LOCAL_VERIFIED
+Windows Terminal real-terminal smoke           SKIPPED_CAPABILITY (non-interactive agent)
+macOS terminal / iTerm real-terminal smoke     SKIPPED_CAPABILITY (no macOS host)
+f5 terminal-level portability                  SKIPPED_CAPABILITY (headless dispatch only)
+```
+
+No new real-terminal evidence was produced. These are supplementary manual
+evidence and are **not** blocking for Stage 13; they carry forward as
+release/hardening limitations (Stage-14 candidate).
+
+### Gates (final state)
+
+```text
+uv run python -m json.tool opencode.json   JSON OK
+uv run pytest                              6941 passed, 131 skipped, 1 warning
+                                           (pre-existing pydantic deprecation)
+uv run ruff check .                        All checks passed!
+uv run ruff format --check .               541 files already formatted
+uv run pyright                             0 errors, 0 warnings, 0 informations
+uv lock --check                            Resolved 57 packages (exit 0)
+git diff --check                           clean
+```
+
+### OpenCode matcher probe evidence (literal)
+
+No stable built-in permission-evaluation command is available, and the running
+OpenCode session had not reloaded the edited `opencode.json`, so
+`opencode --version`/`opencode debug config` were not used. Verification used a
+faithful Python port of the installed OpenCode `1.18.31` matcher
+(`packages/opencode/src/permission/index.ts` `evaluate()` = `findLast`;
+`packages/core/src/util/wildcard.ts` `Wildcard.match`, anchored `^...$` with
+`* -> .*`) applied to the ordered `agent.<name>.permission.bash` key order.
+Recorded literal results:
+
+```text
+plan  git diff-tree HEAD                     allow
+plan  git diff-tree HEAD > out.txt           deny   (matched *>*)
+plan  git log --output=out.txt               deny   (matched git log*--output*)
+plan  git reflog expire --expire=now --all   deny   (no reflog allow; * deny)
+plan  git hash-object -w foo                 deny
+plan  git update-ref refs/heads/x HEAD       deny
+build git diff-tree HEAD                     allow
+build git diff-tree HEAD > out.txt           ask    (matched *>*)
+build git log --output=out.txt               ask    (matched git log*--output*)
+build git push --force                       deny
+build git reset --hard                       deny
+build Get-ChildItem src                      allow
+build ForEach-Object { Remove-Item $_ }      ask
+```
+
+The evaluator was a throwaway dev-tooling script outside the repository; these
+literal results and the source-verified matcher semantics are the durable record.
+
+### Integration handoff
+
+TUI-06 intentionally does not merge to `main`. Repository integration remains a
+separate bounded task:
+
+```text
+TUI-M01 — ff-only integrate feat/textual-tui into main
+```
+
+After independent acceptance of `TUI-M01`, the next work becomes
+`S13-01 — Vault Initialization Contract + dnd init`. No tag is created.
 
 ## Stage-13 gate
 
 Stage 13 Bootstrap must not begin until the TUI track has completed normal
 implementation, review, repository integration/status reconciliation and
-independent acceptance (TUI-06). Stage 13 is `NOT STARTED`, not `BLOCKED`.
+independent acceptance. TUI-06 completed review, status cleanup and the Stage-13
+handoff; ff-only integration remains `TUI-M01`. Stage 13 is `NOT STARTED` and
+gated on independent acceptance of `TUI-M01`, not `BLOCKED`. The durable Stage-13
+handoff contract (including the non-negotiable split between `dnd init` and
+existing-campaign bootstrap) lives in `docs/stages/13_BOOTSTRAP.md`.

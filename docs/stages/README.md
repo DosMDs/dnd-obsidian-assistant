@@ -30,6 +30,7 @@ Detailed ordinary stage records belong in `docs/stages/`. Cross-cutting migratio
 | Stage 11 — Post-session Processor | `11_POST_SESSION_PROCESSOR.md` |
 | Stage 12 — Campaign State | `12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | `TUI_TEXTUAL_PRESENTATION_TRACK.md` |
+| Stage 13 — Bootstrap | `13_BOOTSTRAP.md` |
 
 ## Cross-cutting migrations
 

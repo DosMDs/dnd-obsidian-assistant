@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-17 (TUI-05)
+**Last updated:** 2026-09-18 (TUI-06)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS`; Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
-**Active work:** Textual TUI Architecture Track (next: TUI-06); Stage 13 — Bootstrap is gated on TUI-track completion
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `IN PROGRESS` (integration pending); Stage 13 `NOT STARTED`; Stage 14 `NOT STARTED`
+**Active work:** Textual TUI Architecture Track — TUI-06 `DONE`; next `TUI-M01` (ff-only integration); Stage 13 is gated on independent acceptance of `TUI-M01`
 **Current branch:** `feat/textual-tui`
 
 ## Status model
@@ -37,44 +37,26 @@ in `docs/development/project-invariants.md`.
 | 10. ChangeSet | DONE | `docs/stages/10_CHANGESET.md` |
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
-| Textual TUI Architecture Track (non-numbered) | IN PROGRESS | `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | NOT STARTED | Gated on TUI-track completion (not `BLOCKED`) |
+| Textual TUI Architecture Track (non-numbered) | IN PROGRESS | integration pending; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
+| 13. Bootstrap | NOT STARTED | Gated on `TUI-M01` acceptance (not `BLOCKED`); `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
 ## Current work — Textual TUI Architecture Track
 
-After Stage 12, the accepted product direction is a post-Stage-12 Textual TUI
-presentation track, followed by Stage 13 and Stage 14. The track is recorded in
-`docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md`; the architecture decision is
-`docs/adr/0008-textual-tui-presentation-architecture.md`.
+TUI-00 … TUI-05 are `DONE`; TUI-06 (full track review / status cleanup /
+Stage-13 handoff / OpenCode inspection-permission hardening) is `DONE`. The
+implementation itself is complete and reviewed on `feat/textual-tui`. What
+remains is **repository integration**, which is deliberately kept as a separate
+bounded task:
 
-TUI-00 `DONE` — repository presentation architecture / ADR / track alignment
-(docs-only). TUI-01 `DONE` — Textual dependency qualification + minimal spike;
-`textual==8.2.8` pinned with result `PASS`. TUI-02 `DONE` — smallest
-capability-oriented shared composition seams (new UI-agnostic
-`dnd_assistant.composition` package; Typer rewired with no behavior change).
-TUI-03 `DONE` — production Textual app shell, semantic command registry +
-single dispatcher, registry-derived bindings, command palette, footer
-discoverability, global/context scope, presentation predicates, focus safety and
-lazy `dnd tui` launcher (new `dnd_assistant.tui` package). TUI-04 `DONE` —
-primary assistant / session / Campaign-State integration (real read and write
-paths): per-submission assistant runtime lifetime, recovery preflight parity,
-agent-WRITE ceiling, trusted session writes with `source="tui"` audit,
-PLAYER-safe Campaign-State rendering, `MainScreen`/`TabbedContent` navigation,
-thread-worker hosting with exactly-once resource cleanup and a cross-capability
-in-flight gate. TUI-05 `DONE` — interaction / cross-platform / error-recovery
-hardening: native breakpoint-driven responsive layout with an explicit
-terminal-size contract (reference 100x30, baseline 80x24, minimum usable 60x20,
-degraded scrollable below), `TextArea` assistant composer with explicit submit,
-hardened `Paste` handling for canonical-facing single-line fields, deterministic
-focus/tab-order policy, fail-closed `WorkerState.CANCELLED` semantics, a small
-Textual-free expected-error renderer, per-operation input preservation and a
-narrow launch-time `DndAssistantError` mapping. Dependency-ordered track:
-TUI-00 … TUI-06. Next: TUI-06 — full track review / status cleanup / Stage-13
-handoff. Real-terminal Windows/macOS smoke and terminal-level `f5` portability
-are recorded `SKIPPED_CAPABILITY` (non-interactive agent / no macOS host) and
-preserved for TUI-06; the manual protocol lives in
-`docs/development/tui-terminal-smoke.md`.
+```text
+next   TUI-M01 — ff-only integrate feat/textual-tui into main
+```
+
+`main` is an ancestor of the feature head, so a ff-only integration is
+available; `base-only = 0`, `head-only = 12`. Stage 13 remains gated until
+`TUI-M01` receives independent acceptance; only then does the next work become
+`S13-01 — Vault Initialization Contract + dnd init`.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
@@ -82,17 +64,18 @@ the side-effect authorization boundary, and Typer remains supported for
 scripting, administration, bootstrap, recovery, diagnostics and evals. UI
 enabled/visible state is never authorization.
 
-Stage 13 must not begin until the TUI track has completed normal implementation,
-review, repository integration/status reconciliation and independent acceptance
-(TUI-06). Stage 13 is `NOT STARTED` and gated, not `BLOCKED`.
-
 ## Current blockers and prerequisites
 
 ```text
 No confirmed blocker for the Textual TUI Architecture Track or Stage 13.
-Sequencing gate (not a blocker): Stage 13 must not begin until the TUI track
-completes implementation, review, integration/status reconciliation and
-independent acceptance (TUI-06).
+Sequencing gate (not a blocker): Stage 13 must not begin until TUI-M01
+integration is independently accepted.
+Known carried-forward limitations (non-blocking for Stage 13):
+  Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
+  macOS real-terminal smoke                     SKIPPED_CAPABILITY
+  f5 terminal-level portability                 SKIPPED_CAPABILITY
+  external OS/process kill                      not preventable by the TUI
+  thread-worker cancellation                    fail-closed, not rollback
 ```
 
 ## Documentation map
@@ -101,6 +84,7 @@ independent acceptance (TUI-06).
 |---|---|
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state (this file) |
 | `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` | Textual TUI track plan/history/evidence (TUI-00…TUI-06) |
+| `docs/stages/13_BOOTSTRAP.md` | Durable Stage-13 handoff/plan contract (dnd init vs bootstrap) |
 | `docs/development/tui-terminal-smoke.md` | Manual real-terminal smoke protocol/classification |
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
