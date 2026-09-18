@@ -1,6 +1,6 @@
 # Stage 13 — Bootstrap
 
-**Status:** `IN PROGRESS` (S13-01 `DONE`, S13-02 `DONE`)
+**Status:** `IN PROGRESS` (S13-01 `DONE`, S13-02 `DONE`, S13-03 `DONE`)
 
 This document is the durable Stage-13 handoff/plan contract produced by TUI-06.
 It is **not** Stage-13 implementation and contains no Stage-13 code, tests or
@@ -9,9 +9,9 @@ schemas. Current roadmap state lives in `DEVELOPMENT_STATUS.md`.
 ## Gate
 
 The Textual TUI prerequisite is satisfied (the accepted track was integrated
-by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01` and `S13-02` are `DONE`; the
-next task is `S13-03 — Existing Campaign Bootstrap / Mapping`. There is no
-current Stage-13 blocker.
+by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01`, `S13-02` and `S13-03` are
+`DONE`; the next task is `S13-04 — Bootstrap ChangeSet Review / Apply`. There
+is no current Stage-13 blocker.
 
 ## Two different onboarding scenarios
 
@@ -64,9 +64,9 @@ S13-04  Bootstrap ChangeSet Review / Apply
 S13-05  Bootstrap Completion / Validation / Derived Rebuild
 ```
 
-These are dependency-ordered task boundaries. `S13-01` and `S13-02` are
-implemented/`DONE`; `S13-03` … `S13-05` remain planned boundaries and are not
-yet implemented.
+These are dependency-ordered task boundaries. `S13-01`, `S13-02` and `S13-03`
+are implemented/`DONE`; `S13-04` and `S13-05` remain planned boundaries and are
+not yet implemented.
 
 ## S13-01 — original handoff requirements (historical)
 
@@ -334,6 +334,127 @@ residual:    re-authorization narrows but cannot atomically eliminate the
              redirects fail closed; O_NOFOLLOW protects only the final opened
              file component where the platform exposes it and does not make
              intermediate parent-component traversal atomic
+```
+
+## S13-03 — implementation record (`DONE`)
+
+S13-03 implemented a deterministic, read-only **existing-campaign bootstrap
+mapping** pipeline that consumes the S13-02 discovery report and produces a
+reviewable Stage-10 ChangeSet proposal plus an immutable mapping-evidence
+sidecar.  It performs no canonical campaign mutation, no review/approval/apply
+and no derived rebuild.
+
+### Ownership
+
+```text
+domain/bootstrap_extraction.py             untrusted bounded extraction schema (no EntityId)
+storage/bootstrap_types.py                 pure recognition result types (no YAML codec)
+storage/bootstrap_canonical.py             filesystem-free canonical parse helper
+storage/bootstrap_evidence.py              immutable _system/bootstrap evidence store
+application/bootstrap_input.py             eligibility/order/batching/semantic fingerprint
+application/bootstrap_canonical.py         read-only canonical projection
+application/bootstrap_binding.py           exact type-constrained binding index
+application/bootstrap_entity_id.py         deterministic campaign-scoped allocator
+application/bootstrap_extraction.py        request/model protocol/semantic validator/merge
+application/bootstrap_result.py            result + unresolved vocabulary
+application/bootstrap_changeset.py         deterministic ChangeSet producer
+application/bootstrap_evidence.py          evidence schema/serialization/persistence policy
+application/bootstrap_mapping.py           orchestration + typed run result
+application/pydantic_ai_bootstrap.py       zero-tool Pydantic AI extraction adapter
+prompts/bootstrap_extraction_v1.py         versioned prompt
+composition/bootstrap.py                   discovery/probe/model lifetime/persistence wiring
+cli/bootstrap.py                           Russian `dnd bootstrap map` presentation
+models/profiles.py                         BOOTSTRAP role
+models/pydantic_ai_ollama.py               BOOTSTRAP model factory
+application/changeset_validation.py        narrow read-only `EntityReadSource` preflight protocol
+storage/__init__.py, cli/main.py           re-exports / command registration
+```
+
+### Contract
+
+- **No second traversal:** canonical recognition parses only already-read
+  `ENTITY_CANDIDATE` text through the filesystem-free storage helper; S13-02
+  remains the single trusted traversal/read boundary.  `storage/paths.py` and
+  `storage/vault_discovery.py` are unchanged.
+- **Canonical projection:** reliably parsed, uniquely identified, type-matched
+  documents are bindable; duplicate ids, directory/type mismatches and other
+  parsed conflicts are non-bindable but still block duplicate creation.
+  Malformed notes yield no identity and remain source evidence.  The projection
+  exposes only the narrow read/list surface (`EntityReadSource`) required by
+  `validate_changeset`; it is not a writable repository.  `ObsidianVaultRepository`
+  strictness is unchanged.
+- **Trust:** the model never emits, copies or selects a canonical `EntityId`,
+  revision, path or ChangeSet operation; the extraction schema cannot represent
+  them.  Binding is exact type-constrained name then alias only; fuzzy/FTS and
+  the player resolver never authorize a bootstrap mutation.
+- **Semantic fingerprint:** derived only from eligible source classes
+  (`ENTITY_CANDIDATE`, `SESSION_SOURCE`, `USER_SOURCE`) with stable `src_<32hex>`
+  references and whole-document SHA-256; application-owned config/raw/control,
+  derived and unsupported artifacts are excluded, so persisting
+  `_system/changesets/**` and `_system/bootstrap/**` never changes the semantic
+  input fingerprint.  Batches are deterministic (200 000 chars/batch, max 16).
+- **ChangeSet:** `Provenance.BOOTSTRAP`, `session_ref=None`, `create_entity` and
+  `append_fact` only; `update_entity` is refused.  Python-owned defaults
+  (`status="unknown"`, `visibility=dm`, `knowledge_status=inferred`, no session
+  refs).  Deterministic proposal id `cs_bootstrap_<32hex>`; preflight is a
+  proposal-consistency check against the read-only projection, not final apply
+  safety.  `NO_CHANGES` is a typed outcome, never an empty ChangeSet.
+- **Evidence:** immutable `_system/bootstrap/<changeset_id>.mapping.json`
+  (workflow/control; `APPLICATION_CONTROL` under S13-02) binds the exact
+  proposal id + fingerprint, campaign, semantic input fingerprint, model
+  identity, versions, source evidence, operation provenance and unresolved
+  conflicts.  Proposal persistence precedes evidence persistence; an evidence
+  failure is reported truthfully as partial workflow persistence with no
+  rollback.
+- **No implicit world time:** starting world tick is never inferred or written.
+- **CLI:** `dnd bootstrap map --vault --config --profile [--dry-run]` renders a
+  Russian summary and explicitly states the proposal is not approved/applied,
+  that canonical data was not changed, and that bootstrap review/apply is the
+  next Stage-13 step (S13-04).  It does not advertise the generic
+  `dnd changeset review` path for the bootstrap scenario.
+
+### Correction pass incorporated
+
+```text
+C1  no second filesystem traversal; recognition consumes S13-02 text
+C2  parsed conflicting canonical identities block duplicate creation
+C3  CanonicalStateSnapshot is read-only; validator uses a narrow protocol
+C4  semantic fingerprint excludes application-owned/derived artifacts
+C5  source_ref is >=128 bits (src_<32hex>)
+C6  bootstrap model schema carries no canonical EntityId at all
+C7  exact-only Python-owned binding; no fuzzy/FTS mutation authority
+C8  same normalized new display name across types => unresolved
+C9  snapshot preflight documented as proposal validation, not apply safety
+C10 mixed-Vault review/apply readiness owned by S13-04
+C11 CLI does not promise generic review/apply usability
+C12 immutable evidence sidecar retained
+C13 NO_CHANGES is not a completion claim
+```
+
+### Evidence (this task)
+
+```text
+unit:        extraction domain bounds/no-identity, input preparation/fingerprint
+             (application-artifact exclusion, source_ref >=128-bit, batching,
+             oversize skip, Cyrillic), extraction request/semantic validation/
+             merge, canonical projection and conflicts, exact binding, allocator,
+             producer (Bootstrap provenance, deterministic id, cross-type name
+             conflict, duplicate/conflict blocking, system exclusion),
+             evidence serialization/persistence, orchestration, adapter,
+             BOOTSTRAP role/builder/composition
+integration: real temp-Vault mapping+persistence (only workflow artifacts
+             change, canonical files bytes+mtime stable, no audit append),
+             rediscovery fingerprint stability after persistence, same-id
+             different-content fail-closed, strict VaultRepository still fails
+             closed on a malformed historical note, Russian CLI presentation,
+             dry-run persists nothing, no filesystem read after report
+contract:    AST layer boundaries (domain/storage/application/adapter/
+             composition/CLI); pure application modules hold no filesystem or
+             YAML authority; binding does not import the player resolver
+gates:       pytest (7286 passed, 141 skipped), ruff check, ruff format --check,
+             pyright (0 errors), uv lock --check, git diff --check,
+             maintainability contract (all production modules <=700 physical
+             lines; bootstrap_changeset decomposed to 563)
 ```
 
 ## Stage-13 Source-of-Truth rules carried forward

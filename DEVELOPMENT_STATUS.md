@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-18 (S13-02)
+**Last updated:** 2026-09-18 (S13-03)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `IN PROGRESS`; Stage 14 `NOT STARTED`
-**Active work:** `S13-02 — Existing Vault Discovery / Analysis` `DONE`; next `S13-03 — Existing Campaign Bootstrap / Mapping`
+**Active work:** `S13-03 — Existing Campaign Bootstrap / Mapping` `DONE`; next `S13-04 — Bootstrap ChangeSet Review / Apply`
 **Current branch:** `feat/bootstrap`
 
 ## Status model
@@ -38,25 +38,30 @@ in `docs/development/project-invariants.md`.
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; S13-02 `DONE`; next `S13-03`; `docs/stages/13_BOOTSTRAP.md` |
+| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; S13-02 `DONE`; S13-03 `DONE`; next `S13-04`; `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current work — S13-02 `DONE`
+## Current work — S13-03 `DONE`
 
-`S13-02 — Existing Vault Discovery / Analysis` is `DONE` on
-`feat/bootstrap` (not yet merged to `main`).  It added a strictly read-only,
-model-free discovery contract over an already initialized Vault: a trusted
-storage capability validates the S13-01 `_system/campaign.yaml` precondition,
-inventories source files with symlink/junction-safe deterministic traversal and
-explicit resource bounds, and boundedly reads eligible UTF-8 text sources.  The
-application layer classifies paths (candidate/managed source, session, user,
-application-owned, derived, unsupported) and returns an ephemeral typed report
-to S13-03.  No canonical write, no audit append and no CLI surface.  Stage 13
-remains `IN PROGRESS`.
+`S13-03 — Existing Campaign Bootstrap / Mapping` is `DONE` on
+`feat/bootstrap` (not yet merged to `main`).  It consumes the accepted S13-02
+read-only discovery report (no second filesystem traversal), recognizes
+genuinely canonical entities from already-read `ENTITY_CANDIDATE` text through
+a filesystem-free storage helper, and maps eligible source material through a
+BOOTSTRAP-role heavy model to a deterministic Stage-10 ChangeSet proposal plus
+an immutable `_system/bootstrap/<id>.mapping.json` evidence sidecar.  Model
+output is untrusted and cannot carry a canonical `EntityId`; binding is exact
+and Python-owned; ambiguous, conflicting, unsupported and non-canonical
+material becomes typed unresolved diagnostics rather than speculative
+mutation.  No canonical campaign mutation, no review/approval/apply and no
+derived rebuild.  Stage 13 remains `IN PROGRESS`.
 
 ```text
-next   S13-03 — Existing Campaign Bootstrap / Mapping
+next   S13-04 — Bootstrap ChangeSet Review / Apply
 ```
+
+S13-04 must decide/enforce the mixed-Vault review/apply readiness prerequisite
+before any apply authority; S13-03 explicitly does not implement normalization.
 
 `dnd init` yields a **structurally initialized** Vault, not a session-ready
 one: `_system/world_time.json` is deliberately out of scope.  A deterministic

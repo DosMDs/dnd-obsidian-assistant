@@ -2,6 +2,16 @@
 
 from dnd_assistant.storage.atomic import atomic_write_text
 from dnd_assistant.storage.audit import AuditContext, AuditRecord, AuditService
+from dnd_assistant.storage.bootstrap_canonical import parse_canonical_candidate
+from dnd_assistant.storage.bootstrap_evidence import (
+    BootstrapEvidenceStore,
+    ObsidianBootstrapEvidenceStore,
+)
+from dnd_assistant.storage.bootstrap_types import (
+    CanonicalCandidate,
+    CanonicalCandidateOutcome,
+    expected_entity_type,
+)
 from dnd_assistant.storage.derived_state import (
     DerivedStateStore,
     ObsidianDerivedStateStore,
@@ -58,6 +68,9 @@ __all__: list[str] = [
     "AuditContext",
     "AuditRecord",
     "AuditService",
+    "BootstrapEvidenceStore",
+    "CanonicalCandidate",
+    "CanonicalCandidateOutcome",
     "DerivedStateStore",
     "DiscoveredEntityFile",
     "DiscoveryIssue",
@@ -67,6 +80,7 @@ __all__: list[str] = [
     "EntityPatch",
     "InventoryEntry",
     "ObsidianDerivedStateStore",
+    "ObsidianBootstrapEvidenceStore",
     "ObsidianSessionEventRepository",
     "ObsidianSessionMetadataRepository",
     "ObsidianSessionRecoveryRepository",
@@ -91,7 +105,9 @@ __all__: list[str] = [
     "atomic_write_text",
     "discover_entity_files",
     "entity_directory",
+    "expected_entity_type",
     "parse",
+    "parse_canonical_candidate",
     "resolve_entity_path",
     "resolve_session_storage_paths",
     "serialize",

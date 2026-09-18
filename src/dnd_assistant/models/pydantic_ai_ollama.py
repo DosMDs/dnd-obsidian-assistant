@@ -10,6 +10,7 @@ Ownership
 Owned here:
     ``build_pydantic_ai_ollama_model()`` — AGENT-role factory function.
     ``build_pydantic_ai_post_session_model()`` — POST_SESSION-role factory.
+    ``build_pydantic_ai_bootstrap_model()`` — BOOTSTRAP-role factory.
     ``_normalize_openai_compatible_base_url()`` — private URL helper.
 
 Owned elsewhere (unchanged):
@@ -98,6 +99,33 @@ def build_pydantic_ai_post_session_model(
             non-None ``keep_alive`` value.
     """
     return _build_ollama_model(profile, required_role=ModelProfileRole.POST_SESSION)
+
+
+def build_pydantic_ai_bootstrap_model(
+    profile: ModelProfile,
+) -> OllamaModel:
+    """Construct a Pydantic AI ``OllamaModel`` for the BOOTSTRAP role.
+
+    Existing-campaign bootstrap extraction uses the same provider, URL,
+    timeout and ``keep_alive`` policy as the other heavy-model transports, but
+    is selected by a distinct ``BOOTSTRAP`` role so operator model selection
+    for existing-campaign import never accidentally alters ``dnd ask`` or
+    ``dnd session process`` configuration.
+
+    Args:
+        profile: A project ``ModelProfile`` whose ``provider`` must be
+            ``"ollama"`` and ``role`` must be ``BOOTSTRAP``.
+
+    Returns:
+        A configured ``OllamaModel`` instance with the framework
+        ``OllamaProvider``.
+
+    Raises:
+        ValidationError: If ``profile`` is not a ``ModelProfile`` instance,
+            or has a non-ollama provider, a non-BOOTSTRAP role, or a
+            non-None ``keep_alive`` value.
+    """
+    return _build_ollama_model(profile, required_role=ModelProfileRole.BOOTSTRAP)
 
 
 def _build_ollama_model(

@@ -24,7 +24,7 @@ This module belongs to the application layer and must not import from:
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from pydantic import BaseModel, Field
 
@@ -36,7 +36,29 @@ from dnd_assistant.domain.changeset import (
 )
 
 if TYPE_CHECKING:
-    from dnd_assistant.storage.types import VaultRepository
+    from dnd_assistant.domain.types import EntityType
+    from dnd_assistant.storage.types import VaultDocument
+
+
+@runtime_checkable
+class EntityReadSource(Protocol):
+    """Narrow read-only repository surface required by ChangeSet preflight.
+
+    ``validate_changeset`` only needs the canonical entity read/list surface.
+    Typing the dependency as this minimal structural protocol (instead of the
+    full ``VaultRepository``) lets read-only projections satisfy preflight
+    without pretending to be a mutable repository.  The concrete
+    ``ObsidianVaultRepository`` and ``VaultRepository`` protocol satisfy it
+    naturally; no runtime behavior changes.
+    """
+
+    def list_entities(
+        self,
+        entity_type: EntityType | None = None,
+    ) -> list[VaultDocument]:
+        """Return the canonical entity documents visible to preflight."""
+        ...
+
 
 # ── Validation issue contract ─────────────────────────────────────────────
 
@@ -100,7 +122,7 @@ class ChangeSetValidationResult(BaseModel):
 # ── Projection ────────────────────────────────────────────────────────────
 
 
-def _base_projection(repository: VaultRepository) -> dict[str, int]:
+def _base_projection(repository: EntityReadSource) -> dict[str, int]:
     """Read one repository snapshot into ``{entity_id: revision}``.
 
     This is the only repository interaction the validator performs.
@@ -188,7 +210,7 @@ def _validate_revision_guarded(
 
 def validate_changeset(
     changeset: ChangeSet,
-    repository: VaultRepository,
+    repository: EntityReadSource,
 ) -> ChangeSetValidationResult:
     """Validate an entire ChangeSet without performing any mutation.
 

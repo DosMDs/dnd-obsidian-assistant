@@ -11,6 +11,7 @@ from pathlib import Path
 import typer
 
 from dnd_assistant.cli.ask import _ask_command
+from dnd_assistant.cli.bootstrap import bootstrap_app
 from dnd_assistant.cli.changeset import changeset_app
 from dnd_assistant.cli.init import _init_command
 from dnd_assistant.cli.post_session import register_session_process_commands
@@ -33,6 +34,10 @@ app.add_typer(session_app)
 # ── ChangeSet command group ─────────────────────────────────────────────────
 
 app.add_typer(changeset_app)
+
+# ── Bootstrap command group ─────────────────────────────────────────────────
+
+app.add_typer(bootstrap_app)
 
 # ── Note root command ───────────────────────────────────────────────────────
 

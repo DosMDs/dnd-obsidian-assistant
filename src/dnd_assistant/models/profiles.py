@@ -44,6 +44,7 @@ class ModelProfileRole(StrEnum):
     SUMMARIZER = "summarizer"
     EMBEDDING = "embedding"
     POST_SESSION = "post_session"
+    BOOTSTRAP = "bootstrap"
 
 
 # ── HTTP/HTTPS URL validation ─────────────────────────────────────────────
