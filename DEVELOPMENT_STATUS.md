@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-18 (S13-03)
+**Last updated:** 2026-09-19 (S13-04)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `IN PROGRESS`; Stage 14 `NOT STARTED`
-**Active work:** `S13-03 — Existing Campaign Bootstrap / Mapping` `DONE`; next `S13-04 — Bootstrap ChangeSet Review / Apply`
+**Active work:** `S13-04 — Bootstrap ChangeSet Review / Apply` `DONE`; next `S13-05 — Bootstrap Completion / Validation / Derived Rebuild`
 **Current branch:** `feat/bootstrap`
 
 ## Status model
@@ -38,30 +38,35 @@ in `docs/development/project-invariants.md`.
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; S13-02 `DONE`; S13-03 `DONE`; next `S13-04`; `docs/stages/13_BOOTSTRAP.md` |
+| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; S13-02 `DONE`; S13-03 `DONE`; S13-04 `DONE`; next `S13-05`; `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current work — S13-03 `DONE`
+## Current work — S13-04 `DONE`
 
-`S13-03 — Existing Campaign Bootstrap / Mapping` is `DONE` on
-`feat/bootstrap` (not yet merged to `main`).  It consumes the accepted S13-02
-read-only discovery report (no second filesystem traversal), recognizes
-genuinely canonical entities from already-read `ENTITY_CANDIDATE` text through
-a filesystem-free storage helper, and maps eligible source material through a
-BOOTSTRAP-role heavy model to a deterministic Stage-10 ChangeSet proposal plus
-an immutable `_system/bootstrap/<id>.mapping.json` evidence sidecar.  Model
-output is untrusted and cannot carry a canonical `EntityId`; binding is exact
-and Python-owned; ambiguous, conflicting, unsupported and non-canonical
-material becomes typed unresolved diagnostics rather than speculative
-mutation.  No canonical campaign mutation, no review/approval/apply and no
-derived rebuild.  Stage 13 remains `IN PROGRESS`.
+`S13-04 — Bootstrap ChangeSet Review / Apply` is `DONE` on `feat/bootstrap`
+(not yet merged to `main`).  It loads the persisted S13-03 proposal and its
+immutable mapping evidence, cross-validates the sidecar against the exact
+proposal and a fresh S13-02-derived projection, computes semantic source
+freshness and canonical coverage, and exposes a Russian review surface plus
+explicit approval/rejection through the existing content-bound Stage-10
+`ChangeSetApproval`.  Apply is gated by a typed bootstrap readiness assessment
+(including a read-only strict-repository probe) and then reuses the unmodified
+Stage-10 applier and append-only apply-attempt ledger with audit source
+`bootstrap_apply`.  A mixed historical Vault remains reviewable when evidence
+and freshness allow it, but canonical apply is blocked with zero writes; no
+historical note is automatically moved, renamed or deleted.  The generic
+`dnd changeset apply` refuses BOOTSTRAP proposals and `dnd changeset status`
+states that it is generic Stage-10 recovery state only.  No model call, no
+rollback/transaction and no derived rebuild.  A successful apply is not
+bootstrap completion.  Stage 13 remains `IN PROGRESS`.
 
 ```text
-next   S13-04 — Bootstrap ChangeSet Review / Apply
+next   S13-05 — Bootstrap Completion / Validation / Derived Rebuild
 ```
 
-S13-04 must decide/enforce the mixed-Vault review/apply readiness prerequisite
-before any apply authority; S13-03 explicitly does not implement normalization.
+S13-05 owns final bootstrap completion, coverage/unresolved resolution,
+Campaign State/FTS rebuild and session-ready certification; S13-04 explicitly
+does not implement or claim them.
 
 `dnd init` yields a **structurally initialized** Vault, not a session-ready
 one: `_system/world_time.json` is deliberately out of scope.  A deterministic
@@ -78,7 +83,7 @@ enabled/visible state is never authorization.
 
 ```text
 No confirmed blocker for Stage 13.
-S13-01 and S13-02 are DONE; next planned task S13-03 is not started.
+S13-01 through S13-04 are DONE; next planned task S13-05 is not started.
 Recorded Stage-13 follow-up (not a blocker):
   deterministic Typer admin surface for starting world time
 Known carried-forward limitations (non-blocking for Stage 13):

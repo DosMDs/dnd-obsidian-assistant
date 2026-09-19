@@ -62,6 +62,7 @@ from dnd_assistant.domain.changeset import (
     CreateEntityOperation,
     UpdateEntityOperation,
 )
+from dnd_assistant.domain.types import Provenance
 from dnd_assistant.errors import (
     ConflictError,
     DndAssistantError,
@@ -580,6 +581,22 @@ def _changeset_apply(
         store = _compose_store(vault_root)
         repository = _compose_repository(vault_root)
         changeset = load_proposal(store, changeset_id)
+
+        # Bootstrap proposals must go through the bootstrap review/apply
+        # workflow, which enforces evidence binding, semantic source freshness,
+        # canonical coverage and strict repository readiness.  The generic
+        # applier is not bootstrap-aware, so applying a BOOTSTRAP proposal here
+        # would bypass those gates.  This is a presentation/composition guard
+        # only; ordinary non-bootstrap ChangeSets are unaffected.
+        if changeset.provenance.provenance is Provenance.BOOTSTRAP:
+            typer.echo(
+                f"Ошибка: ChangeSet {changeset.changeset_id} — bootstrap-предложение. "
+                "Используйте bootstrap-процедуру:\n"
+                f"  dnd bootstrap apply {changeset.changeset_id} --vault {vault_root}",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+
         approval = load_approval(store, changeset_id)
 
         if not approval.is_approved:
@@ -650,6 +667,14 @@ def _changeset_status(
     try:
         store = _compose_store(vault_root)
         changeset = load_proposal(store, changeset_id)
+        if changeset.provenance.provenance is Provenance.BOOTSTRAP:
+            typer.echo(
+                "ВНИМАНИЕ: это bootstrap-предложение. Статус ниже описывает только "
+                "generic-состояние Stage-10 (попытки применения и аудит) и НЕ является "
+                "готовностью к bootstrap-применению. Проверка доказательств, свежести "
+                "источников и строгой готовности Vault выполняются только bootstrap-процедурой:\n"
+                f"  dnd bootstrap review {changeset.changeset_id} --vault {vault_root}"
+            )
         try:
             approval: ChangeSetApproval | None = load_approval(store, changeset_id)
         except NotFoundError:

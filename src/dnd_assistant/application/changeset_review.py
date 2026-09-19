@@ -42,11 +42,14 @@ from __future__ import annotations
 import hashlib
 import json
 from enum import StrEnum
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 
-from dnd_assistant.application.changeset_validation import validate_changeset
+from dnd_assistant.application.changeset_validation import (
+    EntityReadSource,
+    validate_changeset,
+)
 from dnd_assistant.domain.changeset import (
     ChangeOperation,
     ChangeSet,
@@ -56,9 +59,6 @@ from dnd_assistant.domain.changeset import (
 )
 from dnd_assistant.domain.entity import SessionRef
 from dnd_assistant.errors import ValidationError
-
-if TYPE_CHECKING:
-    from dnd_assistant.storage.types import VaultRepository
 
 # ── Reviewer identity / optional reason ───────────────────────────────────
 
@@ -274,7 +274,7 @@ class ChangeSetApproval(BaseModel):
 
 def build_changeset_review(
     changeset: ChangeSet,
-    repository: VaultRepository,
+    repository: EntityReadSource,
 ) -> ChangeSetReview:
     """Build a proposal-only review after a fresh whole-batch preflight.
 

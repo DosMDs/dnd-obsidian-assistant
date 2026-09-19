@@ -1,6 +1,6 @@
 # Stage 13 — Bootstrap
 
-**Status:** `IN PROGRESS` (S13-01 `DONE`, S13-02 `DONE`, S13-03 `DONE`)
+**Status:** `IN PROGRESS` (S13-01 `DONE`, S13-02 `DONE`, S13-03 `DONE`, S13-04 `DONE`)
 
 This document is the durable Stage-13 handoff/plan contract produced by TUI-06.
 It is **not** Stage-13 implementation and contains no Stage-13 code, tests or
@@ -9,9 +9,10 @@ schemas. Current roadmap state lives in `DEVELOPMENT_STATUS.md`.
 ## Gate
 
 The Textual TUI prerequisite is satisfied (the accepted track was integrated
-by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01`, `S13-02` and `S13-03` are
-`DONE`; the next task is `S13-04 — Bootstrap ChangeSet Review / Apply`. There
-is no current Stage-13 blocker.
+by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01`, `S13-02`, `S13-03` and
+`S13-04` are `DONE`; the next task is
+`S13-05 — Bootstrap Completion / Validation / Derived Rebuild`. There is no
+current Stage-13 blocker.
 
 ## Two different onboarding scenarios
 
@@ -64,9 +65,9 @@ S13-04  Bootstrap ChangeSet Review / Apply
 S13-05  Bootstrap Completion / Validation / Derived Rebuild
 ```
 
-These are dependency-ordered task boundaries. `S13-01`, `S13-02` and `S13-03`
-are implemented/`DONE`; `S13-04` and `S13-05` remain planned boundaries and are
-not yet implemented.
+These are dependency-ordered task boundaries. `S13-01`, `S13-02`, `S13-03` and
+`S13-04` are implemented/`DONE`; `S13-05` remains a planned boundary and is not
+yet implemented.
 
 ## S13-01 — original handoff requirements (historical)
 
@@ -517,6 +518,123 @@ gates:       pytest (7305 passed, 141 skipped), ruff check, ruff format --check,
              maintainability contract (all production modules <=700 physical
              lines; storage/vault_discovery 695; bootstrap_changeset 593)
 ```
+
+## S13-04 — implementation record (`DONE`)
+
+S13-04 implemented the trusted bootstrap review/approval/apply workflow over the
+persisted S13-03 proposal + immutable mapping evidence.  It performs **no model
+call**, no historical-file normalization and no S13-05 completion work.
+
+### Ownership
+
+```text
+application/bootstrap_review.py            proposal/evidence loading, evidence
+                                           cross-validation, freshness, review DTO,
+                                           bounded source previews
+application/bootstrap_readiness.py         typed approval / preconditions / apply
+                                           readiness gates (strict probe)
+application/bootstrap_apply.py             bootstrap orchestration over the
+                                           existing Stage-10 applier/ledger
+composition/bootstrap_review_apply.py      concrete stores/repository/discovery/
+                                           audit wiring
+cli/bootstrap_review.py                    Russian review/approve/reject/apply
+application/changeset_review.py            annotation narrowed to EntityReadSource
+cli/changeset.py                           mandatory BOOTSTRAP generic-apply
+                                           guard + generic-status Stage-10 warning
+cli/main.py                                registers the bootstrap review commands
+storage/**, domain/**, storage/vault_discovery.py, application/bootstrap_changeset.py
+                                           unchanged
+```
+
+### Contract
+
+- **Artifact binding:** the proposal is loaded through the Stage-10 store; the
+  evidence sidecar is optional at load time (S13-03 allows partial persistence)
+  and malformed evidence fails closed with `StorageError`.  The evidence is bound
+  to the exact `changeset_id`, the recomputed proposal fingerprint, BOOTSTRAP
+  provenance, `session_ref is None`, the current campaign and one exact evidence
+  record per operation.  Filename identity is never trusted.
+- **Structural evidence cross-validation:** unique evidence/projection
+  `source_ref`s, exact source set, operation indices exactly `0..N-1`, no
+  duplicate operation evidence, `create_entity` candidate / `append_fact` claim
+  provenance, every operation and unresolved `source_ref` present in the evidence
+  sources, and `update_entity` rejected.  Descriptor-vs-projection field checks
+  run only when the semantic input fingerprint still matches, so a changed source
+  is reported as staleness rather than evidence corruption (both fail closed).
+- **Freshness:** `prepare_bootstrap_input(fresh S13-02 report).input_fingerprint`
+  must equal the evidence `input_fingerprint`; campaign identity must match.
+  `_system/changesets/**` and `_system/bootstrap/**` never affect the fingerprint.
+- **Review state (`BootstrapReviewState`):** `REVIEWABLE` / `STALE_SOURCE` /
+  `NOT_REVIEWABLE`.  A real Stage-10 `ChangeSetReview` is produced only for a
+  reviewable, coverage-complete, projection-consistent proposal; otherwise only a
+  weaker `BootstrapProposalInspection` exists.  Source content previews are
+  bounded (`10` previews, `2 000` chars each, `12 000` aggregate) and are rendered
+  only when fresh; stale proposals show metadata/hash/path plus explicit status.
+- **Approval gate:** evidence binding + freshness + complete canonical coverage +
+  projection consistency; a strict repository is deliberately **not** required,
+  so a mixed historical Vault may still be approved.  Unresolved items require
+  explicit `--acknowledge-unresolved`.
+- **Apply readiness (`BootstrapApplyReadiness`):** typed `READY` / `MISSING_EVIDENCE`
+  / `EVIDENCE_MISMATCH` / `STALE_SOURCE` / `INCOMPLETE_CANONICAL_COVERAGE` /
+  `PROJECTION_INCONSISTENT` / `UNRESOLVED_NOT_ACKNOWLEDGED` / `STRICT_REPOSITORY_NOT_READY`
+  / `CHANGESET_PREFLIGHT_FAILED` / `NOT_APPLICABLE`.  The strict probe is a
+  read-only `validate_changeset` through `EntityReadSource` (no audit intent,
+  no mutation) and classifies failures by typed project errors only — never by
+  parsing exception messages.
+- **Apply pipeline:** load proposal -> BOOTSTRAP provenance -> evidence ->
+  freshness/coverage/projection -> acknowledgement -> exact approval binding ->
+  strict readiness + strict preflight -> `load_apply_attempts` + audit ->
+  `assert_changeset_applicable` -> `apply_changeset(..., source="bootstrap_apply")`
+  -> `record_apply_attempt(..., source="bootstrap_apply")`.  No second applier,
+  no rollback/transaction, no bootstrap retry path; `apply_changeset` still runs
+  its own fresh strict preflight immediately before the first write.
+- **Generic surfaces:** `dnd changeset apply` refuses a BOOTSTRAP-provenance
+  proposal before any entity mutation and directs to
+  `dnd bootstrap apply <id> --vault ...`; `dnd changeset status` states that its
+  applicability result is generic Stage-10 recovery state only and is not
+  bootstrap apply readiness.  `application.changeset_status` semantics are
+  unchanged.
+- **Reject:** a rejection binds to the exact BOOTSTRAP proposal content and is
+  allowed with missing evidence, stale source, incomplete coverage or a
+  non-ready strict repository; apply readiness is not required.  The existing
+  immutable `ChangeSetApproval` / `persist_approval` contract is reused.
+- **Mixed Vault:** automatic normalization is **rejected**.  A mixed Vault is
+  reviewable when evidence/freshness/coverage allow it, but canonical apply is
+  blocked with zero entity writes and zero ChangeSet operation audit intent;
+  the user remedies the Vault manually, re-runs `dnd bootstrap map`, and reviews a
+  new proposal identity.  An approval never survives a changed semantic input
+  fingerprint.
+- **No model / no S13-05:** no profile construction, Pydantic AI/Ollama call,
+  extraction, Campaign State/index rebuild, world-time init or completion marker.
+  Successful apply explicitly states that Stage 13 bootstrap is not yet complete.
+
+### Evidence (this task)
+
+```text
+unit:        evidence binding/operation/source tamper matrix, review states,
+             preview bounds, approval/preconditions/apply readiness,
+             CLI Russian presentation and exit codes
+integration: strict Vault review->approve->apply (real repository, audit source
+             bootstrap_apply), second-apply blocked, mixed Vault review works but
+             apply blocked with zero writes, duplicate canonical ids blocked,
+             generic approval + stale source blocked, missing evidence blocked,
+             unresolved acknowledgement required, source change blocked,
+             generic apply refused and generic status warning
+contract:    AST layer boundaries for the new application/composition/CLI
+             modules (no provider/presentation/filesystem, no model
+             construction, CLI write-free) + mandatory generic guard presence
+gates:       targeted S13-04 (59 passed), full pytest (7379 passed, 141 skipped),
+             ruff check, ruff format --check (599 files), pyright (0 errors),
+             uv lock --check, git diff --check, maintainability contract
+             (production/vault_discovery/bootstrap_changeset/test_boundaries
+             unchanged; new modules <=700, new tests <=1000)
+```
+
+S13-04 stops after human-reviewed canonical apply and durable Stage-10 apply
+evidence.  It does not implement Campaign State rebuild, FTS/index rebuild,
+bootstrap completion markers, session-ready certification, starting world-time
+initialization or final unresolved-resolution workflow — those belong to S13-05
+or the recorded world-time follow-up.
 
 ## Stage-13 Source-of-Truth rules carried forward
 
