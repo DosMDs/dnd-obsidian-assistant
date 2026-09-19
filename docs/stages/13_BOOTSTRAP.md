@@ -1,6 +1,6 @@
 # Stage 13 — Bootstrap
 
-**Status:** `IN PROGRESS` (S13-01 `DONE`, S13-02 `DONE`, S13-03 `DONE`, S13-04 `DONE`)
+**Status:** `DONE` (S13-01 … S13-05 `DONE`)
 
 This document is the durable Stage-13 handoff/plan contract produced by TUI-06.
 It is **not** Stage-13 implementation and contains no Stage-13 code, tests or
@@ -9,10 +9,9 @@ schemas. Current roadmap state lives in `DEVELOPMENT_STATUS.md`.
 ## Gate
 
 The Textual TUI prerequisite is satisfied (the accepted track was integrated
-by `TUI-M01`). Stage 13 is `IN PROGRESS`; `S13-01`, `S13-02`, `S13-03` and
-`S13-04` are `DONE`; the next task is
-`S13-05 — Bootstrap Completion / Validation / Derived Rebuild`. There is no
-current Stage-13 blocker.
+by `TUI-M01`). Stage 13 is `DONE`; `S13-01` … `S13-05` are `DONE`. There is no
+current Stage-13 blocker and no planned Stage-13 follow-up: the deterministic
+starting-world-time admin surface is implemented by S13-05.
 
 ## Two different onboarding scenarios
 
@@ -65,9 +64,8 @@ S13-04  Bootstrap ChangeSet Review / Apply
 S13-05  Bootstrap Completion / Validation / Derived Rebuild
 ```
 
-These are dependency-ordered task boundaries. `S13-01`, `S13-02`, `S13-03` and
-`S13-04` are implemented/`DONE`; `S13-05` remains a planned boundary and is not
-yet implemented.
+These are dependency-ordered task boundaries. `S13-01` … `S13-05` are
+implemented/`DONE`.
 
 ## S13-01 — original handoff requirements (historical)
 
@@ -667,8 +665,146 @@ gates:       targeted S13-04 correction (867 passed), full pytest (7393 passed,
 S13-04 stops after human-reviewed canonical apply and durable Stage-10 apply
 evidence.  It does not implement Campaign State rebuild, FTS/index rebuild,
 bootstrap completion markers, session-ready certification, starting world-time
-initialization or final unresolved-resolution workflow — those belong to S13-05
-or the recorded world-time follow-up.
+initialization or final unresolved-resolution workflow — those belong to S13-05.
+
+## S13-05 — implementation record (`DONE`)
+
+S13-05 implemented the deterministic, fail-closed bootstrap **finalization**
+workflow that decides explicit completion, rebuilds the disposable derived
+projections and certifies session-runtime prerequisites.  It performs **no
+canonical mutation**: the only canonical write in S13-05 is the separate
+``dnd time init`` admin command.
+
+### Ownership
+
+```text
+application/bootstrap_completion.py        typed completion vocabulary + closure policy
+composition/bootstrap_completion.py        ordered finalization pipeline
+composition/index_rebuild.py               shared UI-agnostic FTS rebuild/verify
+composition/world_time.py                  world-time repository factory
+cli/bootstrap_finalize.py                  Russian `dnd bootstrap finalize`
+cli/time.py                                Russian `dnd time init`
+cli/main.py                                registration + index rebuild routed through composition
+```
+
+### Contract
+
+- **Fresh closure assessment, not historical apply.**  Completion never accepts an
+  earlier applied BOOTSTRAP ChangeSet as proof.  It reruns the accepted S13-02
+  discovery and the accepted S13-03 ``BootstrapRuntime.run(report, persist=True)``
+  pipeline (existing BOOTSTRAP role/prompt/schema/binder/producer) once.  Python
+  decides completion from the typed mapping result; the model never decides.
+  Multi-cycle bootstrap and no-change-from-start bootstrap are both supported; no
+  "latest ChangeSet" pointer and no second apply ledger exist.  Old S13-03
+  evidence is historical and is never refreshed or mutated.
+- **Immediate source-stability recheck (ordering).**  After the single mapping run
+  the pipeline recomputes a fresh semantic fingerprint *before* returning any
+  normal mapping terminal status.  A mismatch returns
+  ``SOURCE_CHANGED_DURING_VALIDATION`` (primary), never ``PENDING_CHANGESET``;
+  persisted proposal/evidence remain truthful workflow artifacts and the user
+  reruns mapping/finalize.
+- **Typed non-boolean status.**  ``BootstrapCompletionStatus`` distinguishes
+  ``COMPLETE`` / ``COMPLETE_WITH_ACKNOWLEDGED_UNRESOLVED`` / ``PENDING_CHANGESET``
+  / ``CANONICAL_COVERAGE_INCOMPLETE`` / ``UNRESOLVED_NOT_ACKNOWLEDGED`` /
+  ``UNINITIALIZED_VAULT`` / ``RECOVERY_BLOCKED`` / ``CANONICAL_NOT_READY`` /
+  ``WORLD_TIME_UNINITIALIZED`` / ``WORLD_TIME_INVALID`` /
+  ``ACTIVE_SESSION_PRESENT`` / ``MAPPING_FAILED`` /
+  ``PROPOSAL_PERSISTENCE_FAILED`` / ``EVIDENCE_PERSISTENCE_FAILED`` /
+  ``SOURCE_CHANGED_DURING_VALIDATION`` / ``CAMPAIGN_STATE_REBUILD_FAILED`` /
+  ``FTS_REBUILD_FAILED`` / ``DERIVED_VERIFICATION_FAILED``.  Sub-failures are
+  preserved in ``issues`` and never concealed by the primary status.
+- **Incomplete canonical coverage is never acknowledgeable.**
+  ``CANONICAL_COVERAGE_INCOMPLETE`` blocks completion and derived rebuild, and
+  ``--acknowledge-unresolved`` cannot override it.  This includes the accepted
+  S13-03 no-model coverage-incomplete ``NO_CHANGES`` path (zero model calls, zero
+  derived writes).  Ordinary unresolved diagnostics are the only acknowledgeable
+  category; no reason-specific automatic acceptance is introduced.
+- **Prerequisites.**  Strict canonical validation uses only
+  ``ObsidianVaultRepository.list_entities()`` (malformed Markdown, duplicate
+  ``EntityId``, type/directory mismatch, unsafe path and corrupt audit topology
+  all block).  World time is required (raw ``world_tick`` exposed) and active
+  session blocks finalization; a session-repository ``ConflictError``/
+  ``StorageError`` fails closed as ``RECOVERY_BLOCKED``/``CANONICAL_NOT_READY``
+  rather than masquerading as an ordinary active session.
+- **Derived rebuild semantics.**  Campaign State and FTS are independent
+  disposable stores with no whole-finalization transaction and no rollback.  A
+  ``CampaignStateSourceChangedError`` is classified as
+  ``SOURCE_CHANGED_DURING_VALIDATION`` and **no not-yet-started derived
+  maintenance** is begun after it; an ordinary Campaign State storage failure
+  still allows the independent FTS attempt and vice versa.  Verification is
+  literal: Campaign State ``inspect == CURRENT`` and FTS
+  ``verify_freshness(fresh documents)``; a final semantic source-stability check
+  must still match.
+- **Starting world time admin surface.**
+  ``dnd time init --vault PATH --world-tick INTEGER`` is model-free, runs the
+  recovery preflight first, uses
+  ``ObsidianWorldTimeRepository.initialize_current_world_time`` with the shared
+  ``build_audit_context`` (source ``cli``, prefix ``cli-time-init``), validates a
+  raw signed ``WorldTick``, initializes revision 1 once, refuses an existing
+  ``world_time.json`` and never infers/converts a tick or parses a calendar.  No
+  ``set``/``advance`` surface is added.  This closes the recorded Stage-13
+  follow-up: a freshly initialized campaign can become session-ready without an
+  LLM write tool call.
+- **Shared FTS composition.**  ``composition/index_rebuild.py`` owns the single
+  canonical-documents read and the
+  ``SqliteFtsIndex.rebuild``/``verify_freshness`` calls used by both
+  ``dnd index rebuild`` and bootstrap finalization; the existing CLI behavior is
+  preserved and the FTS source-fingerprint algorithm is not duplicated.
+
+### Historical `Campaign/Bootstrap.md` reconciliation
+
+The original Stage-13 architecture sketch expected a ``Campaign/Bootstrap.md``
+imported-history boundary.  That sketch is **superseded for the MVP** by the
+accepted reviewed bootstrap workflow: imported knowledge becomes canonical only
+through reviewed/applied ChangeSets plus immutable mapping evidence under
+``_system/bootstrap/**``, and system-observed history lives in Sessions/raw
+data.  No canonical ``Campaign`` document schema, repository or audited writer
+exists, so creating an ad-hoc Markdown file would bypass the ``VaultRepository``/
+audit boundary.  ``Campaign/Bootstrap.md`` is therefore deliberately **not**
+part of Stage 13 (not an unfinished requirement).
+
+### Completion marker
+
+No ``_system/bootstrap/*completion*`` artifact is created.  Current operational
+readiness is re-derived on demand; a durable marker would itself need freshness/
+invalidation semantics after later sessions and canonical changes and would risk
+becoming a second Source of Truth.  Existing durable workflow evidence remains
+sufficient.
+
+### Evidence (this task)
+
+```text
+unit:        closure classification matrix (coverage-incomplete never
+             acknowledgeable; partial evidence persistence; proposal; unresolved;
+             clean no-changes), status/result `completed` semantics,
+             `dnd time init` help/negative tick/audit intent+committed/refusal
+integration: clean NO_CHANGES -> COMPLETE with Campaign State CURRENT + verified
+             FTS and no historical ChangeSet; negative world tick;
+             coverage-incomplete NO_CHANGES + --acknowledge-unresolved ->
+             CANONICAL_COVERAGE_INCOMPLETE with zero model calls and zero derived
+             writes; persisted proposal + source drift -> SOURCE_CHANGED (not
+             PENDING) with workflow artifacts retained and zero derived writes;
+             stable proposal -> PENDING_CHANGESET loadable by the S13-04 bundle
+             loader; partial evidence persistence -> EVIDENCE_PERSISTENCE_FAILED;
+             partial persistence + drift -> SOURCE_CHANGED with persistence
+             failure retained in diagnostics; CampaignStateSourceChangedError ->
+             SOURCE_CHANGED with FTS not started; ordinary Campaign State failure
+             -> CAMPAIGN_STATE_REBUILD_FAILED with FTS retained/verified;
+             multiple-active-session conflict -> RECOVERY_BLOCKED (not
+             ACTIVE_SESSION_PRESENT); malformed canonical note blocked before the
+             model; missing world time blocked; uninitialized Vault; source drift
+             after derived rebuild; Russian CLI COMPLETE/PENDING rendering and
+             exit codes
+contract:    AST layer boundaries for the new application/composition/CLI
+             modules (pure application policy, no presentation in composition,
+             CLI write-free, model-free time CLI) + FTS composition reuse and
+             main-CLI routing
+gates:       targeted S13-05 suites (846 passed with maintainability contract),
+             full pytest (7441 passed, 141 skipped; one pre-existing timing-flaky
+             TUI concurrency test passed on isolated and module rerun),
+             ruff check, ruff format --check (611 files), pyright (0 errors),
+             uv lock --check, git diff --check, maintainability contract
+```
 
 ## Stage-13 Source-of-Truth rules carried forward
 

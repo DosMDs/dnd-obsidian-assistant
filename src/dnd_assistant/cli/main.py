@@ -12,15 +12,15 @@ import typer
 
 from dnd_assistant.cli.ask import _ask_command
 from dnd_assistant.cli.bootstrap import bootstrap_app
+from dnd_assistant.cli.bootstrap_finalize import register_bootstrap_finalize_command
 from dnd_assistant.cli.bootstrap_review import register_bootstrap_review_apply_commands
 from dnd_assistant.cli.changeset import changeset_app
 from dnd_assistant.cli.init import _init_command
 from dnd_assistant.cli.post_session import register_session_process_commands
 from dnd_assistant.cli.session import _note_command, session_app
+from dnd_assistant.cli.time import time_app
+from dnd_assistant.composition.index_rebuild import rebuild_fts_index
 from dnd_assistant.errors import DndAssistantError, StorageError
-from dnd_assistant.retrieval.index import SqliteFtsIndex
-from dnd_assistant.storage.audit import AuditService
-from dnd_assistant.storage.vault_repository import ObsidianVaultRepository
 
 app = typer.Typer(
     name="dnd",
@@ -39,7 +39,12 @@ app.add_typer(changeset_app)
 # ── Bootstrap command group ─────────────────────────────────────────────────
 
 register_bootstrap_review_apply_commands(bootstrap_app)
+register_bootstrap_finalize_command(bootstrap_app)
 app.add_typer(bootstrap_app)
+
+# ── Time command group ──────────────────────────────────────────────────────
+
+app.add_typer(time_app)
 
 # ── Note root command ───────────────────────────────────────────────────────
 
@@ -151,45 +156,24 @@ def _rebuild_index(
         )
         raise typer.Exit(code=1)
 
-    # Compose read-only Vault access
-    try:
-        audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
-        if not audit_log_path.parent.is_dir():
-            typer.echo(
-                f"Ошибка: директория _system/audit/ не найдена в Vault: {vault_root}",
-                err=True,
-            )
-            raise typer.Exit(code=1)
-
-        audit_service = AuditService(str(audit_log_path))
-        repository = ObsidianVaultRepository(
-            vault_root=str(vault_root),
-            audit_service=audit_service,
+    audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
+    if not audit_log_path.parent.is_dir():
+        typer.echo(
+            f"Ошибка: директория _system/audit/ не найдена в Vault: {vault_root}",
+            err=True,
         )
-    except StorageError as exc:
-        typer.echo(f"Ошибка: не удалось открыть Vault: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        raise typer.Exit(code=1)
 
-    # Read all canonical documents
     try:
-        documents = repository.list_entities()
-    except StorageError as exc:
-        typer.echo(f"Ошибка: не удалось прочитать сущности Vault: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
-
-    # Rebuild index
-    try:
-        index = SqliteFtsIndex(vault_root=str(vault_root))
-        index.rebuild(documents)
+        rebuild = rebuild_fts_index(vault_root)
     except StorageError as exc:
         typer.echo(f"Ошибка: не удалось перестроить индекс: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    player_count = sum(1 for d in documents if d.entity.visibility.value == "player")
     typer.echo(
         f"Индекс полнотекстового поиска успешно перестроен.\n"
-        f"  Сущностей проиндексировано: {player_count}\n"
-        f"  Путь к индексу: {index.index_path}"
+        f"  Сущностей проиндексировано: {rebuild.player_count}\n"
+        f"  Путь к индексу: {rebuild.index_path}"
     )
 
 

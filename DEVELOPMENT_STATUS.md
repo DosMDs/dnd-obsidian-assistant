@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-19 (S13-04)
+**Last updated:** 2026-09-19 (S13-05)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `IN PROGRESS`; Stage 14 `NOT STARTED`
-**Active work:** `S13-04 — Bootstrap ChangeSet Review / Apply` `DONE`; next `S13-05 — Bootstrap Completion / Validation / Derived Rebuild`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE`; Stage 14 `NOT STARTED`
+**Active work:** `S13-05 — Bootstrap Completion / Validation / Derived Rebuild` `DONE`; next `Stage 14 — Evals / Hardening`
 **Current branch:** `feat/bootstrap`
 
 ## Status model
@@ -38,40 +38,38 @@ in `docs/development/project-invariants.md`.
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | IN PROGRESS | S13-01 `DONE`; S13-02 `DONE`; S13-03 `DONE`; S13-04 `DONE`; next `S13-05`; `docs/stages/13_BOOTSTRAP.md` |
+| 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; `docs/stages/13_BOOTSTRAP.md` |
 | 14. Evals / Hardening | NOT STARTED | — |
 
-## Current work — S13-04 `DONE`
+## Current work — S13-05 `DONE`
 
-`S13-04 — Bootstrap ChangeSet Review / Apply` is `DONE` on `feat/bootstrap`
-(not yet merged to `main`).  It loads the persisted S13-03 proposal and its
-immutable mapping evidence, cross-validates the sidecar against the exact
-proposal and a fresh S13-02-derived projection, computes semantic source
-freshness and canonical coverage, and exposes a Russian review surface plus
-explicit approval/rejection through the existing content-bound Stage-10
-`ChangeSetApproval`.  Apply is gated by a typed bootstrap readiness assessment
-(including a read-only strict-repository probe) and then reuses the unmodified
-Stage-10 applier and append-only apply-attempt ledger with audit source
-`bootstrap_apply`.  A mixed historical Vault remains reviewable when evidence
-and freshness allow it, but canonical apply is blocked with zero writes; no
-historical note is automatically moved, renamed or deleted.  The generic
-`dnd changeset apply` refuses BOOTSTRAP proposals and `dnd changeset status`
-states that it is generic Stage-10 recovery state only.  No model call, no
-rollback/transaction and no derived rebuild.  A successful apply is not
-bootstrap completion.  Stage 13 remains `IN PROGRESS`.
+`S13-05 — Bootstrap Completion / Validation / Derived Rebuild` is `DONE` on
+`feat/bootstrap` (not yet merged to `main`).  `dnd bootstrap finalize` runs a
+recovery preflight, requires an initialized Vault with a strict valid canonical
+repository, requires canonical world time and no active session, then runs one
+fresh S13-02 discovery + S13-03 mapping through the accepted
+`BootstrapRuntime.run(persist=True)` (existing BOOTSTRAP role/prompt/schema/
+binder/producer; no second implementation).  It performs an immediate semantic
+source-fingerprint recheck before any normal mapping terminal status, so a stale
+persisted proposal is never advertised as `PENDING_CHANGESET`.  Completion is a
+typed non-boolean result; incomplete canonical coverage is never acknowledgeable,
+ordinary unresolved diagnostics require `--acknowledge-unresolved`, and
+`COMPLETE_WITH_ACKNOWLEDGED_UNRESOLVED` never claims complete historical
+knowledge.  Derived maintenance rebuilds Campaign State and FTS independently
+(no transaction/rollback), verifies `CURRENT`/freshness literally and rechecks
+final source stability.  `dnd time init --vault PATH --world-tick INTEGER` adds
+the deterministic, model-free initialize-once starting-world-time admin surface
+(recovery preflight + repository audit); no completion marker and no
+`Campaign/Bootstrap.md` are created.  Stage 13 is `DONE`.
 
 ```text
-next   S13-05 — Bootstrap Completion / Validation / Derived Rebuild
+next   Stage 14 — Evals / Hardening (NOT STARTED)
 ```
 
-S13-05 owns final bootstrap completion, coverage/unresolved resolution,
-Campaign State/FTS rebuild and session-ready certification; S13-04 explicitly
-does not implement or claim them.
-
-`dnd init` yields a **structurally initialized** Vault, not a session-ready
-one: `_system/world_time.json` is deliberately out of scope.  A deterministic
-Typer admin surface for the starting world tick is a recorded Stage-13
-follow-up decision; the existing `set_world_time` WRITE tool can initialize it.
+`dnd init` still yields a **structurally initialized** Vault; it becomes
+session-ready only after `dnd time init` (or the existing `set_world_time` WRITE
+tool) initializes `_system/world_time.json` and `bootstrap finalize` certifies
+readiness.
 
 Textual is presentation-only. Obsidian Vault remains the only campaign Source of
 Truth, Python owns trusted domain/application/storage logic, `ToolExecutor` is
@@ -82,10 +80,7 @@ enabled/visible state is never authorization.
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for Stage 13.
-S13-01 through S13-04 are DONE; next planned task S13-05 is not started.
-Recorded Stage-13 follow-up (not a blocker):
-  deterministic Typer admin surface for starting world time
+No confirmed blocker for Stage 13.  Stage 13 is DONE.
 Known carried-forward limitations (non-blocking for Stage 13):
   Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
   macOS real-terminal smoke                     SKIPPED_CAPABILITY
@@ -93,6 +88,7 @@ Known carried-forward limitations (non-blocking for Stage 13):
   external OS/process kill                      not preventable by the TUI
   thread-worker cancellation                    fail-closed, not rollback
   Windows/macOS symlink-junction discovery       capability-gated tests
+  TUI campaign-state concurrency timing flake    passed on isolated/module rerun
 ```
 
 ## Documentation map
