@@ -137,7 +137,7 @@ for commands intentionally not run.
 - For changes involving `sys.modules` or process-global test state, run affected
   suites in relevant execution orders to verify isolation.
 
-## 4. Canonical command identity
+## 4. Canonical command identity and focused-first escalation
 
 Reserved names such as `canonical pytest`, `full pytest`, `full suite` must
 refer to the repository-defined canonical command, normally from the repository
@@ -152,6 +152,105 @@ subdirectory must be named precisely and must not be reported as the canonical
 full suite. When environment state affects collection/network behavior, record
 the relevant state (e.g. PAIM live env set = explicit live gate; unset =
 canonical offline pytest).
+
+### Focused-first test escalation
+
+One canonical testing workflow applies to implementation and correction work:
+
+```text
+implementation/change
+    ↓
+Level 1 — focused tests
+    exact regression / changed function / smallest relevant test set
+    ↓
+Level 2 — affected subsystem tests
+    owning module / contract / integration subset
+    ↓
+static and repository gates as appropriate
+    Pyright / Ruff / maintainability / contracts
+    ↓
+Level 3 — canonical full pytest
+    one final integration gate
+```
+
+The normal direction is **focused → affected → canonical**. The canonical full
+suite is a FINAL INTEGRATION GATE, not the default diagnostic loop. Running the
+full suite before focused/affected scopes are stable is not a valid substitute
+for narrow diagnosis.
+
+### Failure-loop behavior
+
+When a focused or affected test fails:
+
+- diagnose the narrowest failing scope;
+- fix the defect;
+- rerun the exact failing test first;
+- then rerun the smallest owning/affected suite;
+- only escalate after that scope is stable.
+
+When the canonical full suite fails, do not immediately rerun the whole suite.
+Instead:
+
+1. capture the exact failing test(s) and failure evidence;
+2. classify whether the failure is plausibly task-owned;
+3. rerun the exact failing test in isolation;
+4. if needed, run the owning module / small subsystem;
+5. if timing/order/flakiness is suspected, use targeted repetitions or a
+   controlled affected-suite run;
+6. inspect whether the current diff can affect that subsystem;
+7. fix task-owned failures before any new canonical run;
+8. explicitly classify apparently unrelated/pre-existing flakiness.
+
+Only after all identified failures are resolved or explicitly classified may a
+new canonical full-suite run be considered.
+
+### Canonical rerun policy and the no-lucky-green rule
+
+There is no arbitrary hard cap such as "the full suite may only ever run twice".
+The rule is semantic:
+
+- normally one canonical full run after focused/affected/static gates are
+  stable;
+- if that run reveals a real task-owned defect, fix and stabilize narrowly, then
+  one new final canonical run is justified;
+- if it exposes an apparently unrelated flaky test, narrow diagnosis comes first;
+  another full run requires an explicit reason;
+- every canonical full run after the first must have a stated justification.
+
+Do **not** repeatedly rerun the canonical full suite merely to obtain a lucky
+green result from flaky/order/timing-sensitive tests. A green rerun after one or
+more unexplained failures does not erase the earlier failure evidence. Repeated
+full-suite retries are not a valid substitute for root-cause classification. If a
+test is suspected flaky, diagnose the TEST narrowly.
+
+```text
+Bad:
+    full suite → fail A → full suite → fail B → full suite → fail C → repeat until green
+
+Correct:
+    full suite → fail A → exact A / owning subset → classify/fix
+    → exact/affected green → one justified final full suite
+```
+
+This works for large/high-risk changes without weakening final integration
+evidence.
+
+### Escalation evidence in the Final Report
+
+Final Reports must distinguish:
+
+- focused test evidence;
+- affected/subsystem evidence;
+- canonical full-suite evidence;
+- flaky/unrelated failure investigations.
+
+If earlier canonical runs failed before the final green run, do not hide them.
+Report which tests failed, whether they passed in isolation, whether the current
+diff can plausibly affect them, a classification (`TASK_OWNED` /
+`PRE_EXISTING_FLAKY` / `UNRELATED` / `UNRESOLVED`), and why an additional
+canonical run was or was not justified. Never state simply "full suite green"
+when repeated failures were observed during the same task without mentioning
+them.
 
 ## 5. Evidence integrity
 

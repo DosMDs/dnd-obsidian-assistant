@@ -51,7 +51,15 @@ Responsibilities:
 - behavioral evidence that a green test actually asserts the claimed behavior;
 - gate correctness: gates chosen from the final diff, appropriate to the change;
 - misuse of skips/xfails and contamination of measured versus historical
-  results.
+  results;
+- test-escalation discipline (flag each of these explicitly):
+  - the full suite used repeatedly as a diagnostic loop;
+  - unexplained canonical full-suite reruns;
+  - lucky-green evidence (a green rerun presented as if earlier failures did not
+    happen);
+  - broad suite reruns performed before narrow failure stabilization;
+  - earlier failures hidden from the Final Report (a bare "full suite green"
+    after observed failures).
 
 You must not edit files, stage, commit, push, change Git state, run application
 tests or live models/evals, or delegate implementation.

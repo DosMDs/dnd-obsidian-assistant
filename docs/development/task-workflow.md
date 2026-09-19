@@ -249,3 +249,9 @@ If an ordinary push is rejected, stop and report the reason.
   invariant, and update the relevant rule/skill/helper before continuing.
 - Do not make a gate pass by weakening a threshold, allowlist or safety
   boundary. See [maintainability.md](maintainability.md).
+- Debugging and correction follow focused-first escalation: rerun the exact
+  failing test, then the smallest owning/affected suite, before any canonical
+  full-suite run. A canonical full-suite failure is diagnosed narrowly (exact
+  test in isolation, owning subsystem, task-ownership classification) instead of
+  being retried wholesale; repeated canonical runs are not a lucky-green
+  substitute. See [quality-and-evidence.md](quality-and-evidence.md) §4.

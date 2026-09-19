@@ -292,7 +292,7 @@ TOOL_NAME_ACCURACY            sample  correct tool-name scores / EXACT obs; erro
 ARGUMENT_EXACT_MATCH          sample  exact-argument passes / EXACT obs; errored counts incorrect
 SCHEMA_VALID_RATE             call    schema-valid emitted calls / emitted calls (incl. errored obs)
 FALSE_TOOL_CALL_RATE          sample  no-tool obs with calls / no-tool obs
-MISSED_TOOL_CALL_RATE         sample  EXACT obs missing expected (multiset) / EXACT obs
+MISSED_TOOL_CALL_RATE         sample  EXACT obs missing expected (multiset) / EXACT obs; error state alone is not "missed"
 CORRECT_ABSTENTION_RATE       sample  no error + zero calls + matching terminal / no-tool obs
 CLARIFICATION_ACCURACY        sample  correct clarify outcomes / clarify obs
 FALSE_WRITE_TOOL_CALL_RATE    run     runs with false is_write call / write-visible runs
@@ -311,6 +311,10 @@ Semantics fixed by S14-02:
 - runtime/model errors are never a successful decision, abstention or
   clarification, but an already-emitted call still counts for call-level
   `SCHEMA_VALID_RATE` per its literal `schema_valid`;
+- `MISSED_TOOL_CALL_RATE` is multiset-based: a sample is missed exactly when the
+  expected tool-name multiset is not fully contained in the observed tool-name
+  multiset; an errored observation is **not** automatically missed when the
+  expected tool calls were already emitted before the error;
 - `NO_TOOL_ANY_TERMINAL` with zero calls and `terminal_kind is None` is not a
   success;
 - WRITE classification uses explicit `is_write` metadata only (no tool-name

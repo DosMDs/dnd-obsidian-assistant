@@ -102,6 +102,21 @@ test changes and must complete with 0 errors. Pytest green does not override
 Pyright failure, and Pyright green does not replace pytest or Ruff. Details:
 `docs/development/quality-and-evidence.md`.
 
+Testing is **focused-first**; the canonical full suite is a **final integration
+gate, not the default diagnostic loop**:
+
+```text
+focused tests → affected/subsystem tests → static/repository gates
+→ one canonical full `uv run pytest`
+```
+
+On failure, rerun the exact failing test in isolation first, fix the defect,
+stabilize the smallest owning/affected scope, and only then escalate. Do not
+rerun the canonical full suite merely to obtain a lucky green: a green rerun
+does not erase earlier failure evidence. Every canonical full run after the
+first needs a stated justification. Details:
+`docs/development/quality-and-evidence.md`.
+
 ## Source editing
 
 Mutate repository text through OpenCode's structured `edit` / `write` /
