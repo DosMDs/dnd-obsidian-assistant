@@ -184,12 +184,26 @@ class SourceReadResult:
 
 
 @dataclass(frozen=True, slots=True)
+class ExcludedEntry:
+    """Typed informational record of one traversal-excluded entry.
+
+    Excluded entries remain excluded from inventory and content; this metadata
+    only lets application coverage policy decide whether an exclusion could hide
+    a canonical entity file.
+    """
+
+    relative_path: str
+    is_directory: bool
+
+
+@dataclass(frozen=True, slots=True)
 class VaultSourceInventory:
     """Deterministic, ordered inventory of a validated initialized Vault."""
 
     campaign_id: str
     entries: tuple[InventoryEntry, ...]
     issues: tuple[DiscoveryIssue, ...]
+    excluded: tuple[ExcludedEntry, ...] = ()
 
 
 def _order_key(relative_path: str) -> tuple[str, str]:
@@ -339,20 +353,25 @@ class ObsidianVaultSourceReader:
 
         entries: list[InventoryEntry] = []
         issues: list[DiscoveryIssue] = []
+        excluded: list[ExcludedEntry] = []
 
-        for entry in self._walk(issues):
+        for entry in self._walk(issues, excluded):
             entries.append(entry)
 
         issues.extend(self._case_alias_issues(entries))
         entries.sort(key=lambda item: _order_key(item.relative_path))
+        excluded.sort(key=lambda item: _order_key(item.relative_path))
         issues.sort(key=lambda issue: (_order_key(issue.relative_path), issue.code.value))
         return VaultSourceInventory(
             campaign_id=self._campaign_id,
             entries=tuple(entries),
             issues=tuple(issues),
+            excluded=tuple(excluded),
         )
 
-    def _walk(self, issues: list[DiscoveryIssue]) -> Iterator[InventoryEntry]:
+    def _walk(
+        self, issues: list[DiscoveryIssue], excluded: list[ExcludedEntry]
+    ) -> Iterator[InventoryEntry]:
         """Yield inventoried files, recording isolated traversal issues.
 
         Traversal is iterative (no recursion), never materializes a directory
@@ -397,9 +416,12 @@ class ObsidianVaultSourceReader:
                         is_directory = entry.is_dir(follow_symlinks=False)
                     except OSError:
                         is_directory = False
-                    if _is_excluded_name(entry.name, is_directory=is_directory):
-                        continue
                     relative = f"{rel_dir}/{entry.name}" if rel_dir else entry.name
+                    if _is_excluded_name(entry.name, is_directory=is_directory):
+                        excluded.append(
+                            ExcludedEntry(relative_path=relative, is_directory=is_directory)
+                        )
+                        continue
 
                     if self._is_redirect(entry.path):
                         issues.append(DiscoveryIssue(relative, DiscoveryIssueCode.UNSAFE_REDIRECT))
@@ -664,6 +686,7 @@ __all__ = [
     "DiscoveryIssue",
     "DiscoveryIssueCode",
     "DiscoveryLimits",
+    "ExcludedEntry",
     "InventoryEntry",
     "ObsidianVaultSourceReader",
     "SourceReadResult",

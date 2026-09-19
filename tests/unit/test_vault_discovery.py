@@ -141,6 +141,23 @@ class TestInventory:
         ):
             assert excluded not in paths
 
+    def test_excluded_entries_are_recorded_as_typed_metadata(self, tmp_path: Path) -> None:
+        root = _make_vault(tmp_path)
+        _write_text(root, ".git/config", "x")
+        _write_text(root, "Characters/NPCs/.archive/hidden.md", "x")
+        _write_text(root, "Characters/NPCs/~legacy.md", "x")
+        _write_text(root, "Characters/NPCs/.DS_Store", "x")
+        result = ObsidianVaultSourceReader(root).inventory()
+        excluded = {(e.relative_path, e.is_directory) for e in result.excluded}
+        assert (".git", True) in excluded
+        assert ("Characters/NPCs/.archive", True) in excluded
+        assert ("Characters/NPCs/~legacy.md", False) in excluded
+        assert ("Characters/NPCs/.DS_Store", False) in excluded
+        entry_paths = {e.relative_path for e in result.entries}
+        assert "Characters/NPCs/.archive" not in entry_paths
+        assert "Characters/NPCs/~legacy.md" not in entry_paths
+        assert "Characters/NPCs/.DS_Store" not in entry_paths
+
     def test_known_hidden_state_manifest_is_not_blanket_excluded(self, tmp_path: Path) -> None:
         root = _make_vault(tmp_path)
         _write_text(root, "State/.campaign-state-manifest.json", "{}")

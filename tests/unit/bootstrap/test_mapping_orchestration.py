@@ -6,6 +6,7 @@ import builtins
 
 import pytest
 
+from dnd_assistant.application.bootstrap_canonical import assess_canonical_coverage
 from dnd_assistant.application.bootstrap_changeset import BootstrapUnresolvedReason
 from dnd_assistant.application.bootstrap_extraction import (
     BootstrapExtractionError,
@@ -17,14 +18,22 @@ from dnd_assistant.application.bootstrap_mapping import (
     run_bootstrap_mapping,
 )
 from dnd_assistant.application.bootstrap_result import BootstrapMappingOutcome
-from dnd_assistant.application.vault_discovery import ContentReadStatus, SourceClass
+from dnd_assistant.application.vault_discovery import (
+    ContentReadStatus,
+    SourceClass,
+    VaultDiscoveryReport,
+)
 from dnd_assistant.composition.bootstrap import canonical_candidates_from_report
 from dnd_assistant.domain.bootstrap_extraction import (
     BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
     BootstrapExtraction,
 )
 from dnd_assistant.domain.types import EntityType
-from dnd_assistant.storage.vault_discovery import DiscoveryIssue, DiscoveryIssueCode
+from dnd_assistant.storage.vault_discovery import (
+    DiscoveryIssue,
+    DiscoveryIssueCode,
+    ExcludedEntry,
+)
 from tests.unit.bootstrap.helpers import (
     FakeBootstrapModel,
     canonical_text,
@@ -153,6 +162,28 @@ def test_managed_namespace_discovery_issue_fails_closed() -> None:
         item.reason is BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE
         for item in run.result.unresolved
     )
+
+
+def test_casefold_equivalent_managed_namespace_exclusion_breaks_coverage() -> None:
+    report = VaultDiscoveryReport(
+        campaign_id=_CAMP,
+        entries=(make_source("Notes/a.md", SourceClass.USER_SOURCE, "варос"),),
+        issues=(),
+        excluded=(ExcludedEntry("CHARACTERS/NPCS/.archive", True),),
+    )
+    coverage = assess_canonical_coverage(report)
+    assert coverage.complete is False
+    assert [issue.relative_path for issue in coverage.issues] == ["CHARACTERS/NPCS/.archive"]
+
+
+def test_excluded_non_markdown_file_does_not_break_coverage() -> None:
+    report = VaultDiscoveryReport(
+        campaign_id=_CAMP,
+        entries=(make_source("Notes/a.md", SourceClass.USER_SOURCE, "варос"),),
+        issues=(),
+        excluded=(ExcludedEntry("Characters/NPCs/.DS_Store", False),),
+    )
+    assert assess_canonical_coverage(report).complete is True
 
 
 def test_skipped_user_source_does_not_break_coverage() -> None:

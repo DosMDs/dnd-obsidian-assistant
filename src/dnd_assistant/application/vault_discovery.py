@@ -34,6 +34,7 @@ from dnd_assistant.storage.types import EntityDirectory
 from dnd_assistant.storage.vault_discovery import (
     DiscoveryIssue,
     DiscoveryIssueCode,
+    ExcludedEntry,
     VaultSourceReader,
 )
 
@@ -148,12 +149,16 @@ class VaultDiscoveryReport:
 
     The report carries Vault-relative POSIX paths, classification metadata and
     bounded text only.  It carries no absolute filesystem path and grants no
-    filesystem traversal authority.
+    filesystem traversal authority.  ``excluded`` records typed metadata for
+    entries the S13-02 exclusion policy omitted so downstream coverage policy
+    can prove whether an exclusion could hide a canonical entity file; excluded
+    material never becomes inventory or model input.
     """
 
     campaign_id: str
     entries: tuple[DiscoveredSource, ...]
     issues: tuple[DiscoveryIssue, ...]
+    excluded: tuple[ExcludedEntry, ...] = ()
 
 
 # ── Pure policy helpers ──────────────────────────────────────────────────────
@@ -360,6 +365,7 @@ class VaultDiscoveryService:
             campaign_id=inventory.campaign_id,
             entries=tuple(entries),
             issues=tuple(issues),
+            excluded=inventory.excluded,
         )
 
 

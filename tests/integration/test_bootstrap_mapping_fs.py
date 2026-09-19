@@ -8,6 +8,8 @@ from typing import Any
 
 import pytest
 
+from dnd_assistant.application.bootstrap_canonical import CanonicalCoverageReason
+from dnd_assistant.application.bootstrap_changeset import BootstrapUnresolvedReason
 from dnd_assistant.application.bootstrap_evidence import (
     BOOTSTRAP_EVIDENCE_SCHEMA_VERSION,
     build_bootstrap_evidence,
@@ -15,6 +17,7 @@ from dnd_assistant.application.bootstrap_evidence import (
 )
 from dnd_assistant.application.bootstrap_input import prepare_bootstrap_input, source_ref
 from dnd_assistant.application.bootstrap_mapping import run_bootstrap_mapping
+from dnd_assistant.application.bootstrap_result import BootstrapMappingOutcome
 from dnd_assistant.application.changeset_store import persist_proposal
 from dnd_assistant.application.vault_discovery import (
     VaultDiscoveryService,
@@ -230,3 +233,99 @@ def test_runtime_evidence_uses_extraction_schema_version(tmp_path: Path, monkeyp
         deserialize_bootstrap_evidence(stored).extraction_schema_version
         == BOOTSTRAP_EXTRACTION_SCHEMA_VERSION
     )
+
+
+def _excluded_pairs(root: Path) -> set[tuple[str, bool]]:
+    return {(entry.relative_path, entry.is_directory) for entry in _report(root).excluded}
+
+
+def test_excluded_subtree_in_managed_namespace_blocks_coverage(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    (tmp_path / "Characters" / "NPCs" / ".archive").mkdir()
+    (tmp_path / "Characters" / "NPCs" / ".archive" / "hidden.md").write_text(
+        canonical_text("npc-2", EntityType.NPC, "Скрытый"), encoding="utf-8"
+    )
+
+    report = _report(tmp_path)
+    paths = {entry.relative_path for entry in report.entries}
+    assert "Characters/NPCs/.archive" not in paths
+    assert "Characters/NPCs/.archive/hidden.md" not in paths
+    assert ("Characters/NPCs/.archive", True) in {
+        (entry.relative_path, entry.is_directory) for entry in report.excluded
+    }
+
+    model = FakeBootstrapModel(_extraction())
+    run = run_bootstrap_mapping(report, canonical_candidates_from_report(report), model)
+    assert run.coverage.complete is False
+    assert any(
+        issue.reason is CanonicalCoverageReason.EXCLUDED_CANONICAL_PATH
+        and issue.relative_path == "Characters/NPCs/.archive"
+        for issue in run.coverage.issues
+    )
+    assert run.result.outcome is BootstrapMappingOutcome.NO_CHANGES
+    assert run.result.changeset is None
+    assert model.requests == []
+    assert any(
+        item.reason is BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE
+        for item in run.result.unresolved
+    )
+
+
+def test_excluded_markdown_file_in_managed_namespace_blocks_coverage(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    (tmp_path / "Characters" / "NPCs" / "~legacy.md").write_text("# legacy\n", encoding="utf-8")
+
+    report = _report(tmp_path)
+    assert "Characters/NPCs/~legacy.md" not in {entry.relative_path for entry in report.entries}
+    assert ("Characters/NPCs/~legacy.md", False) in {
+        (entry.relative_path, entry.is_directory) for entry in report.excluded
+    }
+
+    model = FakeBootstrapModel(_extraction())
+    run = run_bootstrap_mapping(report, canonical_candidates_from_report(report), model)
+    assert run.coverage.complete is False
+    assert any(
+        issue.reason is CanonicalCoverageReason.EXCLUDED_CANONICAL_PATH
+        and issue.relative_path == "Characters/NPCs/~legacy.md"
+        for issue in run.coverage.issues
+    )
+    assert run.result.changeset is None
+    assert model.requests == []
+    assert any(
+        item.reason is BootstrapUnresolvedReason.CANONICAL_COVERAGE_INCOMPLETE
+        for item in run.result.unresolved
+    )
+
+
+def test_root_infrastructure_exclusions_do_not_block_coverage(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    (tmp_path / ".git").mkdir()
+    (tmp_path / ".git" / "config").write_text("x", encoding="utf-8")
+    (tmp_path / ".obsidian").mkdir()
+    (tmp_path / ".obsidian" / "app.json").write_text("{}", encoding="utf-8")
+
+    report = _report(tmp_path)
+    assert {entry.relative_path for entry in report.entries}.isdisjoint({".git", ".obsidian"})
+    assert _excluded_pairs(tmp_path) >= {(".git", True), (".obsidian", True)}
+
+    run = run_bootstrap_mapping(
+        report, canonical_candidates_from_report(report), FakeBootstrapModel()
+    )
+    assert run.coverage.complete is True
+
+
+def test_os_metadata_exclusion_does_not_block_coverage(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    (tmp_path / "Characters" / "NPCs" / ".DS_Store").write_text("x", encoding="utf-8")
+
+    report = _report(tmp_path)
+    assert "Characters/NPCs/.DS_Store" not in {entry.relative_path for entry in report.entries}
+    assert ("Characters/NPCs/.DS_Store", False) in {
+        (entry.relative_path, entry.is_directory) for entry in report.excluded
+    }
+
+    run = run_bootstrap_mapping(
+        report, canonical_candidates_from_report(report), FakeBootstrapModel()
+    )
+    assert run.coverage.complete is True
+    assert all(issue.relative_path != "Characters/NPCs/.DS_Store" for issue in run.coverage.issues)

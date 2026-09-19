@@ -272,8 +272,12 @@ surface was added (the bootstrap user workflow belongs to S13-03).
   and does not make intermediate parent-component traversal atomic; hidden dirs,
   `.obsidian`/`.git`, OS metadata and editor temp/backup files are excluded
   (casefold-equivalently), while the hidden Campaign State manifest is
-  intentionally not blanket-excluded.  Static redirects fail closed; no
-  absolute atomic/no-follow guarantee is claimed.
+  intentionally not blanket-excluded.  Each omitted entry is recorded as typed,
+  informational `ExcludedEntry` metadata (relative path + directory flag) on the
+  inventory/report; excluded material never becomes inventory or content, so the
+  metadata grants no read authority and only lets application coverage policy
+  judge whether an exclusion could hide a canonical entity file.  Static
+  redirects fail closed; no absolute atomic/no-follow guarantee is claimed.
 - **Bounds:** the `20_000` traversal ceiling bounds filesystem entries
   *encountered* (files, directories, redirects, excluded and non-regular
   entries), is enforced lazily without materializing a directory listing, and
@@ -431,9 +435,11 @@ C12 immutable evidence sidecar retained
 C13 NO_CHANGES is not a completion claim
 ```
 
-### S13-03 correction pass (C1-C6)
+### S13-03 correction pass (C1-C7)
 
-A focused correction pass tightened the accepted mapping architecture:
+A focused correction pass tightened the accepted mapping architecture (C1-C6)
+and, in a further additive pass, closed the silent-exclusion false-coverage
+condition (C7):
 
 ```text
 C1 batching bounds the exact rendered model-visible batch text (markers,
@@ -456,6 +462,22 @@ C6 trusted merge deterministically scopes batch-local candidate/claim/reference
    local ids without false cross-batch conflicts; run-wide candidate/claim/
    reference/total-char bounds fail through the typed OUTPUT_BOUNDS_EXCEEDED
    contract
+C7 silent S13-02 exclusions no longer produce false canonical coverage.  The
+   S13-02 traversal remains the only filesystem traversal; it now records each
+   omitted entry as typed informational ExcludedEntry metadata (relative path +
+   directory flag), carried on VaultSourceInventory and VaultDiscoveryReport.
+   CanonicalCoverage.complete now means no known S13-02 read/traversal/exclusion
+   condition can hide a canonical .md entity from the report-derived
+   recognition universe.  An excluded directory inside/equal to a managed
+   entity namespace (arbitrary .md descendants possible) or an excluded .md file
+   inside a managed namespace yields CANONICAL_COVERAGE incomplete with no model
+   call and NO_CHANGES/no ChangeSet.  Root .git/.obsidian, OS metadata that
+   cannot be a canonical .md file (e.g. Characters/NPCs/.DS_Store) and other
+   harmless exclusions do not block bootstrap.  The check is deliberately .md
+   because the strict canonical repository recognizes only .md entity files.
+   Excluded material is never fed to the model; canonical parsing, exact binding
+   and proposal identity are unchanged.  The documented OS-level TOCTOU
+   limitation remains; no atomic filesystem snapshot is claimed.
 ```
 
 ### Evidence (this task)
@@ -482,14 +504,18 @@ correction:  rendered-batch-bound adversarial (many empty/tiny sources/long
              collision with different display name, proposal-id sensitivity to
              processor/prompt/extraction-schema version, evidence extraction
              version independence, deterministic cross-batch id scoping and
-             false-conflict avoidance, run-wide typed overflow
+             false-conflict avoidance, run-wide typed overflow; C7 real
+             discovery+mapping exclusion regressions (excluded managed subtree
+             and excluded managed .md file => typed ExcludedEntry metadata,
+             coverage incomplete, no model call, NO_CHANGES/no ChangeSet; root
+             .git/.obsidian and .DS_Store remain excluded without blocking)
 contract:    AST layer boundaries (domain/storage/application/adapter/
              composition/CLI); pure application modules hold no filesystem or
              YAML authority; binding does not import the player resolver
-gates:       pytest (7298 passed, 141 skipped), ruff check, ruff format --check,
+gates:       pytest (7305 passed, 141 skipped), ruff check, ruff format --check,
              pyright (0 errors), uv lock --check, git diff --check,
              maintainability contract (all production modules <=700 physical
-             lines; bootstrap_changeset 593)
+             lines; storage/vault_discovery 695; bootstrap_changeset 593)
 ```
 
 ## Stage-13 Source-of-Truth rules carried forward

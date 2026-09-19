@@ -243,6 +243,10 @@ class CanonicalCoverageReason(StrEnum):
     """A discovery issue on a managed entity-namespace path can hide regular
     canonical files from the filesystem-free recognition step."""
 
+    EXCLUDED_CANONICAL_PATH = "excluded_canonical_path"
+    """An S13-02 exclusion inside (or equal to) a managed entity namespace can
+    hide canonical ``.md`` files from the filesystem-free recognition step."""
+
 
 @dataclass(frozen=True, slots=True)
 class CanonicalCoverageIssue:
@@ -268,10 +272,14 @@ class CanonicalCoverage:
 def assess_canonical_coverage(report: VaultDiscoveryReport) -> CanonicalCoverage:
     """Assess whether canonical identity coverage is complete.
 
-    Consumes only the S13-02 report: no second filesystem traversal.  A
-    skipped/failed ``ENTITY_CANDIDATE`` or a discovery issue on a managed
-    entity-namespace path makes coverage incomplete.  A skipped/failed
-    ``USER_SOURCE`` or ``SESSION_SOURCE`` does not.
+    Consumes only the S13-02 report: no second filesystem traversal.  Coverage
+    is complete exactly when no known S13-02 read/traversal/exclusion condition
+    can hide a canonical ``.md`` entity from the report-derived recognition
+    universe.  A skipped/failed ``ENTITY_CANDIDATE``, a discovery issue on a
+    managed entity-namespace path, or an exclusion inside/equal to a managed
+    namespace that could hide such a file makes coverage incomplete.  A
+    skipped/failed ``USER_SOURCE``/``SESSION_SOURCE`` or a harmless exclusion
+    (e.g. root ``.git``/``.obsidian`` or a non-``.md`` file) does not.
     """
     issues: list[CanonicalCoverageIssue] = []
 
@@ -301,6 +309,23 @@ def assess_canonical_coverage(report: VaultDiscoveryReport) -> CanonicalCoverage
                 detail=(
                     f"Discovery issue {issue.code.value!r} on a managed entity namespace can hide "
                     "canonical files; canonical identity coverage is incomplete"
+                ),
+            )
+        )
+
+    for excluded in report.excluded:
+        if not is_managed_entity_namespace_path(excluded.relative_path):
+            continue
+        if not excluded.is_directory and not excluded.relative_path.casefold().endswith(".md"):
+            continue
+        kind = "directory" if excluded.is_directory else "Markdown file"
+        issues.append(
+            CanonicalCoverageIssue(
+                relative_path=excluded.relative_path,
+                reason=CanonicalCoverageReason.EXCLUDED_CANONICAL_PATH,
+                detail=(
+                    f"Excluded {kind} inside a managed entity namespace can hide canonical "
+                    "entity files; canonical identity coverage is incomplete"
                 ),
             )
         )
