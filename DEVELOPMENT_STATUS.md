@@ -3,7 +3,7 @@
 **Last updated:** 2026-09-19 (S14-01)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign Qualification` `IN PROGRESS`
+**Active work:** `S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign Qualification` `DONE`; next `S14-02 — Deterministic Eval Contract & Scoring Foundation` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-09; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01 `DONE`; S14-02 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-01 `IN PROGRESS`
+## Current work — S14-01 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -50,14 +50,14 @@ investigation) and the accepted Stage-14 architecture contract, gap matrix and
 task decomposition are recorded in `docs/stages/14_EVALS_AND_HARDENING.md`.
 
 `S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign
-Qualification` is a documentation-only task: it creates the durable Stage-14
-record, reconciles this status surface after the Stage-13 fast-forward
-integration, and qualifies the golden fixture.  No production, test, fixture,
-config or dependency change is part of S14-01.
+Qualification` is `DONE`: it created the durable Stage-14 record, reconciled
+this status surface after the Stage-13 fast-forward integration, and qualified
+the golden fixture.  It made no production, test, fixture, config or dependency
+change.
 
 ```text
-current  S14-01 — contract / status / golden-campaign qualification   IN PROGRESS
-next     S14-02 — deterministic eval contract and scoring foundation
+done     S14-01 — contract / status / golden-campaign qualification   DONE
+next     S14-02 — deterministic eval contract and scoring foundation  NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes

@@ -2,7 +2,8 @@
 
 **Status:** `IN PROGRESS` (S14-01 … S14-09)
 **Accepted baseline:** `main` @ `09fa5690b39bc1b4aeedea4fb98e26fc58c461f3`
-**Current task:** `S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign Qualification`
+**S14-01:** `DONE`
+**Next task:** `S14-02 — Deterministic Eval Contract & Scoring Foundation` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -212,12 +213,14 @@ S14-09  final Stage-14 review / release-readiness closure
   `DONE`, state release readiness and remaining capability skips. No next-stage
   work.
 
-## 7. S14-01 implementation record
+## 7. S14-01 implementation record (`DONE`)
 
-`S14-01` is a documentation-only contract/status/qualification task. It creates
-this durable record, reconciles the status surface after the Stage-13
-fast-forward integration, and records the golden-campaign qualification. It
-performs no production, test, fixture, config or dependency change.
+`S14-01` was a documentation-only contract/status/qualification task. It is
+`DONE`: it created this durable record, reconciled the status surface after the
+Stage-13 fast-forward integration, and recorded the golden-campaign
+qualification. It performed no production, test, fixture, config or dependency
+change. The overall Stage 14 remains `IN PROGRESS`; `S14-02` is the next task
+and has not started.
 
 Expected changed files:
 
