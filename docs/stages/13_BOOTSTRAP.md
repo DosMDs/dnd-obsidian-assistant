@@ -781,8 +781,14 @@ sufficient.
 ```text
 unit:        closure classification matrix (coverage-incomplete never
              acknowledgeable; partial evidence persistence; proposal; unresolved;
-             clean no-changes), status/result `completed` semantics,
-             `dnd time init` help/negative tick/audit intent+committed/refusal
+             clean no-changes), status/result `completed` semantics;
+             `dnd time init` S13-01 precondition: absent campaign marker ->
+             refused with zero world-time write/audit; invalid marker -> fail
+             closed with zero world-time write/audit; incomplete managed layout
+             -> refused without implicit repair and zero world-time write/audit;
+             real S13-01 initialized Vault + negative tick -> revision 1 and
+             `world_time.initialize` intent + committed audit; existing world
+             time -> no overwrite; model-free help
 integration: clean NO_CHANGES -> COMPLETE with Campaign State CURRENT + verified
              FTS and no historical ChangeSet; negative world tick;
              coverage-incomplete NO_CHANGES + --acknowledge-unresolved ->
@@ -799,16 +805,21 @@ integration: clean NO_CHANGES -> COMPLETE with Campaign State CURRENT + verified
              ACTIVE_SESSION_PRESENT); malformed canonical note blocked before the
              model; missing world time blocked; uninitialized Vault; source drift
              after derived rebuild; Russian CLI COMPLETE/PENDING rendering and
-             exit codes
+             exit codes; PENDING_CHANGESET guidance rendered executable with the
+             resolved ``--vault`` path
 contract:    AST layer boundaries for the new application/composition/CLI
              modules (pure application policy, no presentation in composition,
              CLI write-free, model-free time CLI) + FTS composition reuse and
              main-CLI routing
-gates:       targeted S13-05 suites (846 passed with maintainability contract),
-             full pytest (7441 passed, 141 skipped; one pre-existing timing-flaky
-             TUI concurrency test passed on isolated and module rerun),
-             ruff check, ruff format --check (611 files), pyright (0 errors),
-             uv lock --check, git diff --check, maintainability contract
+gates:       focused S13-05 + maintainability  849 passed
+             full pytest                       7445 passed, 141 skipped,
+                                                0 failed, 0 errors
+             ruff check                        passed
+             ruff format --check               passed (611 files)
+             pyright                           0 errors, 0 warnings
+             uv lock --check                   passed
+             git diff --check                  passed
+             maintainability contract          811 passed
 ```
 
 ## Stage-13 Source-of-Truth rules carried forward
