@@ -31,6 +31,7 @@ Detailed ordinary stage records belong in `docs/stages/`. Cross-cutting migratio
 | Stage 12 — Campaign State | `12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | `TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | Stage 13 — Bootstrap | `13_BOOTSTRAP.md` |
+| Stage 14 — Evals / Hardening | `14_EVALS_AND_HARDENING.md` |
 
 ## Cross-cutting migrations
 

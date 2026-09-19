@@ -1,10 +1,10 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-19 (S13-05)
+**Last updated:** 2026-09-19 (S14-01)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE`; Stage 14 `NOT STARTED`
-**Active work:** `S13-05 — Bootstrap Completion / Validation / Derived Rebuild` `DONE`; next `Stage 14 — Evals / Hardening`
-**Current branch:** `feat/bootstrap`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
+**Active work:** `S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign Qualification` `IN PROGRESS`
+**Current branch:** `feat/evals-hardening`
 
 ## Status model
 
@@ -38,32 +38,26 @@ in `docs/development/project-invariants.md`.
 | 11. Post-session Processor | DONE | `docs/stages/11_POST_SESSION_PROCESSOR.md` |
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
-| 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | NOT STARTED | — |
+| 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-09; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S13-05 `DONE`
+## Current work — S14-01 `IN PROGRESS`
 
-`S13-05 — Bootstrap Completion / Validation / Derived Rebuild` is `DONE` on
-`feat/bootstrap` (not yet merged to `main`).  `dnd bootstrap finalize` runs a
-recovery preflight, requires an initialized Vault with a strict valid canonical
-repository, requires canonical world time and no active session, then runs one
-fresh S13-02 discovery + S13-03 mapping through the accepted
-`BootstrapRuntime.run(persist=True)` (existing BOOTSTRAP role/prompt/schema/
-binder/producer; no second implementation).  It performs an immediate semantic
-source-fingerprint recheck before any normal mapping terminal status, so a stale
-persisted proposal is never advertised as `PENDING_CHANGESET`.  Completion is a
-typed non-boolean result; incomplete canonical coverage is never acknowledgeable,
-ordinary unresolved diagnostics require `--acknowledge-unresolved`, and
-`COMPLETE_WITH_ACKNOWLEDGED_UNRESOLVED` never claims complete historical
-knowledge.  Derived maintenance rebuilds Campaign State and FTS independently
-(no transaction/rollback), verifies `CURRENT`/freshness literally and rechecks
-final source stability.  `dnd time init --vault PATH --world-tick INTEGER` adds
-the deterministic, model-free initialize-once starting-world-time admin surface
-(recovery preflight + repository audit); no completion marker and no
-`Campaign/Bootstrap.md` are created.  Stage 13 is `DONE`.
+Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
+`docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
+roadmap stage.  `S14-00` (accepted planning / architecture / evidence
+investigation) and the accepted Stage-14 architecture contract, gap matrix and
+task decomposition are recorded in `docs/stages/14_EVALS_AND_HARDENING.md`.
+
+`S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign
+Qualification` is a documentation-only task: it creates the durable Stage-14
+record, reconciles this status surface after the Stage-13 fast-forward
+integration, and qualifies the golden fixture.  No production, test, fixture,
+config or dependency change is part of S14-01.
 
 ```text
-next   Stage 14 — Evals / Hardening (NOT STARTED)
+current  S14-01 — contract / status / golden-campaign qualification   IN PROGRESS
+next     S14-02 — deterministic eval contract and scoring foundation
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
@@ -80,8 +74,8 @@ enabled/visible state is never authorization.
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for Stage 13.  Stage 13 is DONE.
-Known carried-forward limitations (non-blocking for Stage 13):
+No confirmed blocker for Stage 14.  Stage 13 is `DONE` and integrated.
+Known carried-forward limitations (non-blocking for Stage 14):
   Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
   macOS real-terminal smoke                     SKIPPED_CAPABILITY
   f5 terminal-level portability                 SKIPPED_CAPABILITY
@@ -97,6 +91,7 @@ Known carried-forward limitations (non-blocking for Stage 13):
 | `DEVELOPMENT_STATUS.md` | Compact canonical current roadmap state (this file) |
 | `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` | Textual TUI track plan/history/evidence (TUI-00…TUI-06) |
 | `docs/stages/13_BOOTSTRAP.md` | Durable Stage-13 handoff/plan contract (dnd init vs bootstrap) |
+| `docs/stages/14_EVALS_AND_HARDENING.md` | Durable Stage-14 architecture/task/evidence record (evals/hardening) |
 | `docs/development/tui-terminal-smoke.md` | Manual real-terminal smoke protocol/classification |
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
