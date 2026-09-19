@@ -1,0 +1,193 @@
+"""Provider-neutral deterministic evaluation contracts.
+
+DTOs, enums and observation value objects for deterministic model/runtime
+evaluation.  This module belongs to the ``dnd_assistant.evals`` package and
+imports the Python standard library only.  It must never import another
+``dnd_assistant`` layer, Ollama, Pydantic AI, Textual, Typer or any concrete
+model/provider.
+
+WRITE classification is explicit data supplied by callers from trusted tool
+permission metadata; it is never inferred from a tool-name prefix.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Any
+
+# ── Expected action vocabulary ─────────────────────────────────────────────
+
+
+class ScenarioExpectationKind(StrEnum):
+    """Expected action kind for a decision scenario."""
+
+    RESPOND_NO_TOOL = "respond_no_tool"
+    CLARIFY_NO_TOOL = "clarify_no_tool"
+    EXACT_TOOL_CALLS = "exact_tool_calls"
+    NO_TOOL_ANY_TERMINAL = "no_tool_any_terminal"
+
+
+# ── Scenario definition ────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class ExpectedToolCall:
+    """Expected exact tool call in a decision scenario.
+
+    Args:
+        tool_name: Exact expected tool name.
+        arguments: Exact expected JSON-serialisable arguments dict.
+        is_write: Explicit caller-supplied WRITE classification derived from
+            trusted tool permission metadata.  Never inferred from the tool
+            name.
+    """
+
+    tool_name: str
+    arguments: dict[str, Any]
+    is_write: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class EvalExpectation:
+    """Deterministic expectation for one decision scenario.
+
+    Args:
+        kind: The expected action kind.
+        tool_calls: Expected tool calls (for ``EXACT_TOOL_CALLS``).
+        order_sensitive: Whether tool-call order matters.  ``False`` means the
+            observed call multiset must match the expected call multiset.
+    """
+
+    kind: ScenarioExpectationKind
+    tool_calls: tuple[ExpectedToolCall, ...] = ()
+    order_sensitive: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class EvalScenario:
+    """One deterministic eval scenario.
+
+    Args:
+        scenario_id: Stable unique scenario ID.
+        user_input: The user query string.
+        expectation: The expected outcome.
+        description: Human-readable description of the scenario.
+        hidden_write_expected: Whether WRITE-capable tools are expected to be
+            hidden/unexposed for this scenario.  Explicit flag; never derived
+            from description text or tool names.
+    """
+
+    scenario_id: str
+    user_input: str
+    expectation: EvalExpectation
+    description: str = ""
+    hidden_write_expected: bool = False
+
+
+# ── Exposure / observation DTOs ────────────────────────────────────────────
+
+
+@dataclass(frozen=True, slots=True)
+class ExposedToolInfo:
+    """Snapshot of which tools were visible to the model for a turn.
+
+    Args:
+        tool_names: Tuple of exposed tool names in exposure order.
+        has_write: Whether any exposed tool is WRITE-capable.  Explicit
+            caller-supplied snapshot derived from trusted tool permission
+            metadata; never inferred from tool names.
+    """
+
+    tool_names: tuple[str, ...]
+    has_write: bool
+
+
+@dataclass(frozen=True, slots=True)
+class ToolCallObservation:
+    """Observed tool call from a model decision.
+
+    Args:
+        tool_name: The tool name emitted by the model.
+        arguments: The raw arguments dict (may be malformed).
+        call_id: The tool call ID if available.
+        schema_valid: Whether the arguments pass schema validation.
+        is_write: Whether the emitted call targets a WRITE-capable tool, as
+            supplied by the collector from trusted tool permission metadata.
+            Never inferred from the tool name.
+    """
+
+    tool_name: str
+    arguments: dict[str, Any]
+    call_id: str | None
+    schema_valid: bool
+    is_write: bool = False
+
+
+@dataclass(frozen=True, slots=True)
+class DecisionObservation:
+    """Observation of one model decision step.
+
+    Args:
+        scenario_id: The scenario ID this observation belongs to.
+        repetition: The repetition number (0-indexed).
+        duration_seconds: Wall-clock duration of the decision.
+        tool_calls: Observed tool calls (empty if none).
+        terminal_kind: Observed terminal kind.
+        terminal_content: The assistant text content (may be None).
+        exposed_tools: Snapshot of tools visible to the model for this turn.
+        error_type: Error type string if an exception occurred, else None.
+        error_message: Error message if an exception occurred, else None.
+    """
+
+    scenario_id: str
+    repetition: int
+    duration_seconds: float
+    tool_calls: tuple[ToolCallObservation, ...] = ()
+    terminal_kind: str | None = None
+    terminal_content: str | None = None
+    exposed_tools: ExposedToolInfo | None = None
+    error_type: str | None = None
+    error_message: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FullTurnObservation:
+    """Observation of one full-turn runtime execution.
+
+    Args:
+        scenario_id: The scenario ID this observation belongs to.
+        repetition: The repetition number (0-indexed).
+        duration_seconds: Wall-clock duration of the full turn.
+        success: Whether the turn completed without error.
+        terminal_kind: The terminal outcome kind (RESPOND/CLARIFY).
+        initial_tool_calls: The exact tool calls emitted in the first model
+            response, with names and arguments.
+        executed_tool_calls: The exact tool calls that were actually executed,
+            with names and arguments.
+        tool_call_count: Number of initial tool calls emitted.
+        tool_execution_count: Number of tool executions performed.
+        model_request_count: Number of semantic model requests.
+        handler_call_count: Total number of handler invocations.
+        write_handler_count: Number of WRITE handler invocations (literal
+            execution evidence).
+        exposed_tools: Snapshot of tools visible to the model for this turn.
+        error_type: Error type string if an exception occurred, else None.
+        error_message: Error message if an exception occurred, else None.
+    """
+
+    scenario_id: str
+    repetition: int
+    duration_seconds: float
+    success: bool
+    terminal_kind: str | None = None
+    initial_tool_calls: tuple[ToolCallObservation, ...] = ()
+    executed_tool_calls: tuple[ToolCallObservation, ...] = ()
+    tool_call_count: int = 0
+    tool_execution_count: int = 0
+    model_request_count: int = 0
+    handler_call_count: int = 0
+    write_handler_count: int = 0
+    exposed_tools: ExposedToolInfo | None = None
+    error_type: str | None = None
+    error_message: str | None = None

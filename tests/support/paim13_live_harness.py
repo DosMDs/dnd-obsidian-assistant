@@ -30,6 +30,9 @@ from dnd_assistant.application.agent_context import AgentContextBuilder
 from dnd_assistant.application.agent_tool_selection import select_agent_tools
 from dnd_assistant.domain.types import Visibility
 from dnd_assistant.errors import NotFoundError
+from dnd_assistant.evals import (
+    ExposedToolInfo,
+)
 from dnd_assistant.retrieval.types import MatchKind, SearchHit
 from dnd_assistant.tools.catalog import build_tool_registry_schema
 from dnd_assistant.tools.registry import ToolRegistry
@@ -55,9 +58,6 @@ from tests.support.paim13_scenarios import (
     ReadQuestInput,
     WriteCampaignNoteInput,
     WriteQuestStatusInput,
-)
-from tests.support.pydantic_ai_eval import (
-    ExposedToolInfo,
 )
 from tests.support.repository_doubles import VaultRepositoryWriteStubs
 

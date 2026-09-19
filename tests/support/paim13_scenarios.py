@@ -13,6 +13,12 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from dnd_assistant.evals import (
+    EvalExpectation,
+    EvalScenario,
+    ExpectedToolCall,
+    ScenarioExpectationKind,
+)
 from dnd_assistant.storage.audit import AuditContext
 from dnd_assistant.tools.types import (
     ExecutionContext,
@@ -20,12 +26,6 @@ from dnd_assistant.tools.types import (
     SessionMode,
     SideEffect,
     ToolDefinition,
-)
-from tests.support.pydantic_ai_eval import (
-    EvalExpectation,
-    EvalScenario,
-    ExpectedToolCall,
-    ScenarioExpectationKind,
 )
 
 # ── Synthetic eval tool schemas ──────────────────────────────────────────────
@@ -291,6 +291,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
                 ExpectedToolCall(
                     tool_name="write_quest_status",
                     arguments={"name": "Moon Gate", "status": "completed"},
+                    is_write=True,
                 ),
             ),
             order_sensitive=True,
@@ -306,6 +307,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
                 ExpectedToolCall(
                     tool_name="write_campaign_note",
                     arguments={"text": "dragon moved north"},
+                    is_write=True,
                 ),
             ),
             order_sensitive=True,
@@ -321,6 +323,7 @@ DECISION_SCENARIOS: list[EvalScenario] = [
                 ExpectedToolCall(
                     tool_name="write_quest_status",
                     arguments={"name": "Moon Gate", "status": "active"},
+                    is_write=True,
                 ),
             ),
             order_sensitive=True,
@@ -473,6 +476,7 @@ FULL_TURN_SCENARIOS: list[EvalScenario] = [
                 ExpectedToolCall(
                     tool_name="write_quest_status",
                     arguments={"name": "Moon Gate", "status": "completed"},
+                    is_write=True,
                 ),
             ),
             order_sensitive=True,

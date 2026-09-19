@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-19 (S14-01)
+**Last updated:** 2026-09-19 (S14-02)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign Qualification` `DONE`; next `S14-02 — Deterministic Eval Contract & Scoring Foundation` `NOT STARTED`
+**Active work:** `S14-02 — Deterministic Eval Contract & Scoring Foundation` `DONE`; next `S14-03 — Offline Scripted-Model Full-Sequence Regression` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01 `DONE`; S14-02 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01, S14-02 `DONE`; S14-03 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-01 `DONE`
+## Current work — S14-02 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -49,15 +49,23 @@ roadmap stage.  `S14-00` (accepted planning / architecture / evidence
 investigation) and the accepted Stage-14 architecture contract, gap matrix and
 task decomposition are recorded in `docs/stages/14_EVALS_AND_HARDENING.md`.
 
-`S14-01 — Stage-14 Contract, Status Reconciliation & Golden-Campaign
-Qualification` is `DONE`: it created the durable Stage-14 record, reconciled
-this status surface after the Stage-13 fast-forward integration, and qualified
-the golden fixture.  It made no production, test, fixture, config or dependency
-change.
+`S14-01` created that durable record and reconciled this status surface; the
+golden fixture is qualified and unchanged.
+
+`S14-02 — Deterministic Eval Contract & Scoring Foundation` is `DONE`: the
+provider-neutral deterministic eval contract and scoring foundation now live in
+`src/dnd_assistant/evals/` (contracts, scoring, metrics, WRITE execution
+accounting), with one deterministic scoring implementation, stable metric
+identities, explicit `is_write` metadata (no tool-name-prefix inference),
+true multisets for unordered calls, and explicit missing/error/zero-denominator
+semantics.  The historical `tests/support/pydantic_ai_eval.py` was removed and
+its four literal consumers migrated.  No CLI, composition wiring, dataset,
+live-model run, report writer or dependency was added.
 
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
-next     S14-02 — deterministic eval contract and scoring foundation  NOT STARTED
+done     S14-02 — deterministic eval contract and scoring foundation  DONE
+next     S14-03 — offline scripted-model full-sequence regression     NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes

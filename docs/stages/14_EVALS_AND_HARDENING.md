@@ -3,7 +3,8 @@
 **Status:** `IN PROGRESS` (S14-01 … S14-09)
 **Accepted baseline:** `main` @ `09fa5690b39bc1b4aeedea4fb98e26fc58c461f3`
 **S14-01:** `DONE`
-**Next task:** `S14-02 — Deterministic Eval Contract & Scoring Foundation` (`NOT STARTED`)
+**S14-02:** `DONE`
+**Next task:** `S14-03 — Offline Scripted-Model Full-Sequence Regression` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -257,3 +258,115 @@ remains the only campaign Source of Truth.
 - `docs/stages/13_BOOTSTRAP.md` — accepted Stage-13 bootstrap contract.
 - `.opencode/skills/eval-harness/SKILL.md` — deterministic harness methodology.
 - `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` — PAIM migration and retirement.
+
+## 10. S14-02 implementation record (`DONE`)
+
+`S14-02 — Deterministic Eval Contract & Scoring Foundation` is `DONE`.  It moved
+the genuinely reusable deterministic eval contract/scoring out of historical
+PAIM test-only infrastructure into the provider-neutral
+`src/dnd_assistant/evals/` package and removed the obsolete generic test-only
+implementation.  It added no CLI, composition wiring, dataset, live-model run,
+report writer, threshold or dependency.
+
+Public production modules (all `< 700` physical lines):
+
+```text
+src/dnd_assistant/evals/__init__.py          61   facade + __all__
+src/dnd_assistant/evals/contracts.py        193   expectation/observation DTOs (explicit is_write)
+src/dnd_assistant/evals/scoring.py          266   strict JSON + decision/full-turn scoring (multiset)
+src/dnd_assistant/evals/metrics.py          316   MetricId/MetricSummary/summarize_metrics/percentile
+src/dnd_assistant/evals/write_accounting.py  68   unauthorized WRITE execution accounting
+```
+
+Public API (`__all__`): `DecisionObservation`, `EvalExpectation`, `EvalScenario`,
+`ExpectedToolCall`, `ExposedToolInfo`, `FullTurnObservation`, `MetricId`,
+`MetricSummary`, `ScenarioExpectationKind`, `ToolCallObservation`,
+`count_unauthorized_write_handler_executions`, `json_args_equal`,
+`nearest_rank_percentile`, `score_arguments`, `score_decision`, `score_full_turn`,
+`score_tool_name`, `summarize_metrics`.
+
+Stable metric identities (`MetricId`) and semantics — unit / error treatment:
+
+```text
+TOOL_NAME_ACCURACY            sample  correct tool-name scores / EXACT obs; errored counts incorrect
+ARGUMENT_EXACT_MATCH          sample  exact-argument passes / EXACT obs; errored counts incorrect
+SCHEMA_VALID_RATE             call    schema-valid emitted calls / emitted calls (incl. errored obs)
+FALSE_TOOL_CALL_RATE          sample  no-tool obs with calls / no-tool obs
+MISSED_TOOL_CALL_RATE         sample  EXACT obs missing expected (multiset) / EXACT obs
+CORRECT_ABSTENTION_RATE       sample  no error + zero calls + matching terminal / no-tool obs
+CLARIFICATION_ACCURACY        sample  correct clarify outcomes / clarify obs
+FALSE_WRITE_TOOL_CALL_RATE    run     runs with false is_write call / write-visible runs
+HIDDEN_WRITE_ATTEMPT_RATE     run     hidden scenarios with is_write call / hidden scenarios
+UNNECESSARY_TOOL_CALL_COUNT   count   extra emitted calls; denominator None, value == numerator
+```
+
+Semantics fixed by S14-02:
+
+- no fixed repetition count and no majority/vote policy; only actually frozen
+  observations are summarized (expected-sample completeness belongs to S14-06);
+- duplicate `(scenario_id, repetition)` raises `ValueError`; absent observations
+  contribute to neither numerator nor denominator; a ratio metric with zero
+  applicable observations has `value is None`; a count metric has
+  `denominator is None`;
+- runtime/model errors are never a successful decision, abstention or
+  clarification, but an already-emitted call still counts for call-level
+  `SCHEMA_VALID_RATE` per its literal `schema_valid`;
+- `NO_TOOL_ANY_TERMINAL` with zero calls and `terminal_kind is None` is not a
+  success;
+- WRITE classification uses explicit `is_write` metadata only (no tool-name
+  prefix anywhere under `src/dnd_assistant/evals/`); `write_handler_count` stays
+  literal execution evidence and an error after a side effect does not erase it;
+- `nearest_rank_percentile` accepts unsorted input, sorts a copy and does not
+  mutate caller input.
+
+Migration: the four literal consumers of `tests/support/pydantic_ai_eval.py`
+(`test_pydantic_ai_eval.py`, `test_pydantic_ai_eval_unauthorized_write.py`,
+`paim13_scenarios.py`, `paim13_live_harness.py`) were migrated to
+`dnd_assistant.evals`; `tests/support/pydantic_ai_eval.py` and the two
+superseded unit modules were deleted.  PAIM `CountingPydanticModel`,
+synthetic registries/handlers, context-builder doubles and the Ollama probe
+remain test-only.  Unique context-builder coverage moved into
+`test_pydantic_ai_eval_live_harness.py`.
+
+Expected changed files:
+
+```text
+src/dnd_assistant/evals/__init__.py                 modified (facade)
+src/dnd_assistant/evals/contracts.py                new
+src/dnd_assistant/evals/scoring.py                  new
+src/dnd_assistant/evals/metrics.py                  new
+src/dnd_assistant/evals/write_accounting.py         new
+tests/contract/test_evals_boundaries.py             new
+tests/unit/test_evals_scoring.py                    new
+tests/unit/test_evals_metrics.py                    new
+tests/unit/test_evals_write_accounting.py           new
+tests/support/paim13_scenarios.py                   modified (imports + is_write)
+tests/support/paim13_live_harness.py                modified (imports)
+tests/unit/test_pydantic_ai_eval_live_harness.py    modified (context-builder tests)
+tests/support/pydantic_ai_eval.py                   deleted
+tests/unit/test_pydantic_ai_eval.py                 deleted
+tests/unit/test_pydantic_ai_eval_unauthorized_write.py deleted
+DEVELOPMENT_STATUS.md                               status reconciliation
+docs/stages/14_EVALS_AND_HARDENING.md               this record
+```
+
+Acceptance → evidence for S14-02:
+
+| Criterion | Evidence |
+|---|---|
+| Provider-neutral deterministic eval package owns the contract/scoring | `src/dnd_assistant/evals/` modules; all four consumers import `dnd_assistant.evals` |
+| No forbidden dependency in evals | `tests/contract/test_evals_boundaries.py` (AST: no other `dnd_assistant` layer, no provider/HTTP, no env, non-vacuous detector self-tests) |
+| No WRITE name-prefix inference in production evals | boundary test `test_evals_never_infers_write_from_name_prefix` |
+| No fixed repetition / majority in the primitive | `test_evals_metrics.py` observation-derived denominators; no scenario/majority metric |
+| Missing/duplicate/zero-denominator semantics | `test_evals_metrics.py` completeness and `value is None` tests |
+| Error never success/abstention/valid; emitted call still schema-scored | `test_evals_scoring.py`, `test_evals_metrics.py` |
+| Unordered duplicate multiset correctness | `test_evals_scoring.py` `A,A,B` vs `A,B,B` / `B,A,A` |
+| Unauthorized WRITE accounting incl. error-after-side-effect | `test_evals_write_accounting.py` |
+| Unordered percentile input without mutation | `test_evals_scoring.py` percentile tests |
+| Maintainability | `tests/contract/test_maintainability.py` green; all new modules `< 700`; no allowlist change |
+
+Final gate evidence recorded in Git: focused new eval suites + boundary +
+maintainability, PAIM offline suites, canonical full `uv run pytest`
+(7476 passed, 141 skipped, 0 failed/errors), `uv run pyright` (0 errors),
+`uv run ruff check .`, `uv run ruff format --check .`, `uv lock --check`,
+`git diff --check`.

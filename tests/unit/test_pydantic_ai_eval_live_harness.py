@@ -370,3 +370,36 @@ class TestCountingPydanticModelArchitecture:
         counter = CountingPydanticModel(fake)
         runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=counter)
         assert runtime is not None
+
+
+# ==============================================================================
+# Deterministic AgentContext builder tests
+# ==============================================================================
+
+
+class TestDeterministicContextBuilder:
+    """Offline tests for the deterministic AgentContext builder."""
+
+    def _build(self, query: str):
+        from tests.support.paim13_live_harness import make_deterministic_context_builder
+
+        return make_deterministic_context_builder().build(query)
+
+    def test_arlen_query_contains_arlen(self) -> None:
+        context = self._build("Tell me about Arlen")
+        names = tuple(e.name for e in context.relevant_entities)
+        assert "Arlen" in names
+
+    def test_black_keep_query_contains_black_keep(self) -> None:
+        context = self._build("What is Black Keep?")
+        names = tuple(e.name for e in context.relevant_entities)
+        assert "Black Keep" in names
+
+    def test_moon_gate_query_contains_moon_gate(self) -> None:
+        context = self._build("Tell me about the Moon Gate quest")
+        names = tuple(e.name for e in context.relevant_entities)
+        assert "Moon Gate" in names
+
+    def test_greeting_has_no_relevant_entities(self) -> None:
+        context = self._build("Hello! How are you?")
+        assert len(context.relevant_entities) == 0
