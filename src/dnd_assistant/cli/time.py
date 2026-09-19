@@ -21,7 +21,11 @@ import typer
 
 from dnd_assistant.cli.session import _recovery_preflight
 from dnd_assistant.composition.audit_context import build_audit_context
-from dnd_assistant.composition.world_time import compose_world_time_repository
+from dnd_assistant.composition.world_time import (
+    WorldTimeInitStatus,
+    compose_world_time_repository,
+    inspect_world_time_init_precondition,
+)
 from dnd_assistant.errors import ConflictError, DndAssistantError
 
 __all__ = ["time_app"]
@@ -57,6 +61,29 @@ def _time_init(
     if not vault_root.is_dir():
         typer.echo(
             f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    precondition = inspect_world_time_init_precondition(vault_root)
+    if precondition.status is WorldTimeInitStatus.UNINITIALIZED_VAULT:
+        typer.echo(
+            "Ошибка: Vault не инициализирован (_system/campaign.yaml отсутствует).\n"
+            f"Сначала выполните: dnd init --vault {vault_root}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if precondition.status is WorldTimeInitStatus.INCOMPLETE_LAYOUT:
+        typer.echo(
+            "Ошибка: структура инициализированного Vault неполна.\n"
+            f"Повторно выполните: dnd init --vault {vault_root}\n"
+            f"  Детали: {precondition.detail or '—'}",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+    if precondition.status is WorldTimeInitStatus.INVALID_VAULT:
+        typer.echo(
+            f"Ошибка: инициализация Vault некорректна: {precondition.detail or '—'}",
             err=True,
         )
         raise typer.Exit(code=1)

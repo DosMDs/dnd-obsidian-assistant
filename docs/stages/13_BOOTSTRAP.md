@@ -736,12 +736,17 @@ cli/main.py                                registration + index rebuild routed t
   ``verify_freshness(fresh documents)``; a final semantic source-stability check
   must still match.
 - **Starting world time admin surface.**
-  ``dnd time init --vault PATH --world-tick INTEGER`` is model-free, runs the
-  recovery preflight first, uses
+  ``dnd time init --vault PATH --world-tick INTEGER`` is model-free, first
+  validates the S13-01 initialized-Vault precondition in read-only fashion
+  through the trusted ``ObsidianVaultInitializer.inspect()`` capability (valid
+  ``_system/campaign.yaml`` marker, known campaign identity, no missing managed
+  directories), then runs the recovery preflight, then uses
   ``ObsidianWorldTimeRepository.initialize_current_world_time`` with the shared
   ``build_audit_context`` (source ``cli``, prefix ``cli-time-init``), validates a
   raw signed ``WorldTick``, initializes revision 1 once, refuses an existing
-  ``world_time.json`` and never infers/converts a tick or parses a calendar.  No
+  ``world_time.json`` and never infers/converts a tick or parses a calendar.  An
+  absent marker or an incomplete layout is refused with instructions to run/rerun
+  ``dnd init``; this surface never initializes or repairs the Vault.  No
   ``set``/``advance`` surface is added.  This closes the recorded Stage-13
   follow-up: a freshly initialized campaign can become session-ready without an
   LLM write tool call.

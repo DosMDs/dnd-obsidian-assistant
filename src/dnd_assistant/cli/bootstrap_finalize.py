@@ -64,8 +64,12 @@ def _fmt(value: object, *, default: str = "—") -> str:
     return str(value)
 
 
-def render_completion(result: BootstrapCompletionResult) -> str:
-    """Render a typed completion result as Russian CLI text."""
+def render_completion(result: BootstrapCompletionResult, *, vault: str) -> str:
+    """Render a typed completion result as Russian CLI text.
+
+    ``vault`` is the already-resolved CLI Vault path, used only to render
+    executable follow-up commands; it is never added to application DTOs.
+    """
     fingerprint = result.completion_fingerprint
     digest = f"sha256:{fingerprint.digest}" if fingerprint is not None else "—"
     lines = [
@@ -93,10 +97,11 @@ def render_completion(result: BootstrapCompletionResult) -> str:
             [
                 "",
                 "Bootstrap НЕ завершён. Просмотрите и примените созданное предложение:",
-                f"  dnd bootstrap review {_fmt(result.changeset_id)}",
-                f"  dnd bootstrap approve {_fmt(result.changeset_id)} --reviewer <id> "
+                f"  dnd bootstrap review {_fmt(result.changeset_id)} --vault {vault}",
+                f"  dnd bootstrap approve {_fmt(result.changeset_id)} --vault {vault} "
+                "--reviewer <id> [--acknowledge-unresolved]",
+                f"  dnd bootstrap apply {_fmt(result.changeset_id)} --vault {vault} "
                 "[--acknowledge-unresolved]",
-                f"  dnd bootstrap apply {_fmt(result.changeset_id)} [--acknowledge-unresolved]",
             ]
         )
     elif result.status is BootstrapCompletionStatus.COMPLETE:
@@ -178,7 +183,7 @@ def _bootstrap_finalize(
         typer.echo(f"Ошибка: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(render_completion(result))
+    typer.echo(render_completion(result, vault=str(vault_root)))
     if not result.completed:
         raise typer.Exit(code=1)
 

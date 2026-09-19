@@ -512,3 +512,5 @@ def test_finalize_cli_pending_changeset_exits_nonzero(
     assert result.exit_code != 0
     assert "ОЖИДАЕТ" in result.stdout
     assert "bootstrap review" in result.stdout
+    assert "--vault" in result.stdout
+    assert str(tmp_path) in result.stdout

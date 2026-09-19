@@ -88,7 +88,6 @@ Known carried-forward limitations (non-blocking for Stage 13):
   external OS/process kill                      not preventable by the TUI
   thread-worker cancellation                    fail-closed, not rollback
   Windows/macOS symlink-junction discovery       capability-gated tests
-  TUI campaign-state concurrency timing flake    passed on isolated/module rerun
 ```
 
 ## Documentation map
