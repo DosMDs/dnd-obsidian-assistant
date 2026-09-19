@@ -32,12 +32,12 @@ from dnd_assistant.application.bootstrap_canonical import (
     CanonicalStateSnapshot,
 )
 from dnd_assistant.application.bootstrap_evidence import BootstrapEvidenceRecord
-from dnd_assistant.application.bootstrap_input import BootstrapInputProjection
-from dnd_assistant.application.bootstrap_review import (
+from dnd_assistant.application.bootstrap_evidence_validation import (
     BootstrapEvidenceIssue,
     assess_source_freshness,
     validate_bootstrap_evidence,
 )
+from dnd_assistant.application.bootstrap_input import BootstrapInputProjection
 from dnd_assistant.application.changeset_review import ChangeSetApproval
 from dnd_assistant.application.changeset_validation import (
     ChangeSetValidationResult,
@@ -65,6 +65,41 @@ class BootstrapApplyReadiness(StrEnum):
     STRICT_REPOSITORY_NOT_READY = "strict_repository_not_ready"
     CHANGESET_PREFLIGHT_FAILED = "changeset_preflight_failed"
     NOT_APPLICABLE = "not_applicable"
+
+
+class StrictRepositoryIssueCategory(StrEnum):
+    """Typed category of a strict-repository construction failure.
+
+    Derived only from the existing project error type; exception messages are
+    preserved as human detail but are never parsed for classification.
+    """
+
+    STORAGE_ERROR = "storage_error"
+    NOT_FOUND = "not_found"
+    CONFLICT = "conflict"
+    VALIDATION_ERROR = "validation_error"
+    PROJECT_ERROR = "project_error"
+
+
+@dataclass(frozen=True, slots=True)
+class StrictRepositoryIssue:
+    """Truthful diagnostic for an unavailable strict repository."""
+
+    category: StrictRepositoryIssueCategory
+    detail: str
+
+
+@dataclass(frozen=True, slots=True)
+class StrictRepositoryProbe:
+    """Read-only result of probing strict Vault repository readiness.
+
+    Either ``repository`` is present and ``issue`` is ``None``, or the typed
+    construction failure is captured in ``issue`` and ``repository`` is absent.
+    The probe never mutates the Vault and never writes audit intent.
+    """
+
+    repository: EntityReadSource | None
+    issue: StrictRepositoryIssue | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +204,7 @@ def assess_bootstrap_preconditions(
     projection: BootstrapInputProjection,
     coverage: CanonicalCoverage,
     snapshot: CanonicalStateSnapshot,
-    strict_repository: EntityReadSource | None,
+    strict_probe: StrictRepositoryProbe,
 ) -> BootstrapReadinessResult:
     """Assess the strict apply prerequisites, excluding approval/acknowledgement.
 
@@ -195,14 +230,19 @@ def assess_bootstrap_preconditions(
             validation=consistency,
         )
 
-    if strict_repository is None:
+    if strict_probe.repository is None:
+        detail = (
+            strict_probe.issue.detail
+            if strict_probe.issue is not None
+            else "Strict Vault repository is unavailable"
+        )
         return BootstrapReadinessResult(
             readiness=BootstrapApplyReadiness.STRICT_REPOSITORY_NOT_READY,
-            detail="Strict Vault repository could not be constructed",
+            detail=detail,
         )
 
     try:
-        strict_validation = validate_changeset(changeset, strict_repository)
+        strict_validation = validate_changeset(changeset, strict_probe.repository)
     except (StorageError, ConflictError) as exc:
         return BootstrapReadinessResult(
             readiness=BootstrapApplyReadiness.STRICT_REPOSITORY_NOT_READY,
@@ -231,7 +271,7 @@ def assess_bootstrap_apply_readiness(
     projection: BootstrapInputProjection,
     coverage: CanonicalCoverage,
     snapshot: CanonicalStateSnapshot,
-    strict_repository: EntityReadSource | None,
+    strict_probe: StrictRepositoryProbe,
     approval: ChangeSetApproval | None,
     acknowledge_unresolved: bool,
 ) -> BootstrapReadinessResult:
@@ -249,7 +289,7 @@ def assess_bootstrap_apply_readiness(
         projection=projection,
         coverage=coverage,
         snapshot=snapshot,
-        strict_repository=strict_repository,
+        strict_probe=strict_probe,
     )
     if preconditions.readiness is not BootstrapApplyReadiness.READY:
         return preconditions
@@ -279,6 +319,9 @@ def assess_bootstrap_apply_readiness(
 __all__ = [
     "BootstrapApplyReadiness",
     "BootstrapReadinessResult",
+    "StrictRepositoryIssue",
+    "StrictRepositoryIssueCategory",
+    "StrictRepositoryProbe",
     "assess_bootstrap_apply_readiness",
     "assess_bootstrap_approval_readiness",
     "assess_bootstrap_preconditions",

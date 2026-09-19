@@ -18,20 +18,21 @@ This module belongs to the application layer and must not import from:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from dnd_assistant.application.bootstrap_canonical import (
     CanonicalCoverage,
     CanonicalStateSnapshot,
 )
 from dnd_assistant.application.bootstrap_evidence import BootstrapEvidenceRecord
+from dnd_assistant.application.bootstrap_evidence_validation import BootstrapEvidenceIssue
 from dnd_assistant.application.bootstrap_input import BootstrapInputProjection
 from dnd_assistant.application.bootstrap_readiness import (
     BootstrapApplyReadiness,
     BootstrapReadinessResult,
+    StrictRepositoryProbe,
     assess_bootstrap_apply_readiness,
 )
-from dnd_assistant.application.bootstrap_review import BootstrapEvidenceIssue
 from dnd_assistant.application.changeset_apply import (
     ChangeSetApplyContext,
     ChangeSetApplyResult,
@@ -84,7 +85,7 @@ def apply_bootstrap_changeset(
     projection: BootstrapInputProjection,
     coverage: CanonicalCoverage,
     snapshot: CanonicalStateSnapshot,
-    strict_repository: VaultRepository | None,
+    strict_probe: StrictRepositoryProbe,
     acknowledge_unresolved: bool,
     audit_records: Sequence[AuditRecord],
     context: ChangeSetApplyContext,
@@ -103,7 +104,7 @@ def apply_bootstrap_changeset(
         projection=projection,
         coverage=coverage,
         snapshot=snapshot,
-        strict_repository=strict_repository,
+        strict_probe=strict_probe,
         approval=approval,
         acknowledge_unresolved=acknowledge_unresolved,
     )
@@ -115,7 +116,8 @@ def apply_bootstrap_changeset(
         )
 
     assert approval is not None  # guaranteed by the readiness gate
-    assert strict_repository is not None  # guaranteed by the readiness gate
+    repository = strict_probe.repository
+    assert repository is not None  # guaranteed by the readiness gate
 
     attempts = load_apply_attempts(store, changeset.changeset_id)
     try:
@@ -126,7 +128,12 @@ def apply_bootstrap_changeset(
             detail=str(exc),
         )
 
-    result = apply_changeset(changeset, approval, strict_repository, context=context)
+    result = apply_changeset(
+        changeset,
+        approval,
+        cast("VaultRepository", repository),
+        context=context,
+    )
 
     attempt_error: str | None = None
     attempt_recorded = False

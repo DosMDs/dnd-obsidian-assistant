@@ -5,12 +5,16 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import typer
 from typer.testing import CliRunner
 
 from dnd_assistant.application.bootstrap_evidence import build_bootstrap_evidence
 from dnd_assistant.application.bootstrap_input import source_ref
 from dnd_assistant.application.bootstrap_mapping import run_bootstrap_mapping
-from dnd_assistant.application.bootstrap_readiness import BootstrapApplyReadiness
+from dnd_assistant.application.bootstrap_readiness import (
+    BootstrapApplyReadiness,
+    StrictRepositoryIssueCategory,
+)
 from dnd_assistant.application.bootstrap_review import (
     BootstrapReviewState,
 )
@@ -21,18 +25,30 @@ from dnd_assistant.application.changeset_review import (
     compute_changeset_fingerprint,
 )
 from dnd_assistant.application.changeset_store import persist_approval, persist_proposal
+from dnd_assistant.cli.bootstrap_review import register_bootstrap_review_apply_commands
 from dnd_assistant.cli.changeset import changeset_app
 from dnd_assistant.composition.bootstrap import canonical_candidates_from_report
 from dnd_assistant.composition.bootstrap_review_apply import (
     compose_bootstrap_apply,
     compose_bootstrap_approval,
     compose_bootstrap_review,
+    compose_strict_repository,
 )
 from dnd_assistant.domain.bootstrap_extraction import (
     BOOTSTRAP_EXTRACTION_SCHEMA_VERSION,
     BootstrapExtraction,
 )
-from dnd_assistant.domain.types import EntityType
+from dnd_assistant.domain.changeset import (
+    ChangeSet,
+    CreateEntityOperation,
+    ProposalProvenance,
+)
+from dnd_assistant.domain.types import (
+    EntityType,
+    KnowledgeStatus,
+    Provenance,
+    Visibility,
+)
 from dnd_assistant.storage.audit import AuditService
 from dnd_assistant.storage.bootstrap_evidence import ObsidianBootstrapEvidenceStore
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
@@ -334,3 +350,84 @@ def test_generic_status_warns_bootstrap_scoped(tmp_path: Path) -> None:
     assert invocation.exit_code == 0, invocation.output
     assert "bootstrap" in invocation.output.lower()
     assert "Stage-10" in invocation.output
+
+
+# ── Strict probe + reject independence ────────────────────────────────────
+
+
+def _bootstrap_app() -> typer.Typer:
+    app = typer.Typer()
+    register_bootstrap_review_apply_commands(app)
+    return app
+
+
+def test_strict_probe_construction_failure_is_typed_and_read_only(tmp_path: Path) -> None:
+    (tmp_path / "_system").mkdir()
+    (tmp_path / "_system" / "campaign.yaml").write_text(
+        f"schema_version: 1\ncampaign_id: {_CAMP}\n", encoding="utf-8"
+    )
+    # No _system/audit/ directory: strict repository construction must fail.
+    before = _snapshot(tmp_path)
+    probe = compose_strict_repository(tmp_path)
+    assert probe.repository is None
+    assert probe.issue is not None
+    assert probe.issue.category is StrictRepositoryIssueCategory.STORAGE_ERROR
+    assert probe.issue.detail
+    assert _snapshot(tmp_path) == before
+
+
+def test_reject_persists_with_missing_evidence(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    changeset_id = _produce(tmp_path)
+    (tmp_path / "_system" / "bootstrap" / f"{changeset_id}.mapping.json").unlink()
+
+    invocation = runner.invoke(
+        _bootstrap_app(),
+        ["reject", changeset_id, "--vault", str(tmp_path), "--reviewer", "dm"],
+    )
+    assert invocation.exit_code == 0, invocation.output
+    approval_text = ObsidianChangeSetStore(tmp_path).read_approval(changeset_id)
+    assert "rejected" in approval_text
+
+
+def test_reject_persists_with_malformed_evidence(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    changeset_id = _produce(tmp_path)
+    (tmp_path / "_system" / "bootstrap" / f"{changeset_id}.mapping.json").write_text(
+        "{not valid json", encoding="utf-8"
+    )
+
+    invocation = runner.invoke(
+        _bootstrap_app(),
+        ["reject", changeset_id, "--vault", str(tmp_path), "--reviewer", "dm"],
+    )
+    assert invocation.exit_code == 0, invocation.output
+    approval_text = ObsidianChangeSetStore(tmp_path).read_approval(changeset_id)
+    assert "rejected" in approval_text
+
+
+def test_non_bootstrap_reject_refused(tmp_path: Path) -> None:
+    _write_vault(tmp_path)
+    manual = ChangeSet(
+        changeset_id="cs_manual_reject",
+        provenance=ProposalProvenance(provenance=Provenance.MANUAL),
+        session_ref=None,
+        operations=(
+            CreateEntityOperation(
+                entity_id="npc-manual-1",
+                type=EntityType.NPC,
+                name="Ручной",
+                status="alive",
+                visibility=Visibility.DM,
+                knowledge_status=KnowledgeStatus.CONFIRMED,
+            ),
+        ),
+    )
+    persist_proposal(ObsidianChangeSetStore(tmp_path), manual)
+
+    invocation = runner.invoke(
+        _bootstrap_app(),
+        ["reject", "cs_manual_reject", "--vault", str(tmp_path), "--reviewer", "dm"],
+    )
+    assert invocation.exit_code == 1
+    assert not (tmp_path / "_system" / "changesets" / "cs_manual_reject.approval.json").exists()

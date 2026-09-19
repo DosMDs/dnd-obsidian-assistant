@@ -41,6 +41,9 @@ from dnd_assistant.application.bootstrap_input import (
 )
 from dnd_assistant.application.bootstrap_readiness import (
     BootstrapReadinessResult,
+    StrictRepositoryIssue,
+    StrictRepositoryIssueCategory,
+    StrictRepositoryProbe,
     assess_bootstrap_approval_readiness,
     assess_bootstrap_preconditions,
 )
@@ -52,7 +55,7 @@ from dnd_assistant.application.bootstrap_review import (
 )
 from dnd_assistant.application.changeset_apply import ChangeSetApplyContext
 from dnd_assistant.application.changeset_review import ChangeSetApproval
-from dnd_assistant.application.changeset_store import load_approval
+from dnd_assistant.application.changeset_store import load_approval, load_proposal
 from dnd_assistant.application.vault_discovery import VaultDiscoveryReport
 from dnd_assistant.composition.audit_context import now_utc
 from dnd_assistant.composition.bootstrap import (
@@ -60,7 +63,13 @@ from dnd_assistant.composition.bootstrap import (
     compose_bootstrap_discovery,
 )
 from dnd_assistant.domain.changeset import ChangeSet
-from dnd_assistant.errors import NotFoundError, StorageError
+from dnd_assistant.errors import (
+    ConflictError,
+    DndAssistantError,
+    NotFoundError,
+    StorageError,
+    ValidationError,
+)
 from dnd_assistant.storage.audit import AuditService
 from dnd_assistant.storage.bootstrap_evidence import ObsidianBootstrapEvidenceStore
 from dnd_assistant.storage.changeset_store import ObsidianChangeSetStore
@@ -116,28 +125,56 @@ def compose_bootstrap_context(vault_root: Path) -> BootstrapWorkflowContext:
     )
 
 
-def compose_strict_repository(vault_root: Path) -> ObsidianVaultRepository | None:
-    """Construct the strict Vault repository, or ``None`` when it is unavailable.
+def _probe_category(error: DndAssistantError) -> StrictRepositoryIssueCategory:
+    """Map an existing project error type to a strict-probe category.
+
+    Classification is by exception type only; the message is preserved as human
+    detail but is never parsed.
+    """
+    if isinstance(error, ConflictError):
+        return StrictRepositoryIssueCategory.CONFLICT
+    if isinstance(error, NotFoundError):
+        return StrictRepositoryIssueCategory.NOT_FOUND
+    if isinstance(error, ValidationError):
+        return StrictRepositoryIssueCategory.VALIDATION_ERROR
+    if isinstance(error, StorageError):
+        return StrictRepositoryIssueCategory.STORAGE_ERROR
+    return StrictRepositoryIssueCategory.PROJECT_ERROR
+
+
+def compose_strict_repository(vault_root: Path) -> StrictRepositoryProbe:
+    """Probe strict Vault repository readiness with typed diagnostics.
 
     The strict repository is never weakened for bootstrap.  A missing/invalid
-    audit topology or any other constructor failure yields ``None`` (the typed
-    readiness gate reports ``STRICT_REPOSITORY_NOT_READY``); a mixed historical
-    Vault that constructs but cannot build a clean snapshot is detected later by
-    the read-only strict preflight.
+    audit topology or any other constructor failure yields a probe with no
+    repository and a typed issue (the readiness gate reports
+    ``STRICT_REPOSITORY_NOT_READY``); a mixed historical Vault that constructs but
+    cannot build a clean snapshot is detected later by the read-only strict
+    preflight.  The probe performs no mutation and no audit intent.
     """
     audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
     try:
         audit_service = AuditService(str(audit_log_path))
-        return ObsidianVaultRepository(vault_root=str(vault_root), audit_service=audit_service)
-    except StorageError:
-        return None
+        repository = ObsidianVaultRepository(
+            vault_root=str(vault_root), audit_service=audit_service
+        )
+    except DndAssistantError as exc:
+        return StrictRepositoryProbe(
+            repository=None,
+            issue=StrictRepositoryIssue(category=_probe_category(exc), detail=str(exc)),
+        )
+    return StrictRepositoryProbe(repository=repository, issue=None)
 
 
 def compose_bootstrap_proposal(vault_root: Path, changeset_id: str) -> ChangeSet:
-    """Load a persisted bootstrap proposal (used by the reject path)."""
+    """Load a persisted bootstrap proposal directly (used by the reject path).
+
+    Rejection is content-bound rejection of the exact proposal, not evidence or
+    apply authority, so this deliberately does not read or deserialize the
+    evidence sidecar.
+    """
     context = compose_bootstrap_context(vault_root)
-    bundle = load_bootstrap_bundle(context.changeset_store, context.evidence_store, changeset_id)
-    return bundle.changeset
+    return load_proposal(context.changeset_store, changeset_id)
 
 
 def _load_bundle(
@@ -179,7 +216,7 @@ def compose_bootstrap_review(vault_root: Path, changeset_id: str) -> BootstrapRe
         projection=projection,
         coverage=coverage,
         snapshot=snapshot,
-        strict_repository=compose_strict_repository(vault_root),
+        strict_probe=compose_strict_repository(vault_root),
     )
     return BootstrapReviewRun(bundle=review, readiness=readiness)
 
@@ -228,7 +265,7 @@ def compose_bootstrap_apply(
     except NotFoundError:
         approval = None
 
-    strict_repository = compose_strict_repository(vault_root)
+    strict_probe = compose_strict_repository(vault_root)
     audit_records = context.audit_service.read_all()
     apply_context = ChangeSetApplyContext(
         source=BOOTSTRAP_APPLY_SOURCE,
@@ -244,7 +281,7 @@ def compose_bootstrap_apply(
         projection=projection,
         coverage=coverage,
         snapshot=snapshot,
-        strict_repository=strict_repository,
+        strict_probe=strict_probe,
         acknowledge_unresolved=acknowledge_unresolved,
         audit_records=audit_records,
         context=apply_context,

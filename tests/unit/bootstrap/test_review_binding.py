@@ -14,16 +14,18 @@ from dnd_assistant.application.bootstrap_evidence import (
     EvidenceUnresolved,
     build_bootstrap_evidence,
 )
+from dnd_assistant.application.bootstrap_evidence_validation import (
+    BootstrapEvidenceIssueCode,
+    validate_bootstrap_evidence,
+)
 from dnd_assistant.application.bootstrap_input import source_ref
 from dnd_assistant.application.bootstrap_mapping import run_bootstrap_mapping
 from dnd_assistant.application.bootstrap_review import (
     MAX_SOURCE_PREVIEW_CHARS,
     MAX_SOURCE_PREVIEW_TOTAL_CHARS,
     MAX_SOURCE_PREVIEWS,
-    BootstrapEvidenceIssueCode,
     BootstrapReviewState,
     build_bootstrap_review,
-    validate_bootstrap_evidence,
 )
 from dnd_assistant.application.vault_discovery import SourceClass
 from dnd_assistant.composition.bootstrap import canonical_candidates_from_report
@@ -223,6 +225,54 @@ def test_create_missing_candidate_provenance() -> None:
         update={"operations": (first.model_copy(update={"candidate_ids": ()}),)}
     )
     assert _CODES.MISSING_CANDIDATE_PROVENANCE in _codes(changed, _cs(run), run.projection)
+
+
+def test_create_missing_source_provenance() -> None:
+    run = _run()
+    record = _record(run)
+    first = record.operations[0]
+    assert first.candidate_ids
+    changed = record.model_copy(
+        update={"operations": (first.model_copy(update={"source_refs": ()}),)}
+    )
+    assert _CODES.MISSING_SOURCE_PROVENANCE in _codes(changed, _cs(run), run.projection)
+
+
+def test_append_missing_source_provenance() -> None:
+    source = EvidenceSource(
+        source_ref=_EXISTING_REF,
+        relative_path="Characters/NPCs/varos.md",
+        source_class=SourceClass.ENTITY_CANDIDATE.value,
+        size_bytes=1,
+        content_sha256="a" * 64,
+        included=True,
+    )
+    changeset = ChangeSet(
+        changeset_id="cs_bootstrap_manual",
+        provenance=ProposalProvenance(provenance=Provenance.BOOTSTRAP),
+        session_ref=None,
+        operations=(AppendFactOperation(entity_id="npc-1", expected_revision=1, fact="факт"),),
+    )
+    record = BootstrapEvidenceRecord(
+        producer_version="v",
+        campaign_id=_CAMP,
+        changeset_id="cs_bootstrap_manual",
+        proposal_fingerprint=Sha256Fingerprint(digest="b" * 64),
+        input_fingerprint=Sha256Fingerprint(digest="c" * 64),
+        prompt_version="p",
+        extraction_schema_version=1,
+        sources=(source,),
+        operations=(
+            EvidenceOperation(
+                operation_index=0,
+                operation_kind="append_fact",
+                claim_ids=("cl1",),
+                source_refs=(),
+            ),
+        ),
+    )
+    run = _run()
+    assert _CODES.MISSING_SOURCE_PROVENANCE in _codes(record, changeset, run.projection)
 
 
 def test_append_missing_claim_provenance() -> None:

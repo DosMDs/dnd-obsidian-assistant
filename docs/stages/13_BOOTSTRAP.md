@@ -528,11 +528,13 @@ call**, no historical-file normalization and no S13-05 completion work.
 ### Ownership
 
 ```text
-application/bootstrap_review.py            proposal/evidence loading, evidence
-                                           cross-validation, freshness, review DTO,
-                                           bounded source previews
+application/bootstrap_review.py            artifact/review DTOs, proposal
+                                           inspection, bounded source views,
+                                           build_bootstrap_review, bundle loading
+application/bootstrap_evidence_validation.py  evidence/source cross-validation,
+                                           operation provenance and freshness
 application/bootstrap_readiness.py         typed approval / preconditions / apply
-                                           readiness gates (strict probe)
+                                           readiness gates + typed strict probe
 application/bootstrap_apply.py             bootstrap orchestration over the
                                            existing Stage-10 applier/ledger
 composition/bootstrap_review_apply.py      concrete stores/repository/discovery/
@@ -557,10 +559,12 @@ storage/**, domain/**, storage/vault_discovery.py, application/bootstrap_changes
 - **Structural evidence cross-validation:** unique evidence/projection
   `source_ref`s, exact source set, operation indices exactly `0..N-1`, no
   duplicate operation evidence, `create_entity` candidate / `append_fact` claim
-  provenance, every operation and unresolved `source_ref` present in the evidence
-  sources, and `update_entity` rejected.  Descriptor-vs-projection field checks
-  run only when the semantic input fingerprint still matches, so a changed source
-  is reported as staleness rather than evidence corruption (both fail closed).
+  provenance, **at least one `source_ref` on every supported operation**
+  (`MISSING_SOURCE_PROVENANCE` otherwise), every operation and unresolved
+  `source_ref` present in the evidence sources, and `update_entity` rejected.
+  Descriptor-vs-projection field checks run only when the semantic input
+  fingerprint still matches, so a changed source is reported as staleness rather
+  than evidence corruption (both fail closed).
 - **Freshness:** `prepare_bootstrap_input(fresh S13-02 report).input_fingerprint`
   must equal the evidence `input_fingerprint`; campaign identity must match.
   `_system/changesets/**` and `_system/bootstrap/**` never affect the fingerprint.
@@ -577,9 +581,12 @@ storage/**, domain/**, storage/vault_discovery.py, application/bootstrap_changes
 - **Apply readiness (`BootstrapApplyReadiness`):** typed `READY` / `MISSING_EVIDENCE`
   / `EVIDENCE_MISMATCH` / `STALE_SOURCE` / `INCOMPLETE_CANONICAL_COVERAGE` /
   `PROJECTION_INCONSISTENT` / `UNRESOLVED_NOT_ACKNOWLEDGED` / `STRICT_REPOSITORY_NOT_READY`
-  / `CHANGESET_PREFLIGHT_FAILED` / `NOT_APPLICABLE`.  The strict probe is a
-  read-only `validate_changeset` through `EntityReadSource` (no audit intent,
-  no mutation) and classifies failures by typed project errors only — never by
+  / `CHANGESET_PREFLIGHT_FAILED` / `NOT_APPLICABLE`.  Strict availability is a
+  typed read-only `StrictRepositoryProbe` (`repository` present with no issue, or
+  an absent repository plus a typed `StrictRepositoryIssue` category preserving
+  the original project failure; never a bare `None` sentinel).  The probe is a
+  read-only `validate_changeset` through `EntityReadSource` (no audit intent, no
+  mutation) and classifies failures by typed project errors only — never by
   parsing exception messages.
 - **Apply pipeline:** load proposal -> BOOTSTRAP provenance -> evidence ->
   freshness/coverage/projection -> acknowledgement -> exact approval binding ->
@@ -595,9 +602,11 @@ storage/**, domain/**, storage/vault_discovery.py, application/bootstrap_changes
   bootstrap apply readiness.  `application.changeset_status` semantics are
   unchanged.
 - **Reject:** a rejection binds to the exact BOOTSTRAP proposal content and is
-  allowed with missing evidence, stale source, incomplete coverage or a
-  non-ready strict repository; apply readiness is not required.  The existing
-  immutable `ChangeSetApproval` / `persist_approval` contract is reused.
+  allowed with missing/malformed evidence, stale source, incomplete coverage or
+  a non-ready strict repository; apply readiness is not required, and the
+  proposal is loaded directly through the Stage-10 proposal loader (the evidence
+  sidecar is never read to reject).  The existing immutable `ChangeSetApproval` /
+  `persist_approval` contract is reused.
 - **Mixed Vault:** automatic normalization is **rejected**.  A mixed Vault is
   reviewable when evidence/freshness/coverage allow it, but canonical apply is
   blocked with zero entity writes and zero ChangeSet operation audit intent;
@@ -608,26 +617,51 @@ storage/**, domain/**, storage/vault_discovery.py, application/bootstrap_changes
   extraction, Campaign State/index rebuild, world-time init or completion marker.
   Successful apply explicitly states that Stage 13 bootstrap is not yet complete.
 
+### S13-04 correction pass
+
+A bounded correction pass decomposed and tightened the accepted S13-04
+architecture without changing its safety model:
+
+```text
+C1 the evidence/source cross-validation and freshness logic moved to the
+   focused application bootstrap_evidence_validation.py; bootstrap_review.py
+   keeps only artifact/review DTOs, proposal inspection, bounded source views
+   and build_bootstrap_review (both modules comfortably below 600 lines)
+C2 the strict repository `None` sentinel was replaced by the typed
+   StrictRepositoryProbe / StrictRepositoryIssue contract; constructor failures
+   are surfaced with their typed project category and detail, never discarded
+C3 every supported operation now requires at least one source reference
+   (MISSING_SOURCE_PROVENANCE), in addition to the existing unknown-source rule
+C4 compose_bootstrap_proposal loads the proposal directly through the Stage-10
+   proposal loader and no longer reads the evidence sidecar, so rejection is
+   available with missing or malformed evidence
+```
+
 ### Evidence (this task)
 
 ```text
-unit:        evidence binding/operation/source tamper matrix, review states,
-             preview bounds, approval/preconditions/apply readiness,
-             CLI Russian presentation and exit codes
+unit:        evidence binding/operation/source tamper matrix (including missing
+             operation source provenance), review states, preview bounds,
+             approval/preconditions/apply readiness, real apply_bootstrap_changeset
+             orchestration (applicability gate, PARTIAL preservation,
+             attempt-persistence failure, fresh Stage-10 preflight race), CLI
+             Russian presentation and exit codes
 integration: strict Vault review->approve->apply (real repository, audit source
              bootstrap_apply), second-apply blocked, mixed Vault review works but
              apply blocked with zero writes, duplicate canonical ids blocked,
              generic approval + stale source blocked, missing evidence blocked,
              unresolved acknowledgement required, source change blocked,
-             generic apply refused and generic status warning
+             generic apply refused and generic status warning, typed strict-probe
+             construction failure with zero writes, reject with missing/malformed
+             evidence and non-BOOTSTRAP refusal
 contract:    AST layer boundaries for the new application/composition/CLI
              modules (no provider/presentation/filesystem, no model
              construction, CLI write-free) + mandatory generic guard presence
-gates:       targeted S13-04 (59 passed), full pytest (7379 passed, 141 skipped),
-             ruff check, ruff format --check (599 files), pyright (0 errors),
-             uv lock --check, git diff --check, maintainability contract
-             (production/vault_discovery/bootstrap_changeset/test_boundaries
-             unchanged; new modules <=700, new tests <=1000)
+gates:       targeted S13-04 correction (867 passed), full pytest (7393 passed,
+             141 skipped), ruff check, ruff format --check (601 files), pyright
+             (0 errors), uv lock --check, git diff --check, maintainability
+             contract (production/vault_discovery/bootstrap_changeset/
+             test_boundaries unchanged; new modules <=700, new tests <=1000)
 ```
 
 S13-04 stops after human-reviewed canonical apply and durable Stage-10 apply

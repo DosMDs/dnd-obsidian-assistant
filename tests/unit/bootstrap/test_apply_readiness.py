@@ -10,15 +10,16 @@ from dnd_assistant.application.bootstrap_evidence import (
     EvidenceUnresolved,
     build_bootstrap_evidence,
 )
+from dnd_assistant.application.bootstrap_evidence_validation import assess_source_freshness
 from dnd_assistant.application.bootstrap_input import prepare_bootstrap_input, source_ref
 from dnd_assistant.application.bootstrap_mapping import run_bootstrap_mapping
 from dnd_assistant.application.bootstrap_readiness import (
     BootstrapApplyReadiness,
+    StrictRepositoryProbe,
     assess_bootstrap_apply_readiness,
     assess_bootstrap_approval_readiness,
     assess_bootstrap_preconditions,
 )
-from dnd_assistant.application.bootstrap_review import assess_source_freshness
 from dnd_assistant.application.changeset_review import (
     ChangeSetApproval,
     ReviewDecision,
@@ -102,6 +103,10 @@ def _approval(changeset: ChangeSet) -> ChangeSetApproval:
 
 def _projection(run, *, new_text: str):
     return prepare_bootstrap_input(_report(new_text=new_text))
+
+
+def _probe(repository) -> StrictRepositoryProbe:
+    return StrictRepositoryProbe(repository=repository, issue=None)
 
 
 class _ConflictRepo:
@@ -232,7 +237,7 @@ def test_preconditions_strict_not_ready_when_repository_absent() -> None:
         projection=run.projection,
         coverage=run.coverage,
         snapshot=run.snapshot,
-        strict_repository=None,
+        strict_probe=StrictRepositoryProbe(repository=None, issue=None),
     )
     assert result.readiness is BootstrapApplyReadiness.STRICT_REPOSITORY_NOT_READY
 
@@ -247,7 +252,7 @@ def test_preconditions_ready_with_strict_repository() -> None:
         projection=run.projection,
         coverage=run.coverage,
         snapshot=run.snapshot,
-        strict_repository=run.snapshot,
+        strict_probe=_probe(run.snapshot),
     )
     assert result.readiness is BootstrapApplyReadiness.READY
 
@@ -265,7 +270,7 @@ def test_preconditions_strict_preflight_failure() -> None:
         projection=run.projection,
         coverage=run.coverage,
         snapshot=run.snapshot,
-        strict_repository=conflict,
+        strict_probe=_probe(conflict),
     )
     assert result.readiness is BootstrapApplyReadiness.CHANGESET_PREFLIGHT_FAILED
 
@@ -280,7 +285,7 @@ def test_apply_readiness_not_approved_without_approval() -> None:
         projection=run.projection,
         coverage=run.coverage,
         snapshot=run.snapshot,
-        strict_repository=run.snapshot,
+        strict_probe=_probe(run.snapshot),
         approval=None,
         acknowledge_unresolved=True,
     )
@@ -297,7 +302,7 @@ def test_apply_readiness_ready_with_bound_approval() -> None:
         projection=run.projection,
         coverage=run.coverage,
         snapshot=run.snapshot,
-        strict_repository=run.snapshot,
+        strict_probe=_probe(run.snapshot),
         approval=_approval(_cs(run)),
         acknowledge_unresolved=True,
     )
@@ -320,7 +325,7 @@ def test_apply_readiness_rejected_approval_is_not_authority() -> None:
         projection=run.projection,
         coverage=run.coverage,
         snapshot=run.snapshot,
-        strict_repository=run.snapshot,
+        strict_probe=_probe(run.snapshot),
         approval=rejected,
         acknowledge_unresolved=True,
     )

@@ -21,12 +21,12 @@ from pathlib import Path
 import typer
 from pydantic import ValidationError as PydanticValidationError
 
+from dnd_assistant.application.bootstrap_evidence_validation import BootstrapEvidenceIssue
 from dnd_assistant.application.bootstrap_readiness import (
     BootstrapApplyReadiness,
     BootstrapReadinessResult,
 )
 from dnd_assistant.application.bootstrap_review import (
-    BootstrapEvidenceIssue,
     BootstrapReviewBundle,
     BootstrapReviewState,
 )

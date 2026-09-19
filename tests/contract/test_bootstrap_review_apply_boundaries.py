@@ -14,6 +14,7 @@ SRC_ROOT = REPO_ROOT / "src" / "dnd_assistant"
 
 APPLICATION_MODULES = (
     SRC_ROOT / "application" / "bootstrap_review.py",
+    SRC_ROOT / "application" / "bootstrap_evidence_validation.py",
     SRC_ROOT / "application" / "bootstrap_readiness.py",
     SRC_ROOT / "application" / "bootstrap_apply.py",
 )
