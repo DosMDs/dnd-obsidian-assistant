@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-07-QUAL-03)
+**Last updated:** 2026-09-20 (S14-10-RELEASE-SCOPE-DECISION)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `BLOCKED` (closure blocked by S14-07)
-**Active work:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED`; `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; Stage-14 closure/release `RELEASE_BLOCKED`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (prospective current-MVP release scope; accepted live-model baseline deferred — ADR-0009)
+**Active work:** Stage 14 `DONE`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,15 +39,16 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | BLOCKED | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` (no accepted canonical live baseline); S14-08 `DONE`; S14-09 `DONE`; release `RELEASE_BLOCKED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | DONE | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` / UNSATISFIED (no accepted canonical live baseline; disposition `DEFERRED_TO_FUTURE_SCOPE`); S14-08 `DONE`; S14-09 `DONE`; S14-10 `DONE`; release `RELEASE_READY`; `docs/stages/14_EVALS_AND_HARDENING.md`; `docs/adr/0009-release-scope-defers-live-model-qualification.md` |
 
-## Current work — S14-09 `DONE` (Stage 14 `BLOCKED`)
+## Current work — Stage 14 `DONE`; current MVP release `RELEASE_READY`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
-`docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
-roadmap stage.  `S14-00` (accepted planning / architecture / evidence
-investigation) and the accepted Stage-14 architecture contract, gap matrix and
-task decomposition are recorded in `docs/stages/14_EVALS_AND_HARDENING.md`.
+`docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is `DONE` under the
+prospective current-MVP release scope recorded in ADR-0009.  `S14-00` (accepted
+planning / architecture / evidence investigation) and the accepted Stage-14
+architecture contract, gap matrix and task decomposition are recorded in
+`docs/stages/14_EVALS_AND_HARDENING.md`.
 
 `S14-01` created that durable record and reconciled this status surface; the
 golden fixture is qualified and unchanged.
@@ -210,10 +211,13 @@ behavior change.  Detailed evidence: `docs/stages/14_EVALS_AND_HARDENING.md`.
 
 `S14-09 — Final Stage-14 Review / Release-Readiness Closure` is `DONE`: the
 read-only final audit plus one bounded correction of a defect it discovered.
-Software/runtime deterministic hardening is qualified (`SOFTWARE_HARDENING_PASS`),
-but Stage-14 closure/release is `RELEASE_BLOCKED` because the required S14-07
-accepted live model baseline is absent (both `qwen3.5:9b` and `ministral-3:8b`
-measured candidates are `accepted=false`; this is not a `SKIPPED_CAPABILITY`).
+Software/runtime deterministic hardening is qualified (`SOFTWARE_HARDENING_PASS`).
+At the time, Stage-14 closure/release was recorded `RELEASE_BLOCKED` because the
+required S14-07 accepted live model baseline was absent (all three measured
+candidates are `accepted=false`; this was not a `SKIPPED_CAPABILITY`).  That
+verdict was correct then and is prospectively superseded by
+`S14-10-RELEASE-SCOPE-DECISION` / ADR-0009, which defers the accepted
+live-model baseline to a non-stage post-MVP milestone.
 The first S14-09 canonical was not green (`1 failed, 7754 passed, 141 skipped`):
 `tests/integration/test_tui_paste.py::TestTouchedIdsPaste::test_multiline_paste_normalized_to_literal_tokens_in_order`
 failed because S14-08 coupled pane convergence with focus ownership, so a late
@@ -224,9 +228,10 @@ requested active pane; the new deterministic regression fails before and passes
 after, the original paste regression is unchanged and green, and the
 `shell -> paste` / `layout_geometry -> paste` order reproducers are green.
 Post-correction canonical: `7756 passed, 141 skipped, 0 failed/errors`.
-Resolving S14-07 requires a separate explicit distinct-candidate qualification
-or an explicit future scope decision; neither is performed here.  Detailed
-evidence: `docs/stages/14_EVALS_AND_HARDENING.md` §18.
+`S14-10-RELEASE-SCOPE-DECISION` subsequently resolved the release scope
+prospectively (ADR-0009): the accepted live-model baseline is removed from
+current MVP release closure criteria and deferred.  Detailed evidence:
+`docs/stages/14_EVALS_AND_HARDENING.md` §18 and §21.
 
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
@@ -235,12 +240,18 @@ done     S14-03 — offline scripted-model full-sequence regression     DONE
 done     S14-04 — untrusted-input / path-safety gap closure           DONE
 done     S14-05 — provider/runtime upgrade regression gate            DONE
 done     S14-06 — scriptable eval runner + product dataset            DONE
-blocked  S14-07 — opt-in live Ollama baseline + latency + frozen report BLOCKED
+blocked  S14-07 — opt-in live Ollama baseline + latency + frozen report BLOCKED / UNSATISFIED
+         disposition DEFERRED_TO_FUTURE_SCOPE (metadata, not a task status)
 done     S14-07-DIAG-03 — opt-in local eval diagnostic trace          DONE
 blocked  S14-07-QUAL-03 — distinct qwen3:14b candidate qualification  BLOCKED
 done     S14-08 — TUI / cross-platform hardening evidence             DONE
 done     S14-09 — final Stage-14 review / release-readiness closure   DONE
+done     S14-10 — current-MVP release-scope decision (ADR-0009)       DONE
 ```
+
+Stage 14 is `DONE` and the current MVP release is `RELEASE_READY` under the
+prospective release scope recorded in ADR-0009; no accepted canonical
+live-model baseline currently exists.
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
 session-ready only after `dnd time init` (or the existing `set_world_time` WRITE
@@ -253,11 +264,20 @@ the side-effect authorization boundary, and Typer remains supported for
 scripting, administration, bootstrap, recovery, diagnostics and evals. UI
 enabled/visible state is never authorization.
 
-## Current blockers and prerequisites
+## Current blockers, deferrals and prerequisites
 
 ```text
-S14-07 BLOCKED: no accepted canonical live baseline exists.  THREE measured live
-  candidates were separately qualified and none was accepted:
+Stage 14 is `DONE` and the current MVP release is `RELEASE_READY` under the
+prospective release scope recorded in ADR-0009.  RELEASE_READY does NOT mean a
+canonical local live model has been validated: no accepted canonical live-model
+baseline currently exists.
+S14-07 is BLOCKED / UNSATISFIED (canonical task status `BLOCKED`), disposition
+  DEFERRED_TO_FUTURE_SCOPE (descriptive disposition metadata, not a fifth task
+  status).  The requirement is removed from current MVP release closure criteria
+  and carried to the non-stage post-MVP milestone
+  `v0.5.0 — Accepted Live Model Baseline`; no Stage 15 and no future task are
+  created now.
+  THREE measured live candidates were separately qualified and none was accepted:
     qwen3.5:9b       2 runtime errors (EVAL-P1-007, EVAL-P1-009); frozen v2 report
                      s14-07-product-v1-ollama-baseline.json
     ministral-3:8b   4 runtime errors (EVAL-P1-002, 004, 006, 010); frozen v3
@@ -266,16 +286,17 @@ S14-07 BLOCKED: no accepted canonical live baseline exists.  THREE measured live
                      handler execution at EVAL-P1-010); frozen v3 report
                      s14-07-product-v1-ollama-qwen3-14b-candidate.json
   All three frozen reports are preserved; no rerun and no model/profile change
-  after measurement.  A new accepted baseline requires a further distinct,
-  explicit candidate/qualification decision (never a retry of an existing
-  candidate); no fourth candidate has been selected.
+  after measurement.  The consumed attempts must never be rerun.  S14-07-RES-01
+  resolved that no fourth distinct candidate would be selected or run for this
+  Stage-14 resolution cycle; no fourth candidate was selected.
   S14-07-DIAG-03 observability hardening is DONE (opt-in local diagnostic trace;
   no live inference).  S14-07-QUAL-03 measured exactly once and is consumed; the
   candidate was not accepted and its attempt must never be rerun.
-Stage 14 is `BLOCKED`: S14-09 audit is complete and the S14-08-discovered
-  focus-steal correction (`83170f0`) is independently accepted and green, but
-  release closure is blocked only by the required S14-07 accepted live baseline.
-  Software/runtime deterministic hardening is qualified (`SOFTWARE_HARDENING_PASS`).
+Stage 14 completion: S14-09 audit is complete and the S14-08-discovered
+  focus-steal correction (`83170f0`) is independently accepted and green.
+  Software/runtime deterministic hardening is qualified (`SOFTWARE_HARDENING_PASS`);
+  the former release blocker was resolved prospectively by ADR-0009, not by
+  accepting any candidate.
 Stage 13 is `DONE` and integrated.
 Known carried-forward limitations (non-blocking for Stage 14):
   Windows Terminal real-terminal smoke          MANUAL PASS (S14-08)
@@ -298,6 +319,7 @@ Known carried-forward limitations (non-blocking for Stage 14):
 | `docs/stages/14_EVALS_AND_HARDENING.md` | Durable Stage-14 architecture/task/evidence record (evals/hardening) |
 | `docs/development/tui-terminal-smoke.md` | Manual real-terminal smoke protocol/classification |
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
+| `docs/adr/0009-release-scope-defers-live-model-qualification.md` | Current-MVP release scope defers accepted live-model qualification |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
 | `docs/adr/0007-campaign-state-materialized-derived-projection.md` | Campaign State architecture decision |
 | `docs/stages/README.md` | Stage/track index |

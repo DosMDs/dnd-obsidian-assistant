@@ -1,6 +1,6 @@
 # Stage 14 — Evals / Hardening
 
-**Status:** `BLOCKED` (closure blocked by S14-07)
+**Status:** `DONE` (prospective current-MVP release scope — ADR-0009)
 **Accepted baseline:** `main` @ `09fa5690b39bc1b4aeedea4fb98e26fc58c461f3`
 **S14-01:** `DONE`
 **S14-02:** `DONE`
@@ -8,10 +8,13 @@
 **S14-04:** `DONE`
 **S14-05:** `DONE`
 **S14-06:** `DONE`
-**S14-07:** `BLOCKED` (implementation complete; no accepted canonical live baseline)
+**S14-07:** `BLOCKED` / UNSATISFIED (implementation complete; no accepted canonical live baseline; disposition `DEFERRED_TO_FUTURE_SCOPE`)
 **S14-08:** `DONE`
 **S14-09:** `DONE` (final audit complete; correction `83170f0`)
-**Blocking reason:** no accepted canonical live model baseline exists.
+**S14-10:** `DONE` (current-MVP release-scope decision — ADR-0009)
+**Current MVP release:** `RELEASE_READY` (prospective scope per ADR-0009)
+**Deferred requirement:** accepted canonical live-model baseline (no accepted
+baseline currently exists).
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -1830,3 +1833,79 @@ DEVELOPMENT_STATUS.md                                                   status r
 
 No `src/**`, `pyproject.toml`, `uv.lock` or `README.md` change.  The
 `LOCAL_DIAGNOSTIC_TRACE` is not committed.
+
+## 21. S14-10 — current-MVP release-scope decision (`DONE`)
+
+`S14-10-RELEASE-SCOPE-DECISION` is a documentation-only decision task.  It
+records a **prospective** current-MVP release-scope decision under explicit
+product-owner authorization: the accepted canonical live-model baseline is
+removed from the **current MVP release closure criteria** and carried forward to
+a non-stage post-MVP milestone.  The decision is recorded durably in
+`docs/adr/0009-release-scope-defers-live-model-qualification.md`.
+
+### Decision summary
+
+```text
+Stage 14                 DONE (under the newly authorized prospective scope)
+current MVP release      RELEASE_READY
+S14-07                   status BLOCKED / UNSATISFIED
+                         disposition DEFERRED_TO_FUTURE_SCOPE
+future milestone         v0.5.0 — Accepted Live Model Baseline (non-stage)
+canonical task statuses  NOT STARTED / IN PROGRESS / BLOCKED / DONE (unchanged)
+```
+
+`DEFERRED_TO_FUTURE_SCOPE` is descriptive **disposition metadata**, not a fifth
+canonical task status.  `S14-07` is **not** relabeled `DONE` or `NOT STARTED`;
+its consumed qualification work and frozen measured evidence are preserved.
+
+### Historical result vs prospective decision
+
+This task changes **no** qualification result.  All three distinct measured
+candidates remain `accepted=false`, and **no accepted canonical live-model
+baseline currently exists**.  The frozen acceptance contract (product-v1 /
+single-pass-v1 / agent-v3), every threshold, the dataset, the prompt and all
+frozen artifacts are unchanged.  This is a prospective release-scope decision,
+**not** retroactive acceptance or reinterpretation of any candidate.
+
+`RELEASE_READY` therefore does **not** mean a canonical local live model has
+been validated; it means the current MVP release is no longer gated on the
+deferred accepted-live-baseline requirement.
+
+### Historical verdicts preserved
+
+The `RELEASE_BLOCKED` verdicts recorded in §18 (S14-09 final release
+classification) and §20 (S14-07-QUAL-03 classification) were **correct at the
+time they were recorded** and remain valid historical evidence.  They are
+prospectively superseded by ADR-0009.  §§15–20 are preserved unmodified,
+including their frozen SHA-256, byte and metric evidence.
+
+### Expected changed files
+
+```text
+docs/adr/0009-release-scope-defers-live-model-qualification.md   new
+DEVELOPMENT_STATUS.md                                            current-state revision
+docs/stages/14_EVALS_AND_HARDENING.md                            header status + this §21
+```
+
+### No production / test / dependency / evidence change
+
+```text
+src/**                         unchanged
+tests/**                       unchanged
+pyproject.toml / uv.lock       unchanged
+docs/evidence/evals/**         unchanged (three frozen artifact SHA-256 unchanged)
+frozen contract tests          unchanged
+model inference                none
+fourth candidate               none selected or run
+Stage 15 / future task         none created
+```
+
+### Status
+
+```text
+S14-10-RELEASE-SCOPE-DECISION    DONE
+Stage 14                          DONE (prospective current-MVP release scope)
+current MVP release               RELEASE_READY
+S14-07                            BLOCKED / UNSATISFIED · DEFERRED_TO_FUTURE_SCOPE
+accepted canonical baseline       none exists
+```
