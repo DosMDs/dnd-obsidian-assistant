@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-03)
+**Last updated:** 2026-09-20 (S14-04)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-03 — Offline Scripted-Model Full-Sequence Regression` `DONE`; next `S14-04 — Untrusted-Input / Path-Safety Gap Closure` `NOT STARTED`
+**Active work:** `S14-04 — Untrusted-Input / Path-Safety Gap Closure` `DONE`; next `S14-05 — Provider/Runtime Upgrade Regression Gate` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01, S14-02, S14-03 `DONE`; S14-04 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01, S14-02, S14-03, S14-04 `DONE`; S14-05 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-03 `DONE`
+## Current work — S14-04 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -76,11 +76,29 @@ Only the model/extraction operator is replaced by a local scripting double; no
 production behavior, dependency, CLI, dataset or live-model surface changed.
 The tracked golden fixture is read-only and its bytes are proven unchanged.
 
+`S14-04 — Untrusted-Input / Path-Safety Gap Closure` is `DONE`: one new
+deterministic offline cross-layer integration regression
+(`tests/integration/test_agent_untrusted_input_safety.py`) drives model-generated
+path-shaped arguments through the real production path
+(`compose_ask_runtime` → 12-tool registry → `DndAgentPolicy` →
+`PydanticAIToolBridge` → `ToolExecutor` → real registered handler → real
+repository/storage).  It proves path-shaped `session_id` is rejected by the real
+`storage/session_paths.py` validator for both `get_session` and
+`list_session_events`; path-shaped `EntityId` remains logical data with no
+filesystem authority; a model-generated `patch_entity` WRITE call invokes the
+real handler but authorizes zero canonical mutation; and path-shaped note/fact
+content is persisted verbatim as content.  A test-local outside-Vault sentinel
+proves containment/non-interference (bytes and inventory unchanged, secret marker
+never returned), which is explicitly not a syscall-level non-read proof.  The
+conclusion is `NO PRODUCTION DEFECT`; no production, dependency or CLI surface
+changed.
+
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
 done     S14-02 — deterministic eval contract and scoring foundation  DONE
 done     S14-03 — offline scripted-model full-sequence regression     DONE
-next     S14-04 — untrusted-input / path-safety gap closure           NOT STARTED
+done     S14-04 — untrusted-input / path-safety gap closure           DONE
+next     S14-05 — provider/runtime upgrade regression gate            NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes

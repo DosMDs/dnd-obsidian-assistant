@@ -5,7 +5,8 @@
 **S14-01:** `DONE`
 **S14-02:** `DONE`
 **S14-03:** `DONE`
-**Next task:** `S14-04 — Untrusted-Input / Path-Safety Gap Closure` (`NOT STARTED`)
+**S14-04:** `DONE`
+**Next task:** `S14-05 — Provider/Runtime Upgrade Regression Gate` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -447,6 +448,105 @@ affected subsystem (Level 2)   988 passed
 canonical full pytest          7479 passed, 141 skipped, 0 failed, 0 errors
 pyright                        0 errors, 0 warnings, 0 informations
 ruff check . / format --check  passed / 618 files already formatted
+uv lock --check                passed
+git diff --check               passed
+maintainability contract       green; new test module below the 1000-line limit
+```
+
+## 12. S14-04 implementation record (`DONE`)
+
+`S14-04 — Untrusted-Input / Path-Safety Gap Closure` is `DONE`.  It adds one
+deterministic offline cross-layer integration regression and no production,
+dependency, CLI or config change.  The production-defect decision is
+**NO PRODUCTION DEFECT**.
+
+### Attack-surface conclusion
+
+`compose_ask_runtime` registers exactly 12 model-facing tools
+(`search_entities`, `get_entity`, `patch_entity`, `append_entity_fact`,
+`get_active_session`, `get_session`, `list_sessions`, `list_session_events`,
+`start_session`, `record_event`, `record_note`, `end_session`).  No current
+production tool accepts a filename, `path`, `vault_path`, directory selector or
+`relative_path`.  The only model-facing field that becomes a filesystem path
+component is `session_id`, and it is validated by
+`storage/session_paths.py::_validate_session_id_for_path` before any filesystem
+access.  `EntityId` is a logical identifier matched against parsed canonical
+frontmatter after scanning approved entity directories; it carries no filesystem
+authority.  Content fields persist as content.  World-time and `mvp_registry`
+tools are not production model-reachable.
+
+### New evidence
+
+```text
+tests/integration/test_agent_untrusted_input_safety.py   new
+```
+
+Real path in every scenario: local scripted Pydantic AI `FunctionModel` →
+`compose_ask_runtime` (real 12-tool registry) → `DndAgentPolicy` →
+`PydanticAIToolBridge` → `ToolExecutor` → real registered handler → real
+application/retrieval/repository/storage.  No Ollama, no network.
+
+Literal scenarios implemented:
+
+```text
+A  get_session / list_session_events × hostile session_id
+   {"../outside/secret.md", "..\\outside\\secret.md", "/tmp/outside.md",
+    "C:\\outside\\secret.md"}  (8 cases)
+   request_count == 1; StorageError; "Session ID must not" (real validator);
+   Vault root not disclosed; sentinel untouched.
+B  get_entity × hostile EntityId (4 cases)
+   request_count == 1; generic NotFoundError "Entity not found or not accessible";
+   loose EntityId retained as data; sentinel untouched.
+C  patch_entity path-shaped target, allow_write=True
+   request_count == 1; generic NotFoundError; real handler invoked
+   (authorization message); canonical entity bytes unchanged; audit unchanged;
+   sentinel untouched.  Vocabulary: model-generated WRITE tool call attempted;
+   real handler invoked; canonical repository mutation did not occur.
+D  record_note text = "../../outside/secret.md", allow_write=True
+   request_count == 2; persisted RawSessionEvent.type == "note";
+   extra_fields["text"] literal; canonical entities unchanged; sentinel untouched.
+E  append_entity_fact fact = "../../outside/secret.md", allow_write=True
+   request_count == 2; target entity revision 1 -> 2; literal fact in canonical
+   body via repository read; exactly one canonical file changed; sentinel untouched.
+```
+
+Sentinel limitation: the outside-Vault sentinel proves containment and
+non-interference (SHA-256 bytes and directory inventory unchanged; secret marker
+never returned).  It is **not** a syscall-level "no read occurred" proof.
+
+### Investigated NO ACTION classifications (no duplicate tests added)
+
+```text
+search_entities path safety        query-only; FTS literal query builder; no path authority
+get_active_session                 no model input
+list_sessions                      no model input
+start_session                      server-allocated trusted ID; recovery preflight; audit
+end_session payload IDs            EntityIds stored as JSON; no path authority
+world-time tools                   not production model-reachable (agent_runtime builds 12 tools)
+generic trusted-handler sandboxing ToolExecutor is not a malicious-handler sandbox (out of contract)
+direct Stage-3 traversal/symlink/
+  junction permutations            already covered by Stage-3 storage tests
+unknown/hidden tool + malformed
+  JSON + schema-invalid args       already covered by bridge/policy/runtime unit+integration tests
+broad fuzzing                      no demonstrated authority gap
+```
+
+### Expected changed files
+
+```text
+tests/integration/test_agent_untrusted_input_safety.py   new
+DEVELOPMENT_STATUS.md                                    status reconciliation
+docs/stages/14_EVALS_AND_HARDENING.md                    this record
+```
+
+### Literal evidence
+
+```text
+focused (Level 1)              15 passed
+affected subsystem (Level 2)   1256 passed, 34 skipped
+canonical full pytest          7496 passed, 141 skipped, 0 failed, 0 errors
+pyright                        0 errors, 0 warnings, 0 informations
+ruff check . / format --check  passed / 619 files already formatted
 uv lock --check                passed
 git diff --check               passed
 maintainability contract       green; new test module below the 1000-line limit
