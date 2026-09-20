@@ -9,7 +9,7 @@ in `docs/migrations/001_PYDANTIC_AI_RUNTIME.md` and
 The project owns policy and consequences; Pydantic AI and Ollama are
 replaceable mechanisms. Framework tool exposure/filtering/approval is **not**
 an authorization boundary. Every side effect still flows through
-`DndAgentPolicy` → `PydanticAIToolExecutor` (`ToolExecutor`) → application /
+`DndAgentPolicy` → `PydanticAIToolBridge` → `ToolExecutor` → application /
 `VaultRepository`.
 
 ## 1. Scope and vocabulary
