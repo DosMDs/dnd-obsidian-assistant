@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-06)
+**Last updated:** 2026-09-20 (S14-07)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-06 — Scriptable Eval Runner + Product Dataset` `DONE`; next `S14-07 — Opt-in Live Ollama Model Baseline` `NOT STARTED`
+**Active work:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` (implementation complete; measured live candidate not accepted); next `S14-08` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,7 +39,7 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-06 `DONE`; S14-07 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` (implementation complete, live candidate not accepted); `docs/stages/14_EVALS_AND_HARDENING.md` |
 
 ## Current work — S14-06 `DONE`
 
@@ -118,6 +118,26 @@ denominator (3 for product-v1).  No live Ollama run, no frozen live baseline, no
 latency acceptance and **no dependency change** (`pyproject.toml`/`uv.lock`
 unchanged).  Stage 14 remains `IN PROGRESS`; `S14-07` is next and `NOT STARTED`.
 
+`S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` is
+`BLOCKED`.  The implementation is complete and fully qualified offline
+(implementation commit `10356b0be8e2a5ddd4a858ce49144243ee006e9a`): an explicit
+`dnd eval run --runtime ollama` path (required `--config`/`--profile`, rejected
+for `scripted`), production-factory model construction before any HTTP request,
+`OllamaModelProvider.health()` + `/api/version` preflight, one discarded
+`EVAL-P1-001` warm-up, one measured product-v1 execution through the existing
+recorder/collector, report schema v2 with structured decision/full-turn
+`p50/p95` latency (existing nearest-rank helper) and report-only latency deltas.
+The ONE measured live run (`agent-qwen35-9b` / `qwen3.5:9b`, Ollama 0.34.2,
+Pydantic AI 2.39.0) produced 13/13 complete samples with SYSTEM SAFETY PASS and
+`false_write_tool_call_rate` 0/3/0.0 PASS, but **2 runtime errors**
+(`EVAL-P1-007`, `EVAL-P1-009`), so the candidate was **not accepted**.  The
+measured report is frozen at
+`docs/evidence/evals/s14-07-product-v1-ollama-baseline.json` (SHA-256
+`3bdf8d9285b244cdea239ababf8a29ec4184f9b2aa4d80f940f70c48825bbf47`) and bound by
+`tests/contract/test_eval_frozen_baseline.py`; there is no accepted canonical
+baseline.  No rerun, no model/profile/prompt/dataset/dependency change.  Stage 14
+remains `IN PROGRESS`; `S14-08` is next and `NOT STARTED`.
+
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
 done     S14-02 — deterministic eval contract and scoring foundation  DONE
@@ -125,7 +145,8 @@ done     S14-03 — offline scripted-model full-sequence regression     DONE
 done     S14-04 — untrusted-input / path-safety gap closure           DONE
 done     S14-05 — provider/runtime upgrade regression gate            DONE
 done     S14-06 — scriptable eval runner + product dataset            DONE
-next     S14-07 — opt-in live Ollama baseline + latency + frozen report NOT STARTED
+blocked  S14-07 — opt-in live Ollama baseline + latency + frozen report BLOCKED
+next     S14-08 — TUI / cross-platform hardening evidence             NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
@@ -142,7 +163,12 @@ enabled/visible state is never authorization.
 ## Current blockers and prerequisites
 
 ```text
-No confirmed blocker for Stage 14.  Stage 13 is `DONE` and integrated.
+S14-07 BLOCKED: the ONE measured live product-v1 candidate produced 2 runtime
+  errors (EVAL-P1-007, EVAL-P1-009) and was not accepted; there is NO accepted
+  canonical live baseline.  The frozen measured report is preserved; no rerun,
+  no model/profile change.  A new accepted baseline requires a distinct,
+  explicit candidate/qualification decision (not a retry of this baseline).
+Stage 13 is `DONE` and integrated.
 Known carried-forward limitations (non-blocking for Stage 14):
   Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
   macOS real-terminal smoke                     SKIPPED_CAPABILITY

@@ -8,7 +8,8 @@
 **S14-04:** `DONE`
 **S14-05:** `DONE`
 **S14-06:** `DONE`
-**Next task:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` (`NOT STARTED`)
+**S14-07:** `BLOCKED` (implementation complete; measured live candidate not accepted)
+**Next task:** `S14-08 — TUI / cross-platform hardening evidence` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -906,3 +907,162 @@ git diff --check               passed
 pyproject / uv.lock diff       empty (no dependency change)
 maintainability contract       green (report_json decomposed; all modules < limits)
 ```
+
+## 15. S14-07 implementation record (`BLOCKED`)
+
+`S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report`
+is `BLOCKED`: the implementation is complete and fully qualified offline, but
+the ONE measured live product-v1 candidate was **not accepted** because it
+produced 2 runtime errors. The measured report is preserved as frozen evidence;
+the live model was **not** rerun and no model/profile was changed.
+
+### Implementation (Commit A — measured source revision)
+
+```text
+implementation commit       10356b0be8e2a5ddd4a858ce49144243ee006e9a
+```
+
+Scope delivered:
+
+- `dnd eval run --runtime ollama` explicit opt-in; `--config` and `--profile`
+  are required for `ollama` and rejected for `scripted` (exit 2 otherwise);
+  no `--vault`, no `--repetitions`, no `--model`, no auto-pull, no
+  environment-only configuration.
+- NEW `src/dnd_assistant/composition/eval_ollama.py`: explicit config/profile
+  load, exact production `build_pydantic_ai_ollama_model(profile)` construction
+  **before** any HTTP request, `OllamaModelProvider.health()` preflight plus an
+  explicit public `GET /api/version` probe, one discarded `EVAL-P1-001`
+  warm-up, one shared production delegate wrapped per sample by the existing
+  `RecordingPydanticModel`/`ModelCallRecorder`, then `run_dataset(...,
+  require_oracle_consistency=False)`.
+- NEW `src/dnd_assistant/evals/latency.py` and report schema v2: structured
+  decision/full-turn `p50/p95/sample_count` derived from the same frozen
+  observations via the existing `nearest_rank_percentile`; report-only latency
+  deltas in `compare_eval_reports()`. No SLA, no latency pass/fail.
+- Runtime metadata is `str -> str` and excludes config path, user/home
+  identity, hostname, credentials, raw endpoint and environment dumps.
+
+### Offline qualification (Level 1/2/static/canonical)
+
+```text
+focused (Level 1)              85 passed
+  tests/unit/test_eval_latency.py, test_eval_ollama.py, test_eval_report.py,
+  tests/integration/test_cli_eval.py, tests/contract/test_eval_layering.py
+affected/contract selection   1006 passed (S14-06 eval suites + eval boundaries
+                              + maintainability + provider-upgrade selection integrity)
+provider-upgrade offline gate 358 passed, 7457 deselected  (-m "provider_upgrade and not ollama")
+canonical full pytest          7673 passed, 141 skipped, 1 failed   (first run)
+      failure  tests/integration/test_vault_initialization_fs.py::
+               TestConcurrency::test_concurrent_init_exactly_one_config_file
+      classification  PRE_EXISTING_FLAKY / UNRELATED: passes in isolation;
+                      Windows concurrent Vault-init path-resolution race; the
+                      S14-07 diff touches no initialization/storage code.
+canonical full pytest          7674 passed, 141 skipped, 0 failed, 0 errors
+                              (one justified rerun after narrow isolation of the
+                               unrelated flake; stated reason: establish the
+                               Commit-A canonical gate on the final diff)
+pyright                        0 errors, 0 warnings, 0 informations
+ruff check . / format --check  passed / 645 files already formatted
+uv lock --check                passed (no uv.lock / pyproject.toml change)
+git diff --check               passed
+maintainability contract       green (new modules < limits; report_json_decode
+                               grew to 526 lines, below the ~600 review region)
+```
+
+### Live capability and the ONE measured command
+
+An explicit machine-local configuration was supplied:
+
+```text
+config     <machine-local-config>   (user-private path, not tracked)
+profile    agent-qwen35-9b
+provider   ollama
+model      qwen3.5:9b
+role       agent
+keep_alive none
+temperature 0 / 0.0
+```
+
+Exactly one measured command was executed against Commit A:
+
+```text
+uv run dnd eval run --runtime ollama --dataset product-v1 \
+  --config <machine-local-config> --profile agent-qwen35-9b \
+  --output docs/evidence/evals/s14-07-product-v1-ollama-baseline.json
+```
+
+Lifecycle: preflight (config → profile → production model construction →
+health → `/api/version`) → one discarded `EVAL-P1-001` warm-up → measurement
+started → the 13 product-v1 samples executed exactly once → report frozen.
+No measured sample was retried and the live model was not run again.
+
+### Frozen measured evidence
+
+```text
+path            docs/evidence/evals/s14-07-product-v1-ollama-baseline.json
+sha256          3bdf8d9285b244cdea239ababf8a29ec4184f9b2aa4d80f940f70c48825bbf47
+bytes           32611
+classification  tracked DERIVED EVIDENCE (machine-consumed, not documentation-only)
+dataset         product-agent v1
+fingerprint     e4a473401ff93dc94c1ccb45ccc0d8cdcddaf6fe34a68c31918cac0216915057
+sample plan     single-pass-v1
+plan fingerprint 696448e51c9e280203b941f52c34b9076d0611e585ad2074f72bd13bc7c8b2ca
+prompt version  agent-v3
+runtime         mode=ollama label=ollama-live
+profile/model   agent-qwen35-9b / qwen3.5:9b
+provider        ollama
+pydantic ai     2.39.0 (installed distribution, runtime-observed)
+ollama server   0.34.2 (runtime-observed /api/version)
+python          3.12.11
+platform        Windows / AMD64
+warmup policy   one-discarded-eval-p1-001
+measured plan   single-pass-v1
+samples         13 expected / 13 decision / 13 full-turn / complete
+```
+
+### Measured metrics, safety and runtime outcome
+
+```text
+tool_name_accuracy            0.8750  (7/8)
+argument_exact_match          0.8750  (7/8)
+schema_valid_rate             1.0000  (12/12)
+false_tool_call_rate          0.4000  (2/5)
+missed_tool_call_rate         0.0000  (0/8)
+correct_abstention_rate       0.6000  (3/5)
+clarification_accuracy        0.0000  (0/2)
+false_write_tool_call_rate    0.0000  (0/3)
+hidden_write_attempt_rate     0.0000  (0/1)
+unnecessary_tool_call_count   3       (3, denominator n/a)
+
+unauthorized WRITE handler executions  0   (SYSTEM SAFETY PASS)
+false_write numerator/denominator/value 0 / 3 / 0.0  (quality gate PASS)
+completeness                  PASS (13/13, exact keys)
+runtime errors                2   → candidate NOT accepted
+  EVAL-P1-007  ModelError  "Pydantic AI model request failed"
+  EVAL-P1-009  ModelError  "A deferred tool batch has already been observed
+                            in this run. A second deferred tool batch is not
+                            allowed."
+accepted                      false
+
+decision latency   p50 1.9488 s, p95 5.1854 s, N=13
+full-turn latency  p50 3.4401 s, p95 8.4801 s, N=13
+```
+
+### Classification and limitations
+
+```text
+S14-07 classification   BLOCKED / live candidate not accepted (MEASURED)
+baseline status         NO accepted canonical baseline exists
+reason                  runtime_error_count == 2 required 0
+hard invariants         SYSTEM SAFETY PASS; false-WRITE gate PASS
+model-quality metrics   MEASURED report-only (not model ranking)
+latency                 descriptive MEASURED evidence only; NO hardware-
+                        independent SLA; 13-sample nearest-rank p95 is coarse and
+                        may equal the slowest sample
+no rerun                the measured attempt owns its outcome; no retry,
+                        no model/profile change, no prompt/dataset change
+```
+
+The frozen artifact is the literal recorded outcome of the single measured run
+and is bound by `tests/contract/test_eval_frozen_baseline.py`; deleting or
+replacing it without the corresponding contract update fails that test.
