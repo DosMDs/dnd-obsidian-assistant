@@ -20,6 +20,7 @@ from dnd_assistant.evals.completeness import CompletenessReport
 from dnd_assistant.evals.contracts import (
     DecisionObservation,
     ExposedToolInfo,
+    FailureDiagnostic,
     FullTurnObservation,
     ToolCallObservation,
 )
@@ -47,6 +48,7 @@ def report_to_json(report: EvalReport) -> str:
 
 
 def _encode_report(report: EvalReport) -> dict[str, Any]:
+    include_diagnostics = report.identity.report_schema_version >= 3
     return {
         "identity": _encode_identity(report.identity),
         "runtime": {
@@ -56,7 +58,10 @@ def _encode_report(report: EvalReport) -> dict[str, Any]:
         },
         "sample_contract": _encode_completeness(report.sample_contract),
         "decision_observations": [_encode_decision(o) for o in report.decision_observations],
-        "full_turn_observations": [_encode_full_turn(o) for o in report.full_turn_observations],
+        "full_turn_observations": [
+            _encode_full_turn(o, include_diagnostics=include_diagnostics)
+            for o in report.full_turn_observations
+        ],
         "metrics": [_encode_metric(m) for m in report.metrics],
         "sample_scores": [
             {
@@ -146,8 +151,10 @@ def _encode_decision(observation: DecisionObservation) -> dict[str, Any]:
     }
 
 
-def _encode_full_turn(observation: FullTurnObservation) -> dict[str, Any]:
-    return {
+def _encode_full_turn(
+    observation: FullTurnObservation, *, include_diagnostics: bool
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
         "scenario_id": observation.scenario_id,
         "repetition": observation.repetition,
         "duration_seconds": observation.duration_seconds,
@@ -163,6 +170,21 @@ def _encode_full_turn(observation: FullTurnObservation) -> dict[str, Any]:
         "exposed_tools": _encode_exposed(observation.exposed_tools),
         "error_type": observation.error_type,
         "error_message": observation.error_message,
+    }
+    if include_diagnostics:
+        payload["failure_diagnostic"] = _encode_failure_diagnostic(observation.failure_diagnostic)
+    return payload
+
+
+def _encode_failure_diagnostic(diagnostic: FailureDiagnostic) -> dict[str, Any]:
+    return {
+        "status": diagnostic.status.value,
+        "source_category": (
+            None if diagnostic.source_category is None else diagnostic.source_category.value
+        ),
+        "exception_type": diagnostic.exception_type,
+        "cause_chain": list(diagnostic.cause_chain),
+        "request_index": diagnostic.request_index,
     }
 
 

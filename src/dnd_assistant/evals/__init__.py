@@ -18,11 +18,15 @@ from dnd_assistant.evals.completeness import (
     validate_completeness,
 )
 from dnd_assistant.evals.contracts import (
+    FAILURE_DIAGNOSTIC_NOT_AVAILABLE,
     DecisionObservation,
     EvalExpectation,
     EvalScenario,
     ExpectedToolCall,
     ExposedToolInfo,
+    FailureDiagnostic,
+    FailureDiagnosticStatus,
+    FailureSourceCategory,
     FullTurnObservation,
     ScenarioExpectationKind,
     ToolCallObservation,
@@ -75,6 +79,7 @@ from dnd_assistant.evals.write_accounting import (
 )
 
 __all__ = [
+    "FAILURE_DIAGNOSTIC_NOT_AVAILABLE",
     "REPORT_SCHEMA_VERSION",
     "BaselineComparison",
     "BaselineStatus",
@@ -98,6 +103,9 @@ __all__ = [
     "EvalSessionState",
     "ExpectedToolCall",
     "ExposedToolInfo",
+    "FailureDiagnostic",
+    "FailureDiagnosticStatus",
+    "FailureSourceCategory",
     "FullTurnObservation",
     "LatencyReport",
     "LatencySummary",

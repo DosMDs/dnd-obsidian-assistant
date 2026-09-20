@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+from collections.abc import Callable
 
 import pytest
 
@@ -16,10 +17,14 @@ from dnd_assistant.evals import (
     report_to_json,
 )
 from dnd_assistant.evals.contracts import (
+    FAILURE_DIAGNOSTIC_NOT_AVAILABLE,
     DecisionObservation,
     EvalExpectation,
     EvalScenario,
     ExposedToolInfo,
+    FailureDiagnostic,
+    FailureDiagnosticStatus,
+    FailureSourceCategory,
     FullTurnObservation,
     ScenarioExpectationKind,
     ToolCallObservation,
@@ -333,14 +338,14 @@ def test_strict_decoder_round_trip_and_russian_preserved() -> None:
     assert report_from_json(text) == report
 
 
-# ── Schema v2 latency ──────────────────────────────────────────────────────
+# ── Schema v3 latency ──────────────────────────────────────────────────────
 
 
-def test_schema_version_is_v2() -> None:
+def test_schema_version_is_v3() -> None:
     payload = _payload(_report(_dataset(), _decision(), _full_turn()))
     identity = payload["identity"]
     assert isinstance(identity, dict)
-    assert identity["report_schema_version"] == 2
+    assert identity["report_schema_version"] == 3
 
 
 def test_schema_v1_rejected() -> None:
@@ -350,6 +355,168 @@ def test_schema_v1_rejected() -> None:
     identity["report_schema_version"] = 1
     with pytest.raises(ValueError, match="unsupported report_schema_version"):
         report_from_json(json.dumps(payload))
+
+
+# ── Schema v3 failure diagnostics ──────────────────────────────────────────
+
+
+def _observed_diagnostic() -> FailureDiagnostic:
+    return FailureDiagnostic(
+        status=FailureDiagnosticStatus.OBSERVED,
+        source_category=FailureSourceCategory.FRAMEWORK_PROCESSING,
+        exception_type="UnexpectedModelBehavior",
+        cause_chain=("ModelHTTPError",),
+        request_index=1,
+    )
+
+
+def test_schema_v3_round_trip_preserves_diagnostics() -> None:
+    full_turn = _full_turn(
+        success=False,
+        error_type="ModelError",
+        error_message="Pydantic AI model request failed",
+        failure_diagnostic=_observed_diagnostic(),
+    )
+    report = _report(_dataset(), _decision(), full_turn)
+    decoded = report_from_json(report_to_json(report))
+    assert decoded == report
+    assert decoded.full_turn_observations[0].failure_diagnostic == _observed_diagnostic()
+
+
+def test_schema_v3_success_has_explicit_not_available_diagnostic() -> None:
+    report = _report(_dataset(), _decision(), _full_turn())
+    assert report.full_turn_observations[0].failure_diagnostic == FAILURE_DIAGNOSTIC_NOT_AVAILABLE
+    decoded = report_from_json(report_to_json(report))
+    assert (
+        decoded.full_turn_observations[0].failure_diagnostic.status
+        is FailureDiagnosticStatus.NOT_AVAILABLE
+    )
+
+
+def test_schema_v3_rejects_unknown_diagnostic_field() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    full_turn = payload["full_turn_observations"]
+    assert isinstance(full_turn, list)
+    diagnostic = full_turn[0]["failure_diagnostic"]
+    assert isinstance(diagnostic, dict)
+    diagnostic["extra"] = 1
+    with pytest.raises(ValueError, match="unexpected keys"):
+        report_from_json(json.dumps(payload))
+
+
+def test_schema_v3_rejects_missing_diagnostic_field() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    full_turn = payload["full_turn_observations"]
+    assert isinstance(full_turn, list)
+    del full_turn[0]["failure_diagnostic"]
+    with pytest.raises(ValueError, match="missing required keys"):
+        report_from_json(json.dumps(payload))
+
+
+@pytest.mark.parametrize(
+    ("mutate", "match"),
+    [
+        (lambda d: d.update(status="bogus"), "unknown failure_diagnostic.status"),
+        (
+            lambda d: d.update(status="observed", source_category="bogus", exception_type="X"),
+            "unknown failure_diagnostic.source_category",
+        ),
+        (
+            lambda d: d.update(
+                status="observed", source_category="model_request", exception_type=None
+            ),
+            "requires exception_type",
+        ),
+        (
+            lambda d: d.update(
+                status="observed",
+                source_category="model_request",
+                exception_type="X",
+                request_index=-1,
+            ),
+            "non-negative",
+        ),
+        (
+            lambda d: d.update(
+                status="observed",
+                source_category="model_request",
+                exception_type="X",
+                cause_chain=[1],
+            ),
+            "cause_chain entries must be strings",
+        ),
+        (
+            lambda d: d.update(source_category="model_request"),
+            "not_available must be empty",
+        ),
+    ],
+)
+def test_schema_v3_rejects_malformed_diagnostic(
+    mutate: Callable[[dict[str, object]], None], match: str
+) -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    full_turn = payload["full_turn_observations"]
+    assert isinstance(full_turn, list)
+    diagnostic = full_turn[0]["failure_diagnostic"]
+    assert isinstance(diagnostic, dict)
+    mutate(diagnostic)
+    with pytest.raises(ValueError, match=match):
+        report_from_json(json.dumps(payload))
+
+
+# ── Schema v2 compatibility path ───────────────────────────────────────────
+
+
+def _v2_payload(report: EvalReport) -> dict[str, object]:
+    payload = _payload(report)
+    identity = payload["identity"]
+    assert isinstance(identity, dict)
+    identity["report_schema_version"] = 2
+    full_turn = payload["full_turn_observations"]
+    assert isinstance(full_turn, list)
+    for observation in full_turn:
+        assert isinstance(observation, dict)
+        del observation["failure_diagnostic"]
+    return payload
+
+
+def test_schema_v2_compatibility_supplies_not_available_diagnostic() -> None:
+    payload = _v2_payload(_report(_dataset(), _decision(), _full_turn()))
+    decoded = report_from_json(json.dumps(payload))
+    assert decoded.identity.report_schema_version == 2
+    assert decoded.full_turn_observations[0].failure_diagnostic == FAILURE_DIAGNOSTIC_NOT_AVAILABLE
+
+
+def test_schema_v2_reencode_omits_diagnostics() -> None:
+    payload = _v2_payload(_report(_dataset(), _decision(), _full_turn()))
+    decoded = report_from_json(json.dumps(payload))
+    reencoded = json.loads(report_to_json(decoded))
+    assert reencoded["identity"]["report_schema_version"] == 2
+    assert "failure_diagnostic" not in reencoded["full_turn_observations"][0]
+
+
+def test_schema_v2_rejects_v3_diagnostic_key() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    identity = payload["identity"]
+    assert isinstance(identity, dict)
+    identity["report_schema_version"] = 2
+    with pytest.raises(ValueError, match="unexpected keys"):
+        report_from_json(json.dumps(payload))
+
+
+def test_diagnostics_do_not_change_scoring_safety_or_acceptance() -> None:
+    dataset = _dataset()
+    decision = _decision(error_type="ModelError", error_message="boom", terminal_kind=None)
+    plain = _full_turn(success=False, error_type="ModelError", error_message="boom")
+    with_diag = dataclasses.replace(plain, failure_diagnostic=_observed_diagnostic())
+    without = _report(dataset, decision, plain)
+    with_report = _report(dataset, decision, with_diag)
+    assert without.sample_scores == with_report.sample_scores
+    assert without.safety == with_report.safety
+    assert without.quality == with_report.quality
+    assert without.latency == with_report.latency
+    assert without.run_validity == with_report.run_validity
+    assert without.accepted == with_report.accepted
 
 
 def test_latency_derived_from_frozen_observations() -> None:

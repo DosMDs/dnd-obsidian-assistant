@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
 from dnd_assistant.application.agent_contracts import AgentRunResult
+from dnd_assistant.composition.eval_failure_diagnostics import build_failure_diagnostic
 from dnd_assistant.composition.eval_fixture import (
     EvalFixture,
     HandlerInvocation,
@@ -220,6 +221,8 @@ def _collect(
     write_handler_count = sum(1 for item in fixture.handler_invocations if item.is_write)
     tool_execution_count = len(executed_calls) if result is not None else handler_count
 
+    failure_diagnostic = build_failure_diagnostic(error, recorder)
+
     full_turn = FullTurnObservation(
         scenario_id=scenario_id,
         repetition=repetition,
@@ -236,6 +239,7 @@ def _collect(
         exposed_tools=exposed_tools,
         error_type=error_type,
         error_message=error_message,
+        failure_diagnostic=failure_diagnostic,
     )
     return decision, full_turn
 

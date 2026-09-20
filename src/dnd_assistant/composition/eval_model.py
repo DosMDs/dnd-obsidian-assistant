@@ -25,10 +25,23 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 
+from dnd_assistant.composition.eval_failure_diagnostics import (
+    bounded_cause_chain,
+    sanitize_type_name,
+)
 from dnd_assistant.evals.contracts import EvalExpectation, ScenarioExpectationKind
 
 TERMINAL_RESPOND = '{"kind":"respond","message":"Готово."}'
 TERMINAL_CLARIFY = '{"kind":"clarify","message":"Уточните цель, пожалуйста."}'
+
+
+@dataclass(frozen=True, slots=True)
+class ModelCallFailure:
+    """Bounded structured evidence of one failed semantic model request."""
+
+    request_index: int
+    exception_type: str
+    cause_chain: tuple[str, ...]
 
 
 @dataclass(slots=True)
@@ -39,6 +52,7 @@ class ModelCallRecorder:
     responses: list[ModelResponse] = field(default_factory=list)
     request_durations: list[float] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
+    failure_records: list[ModelCallFailure] = field(default_factory=list)
 
     @property
     def first_response(self) -> ModelResponse | None:
@@ -73,6 +87,13 @@ class RecordingPydanticModel(WrapperModel):
         except Exception as exc:  # noqa: BLE001 - failure evidence is the point
             self.recorder.request_durations.append(self._clock() - start)
             self.recorder.failures.append(f"{type(exc).__name__}: {exc}")
+            self.recorder.failure_records.append(
+                ModelCallFailure(
+                    request_index=self.recorder.request_count - 1,
+                    exception_type=sanitize_type_name(type(exc).__name__),
+                    cause_chain=bounded_cause_chain(exc),
+                )
+            )
             raise
         self.recorder.request_durations.append(self._clock() - start)
         self.recorder.responses.append(response)

@@ -25,7 +25,7 @@ from dnd_assistant.evals.metrics import MetricId, MetricSummary, summarize_metri
 from dnd_assistant.evals.scoring import score_decision, score_full_turn
 from dnd_assistant.evals.write_accounting import count_unauthorized_write_handler_executions
 
-REPORT_SCHEMA_VERSION = 2
+REPORT_SCHEMA_VERSION = 3
 
 
 # ── Report DTOs ────────────────────────────────────────────────────────────

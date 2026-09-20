@@ -1066,3 +1066,45 @@ no rerun                the measured attempt owns its outcome; no retry,
 The frozen artifact is the literal recorded outcome of the single measured run
 and is bound by `tests/contract/test_eval_frozen_baseline.py`; deleting or
 replacing it without the corresponding contract update fails that test.
+
+### S14-07-DIAG-01 / S14-07-DIAG-02 — diagnosis and bounded observability
+
+```text
+DIAG-01 (read-only diagnosis; no code change)
+  EVAL-P1-009   MODEL_BEHAVIOR (high confidence): the model selected one of two
+                intentionally ambiguous «Варос» targets instead of clarifying,
+                then attempted a second deferred tool batch; DndAgentPolicy
+                rejected it by accepted one-batch design.  Permitting a second
+                batch would weaken the bounded-agent contract, so a product
+                runtime change is NOT justified.
+  EVAL-P1-007   exact cause EVIDENCE_INSUFFICIENT: tool selection, one-batch
+                admission, handler execution and tool-result replay all
+                succeeded; the failure was the second semantic request.  The
+                concrete AgentRunError subclass was available in memory but was
+                never persisted.
+  conclusion    NO product runtime defect proven; the runtime contract is sound
+                (two-READ continuation is green offline and in the frozen live
+                P1-002 sample).
+  cause         the generic product ModelError text masked the framework cause;
+                ModelCallRecorder.failures was not surfaced into any report.
+
+DIAG-02 (prospective observability correction; offline only, NO live rerun)
+  schema v3     newly generated reports are schema v3; the frozen v2 artifact is
+                preserved byte-for-byte and still strict-decodes (v2 decoding
+                supplies an explicit not-available diagnostic).
+  diagnostic    one bounded, sanitized per-sample failure_diagnostic on the
+                full-turn observation: status, source category
+                (model_request | framework_processing | project_policy |
+                runtime_other), sanitized exception type, bounded sanitized
+                cause-chain type names, and the literal request index.
+  privacy       only sanitized class-name tokens are persisted; raw provider
+                response bodies and human-readable messages are never stored.
+  evidence      both recorder-side request failures and the final project-error
+                cause chain (an AgentRunError may survive only via __cause__).
+  unchanged     one deferred batch, request limit, retries, ToolExecutor,
+                DndAgentPolicy, bridge, prompt, model/profile/config,
+                dependencies and product-v1 ground truth are unchanged.
+  no rerun      P1-007's historical exact cause remains unrecoverable; the
+                correction is prospective only.
+  S14-07        remains BLOCKED; S14-08 remains NOT STARTED.
+```

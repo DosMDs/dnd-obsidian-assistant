@@ -12,7 +12,7 @@ permission metadata; it is never inferred from a tool-name prefix.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -83,6 +83,65 @@ class EvalScenario:
     expectation: EvalExpectation
     description: str = ""
     hidden_write_expected: bool = False
+
+
+# ── Failure diagnostic vocabulary (schema v3) ──────────────────────────────
+
+
+class FailureDiagnosticStatus(StrEnum):
+    """Availability of per-sample failure diagnostics.
+
+    ``NOT_AVAILABLE`` is the explicit empty value used for successful samples
+    and for legacy schema-v2 reports that never carried diagnostics.
+    """
+
+    NOT_AVAILABLE = "not_available"
+    OBSERVED = "observed"
+
+
+class FailureSourceCategory(StrEnum):
+    """Bounded, provider-neutral category of a runtime failure.
+
+    ``MODEL_REQUEST`` means the wrapped semantic model request raised.
+    ``FRAMEWORK_PROCESSING`` means the framework failed after a request
+    returned (surfacing only through the project error cause chain).
+    ``PROJECT_POLICY`` means the trusted project layer rejected the run.
+    ``RUNTIME_OTHER`` is the bounded catch-all.
+    """
+
+    MODEL_REQUEST = "model_request"
+    FRAMEWORK_PROCESSING = "framework_processing"
+    PROJECT_POLICY = "project_policy"
+    RUNTIME_OTHER = "runtime_other"
+
+
+@dataclass(frozen=True, slots=True)
+class FailureDiagnostic:
+    """Bounded, sanitized per-sample failure evidence (provider-neutral).
+
+    Only structured, non-secret evidence is retained: a source category, the
+    sanitized exception type name, a bounded chain of sanitized cause type
+    names, and the semantic request index when literally known.  Raw provider
+    response bodies and human-readable exception messages are never persisted.
+
+    Args:
+        status: Whether a diagnostic is present.
+        source_category: The bounded failure stage, or ``None`` when
+            unavailable.
+        exception_type: Sanitized exception class name, or ``None``.
+        cause_chain: Bounded ordered sanitized cause type names.
+        request_index: Zero-based semantic request index, or ``None``.
+    """
+
+    status: FailureDiagnosticStatus = FailureDiagnosticStatus.NOT_AVAILABLE
+    source_category: FailureSourceCategory | None = None
+    exception_type: str | None = None
+    cause_chain: tuple[str, ...] = ()
+    request_index: int | None = None
+
+
+FAILURE_DIAGNOSTIC_NOT_AVAILABLE = FailureDiagnostic()
+"""Explicit empty diagnostic for successful and legacy samples."""
 
 
 # ── Exposure / observation DTOs ────────────────────────────────────────────
@@ -174,6 +233,8 @@ class FullTurnObservation:
         exposed_tools: Snapshot of tools visible to the model for this turn.
         error_type: Error type string if an exception occurred, else None.
         error_message: Error message if an exception occurred, else None.
+        failure_diagnostic: Bounded structured failure evidence for this
+            sample (schema v3).  Explicit not-available for success/legacy v2.
     """
 
     scenario_id: str
@@ -191,3 +252,4 @@ class FullTurnObservation:
     exposed_tools: ExposedToolInfo | None = None
     error_type: str | None = None
     error_message: str | None = None
+    failure_diagnostic: FailureDiagnostic = field(default_factory=FailureDiagnostic)
