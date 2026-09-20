@@ -4,7 +4,8 @@
 **Accepted baseline:** `main` @ `09fa5690b39bc1b4aeedea4fb98e26fc58c461f3`
 **S14-01:** `DONE`
 **S14-02:** `DONE`
-**Next task:** `S14-03 — Offline Scripted-Model Full-Sequence Regression` (`NOT STARTED`)
+**S14-03:** `DONE`
+**Next task:** `S14-04 — Untrusted-Input / Path-Safety Gap Closure` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -374,3 +375,79 @@ maintainability, PAIM offline suites, canonical full `uv run pytest`
 (7476 passed, 141 skipped, 0 failed/errors), `uv run pyright` (0 errors),
 `uv run ruff check .`, `uv run ruff format --check .`, `uv lock --check`,
 `git diff --check`.
+
+## 11. S14-03 implementation record (`DONE`)
+
+`S14-03 — Offline Scripted-Model Full-Sequence Regression` is `DONE`.  It adds
+one deterministic, offline cross-stage integration regression proving the
+already accepted Stage-13 bootstrap workflow end-to-end through the real
+production boundaries.  It adds no production behavior, no architecture
+boundary, no CLI/dataset/report/live-model surface and no second fixture.
+
+Changed files:
+
+```text
+tests/integration/test_bootstrap_full_sequence_fs.py   new (single regression)
+DEVELOPMENT_STATUS.md                                  status reconciliation
+docs/stages/14_EVALS_AND_HARDENING.md                  this record
+```
+
+Regression shape (`test_golden_derived_full_bootstrap_sequence`):
+
+- A temporary **golden-derived** pre-init Vault is built from
+  `tests/fixtures/golden_test_vault/`.  Assistant-owned `_system` state is
+  excluded — `campaign.yaml`, `world_time.json`, `fixture-manifest.json`,
+  `audit/audit.jsonl`, `cache/`, `changesets/`, `indexes/`, `migrations/`,
+  `traces/` — while historical append-only raw session material under
+  `_system/raw/sessions/**` (5 sessions: `metadata.json`, `events.jsonl`,
+  `conversation.jsonl`) is preserved verbatim.  The tracked fixture is only read;
+  a recursive SHA-256 before/after snapshot asserts it is byte-identical.
+- Real `dnd init` then real `dnd time init --world-tick 13800` run on the
+  pre-existing material; user campaign material and raw sessions are proven
+  unchanged and no model is requested.
+- Only the model/extraction operator is replaced by a local, ordered,
+  phase/batch-aware scripting double
+  (`tests/integration/test_bootstrap_full_sequence_fs.py`); it fails loudly on
+  any request beyond the production-derived expected batch count.
+- First fresh `finalize_bootstrap` runs real discovery +
+  `BootstrapRuntime.run(report, persist=True)` -> `PROPOSAL` /
+  `PENDING_CHANGESET`, with a persisted proposal and immutable
+  `_system/bootstrap/<id>.mapping.json` evidence, and no canonical or derived
+  mutation.
+- Review is `REVIEWABLE` with a real Stage-10 `ChangeSetReview`, a content-bound
+  fingerprint and `READY` readiness; approval is an explicit `APPROVED`
+  `ChangeSetApproval` bound to the exact persisted proposal fingerprint and
+  persisted via `persist_approval` (`CREATED`, `load_approval` round-trip).
+- Apply runs the real `compose_bootstrap_apply` -> `apply_bootstrap_changeset` ->
+  `apply_changeset`/`VaultRepository` path (`APPLIED`, attempt recorded).  The
+  primary apply proof reads the new canonical entity back through
+  `ObsidianVaultRepository.get_entity`/`list_entities` using the entity id/type
+  from the applied operation (not an assumed filename).  Audit source
+  `bootstrap_apply` and the `*.apply.jsonl` attempt ledger are asserted.
+- A fresh second `finalize_bootstrap` rediscovers and reruns the real runtime:
+  `NO_CHANGES`, `COMPLETE`, `changeset_id is None`, no second proposal,
+  `final_source_stable is True`, canonical entity bytes unchanged relative to
+  the post-apply baseline, Campaign State `CURRENT` (via finalize and via
+  `compose_campaign_state_capability`), and FTS fresh (`verify_fts_index`).
+- The resulting initialized Vault passes the real recovery preflight
+  (`compose_recovery_service(...).inspect_runtime_partition().blocking == ()`);
+  recovery is not bypassed or monkeypatched.
+
+Literal evidence:
+
+```text
+production batch counts        first finalize 1, second finalize 1
+model request checkpoints      after init/time-init 0 = 0
+                               after first finalize  1 = 1
+                               after review/approve/apply 1 = 1
+                               after second finalize 1 + 1 = 2
+golden immutability            recursive SHA-256 map equal before/after
+focused (Level 1)              1 passed
+affected subsystem (Level 2)   988 passed
+canonical full pytest          7479 passed, 141 skipped, 0 failed, 0 errors
+pyright                        0 errors, 0 warnings, 0 informations
+ruff check . / format --check  passed / 618 files already formatted
+uv lock --check                passed
+git diff --check               passed
+maintainability contract       green; new test module below the 1000-line limit
+```

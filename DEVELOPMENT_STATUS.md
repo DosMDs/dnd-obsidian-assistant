@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-19 (S14-02)
+**Last updated:** 2026-09-20 (S14-03)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-02 — Deterministic Eval Contract & Scoring Foundation` `DONE`; next `S14-03 — Offline Scripted-Model Full-Sequence Regression` `NOT STARTED`
+**Active work:** `S14-03 — Offline Scripted-Model Full-Sequence Regression` `DONE`; next `S14-04 — Untrusted-Input / Path-Safety Gap Closure` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01, S14-02 `DONE`; S14-03 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01, S14-02, S14-03 `DONE`; S14-04 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-02 `DONE`
+## Current work — S14-03 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -62,10 +62,25 @@ semantics.  The historical `tests/support/pydantic_ai_eval.py` was removed and
 its four literal consumers migrated.  No CLI, composition wiring, dataset,
 live-model run, report writer or dependency was added.
 
+`S14-03 — Offline Scripted-Model Full-Sequence Regression` is `DONE`: one
+deterministic offline cross-stage integration regression
+(`tests/integration/test_bootstrap_full_sequence_fs.py`) proves the accepted
+Stage-13 bootstrap workflow end-to-end through the real production boundaries
+(`dnd init` -> `dnd time init` -> first fresh `BootstrapRuntime.run(persist=True)`
+finalize -> `PENDING_CHANGESET` -> review -> explicit content-bound approval ->
+real Stage-10/`VaultRepository` apply -> fresh second finalize ->
+`NO_CHANGES`/`COMPLETE` -> Campaign State `CURRENT` + verified FTS).  A
+golden-derived temporary pre-init Vault preserves historical raw session
+material while excluding assistant-owned initialization/derived/workflow state.
+Only the model/extraction operator is replaced by a local scripting double; no
+production behavior, dependency, CLI, dataset or live-model surface changed.
+The tracked golden fixture is read-only and its bytes are proven unchanged.
+
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
 done     S14-02 — deterministic eval contract and scoring foundation  DONE
-next     S14-03 — offline scripted-model full-sequence regression     NOT STARTED
+done     S14-03 — offline scripted-model full-sequence regression     DONE
+next     S14-04 — untrusted-input / path-safety gap closure           NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
