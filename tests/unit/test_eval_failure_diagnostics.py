@@ -16,10 +16,8 @@ from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from dnd_assistant.composition.eval_failure_diagnostics import (
-    MAX_CAUSE_CHAIN,
     bounded_cause_chain,
     build_failure_diagnostic,
-    sanitize_type_name,
 )
 from dnd_assistant.composition.eval_model import (
     ModelCallFailure,
@@ -30,11 +28,14 @@ from dnd_assistant.composition.eval_model import (
 from dnd_assistant.composition.eval_runner import run_dataset
 from dnd_assistant.errors import ModelError, ValidationError
 from dnd_assistant.evals.contracts import (
+    MAX_CAUSE_CHAIN_LENGTH,
     EvalExpectation,
     EvalScenario,
     FailureDiagnosticStatus,
     FailureSourceCategory,
     ScenarioExpectationKind,
+    is_canonical_type_token,
+    sanitize_type_token,
 )
 from dnd_assistant.evals.dataset import (
     EvalCase,
@@ -122,25 +123,25 @@ def test_recorder_success_has_no_failure_records() -> None:
 def test_bounded_cause_chain_is_limited_and_deterministic() -> None:
     root = RuntimeError("root")
     current: BaseException = root
-    for index in range(MAX_CAUSE_CHAIN + 2):
+    for index in range(MAX_CAUSE_CHAIN_LENGTH + 2):
         wrapper = RuntimeError(f"level-{index}")
         wrapper.__cause__ = current
         current = wrapper
     chain = bounded_cause_chain(current)
-    assert len(chain) == MAX_CAUSE_CHAIN
+    assert len(chain) == MAX_CAUSE_CHAIN_LENGTH
     assert chain == bounded_cause_chain(current)
 
 
 # ── Sanitization / privacy ─────────────────────────────────────────────────
 
 
-def test_sanitize_type_name_redacts_unsafe_text() -> None:
-    assert sanitize_type_name("UnexpectedModelBehavior") == "UnexpectedModelBehavior"
-    assert sanitize_type_name("Good_Name1") == "Good_Name1"
-    assert sanitize_type_name("C:\\Users\\alice") == "<redacted>"
-    assert sanitize_type_name("http://localhost:11434") == "<redacted>"
-    assert sanitize_type_name("has space") == "<redacted>"
-    assert sanitize_type_name("x" * 65) == "<redacted>"
+def test_sanitize_type_token_redacts_unsafe_text() -> None:
+    assert sanitize_type_token("UnexpectedModelBehavior") == "UnexpectedModelBehavior"
+    assert sanitize_type_token("Good_Name1") == "Good_Name1"
+    assert sanitize_type_token("C:\\Users\\alice") == "<redacted>"
+    assert sanitize_type_token("http://localhost:11434") == "<redacted>"
+    assert sanitize_type_token("has space") == "<redacted>"
+    assert sanitize_type_token("x" * 65) == "<redacted>"
 
 
 def test_diagnostic_never_persists_raw_message_or_path() -> None:
@@ -163,6 +164,29 @@ def test_diagnostic_never_persists_raw_message_or_path() -> None:
     for forbidden in ("alice", "models.toml", "localhost", "SECRET_TOKEN", "framework detail"):
         assert forbidden not in blob
     assert diagnostic.exception_type == "UnexpectedModelBehavior"
+
+
+def test_redaction_token_is_canonical() -> None:
+    assert is_canonical_type_token("<redacted>")
+    assert sanitize_type_token("bad/path") == "<redacted>"
+
+
+def test_composition_output_is_canonical() -> None:
+    recorder = _recorder_with(
+        request_count=1,
+        failures=[
+            ModelCallFailure(
+                request_index=0,
+                exception_type="C:\\Users\\alice",
+                cause_chain=("bad path", "GoodName"),
+            )
+        ],
+    )
+    diagnostic = build_failure_diagnostic(RuntimeError("boom"), recorder)
+    assert diagnostic.exception_type is not None
+    assert is_canonical_type_token(diagnostic.exception_type)
+    assert all(is_canonical_type_token(entry) for entry in diagnostic.cause_chain)
+    assert len(diagnostic.cause_chain) <= MAX_CAUSE_CHAIN_LENGTH
 
 
 def test_unsafe_dynamic_exception_name_is_redacted() -> None:

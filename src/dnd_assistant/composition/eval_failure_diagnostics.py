@@ -14,41 +14,26 @@ provider response bodies and human-readable messages are never persisted.
 
 from __future__ import annotations
 
-import re
 from typing import TYPE_CHECKING
 
 from pydantic_ai.exceptions import AgentRunError
 
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.evals.contracts import (
+    MAX_CAUSE_CHAIN_LENGTH,
     FailureDiagnostic,
     FailureDiagnosticStatus,
     FailureSourceCategory,
+    sanitize_type_token,
 )
 
 if TYPE_CHECKING:
     from dnd_assistant.composition.eval_model import ModelCallRecorder
 
-MAX_CAUSE_CHAIN: int = 4
-"""Maximum sanitized cause-chain entries retained per diagnostic."""
 
-_REDACTED_TYPE_NAME = "<redacted>"
-_TYPE_NAME_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
-
-
-def sanitize_type_name(name: str) -> str:
-    """Return ``name`` only when it is a safe bare Python class identifier.
-
-    Anything else (spaces, paths, punctuation, over-long or non-ASCII) is
-    replaced with a fixed redaction marker so no private text can leak through
-    an exception class name.
-    """
-    if isinstance(name, str) and _TYPE_NAME_RE.match(name):
-        return name
-    return _REDACTED_TYPE_NAME
-
-
-def bounded_cause_chain(exc: BaseException, *, limit: int = MAX_CAUSE_CHAIN) -> tuple[str, ...]:
+def bounded_cause_chain(
+    exc: BaseException, *, limit: int = MAX_CAUSE_CHAIN_LENGTH
+) -> tuple[str, ...]:
     """Return a bounded chain of sanitized cause type names below ``exc``.
 
     Follows ``__cause__`` first and falls back to ``__context__`` at each step,
@@ -59,7 +44,7 @@ def bounded_cause_chain(exc: BaseException, *, limit: int = MAX_CAUSE_CHAIN) -> 
     current = exc.__cause__ if exc.__cause__ is not None else exc.__context__
     while current is not None and len(names) < limit and id(current) not in seen:
         seen.add(id(current))
-        names.append(sanitize_type_name(type(current).__name__))
+        names.append(sanitize_type_token(type(current).__name__))
         current = current.__cause__ if current.__cause__ is not None else current.__context__
     return tuple(names)
 
@@ -91,8 +76,8 @@ def _observed(
     return FailureDiagnostic(
         status=FailureDiagnosticStatus.OBSERVED,
         source_category=category,
-        exception_type=sanitize_type_name(exception_type),
-        cause_chain=tuple(sanitize_type_name(entry) for entry in cause_chain),
+        exception_type=sanitize_type_token(exception_type),
+        cause_chain=tuple(sanitize_type_token(entry) for entry in cause_chain),
         request_index=request_index,
     )
 

@@ -25,11 +25,12 @@ from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 
-from dnd_assistant.composition.eval_failure_diagnostics import (
-    bounded_cause_chain,
-    sanitize_type_name,
+from dnd_assistant.composition.eval_failure_diagnostics import bounded_cause_chain
+from dnd_assistant.evals.contracts import (
+    EvalExpectation,
+    ScenarioExpectationKind,
+    sanitize_type_token,
 )
-from dnd_assistant.evals.contracts import EvalExpectation, ScenarioExpectationKind
 
 TERMINAL_RESPOND = '{"kind":"respond","message":"Готово."}'
 TERMINAL_CLARIFY = '{"kind":"clarify","message":"Уточните цель, пожалуйста."}'
@@ -90,7 +91,7 @@ class RecordingPydanticModel(WrapperModel):
             self.recorder.failure_records.append(
                 ModelCallFailure(
                     request_index=self.recorder.request_count - 1,
-                    exception_type=sanitize_type_name(type(exc).__name__),
+                    exception_type=sanitize_type_token(type(exc).__name__),
                     cause_chain=bounded_cause_chain(exc),
                 )
             )

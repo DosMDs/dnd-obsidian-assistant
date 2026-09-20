@@ -12,9 +12,45 @@ permission metadata; it is never inferred from a tool-name prefix.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+
+# ── Canonical diagnostic serialization contract ────────────────────────────
+# One provider-neutral definition shared by the writer (composition) and the
+# schema-v3 decoder so the serialized token/bound invariant cannot drift.
+
+MAX_CAUSE_CHAIN_LENGTH: int = 4
+"""Maximum number of sanitized cause-chain tokens in a serialized diagnostic."""
+
+REDACTED_TYPE_TOKEN: str = "<redacted>"
+"""Fixed redaction token emitted when a name is not a safe type token."""
+
+_TYPE_TOKEN_RE = re.compile(r"\A[A-Za-z_][A-Za-z0-9_]{0,63}\Z")
+
+
+def is_canonical_type_token(token: object) -> bool:
+    """True iff ``token`` is a canonical serialized diagnostic type token.
+
+    Canonical tokens are either the fixed redaction token or a bare Python
+    identifier-shaped class name (ASCII letters/underscore then up to 63
+    letters/digits/underscores).  Anything else (paths, URLs, prose, whitespace)
+    is not part of the serialized contract.
+    """
+    if not isinstance(token, str):
+        return False
+    if token == REDACTED_TYPE_TOKEN:
+        return True
+    return _TYPE_TOKEN_RE.match(token) is not None
+
+
+def sanitize_type_token(name: object) -> str:
+    """Return ``name`` if it is a canonical type token, else the redaction token."""
+    if isinstance(name, str) and _TYPE_TOKEN_RE.match(name) is not None:
+        return name
+    return REDACTED_TYPE_TOKEN
+
 
 # ── Expected action vocabulary ─────────────────────────────────────────────
 

@@ -19,6 +19,8 @@ from dnd_assistant.evals.completeness import (
 )
 from dnd_assistant.evals.contracts import (
     FAILURE_DIAGNOSTIC_NOT_AVAILABLE,
+    MAX_CAUSE_CHAIN_LENGTH,
+    REDACTED_TYPE_TOKEN,
     DecisionObservation,
     EvalExpectation,
     EvalScenario,
@@ -30,6 +32,8 @@ from dnd_assistant.evals.contracts import (
     FullTurnObservation,
     ScenarioExpectationKind,
     ToolCallObservation,
+    is_canonical_type_token,
+    sanitize_type_token,
 )
 from dnd_assistant.evals.dataset import (
     EvalCase,
@@ -80,6 +84,8 @@ from dnd_assistant.evals.write_accounting import (
 
 __all__ = [
     "FAILURE_DIAGNOSTIC_NOT_AVAILABLE",
+    "MAX_CAUSE_CHAIN_LENGTH",
+    "REDACTED_TYPE_TOKEN",
     "REPORT_SCHEMA_VERSION",
     "BaselineComparison",
     "BaselineStatus",
@@ -118,10 +124,12 @@ __all__ = [
     "compare_eval_reports",
     "count_unauthorized_write_handler_executions",
     "expected_sample_keys",
+    "is_canonical_type_token",
     "json_args_equal",
     "nearest_rank_percentile",
     "report_from_json",
     "report_to_json",
+    "sanitize_type_token",
     "score_arguments",
     "score_decision",
     "score_full_turn",

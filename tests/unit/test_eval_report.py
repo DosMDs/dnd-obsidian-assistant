@@ -446,6 +446,32 @@ def test_schema_v3_rejects_missing_diagnostic_field() -> None:
             "cause_chain entries must be strings",
         ),
         (
+            lambda d: d.update(
+                status="observed",
+                source_category="model_request",
+                exception_type="C:\\\\Users\\\\alice",
+            ),
+            "canonical sanitized type token",
+        ),
+        (
+            lambda d: d.update(
+                status="observed",
+                source_category="model_request",
+                exception_type="X",
+                cause_chain=["http://localhost:11434"],
+            ),
+            "canonical sanitized type tokens",
+        ),
+        (
+            lambda d: d.update(
+                status="observed",
+                source_category="model_request",
+                exception_type="X",
+                cause_chain=["A", "B", "C", "D", "E"],
+            ),
+            "at most 4 entries",
+        ),
+        (
             lambda d: d.update(source_category="model_request"),
             "not_available must be empty",
         ),
@@ -462,6 +488,24 @@ def test_schema_v3_rejects_malformed_diagnostic(
     mutate(diagnostic)
     with pytest.raises(ValueError, match=match):
         report_from_json(json.dumps(payload))
+
+
+def test_schema_v3_accepts_redaction_token() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    full_turn = payload["full_turn_observations"]
+    assert isinstance(full_turn, list)
+    full_turn[0]["failure_diagnostic"] = {
+        "status": "observed",
+        "source_category": "runtime_other",
+        "exception_type": "<redacted>",
+        "cause_chain": ["<redacted>", "RuntimeError"],
+        "request_index": 2,
+    }
+    decoded = report_from_json(json.dumps(payload))
+    diagnostic = decoded.full_turn_observations[0].failure_diagnostic
+    assert diagnostic.exception_type == "<redacted>"
+    assert diagnostic.cause_chain == ("<redacted>", "RuntimeError")
+    assert diagnostic.request_index == 2
 
 
 # ── Schema v2 compatibility path ───────────────────────────────────────────

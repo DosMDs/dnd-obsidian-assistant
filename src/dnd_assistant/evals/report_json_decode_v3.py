@@ -10,10 +10,12 @@ from __future__ import annotations
 from typing import Any
 
 from dnd_assistant.evals.contracts import (
+    MAX_CAUSE_CHAIN_LENGTH,
     FailureDiagnostic,
     FailureDiagnosticStatus,
     FailureSourceCategory,
     FullTurnObservation,
+    is_canonical_type_token,
 )
 from dnd_assistant.evals.report_json_decode_shared import (
     as_mapping,
@@ -68,6 +70,10 @@ def decode_failure_diagnostic(data: Any) -> FailureDiagnostic:
 
     source_category = _decode_source_category(mapping["source_category"])
     exception_type = _decode_opt_str(mapping["exception_type"], "exception_type")
+    if exception_type is not None and not is_canonical_type_token(exception_type):
+        raise ValueError(
+            "failure_diagnostic.exception_type must be a canonical sanitized type token"
+        )
     cause_chain = _decode_cause_chain(mapping["cause_chain"])
     request_index = _decode_request_index(mapping["request_index"])
 
@@ -116,10 +122,18 @@ def _decode_opt_str(value: Any, field: str) -> str | None:
 def _decode_cause_chain(value: Any) -> tuple[str, ...]:
     if not isinstance(value, list):
         raise ValueError("failure_diagnostic.cause_chain must be a list")
+    if len(value) > MAX_CAUSE_CHAIN_LENGTH:
+        raise ValueError(
+            f"failure_diagnostic.cause_chain must have at most {MAX_CAUSE_CHAIN_LENGTH} entries"
+        )
     entries: list[str] = []
     for item in value:
         if not isinstance(item, str):
             raise ValueError("failure_diagnostic.cause_chain entries must be strings")
+        if not is_canonical_type_token(item):
+            raise ValueError(
+                "failure_diagnostic.cause_chain entries must be canonical sanitized type tokens"
+            )
         entries.append(item)
     return tuple(entries)
 
