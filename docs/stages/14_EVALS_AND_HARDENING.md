@@ -1222,3 +1222,136 @@ S14-08                          remains NOT STARTED
 The artifact is bound by
 `tests/contract/test_eval_ministral_frozen_candidate.py`; deleting or replacing
 it without the corresponding contract update fails that test.
+
+## 17. S14-08 implementation record (`DONE`)
+
+`S14-08 — TUI / Cross-Platform Hardening Evidence` is `DONE`.  It closes the
+remaining headless TUI evidence gaps, diagnoses and corrects recurring TUI test
+failures, and records honest Stage-14 real-terminal platform evidence using
+`docs/development/tui-terminal-smoke.md`.  No lower-layer/domain/runtime
+behavior change; Textual remains presentation-only.
+
+### Automated / headless findings
+
+- The two recurring navigation failures were **not** merely flaky:
+  - a **test-synchronization defect** existed around fixed `pilot.pause()`
+    assumptions (deferred work not settled; startup refresh/inspect workers
+    holding the exclusive gate);
+  - a **real presentation navigation race** existed: a stale deferred focus
+    callback / Textual `TabPane.Focused` message could re-activate the previous
+    pane, leaving the wrong active tab and `focus=None`.
+- Fixed with latest-navigation **generation ownership** plus **bounded**
+  refresh/focus convergence: only the latest navigation's deferred focus runs,
+  the requested pane is re-asserted, and focus is retried across refresh cycles
+  until it lands. No sleeps, no retry plugin, no assertion weakening, no
+  production timing change.
+
+### Help / focus gap
+
+- Command-palette close restores the exact previously focused widget (new
+  regression).
+- The help panel previously had **no reliable close/toggle path** under the
+  custom registry-derived system-command surface (Escape/F1 did not dismiss it;
+  Textual's "Keys" system command is intentionally omitted).
+- Added a **presentation-only help toggle** on the existing `app.help` semantic
+  command; help close restores the exact previously focused widget.
+- Assistant `Enter` inserts a newline and causes zero submit (new regression).
+
+### Primary-view layout defect
+
+Literal first MANUAL finding (Windows Terminal):
+
+```text
+Windows Terminal MANUAL attempt #1:
+    shell/header/tabs/footer/palette/help visible
+    all three primary view bodies visually empty
+    FAIL / BLOCKED
+```
+
+Root cause: Textual 8.2.8 auto-height chain
+`TabbedContent -> ContentSwitcher -> TabPane` collapsed the active pane body to
+height 0; the tab bar rendered, child widgets reported non-zero regions, but
+they were clipped and the body appeared empty.
+
+Fix: production primary tabs / content switcher / pane / capability views
+explicitly fill available height using scoped `1fr` rules
+(`src/dnd_assistant/tui/styles.py`). Layout-only; no view-hierarchy rewrite.
+
+Regression: `tests/integration/test_tui_layout_geometry.py` requires positive
+width **and** height for each view container, primary control and action button
+at 100x30 / 80x24 / 60x20. The suite fails on the pre-fix layout (zero-height
+`#assistant-view` at all three sizes) and passes after the fix.
+
+### Accepted Windows manual evidence
+
+```text
+classification: MANUAL
+platform:       Windows Terminal
+result:         PASS
+```
+
+Groups (literal user result):
+
+```text
+startup / shutdown                                 PASS
+Unicode / Cyrillic                                 PASS
+paste / multiline                                  PASS
+assistant interaction                              PASS
+navigation / focus                                 PASS
+resize                                             PASS
+deterministic session / Campaign-State write path  PASS
+expected-error presentation / recovery             PASS
+```
+
+The assistant model-error path is expected for the disposable smoke config and
+does not invalidate terminal/UI evidence. The first MANUAL attempt remains
+historical evidence that exposed the layout collapse.
+
+### Capability classification
+
+```text
+Windows Terminal       MANUAL PASS
+macOS Terminal/iTerm   SKIPPED_CAPABILITY (no macOS host; never inferred)
+f5                     MANUAL PASS on this Windows Terminal run; remains a
+                       convenience alias, not a cross-platform guarantee
+```
+
+### Preserved limitations
+
+- external terminal/OS process kill cannot be prevented (normal in-app shutdown
+  paths only);
+- thread-worker cancellation is fail-closed, not rollback/retry;
+- macOS real-terminal execution not verified.
+
+### Automated gates (final production/test diff)
+
+```text
+affected TUI + boundaries + maintainability   1104 passed
+focus / navigation / geometry                 48 passed
+former-flake repeated / order-sensitive       deterministic green
+pyright                                       0 errors
+ruff check / format --check                   passed
+uv lock --check                               passed
+git diff --check                              passed
+canonical uv run pytest                       7755 passed, 141 skipped,
+                                              0 failed, 0 errors
+```
+
+Documentation/status finalization happened only after the canonical gate; the
+canonical suite was not rerun for docs-only changes.
+
+```text
+src/dnd_assistant/tui/app.py                    nav generation + bounded focus; help toggle
+src/dnd_assistant/tui/commands.py               help description
+src/dnd_assistant/tui/styles.py                 primary-view fill
+tests/integration/test_tui_layout_geometry.py   new
+tests/integration/test_tui_focus_restore.py     new
+tests/integration/test_tui_interaction.py
+tests/integration/test_tui_shell.py
+docs/development/tui-terminal-smoke.md
+docs/stages/14_EVALS_AND_HARDENING.md           this record
+DEVELOPMENT_STATUS.md
+```
+
+Status: Stage 14 remains `IN PROGRESS`; S14-07 remains `BLOCKED`; S14-09 is the
+next task and is `NOT STARTED`.

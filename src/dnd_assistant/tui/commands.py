@@ -356,7 +356,7 @@ def default_commands() -> tuple[SemanticCommand, ...]:
         SemanticCommand(
             id="app.help",
             title="Справка",
-            description="Показать справку и сочетания клавиш",
+            description="Показать или скрыть справку и сочетания клавиш",
             handler=_help,
             default_keys=("?", "f1"),
         ),

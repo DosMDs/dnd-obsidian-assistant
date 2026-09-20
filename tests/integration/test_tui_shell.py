@@ -108,6 +108,38 @@ def _run(coro: Coroutine[Any, Any, None]) -> None:
     assert not unresolved, f"unresolved async lifecycle diagnostics: {unresolved}"
 
 
+async def _wait_idle(app: Any, pilot: Any) -> None:
+    """Wait until startup read/refresh workers release the exclusive gate."""
+    for _ in range(300):
+        if not app._gate.is_busy:
+            return
+        await pilot.pause()
+    raise AssertionError("app did not become idle")
+
+
+async def _settle_view(app: Any, pilot: Any, view_id: str, selector: str) -> None:
+    """Wait deterministically until a navigation has fully settled.
+
+    A view change schedules primary-control focus via ``call_after_refresh``;
+    the resulting Textual ``TabPane.Focused`` message re-asserts
+    ``TabbedContent.active``.  Waiting on both the expected context id and the
+    exact focused widget converges only after that chain completes, so the
+    assertion is not sensitive to a fixed number of message-pump iterations.
+    """
+    target = app.query_one(selector)
+    for _ in range(300):
+        if app.focused is target and app._current_context().context_id == view_id:
+            return
+        await pilot.pause()
+    focused = app.focused
+    raise AssertionError(
+        f"view {view_id!r} did not settle on {selector}; "
+        f"context={app._current_context().context_id!r} "
+        f"focused={type(focused).__name__}/{getattr(focused, 'id', None)!r} "
+        f"target_display={target.display!r} target_focusable={target.focusable!r}"
+    )
+
+
 def _noop(host: CommandHost) -> None:
     _ = host
 
@@ -264,17 +296,14 @@ class TestProductionShell:
         async def scenario() -> None:
             app = DndTuiApp(_test_services())
             async with app.run_test(size=(80, 24)) as pilot:
-                await pilot.pause()
+                await _wait_idle(app, pilot)
                 assert app._current_context().context_id == "assistant"
                 app.run_semantic_command("view.session")
-                await pilot.pause()
-                assert app._current_context().context_id == "session"
+                await _settle_view(app, pilot, "session", "#session-note-input")
                 app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
-                assert app._current_context().context_id == "campaign-state"
+                await _settle_view(app, pilot, "campaign-state", "#campaign-state-reload")
                 app.run_semantic_command("view.assistant")
-                await pilot.pause()
-                assert app._current_context().context_id == "assistant"
+                await _settle_view(app, pilot, "assistant", "#assistant-query")
 
         _run(scenario())
 

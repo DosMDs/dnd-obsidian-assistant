@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-07)
+**Last updated:** 2026-09-20 (S14-08)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` (implementation complete; measured live candidate not accepted); next `S14-08` `NOT STARTED`
+**Active work:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED`; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; next `S14-09` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` (implementation complete, live candidate not accepted); `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` (implementation complete, live candidate not accepted); S14-08 `DONE`; S14-09 `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-06 `DONE`
+## Current work — S14-08 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -156,6 +156,21 @@ measured report is frozen at
 baseline.  No rerun, no model/profile/prompt/dataset/dependency change.  Stage 14
 remains `IN PROGRESS`; `S14-08` is next and `NOT STARTED`.
 
+`S14-08 — TUI / Cross-Platform Hardening Evidence` is `DONE`.  It closes the
+remaining headless TUI gaps, corrects recurring TUI test failures and records
+honest real-terminal evidence.  Presentation-only fixes: a navigation
+generation/bounded-focus race where a stale deferred focus could re-activate
+the previous pane; a help-panel close/toggle gap on the custom registry-derived
+command surface; and a primary-view layout collapse where Textual 8.2.8's
+auto-height `TabbedContent`/`ContentSwitcher`/`TabPane` chain zeroed the active
+pane body (scoped `1fr` fill in `tui/styles.py`).  New regressions cover
+exact-focus restore after palette/help close, assistant `Enter`
+newline-without-submit, rapid-navigation convergence and positive render
+geometry at 100x30 / 80x24 / 60x20.  Windows Terminal real-terminal smoke is
+`MANUAL — PASS` (attempt #1 exposed the layout collapse); macOS remains
+`SKIPPED_CAPABILITY`; f5 remains a convenience alias.  No domain/storage/runtime
+behavior change.  Detailed evidence: `docs/stages/14_EVALS_AND_HARDENING.md`.
+
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
 done     S14-02 — deterministic eval contract and scoring foundation  DONE
@@ -164,7 +179,8 @@ done     S14-04 — untrusted-input / path-safety gap closure           DONE
 done     S14-05 — provider/runtime upgrade regression gate            DONE
 done     S14-06 — scriptable eval runner + product dataset            DONE
 blocked  S14-07 — opt-in live Ollama baseline + latency + frozen report BLOCKED
-next     S14-08 — TUI / cross-platform hardening evidence             NOT STARTED
+done     S14-08 — TUI / cross-platform hardening evidence             DONE
+next     S14-09 — final Stage-14 review / release-readiness closure   NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
@@ -192,9 +208,9 @@ S14-07 BLOCKED: no accepted canonical live baseline exists.  TWO measured live
   candidate/qualification decision (never a retry of an existing candidate).
 Stage 13 is `DONE` and integrated.
 Known carried-forward limitations (non-blocking for Stage 14):
-  Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
+  Windows Terminal real-terminal smoke          MANUAL PASS (S14-08)
   macOS real-terminal smoke                     SKIPPED_CAPABILITY
-  f5 terminal-level portability                 SKIPPED_CAPABILITY
+  f5 terminal-level portability                 MANUAL PASS (S14-08; convenience alias, not a guarantee)
   external OS/process kill                      not preventable by the TUI
   thread-worker cancellation                    fail-closed, not rollback
   Windows/macOS symlink-junction discovery       capability-gated tests

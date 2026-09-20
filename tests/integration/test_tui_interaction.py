@@ -61,6 +61,23 @@ async def _drain(pilot: Any, predicate: Any) -> None:
     raise AssertionError("condition not reached within pilot iterations")
 
 
+async def _settle_view(app: Any, pilot: Any, view_id: str, selector: str) -> None:
+    """Wait until navigation fully settles on the exact context and widget.
+
+    ``navigate_to`` schedules primary-control focus through
+    ``call_after_refresh``; the Textual ``TabPane.Focused`` message then
+    re-asserts ``TabbedContent.active``.  Waiting for both the expected context
+    id and exact focused widget is deterministic and independent of a fixed
+    ``pilot.pause()`` count.
+    """
+    target = app.query_one(selector)
+    for _ in range(300):
+        if app.focused is target and app._current_context().context_id == view_id:
+            return
+        await pilot.pause()
+    raise AssertionError(f"view {view_id!r} did not settle on {selector}")
+
+
 class RecordingAssistant:
     def __init__(
         self,
@@ -139,20 +156,17 @@ class TestFocusPolicy:
         async def scenario() -> None:
             app = DndTuiApp(_services(RecordingAssistant(), RecordingSession()))
             async with app.run_test(size=(100, 30)) as pilot:
-                await pilot.pause()
+                await _drain(pilot, lambda: not app._gate.is_busy)
                 await pilot.press("f3")
-                await pilot.pause()
-                await pilot.pause()
+                await _settle_view(app, pilot, "session", "#session-note-input")
                 assert app.focused is app.query_one("#session-note-input")
 
                 await pilot.press("f4")
-                await pilot.pause()
-                await pilot.pause()
+                await _settle_view(app, pilot, "campaign-state", "#campaign-state-reload")
                 assert app.focused is app.query_one("#campaign-state-reload")
 
                 await pilot.press("f2")
-                await pilot.pause()
-                await pilot.pause()
+                await _settle_view(app, pilot, "assistant", "#assistant-query")
                 assert app.focused is app.query_one("#assistant-query", TextArea)
 
         _run(scenario())
@@ -161,10 +175,9 @@ class TestFocusPolicy:
         async def scenario() -> None:
             app = DndTuiApp(_services(RecordingAssistant(), RecordingSession()))
             async with app.run_test(size=(100, 30)) as pilot:
-                await pilot.pause()
+                await _drain(pilot, lambda: not app._gate.is_busy)
                 app.run_semantic_command("view.session")
-                await pilot.pause()
-                await pilot.pause()
+                await _settle_view(app, pilot, "session", "#session-note-input")
                 assert app.focused is app.query_one("#session-note-input")
 
         _run(scenario())
@@ -206,6 +219,24 @@ class TestSubmitAlias:
 
         _run(scenario())
 
+    def test_enter_inserts_newline_without_submitting(self) -> None:
+        async def scenario() -> None:
+            assistant = RecordingAssistant()
+            app = DndTuiApp(_services(assistant, RecordingSession()))
+            async with app.run_test(size=(100, 30)) as pilot:
+                await pilot.pause()
+                editor = app.query_one("#assistant-query", TextArea)
+                editor.focus()
+                editor.text = ""
+                await pilot.pause()
+                await pilot.press("а", "enter", "б")
+                await pilot.pause()
+                assert editor.text == "а\nб"
+                assert assistant.calls == [], "Enter must not submit the composer"
+                assert not app._gate.is_busy
+
+        _run(scenario())
+
 
 # ── Runtime binding / palette quit-path audit ────────────────────────────────
 
@@ -228,7 +259,10 @@ class TestQuitPathAudit:
     def test_palette_has_no_framework_quit_entry(self) -> None:
         async def scenario() -> None:
             app = DndTuiApp(_services(RecordingAssistant(), RecordingSession()))
-            async with app.run_test(size=(100, 30)):
+            async with app.run_test(size=(100, 30)) as pilot:
+                # Startup read/refresh workers hold the exclusive gate briefly;
+                # wait until idle so the palette reflects the settled state.
+                await _drain(pilot, lambda: not app._gate.is_busy)
                 titles = {command.title for command in app.get_system_commands(app.screen)}
                 assert "Quit" not in titles
                 assert "Выход" in titles

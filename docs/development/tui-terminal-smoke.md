@@ -29,8 +29,10 @@ interactive terminal do **not** verify macOS.
    ```
 
 2. Create a disposable model config `<temp>/tui-smoke-config.toml` with a local
-   profile of role `AGENT` (a real Ollama endpoint is not required for the
-   platform smoke; model invocation is not part of this protocol).
+   profile of role `agent` (`AGENT`). A real successful Ollama inference is not
+   required: the assistant submit checks may terminate through the expected
+   model-error path (a Russian categorized message), because this protocol
+   validates terminal/UI behavior, not model quality.
 3. Run against the copy only:
 
    ```text

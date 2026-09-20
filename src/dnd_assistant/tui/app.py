@@ -63,6 +63,9 @@ _PRIMARY_FOCUS: dict[str, str] = {
 }
 """Post-navigation focus target per primary view context id."""
 
+_MAX_FOCUS_ATTEMPTS = 10
+"""Bounded refresh retries while a requested pane becomes displayable."""
+
 
 class DndTuiApp(App[None]):
     """The production D&D Session Assistant TUI."""
@@ -110,6 +113,7 @@ class DndTuiApp(App[None]):
         self._gate = InFlightGate()
         self._has_active_session = False
         self._wired = False
+        self._nav_generation = 0
         self._dispatcher = SemanticDispatcher(self.SEMANTIC_REGISTRY, self, self._current_context)
 
     # ── Lifecycle / wiring ──────────────────────────────────────────────────
@@ -205,8 +209,16 @@ class DndTuiApp(App[None]):
             self.push_screen(CommandPalette(id="--command-palette"))
 
     def show_help(self) -> None:
-        """Show the key/help panel."""
-        self.action_show_help_panel()
+        """Toggle the key/help panel (show when hidden, hide when open).
+
+        The panel never takes focus, so hiding it leaves the previously focused
+        widget intact.  Toggling is presentation-only and keeps the accepted
+        ``app.help`` semantic command as the single discoverable surface.
+        """
+        if self.screen.query("HelpPanel"):
+            self.action_hide_help_panel()
+        else:
+            self.action_show_help_panel()
 
     def navigate_to(self, view_id: str) -> None:
         """Switch the primary view by stable id and focus its primary control.
@@ -217,11 +229,32 @@ class DndTuiApp(App[None]):
         tabs = next(iter(self.query(TabbedContent)), None)
         if tabs is None:
             return
+        self._nav_generation += 1
+        generation = self._nav_generation
         tabs.active = view_id
         self.refresh_command_state()
-        self.call_after_refresh(self._focus_primary_view, view_id)
+        self.call_after_refresh(self._focus_primary_view, view_id, generation)
 
-    def _focus_primary_view(self, view_id: str) -> None:
+    def _focus_primary_view(self, view_id: str, generation: int, attempt: int = 0) -> None:
+        """Focus the primary control of the latest requested view.
+
+        Navigation schedules this through ``call_after_refresh``.  Textual may
+        deliver a late ``TabPane.Focused`` message for an earlier pane, which
+        re-activates that stale pane and can hide the requested pane before its
+        control is displayed.  A monotonically increasing generation makes the
+        last navigation authoritative: stale callbacks cannot re-activate an
+        abandoned pane, the requested pane is re-asserted, and focus is retried
+        across refreshes until the control is displayed.  No sleeps or timers
+        are used; convergence is driven by the refresh cycle.
+        """
+        if generation != self._nav_generation:
+            return
+        tabs = next(iter(self.query(TabbedContent)), None)
+        if tabs is None:
+            return
+        if tabs.active != view_id:
+            # Re-assert against a stale pane activation event.
+            tabs.active = view_id
         selector = _PRIMARY_FOCUS.get(view_id)
         if selector is None:
             return
@@ -231,6 +264,10 @@ class DndTuiApp(App[None]):
             return
         if getattr(target, "focusable", False) and target.display:
             target.focus()
+            if self.focused is target:
+                return
+        if attempt < _MAX_FOCUS_ATTEMPTS:
+            self.call_after_refresh(self._focus_primary_view, view_id, generation, attempt + 1)
 
     def assistant_submit(self) -> None:
         view = self._first(AssistantView)
