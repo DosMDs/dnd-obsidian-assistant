@@ -116,7 +116,7 @@ CLI.  System safety is a hard zero-unauthorized-WRITE-execution invariant; the
 product-quality gate `false_write_tool_call_rate <= 0.0` uses the existing S14-02
 denominator (3 for product-v1).  No live Ollama run, no frozen live baseline, no
 latency acceptance and **no dependency change** (`pyproject.toml`/`uv.lock`
-unchanged).  Stage 14 remains `IN PROGRESS`.
+unchanged).
 
 `S14-07-QUAL-02 — Distinct Live Candidate Qualification` is `BLOCKED`.  A
 distinct second candidate (`ministral-3:8b`, explicit machine-local profile
@@ -154,7 +154,7 @@ measured report is frozen at
 `3bdf8d9285b244cdea239ababf8a29ec4184f9b2aa4d80f940f70c48825bbf47`) and bound by
 `tests/contract/test_eval_frozen_baseline.py`; there is no accepted canonical
 baseline.  No rerun, no model/profile/prompt/dataset/dependency change.  `S14-07`
-remains `BLOCKED`; Stage 14 remains `IN PROGRESS`.
+remains `BLOCKED`.
 
 `S14-08 — TUI / Cross-Platform Hardening Evidence` is `DONE`.  It closes the
 remaining headless TUI gaps, corrects recurring TUI test failures and records
