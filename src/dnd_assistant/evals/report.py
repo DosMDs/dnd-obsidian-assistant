@@ -20,11 +20,12 @@ from dnd_assistant.evals.contracts import (
     FullTurnObservation,
 )
 from dnd_assistant.evals.dataset import EvalDataset
+from dnd_assistant.evals.latency import LatencyReport, summarize_latency
 from dnd_assistant.evals.metrics import MetricId, MetricSummary, summarize_metrics
 from dnd_assistant.evals.scoring import score_decision, score_full_turn
 from dnd_assistant.evals.write_accounting import count_unauthorized_write_handler_executions
 
-REPORT_SCHEMA_VERSION = 1
+REPORT_SCHEMA_VERSION = 2
 
 
 # ── Report DTOs ────────────────────────────────────────────────────────────
@@ -112,6 +113,7 @@ class EvalReport:
     full_turn_observations: tuple[FullTurnObservation, ...]
     metrics: tuple[MetricSummary, ...]
     sample_scores: tuple[EvalSampleScore, ...]
+    latency: LatencyReport
     safety: EvalSafetyResult
     quality: EvalQualityResult
     run_validity: EvalRunValidity
@@ -143,6 +145,8 @@ def build_eval_report(
         decision_observations,
         runtime_label=runtime_label,
     )
+
+    latency = _build_latency(decision_observations, full_turn_observations)
 
     unauthorized = 0
     for observation in full_turn_observations:
@@ -205,6 +209,7 @@ def build_eval_report(
         full_turn_observations=tuple(full_turn_observations),
         metrics=tuple(metrics),
         sample_scores=tuple(sample_scores),
+        latency=latency,
         safety=safety,
         quality=quality,
         run_validity=EvalRunValidity(
@@ -310,6 +315,17 @@ def _sample_scores(
     return scores
 
 
+def _build_latency(
+    decision_observations: Sequence[DecisionObservation],
+    full_turn_observations: Sequence[FullTurnObservation],
+) -> LatencyReport:
+    """Aggregate latency from the same frozen observations used for metrics."""
+    return LatencyReport(
+        decision=summarize_latency([o.duration_seconds for o in decision_observations]),
+        full_turn=summarize_latency([o.duration_seconds for o in full_turn_observations]),
+    )
+
+
 # ── Baseline comparison ────────────────────────────────────────────────────
 
 
@@ -345,11 +361,20 @@ class BaselineComparison:
     safety_current: int
     quality_baseline_passed: bool
     quality_current_passed: bool
+    decision_p50_delta: float | None
+    decision_p95_delta: float | None
+    full_turn_p50_delta: float | None
+    full_turn_p95_delta: float | None
 
 
 def compare_eval_reports(current: EvalReport, baseline: EvalReport) -> BaselineComparison:
-    """Compare compatible reports; reject/classify incompatible ground truth."""
+    """Compare compatible reports; reject/classify incompatible ground truth.
+
+    Latency deltas are report-only descriptive evidence: they never contribute
+    to ``status``, acceptance or any pass/fail decision.
+    """
     reasons = _incompatibility_reasons(current, baseline)
+    decision_p50, decision_p95, full_turn_p50, full_turn_p95 = _latency_deltas(current, baseline)
     if reasons:
         return BaselineComparison(
             status=BaselineStatus.INCOMPATIBLE,
@@ -359,6 +384,10 @@ def compare_eval_reports(current: EvalReport, baseline: EvalReport) -> BaselineC
             safety_current=current.safety.unauthorized_write_handler_execution_count,
             quality_baseline_passed=baseline.quality.passed,
             quality_current_passed=current.quality.passed,
+            decision_p50_delta=decision_p50,
+            decision_p95_delta=decision_p95,
+            full_turn_p50_delta=full_turn_p50,
+            full_turn_p95_delta=full_turn_p95,
         )
 
     baseline_by_id = {m.metric_id: m for m in baseline.metrics}
@@ -391,6 +420,29 @@ def compare_eval_reports(current: EvalReport, baseline: EvalReport) -> BaselineC
         safety_current=current.safety.unauthorized_write_handler_execution_count,
         quality_baseline_passed=baseline.quality.passed,
         quality_current_passed=current.quality.passed,
+        decision_p50_delta=decision_p50,
+        decision_p95_delta=decision_p95,
+        full_turn_p50_delta=full_turn_p50,
+        full_turn_p95_delta=full_turn_p95,
+    )
+
+
+def _latency_deltas(
+    current: EvalReport,
+    baseline: EvalReport,
+) -> tuple[float | None, float | None, float | None, float | None]:
+    """Report-only latency deltas (current - baseline); ``None`` if either is absent."""
+
+    def _delta(current_value: float | None, baseline_value: float | None) -> float | None:
+        if current_value is None or baseline_value is None:
+            return None
+        return current_value - baseline_value
+
+    return (
+        _delta(current.latency.decision.p50_seconds, baseline.latency.decision.p50_seconds),
+        _delta(current.latency.decision.p95_seconds, baseline.latency.decision.p95_seconds),
+        _delta(current.latency.full_turn.p50_seconds, baseline.latency.full_turn.p50_seconds),
+        _delta(current.latency.full_turn.p95_seconds, baseline.latency.full_turn.p95_seconds),
     )
 
 

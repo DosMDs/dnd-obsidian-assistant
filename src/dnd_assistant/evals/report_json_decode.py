@@ -21,6 +21,7 @@ from dnd_assistant.evals.contracts import (
     FullTurnObservation,
     ToolCallObservation,
 )
+from dnd_assistant.evals.latency import LatencyReport, LatencySummary
 from dnd_assistant.evals.metrics import MetricId, MetricSummary
 from dnd_assistant.evals.report import (
     REPORT_SCHEMA_VERSION,
@@ -58,6 +59,7 @@ def report_from_json(text: str) -> EvalReport:
             "full_turn_observations",
             "metrics",
             "sample_scores",
+            "latency",
             "safety",
             "quality",
             "run_validity",
@@ -80,6 +82,7 @@ def report_from_json(text: str) -> EvalReport:
     sample_scores = tuple(
         _decode_sample_score(item) for item in _require_list(data, "sample_scores", "report")
     )
+    latency = _decode_latency(_require_mapping(data, "latency", "report"))
     safety = _decode_safety(_require_mapping(data, "safety", "report"))
     quality = _decode_quality(_require_mapping(data, "quality", "report"))
     run_validity = _decode_run_validity(_require_mapping(data, "run_validity", "report"))
@@ -96,6 +99,7 @@ def report_from_json(text: str) -> EvalReport:
         full_turn_observations=full_turn_observations,
         metrics=metrics,
         sample_scores=sample_scores,
+        latency=latency,
         safety=safety,
         quality=quality,
         run_validity=run_validity,
@@ -348,6 +352,30 @@ def _decode_sample_score(data: Any) -> EvalSampleScore:
     )
 
 
+def _decode_latency(data: dict[str, Any]) -> LatencyReport:
+    _require_keys(data, {"decision", "full_turn"}, "latency")
+    return LatencyReport(
+        decision=_decode_latency_summary(data["decision"], "latency.decision"),
+        full_turn=_decode_latency_summary(data["full_turn"], "latency.full_turn"),
+    )
+
+
+def _decode_latency_summary(data: Any, context: str) -> LatencySummary:
+    mapping = _as_mapping(data, context)
+    _require_keys(mapping, {"sample_count", "p50_seconds", "p95_seconds"}, context)
+    sample_count = _require_int(mapping, "sample_count", context)
+    p50 = _opt_nonnegative_float(mapping, "p50_seconds", context)
+    p95 = _opt_nonnegative_float(mapping, "p95_seconds", context)
+    if sample_count == 0:
+        if p50 is not None or p95 is not None:
+            raise ValueError(f"{context}: empty latency set must have null percentiles")
+    elif p50 is None or p95 is None:
+        raise ValueError(f"{context}: non-empty latency set must have percentiles")
+    elif p50 > p95:
+        raise ValueError(f"{context}: p50 must not exceed p95")
+    return LatencySummary(sample_count=sample_count, p50_seconds=p50, p95_seconds=p95)
+
+
 def _decode_safety(data: dict[str, Any]) -> EvalSafetyResult:
     _require_keys(data, {"unauthorized_write_handler_execution_count", "passed"}, "safety")
     return EvalSafetyResult(
@@ -472,6 +500,13 @@ def _opt_float(data: dict[str, Any], field: str, context: str) -> float | None:
     if value is None:
         return None
     return _require_number(data, field, context)
+
+
+def _opt_nonnegative_float(data: dict[str, Any], field: str, context: str) -> float | None:
+    value = _opt_float(data, field, context)
+    if value is not None and value < 0:
+        raise ValueError(f"{context}.{field} must be non-negative")
+    return value
 
 
 def _require_number(data: dict[str, Any], field: str, context: str) -> float:

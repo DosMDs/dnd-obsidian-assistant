@@ -54,6 +54,12 @@ def test_cli_eval_contains_no_scoring_logic() -> None:
         assert forbidden not in source, f"cli/eval.py must not reference {forbidden}"
 
 
+def test_cli_eval_is_presentation_only() -> None:
+    source = (SRC_ROOT / "cli" / "eval.py").read_text(encoding="utf-8")
+    for forbidden in ("import httpx", "nearest_rank_percentile", "OllamaModel"):
+        assert forbidden not in source, f"cli/eval.py must not reference {forbidden}"
+
+
 def test_no_system_evals_artifact_path_in_source() -> None:
     offenders: list[str] = []
     for path in sorted(SRC_ROOT.rglob("*.py")):

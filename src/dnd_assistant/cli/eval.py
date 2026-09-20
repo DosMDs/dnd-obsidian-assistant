@@ -15,14 +15,17 @@ from pathlib import Path
 
 import typer
 
+from dnd_assistant.composition import eval_ollama
 from dnd_assistant.composition.eval_artifacts import (
     EvalArtifactError,
     read_report_text,
     write_report_atomic,
 )
 from dnd_assistant.composition.eval_runner import SCRIPTED_RUNTIME, run_eval
+from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.evals import (
     EvalReport,
+    LatencySummary,
     compare_eval_reports,
     report_from_json,
     report_to_json,
@@ -50,11 +53,18 @@ def _resolve_dataset(alias: str) -> EvalDataset:
 
 
 def _resolve_runtime(runtime: str) -> str:
-    if runtime != SCRIPTED_RUNTIME:
+    if runtime not in (SCRIPTED_RUNTIME, eval_ollama.LIVE_RUNTIME):
         raise typer.BadParameter(
-            f"Неизвестный режим выполнения: {runtime!r}. Доступен: {SCRIPTED_RUNTIME!r}"
+            f"Неизвестный режим выполнения: {runtime!r}. "
+            f"Доступны: {SCRIPTED_RUNTIME!r}, {eval_ollama.LIVE_RUNTIME!r}"
         )
     return runtime
+
+
+def _echo_latency_layer(summary: LatencySummary) -> None:
+    for label, value in (("p50", summary.p50_seconds), ("p95", summary.p95_seconds)):
+        rendered = "нет данных" if value is None else f"{value:.4f} с"
+        typer.echo(f"  {label}: {rendered}, N={summary.sample_count}")
 
 
 def _echo_summary(report: EvalReport) -> None:
@@ -86,6 +96,10 @@ def _echo_summary(report: EvalReport) -> None:
     )
     typer.echo(f"Системная безопасность: {'PASS' if safety.passed else 'FAIL'}")
     typer.echo(f"Качество: {'PASS' if quality.passed else 'FAIL'}")
+    typer.echo("Latency первого model request:")
+    _echo_latency_layer(report.latency.decision)
+    typer.echo("Latency полного turn:")
+    _echo_latency_layer(report.latency.full_turn)
     if report.run_validity.oracle_consistency_required:
         typer.echo(
             f"Согласованность scripted-oracle: {'PASS' if report.run_validity.oracle_consistent else 'FAIL'}"
@@ -99,12 +113,23 @@ def _eval_run(
     runtime: str = typer.Option(
         SCRIPTED_RUNTIME,
         "--runtime",
-        help="Режим выполнения. S14-06 поддерживает только 'scripted'.",
+        help="Режим выполнения: 'scripted' (офлайн) или 'ollama' (явный live).",
     ),
     dataset: str = typer.Option(
         "product-v1",
         "--dataset",
         help="Имя набора данных (например, product-v1).",
+    ),
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--config",
+        help="Путь к machine-local TOML конфигурации (только для --runtime ollama).",
+        resolve_path=True,
+    ),
+    profile: str | None = typer.Option(
+        None,
+        "--profile",
+        help="Имя AGENT-профиля модели (только для --runtime ollama).",
     ),
     output: Path = typer.Option(  # noqa: B008
         ...,
@@ -118,11 +143,20 @@ def _eval_run(
         help="Перезаписать существующий файл отчёта.",
     ),
 ) -> None:
-    """Запустить офлайн eval и записать отчёт."""
+    """Запустить eval и записать отчёт."""
     resolved_runtime = _resolve_runtime(runtime)
     resolved_dataset = _resolve_dataset(dataset)
 
-    report = run_eval(resolved_dataset, runtime=resolved_runtime)
+    try:
+        report = _run_selected_runtime(
+            resolved_runtime,
+            resolved_dataset,
+            config=config,
+            profile=profile,
+        )
+    except DndAssistantError as exc:
+        typer.echo(f"Ошибка live-выполнения: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     _echo_summary(report)
 
@@ -137,6 +171,24 @@ def _eval_run(
     if not report.accepted:
         typer.echo("Оценка не принята: проверьте safety/quality/полноту.", err=True)
         raise typer.Exit(code=1)
+
+
+def _run_selected_runtime(
+    runtime: str,
+    dataset: EvalDataset,
+    *,
+    config: Path | None,
+    profile: str | None,
+) -> EvalReport:
+    """Dispatch scripted vs explicit live runtime; validate option presence."""
+    if runtime == eval_ollama.LIVE_RUNTIME:
+        if config is None or profile is None:
+            raise typer.BadParameter("Для --runtime ollama требуются --config и --profile.")
+        return eval_ollama.run_live_eval(dataset, config_path=config, profile_name=profile)
+
+    if config is not None or profile is not None:
+        raise typer.BadParameter("Опции --config/--profile допустимы только для --runtime ollama.")
+    return run_eval(dataset, runtime=runtime)
 
 
 @eval_app.command("report")

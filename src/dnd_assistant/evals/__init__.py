@@ -36,6 +36,11 @@ from dnd_assistant.evals.dataset import (
     EvalSamplePlan,
     EvalSessionState,
 )
+from dnd_assistant.evals.latency import (
+    LatencyReport,
+    LatencySummary,
+    summarize_latency,
+)
 from dnd_assistant.evals.metrics import (
     MetricId,
     MetricSummary,
@@ -94,6 +99,8 @@ __all__ = [
     "ExpectedToolCall",
     "ExposedToolInfo",
     "FullTurnObservation",
+    "LatencyReport",
+    "LatencySummary",
     "MetricDelta",
     "MetricId",
     "MetricSummary",
@@ -111,6 +118,7 @@ __all__ = [
     "score_decision",
     "score_full_turn",
     "score_tool_name",
+    "summarize_latency",
     "summarize_metrics",
     "validate_completeness",
 ]

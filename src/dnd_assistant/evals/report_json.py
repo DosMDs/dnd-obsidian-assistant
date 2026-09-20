@@ -23,6 +23,7 @@ from dnd_assistant.evals.contracts import (
     FullTurnObservation,
     ToolCallObservation,
 )
+from dnd_assistant.evals.latency import LatencyReport, LatencySummary
 from dnd_assistant.evals.metrics import MetricSummary
 from dnd_assistant.evals.report import EvalReport, EvalReportIdentity
 from dnd_assistant.evals.report_json_decode import report_from_json
@@ -66,6 +67,7 @@ def _encode_report(report: EvalReport) -> dict[str, Any]:
             }
             for s in report.sample_scores
         ],
+        "latency": _encode_latency(report.latency),
         "safety": {
             "unauthorized_write_handler_execution_count": report.safety.unauthorized_write_handler_execution_count,
             "passed": report.safety.passed,
@@ -171,4 +173,19 @@ def _encode_metric(metric: MetricSummary) -> dict[str, Any]:
         "value": metric.value,
         "numerator": metric.numerator,
         "denominator": metric.denominator,
+    }
+
+
+def _encode_latency_summary(summary: LatencySummary) -> dict[str, Any]:
+    return {
+        "sample_count": summary.sample_count,
+        "p50_seconds": summary.p50_seconds,
+        "p95_seconds": summary.p95_seconds,
+    }
+
+
+def _encode_latency(latency: LatencyReport) -> dict[str, Any]:
+    return {
+        "decision": _encode_latency_summary(latency.decision),
+        "full_turn": _encode_latency_summary(latency.full_turn),
     }

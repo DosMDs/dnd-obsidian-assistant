@@ -331,3 +331,94 @@ def test_strict_decoder_round_trip_and_russian_preserved() -> None:
     text = report_to_json(report)
     assert "Готово: Арлен" in text
     assert report_from_json(text) == report
+
+
+# ── Schema v2 latency ──────────────────────────────────────────────────────
+
+
+def test_schema_version_is_v2() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    identity = payload["identity"]
+    assert isinstance(identity, dict)
+    assert identity["report_schema_version"] == 2
+
+
+def test_schema_v1_rejected() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    identity = payload["identity"]
+    assert isinstance(identity, dict)
+    identity["report_schema_version"] = 1
+    with pytest.raises(ValueError, match="unsupported report_schema_version"):
+        report_from_json(json.dumps(payload))
+
+
+def test_latency_derived_from_frozen_observations() -> None:
+    report = _report(_dataset(), _decision(duration_seconds=0.25), _full_turn(duration_seconds=0.5))
+    assert report.latency.decision.sample_count == 1
+    assert report.latency.decision.p50_seconds == 0.25
+    assert report.latency.decision.p95_seconds == 0.25
+    assert report.latency.full_turn.sample_count == 1
+    assert report.latency.full_turn.p50_seconds == 0.5
+
+
+def test_latency_required_in_json() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    del payload["latency"]
+    with pytest.raises(ValueError, match="missing required keys"):
+        report_from_json(json.dumps(payload))
+
+
+def test_latency_rejects_bool_sample_count() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    latency = payload["latency"]
+    assert isinstance(latency, dict)
+    latency["decision"]["sample_count"] = True
+    with pytest.raises(ValueError, match="must be an integer"):
+        report_from_json(json.dumps(payload))
+
+
+def test_latency_rejects_negative_percentile() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    latency = payload["latency"]
+    assert isinstance(latency, dict)
+    latency["full_turn"]["p50_seconds"] = -1.0
+    with pytest.raises(ValueError, match="non-negative"):
+        report_from_json(json.dumps(payload))
+
+
+def test_latency_rejects_inconsistent_nullability() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    latency = payload["latency"]
+    assert isinstance(latency, dict)
+    latency["decision"]["p50_seconds"] = None
+    with pytest.raises(ValueError, match="must have percentiles"):
+        report_from_json(json.dumps(payload))
+
+
+def test_latency_rejects_p50_greater_than_p95() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    latency = payload["latency"]
+    assert isinstance(latency, dict)
+    latency["decision"]["p50_seconds"] = 2.0
+    latency["decision"]["p95_seconds"] = 1.0
+    with pytest.raises(ValueError, match="p50 must not exceed p95"):
+        report_from_json(json.dumps(payload))
+
+
+def test_compatible_baseline_reports_latency_deltas() -> None:
+    dataset = _dataset()
+    baseline = _report(dataset, _decision(duration_seconds=0.1), _full_turn(duration_seconds=0.2))
+    current = _report(dataset, _decision(duration_seconds=0.4), _full_turn(duration_seconds=0.9))
+    comparison = compare_eval_reports(current, baseline)
+    assert comparison.status is BaselineStatus.COMPATIBLE
+    assert comparison.decision_p50_delta == pytest.approx(0.3)
+    assert comparison.full_turn_p50_delta == pytest.approx(0.7)
+
+
+def test_incompatible_baseline_still_reports_latency_deltas() -> None:
+    current = _report(_dataset(version="2"), _decision(), _full_turn())
+    baseline = _report(_dataset(version="1"), _decision(), _full_turn())
+    comparison = compare_eval_reports(current, baseline)
+    assert comparison.status is BaselineStatus.INCOMPATIBLE
+    # Identical durations: deltas are present and zero, never a pass/fail input.
+    assert comparison.decision_p50_delta == 0.0

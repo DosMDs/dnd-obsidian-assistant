@@ -31,6 +31,8 @@ def test_scripted_run_writes_report_without_vault(tmp_path: Path) -> None:
     assert result.exit_code == 0, result.output
     assert (tmp_path / "report.json").is_file()
     assert "Набор данных" in result.output
+    assert "Latency первого model request:" in result.output
+    assert "Latency полного turn:" in result.output
 
 
 def test_run_requires_explicit_output(tmp_path: Path) -> None:
@@ -51,8 +53,54 @@ def test_overwrite_succeeds(tmp_path: Path) -> None:
 
 
 def test_unknown_runtime_is_usage_error(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--runtime", "bogus")
+    assert result.exit_code == 2
+
+
+def test_ollama_requires_config_and_profile(tmp_path: Path) -> None:
     result = _run(tmp_path, "--runtime", "ollama")
     assert result.exit_code == 2
+    assert "config" in result.output.lower() or "--config" in result.output
+
+
+def test_scripted_rejects_live_only_options(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--runtime", "scripted", "--profile", "agent")
+    assert result.exit_code == 2
+
+
+def test_ollama_live_preflight_failure_is_exit_1(tmp_path: Path, monkeypatch: Any) -> None:
+    from dnd_assistant.composition.eval_ollama import EvalLiveError
+
+    def _fail(*_args: Any, **_kwargs: Any) -> Any:
+        raise EvalLiveError("endpoint not reachable")
+
+    monkeypatch.setattr("dnd_assistant.composition.eval_ollama.run_live_eval", _fail)
+    config = tmp_path / "models.toml"
+    config.write_text(
+        "[profiles.agent]\n"
+        'provider = "ollama"\n'
+        'model = "m"\n'
+        'base_url = "http://localhost:11434"\n'
+        'role = "agent"\n',
+        encoding="utf-8",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "eval",
+            "run",
+            "--runtime",
+            "ollama",
+            "--config",
+            str(config),
+            "--profile",
+            "agent",
+            "--output",
+            str(tmp_path / "report.json"),
+        ],
+    )
+    assert result.exit_code == 1
+    assert "live" in result.output.lower()
 
 
 def test_unknown_dataset_is_usage_error(tmp_path: Path) -> None:
