@@ -468,9 +468,10 @@ dependency, CLI or config change.  The production-defect decision is
 `start_session`, `record_event`, `record_note`, `end_session`).  No current
 production tool accepts a filename, `path`, `vault_path`, directory selector or
 `relative_path`.  The only model-facing field that becomes a filesystem path
-component is `session_id`, and it is validated by
-`storage/session_paths.py::_validate_session_id_for_path` before any filesystem
-access.  `EntityId` is a logical identifier matched against parsed canonical
+component is `session_id`, and validation by
+`storage/session_paths.py::_validate_session_id_for_path` occurs before the
+untrusted `session_id` is used to construct or access session-specific
+filesystem paths.  `EntityId` is a logical identifier matched against parsed canonical
 frontmatter after scanning approved entity directories; it carries no filesystem
 authority.  Content fields persist as content.  World-time and `mvp_registry`
 tools are not production model-reachable.

@@ -21,8 +21,8 @@ Scope and contract
   correct safety property is therefore **"path-shaped EntityId remains data"**,
   not "reject path-shaped EntityIds".
 - ``session_id`` is the only model-facing field that becomes a filesystem path
-  component; it is validated by ``storage/session_paths.py`` before any
-  filesystem access.
+  component; it is validated by ``storage/session_paths.py`` before it is used
+  to construct or access session-specific filesystem paths.
 - Content fields (note text, fact text) are persisted as content and never
   interpreted as paths.
 
@@ -209,7 +209,8 @@ def _audit_bytes(root: Path) -> bytes:
 def test_session_read_path_shaped_id_rejected_by_real_storage(
     tmp_path: Path, tool_name: str, hostile_id: str
 ) -> None:
-    """Model-generated session_id reaches the real validator, not the filesystem."""
+    """Model-generated session_id reaches the real path-component validator before
+    it can influence session-specific filesystem paths."""
     root, _services = _make_vault(tmp_path)
     sentinel = _Sentinel(tmp_path / "outside")
     config_path = _write_config(tmp_path)
