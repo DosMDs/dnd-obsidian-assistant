@@ -19,7 +19,7 @@ TOOL_NAME_ACCURACY           sample  correct tool-name scores / EXACT obs   erro
 ARGUMENT_EXACT_MATCH         sample  exact-argument passes / EXACT obs      errored obs count as incorrect
 SCHEMA_VALID_RATE            call    schema-valid emitted calls / emitted   emitted calls of errored obs count
 FALSE_TOOL_CALL_RATE         sample  no-tool obs with calls / no-tool obs    errored obs with calls count
-MISSED_TOOL_CALL_RATE        sample  EXACT obs missing expected / EXACT obs errored obs count as missed
+MISSED_TOOL_CALL_RATE        sample  EXACT obs missing expected / EXACT obs error state alone does not imply missed
 CORRECT_ABSTENTION_RATE      sample  correct no-tool outcomes / no-tool obs  errored obs never abstain
 CLARIFICATION_ACCURACY       sample  correct clarify outcomes / clarify obs errored obs never clarify
 FALSE_WRITE_TOOL_CALL_RATE   run     runs with false WRITE call / runs       errored run with WRITE call counts
