@@ -1,6 +1,6 @@
 # Stage 14 — Evals / Hardening
 
-**Status:** `IN PROGRESS` (S14-01 … S14-09)
+**Status:** `BLOCKED` (closure blocked by S14-07)
 **Accepted baseline:** `main` @ `09fa5690b39bc1b4aeedea4fb98e26fc58c461f3`
 **S14-01:** `DONE`
 **S14-02:** `DONE`
@@ -8,8 +8,10 @@
 **S14-04:** `DONE`
 **S14-05:** `DONE`
 **S14-06:** `DONE`
-**S14-07:** `BLOCKED` (implementation complete; measured live candidate not accepted)
-**Next task:** `S14-08 — TUI / cross-platform hardening evidence` (`NOT STARTED`)
+**S14-07:** `BLOCKED` (implementation complete; no accepted canonical live baseline)
+**S14-08:** `DONE`
+**S14-09:** `DONE` (final audit complete; correction `83170f0`)
+**Blocking reason:** no accepted canonical live model baseline exists.
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -1353,5 +1355,140 @@ docs/stages/14_EVALS_AND_HARDENING.md           this record
 DEVELOPMENT_STATUS.md
 ```
 
-Status: Stage 14 remains `IN PROGRESS`; S14-07 remains `BLOCKED`; S14-09 is the
-next task and is `NOT STARTED`.
+Status: Stage 14 is `BLOCKED`; S14-07 remains `BLOCKED`; S14-08 and S14-09 are
+`DONE`. Closure/release remains blocked only by the required S14-07 accepted
+live model baseline. See the S14-09 audit record below.
+
+## 18. S14-09 implementation record (`DONE`)
+
+`S14-09 — Final Stage-14 Review / Release-Readiness Closure` is the read-only
+final audit plus a bounded correction of one defect it discovered. It is `DONE`;
+the overall Stage 14 remains `BLOCKED` because the required S14-07 accepted live
+baseline is absent. The audit itself completed and did not waive or redefine
+S14-07.
+
+### Final requirement matrix conclusion
+
+```text
+CLOSED                         product-owned deterministic eval contract (S14-02)
+CLOSED                         scriptable eval runner + product dataset + report (S14-06)
+BLOCKED                        accepted product live model baseline (S14-07)
+CLOSED                         live false-write measurement (0/3/0.0 both candidates)
+CLOSED                         offline scripted-model full-sequence regression (S14-03)
+CLOSED                         golden campaign qualification (S14-01/S14-03)
+CLOSED                         adversarial untrusted-input tool/path safety (S14-04)
+CLOSED                         provider/runtime upgrade regression gate (S14-05)
+CLOSED                         latency p50/p95 + measured-set ownership (S14-07 impl)
+CLOSED                         TUI regression completeness (S14-08; corrected below)
+CLOSED_WITH_CAPABILITY_SKIP    cross-platform terminal evidence classification (S14-08)
+SUPERSEDED_BY_ACCEPTED_DECISION test-order/snapshot tooling no-action (S14-00/S14-01)
+```
+
+All deterministic/software hardening requirements are `CLOSED`; the only
+unclosed requirement is the accepted live model baseline.
+
+### Pre-correction audit gates (S14-09)
+
+```text
+contract audit            1027 passed
+integration audit           89 passed
+provider-upgrade gate      358 passed, 7538 deselected  (-m "provider_upgrade and not ollama")
+scripted product-v1 eval   13/13; SYSTEM SAFETY PASS; false-write 0/3/0.0;
+                           quality PASS; oracle consistency PASS
+scripted report            PASS
+pyright                    0 errors, 0 warnings, 0 informations
+ruff check / format        passed / passed
+uv lock --check            passed
+git diff --check           clean
+```
+
+### S14-09-discovered defect and correction
+
+The first S14-09 canonical run was **not** green:
+
+```text
+initial canonical      1 failed, 7754 passed, 141 skipped
+failure                tests/integration/test_tui_paste.py::
+                       TestTouchedIdsPaste::
+                       test_multiline_paste_normalized_to_literal_tokens_in_order
+classification         TASK_OWNED — S14-08 deferred navigation focus retry
+```
+
+Root cause: `DndTuiApp._focus_primary_view()` coupled pane convergence with
+focus ownership. Its bounded deferred retry called `target.focus()` on every
+refresh attempt until the primary target owned focus, so a late retry could
+steal focus from another control (e.g. `#session-touched`) in the newly active
+pane; the posted `Paste` then reached a `SingleLineInput` and was rejected.
+`origin/main` had no retry, so the defect was introduced by S14-08 and
+discovered by S14-09.
+
+Correction (`commit 83170f0`):
+
+```text
+pane convergence (tabs.active = view_id) remains authoritative for the current
+navigation generation;
+focus ownership is separate: a deferred retry yields once focus is already on a
+control inside the requested active pane and does not steal it back;
+implemented generically via TabbedContent.active_pane + DOMNode.ancestors;
+no sleeps/timers, no _MAX_FOCUS_ATTEMPTS change, no control special-casing.
+```
+
+Regression evidence:
+
+```text
+new deterministic focus-steal regression   tests/integration/test_tui_focus_restore.py
+  before correction  FAILED (focus stolen to #session-note-input)
+  after correction   PASS
+original paste regression                  unchanged; PASS
+order reproducer shell -> paste            28 passed
+order reproducer layout_geometry -> paste   18 passed
+```
+
+Correction qualification (final software gate):
+
+```text
+affected TUI + boundaries + maintainability   1076 passed
+pyright                                        0 errors
+ruff                                           passed
+uv lock --check                                passed
+git diff --check                               passed
+canonical uv run pytest                        7756 passed, 141 skipped, 0 failed/errors
+```
+
+This correction is the final TUI evidence: the earlier S14-08 claim that all
+order-sensitive TUI coverage was already complete is superseded, because S14-09
+later discovered this real presentation defect and closed it.
+
+### Final release classification
+
+```text
+SOFTWARE_HARDENING_PASS   deterministic/software hardening qualified
+Stage-14 verdict          RELEASE_BLOCKED
+reason                    S14-07 is an accepted required Stage-14 deliverable;
+                          qwen3.5:9b accepted=false (2 runtime errors);
+                          ministral-3:8b accepted=false (4 runtime errors);
+                          therefore no accepted canonical live baseline exists.
+                          This is NOT a SKIPPED_CAPABILITY classification:
+                          live execution capability existed and two distinct
+                          candidates were actually measured.
+```
+
+### Frozen evidence and capability state (unchanged)
+
+```text
+qwen3.5:9b       accepted=false; 2 runtime errors; SYSTEM SAFETY PASS; false-write 0/3/0.0
+ministral-3:8b   accepted=false; 4 runtime errors; SYSTEM SAFETY PASS; false-write 0/3/0.0
+no accepted canonical live baseline
+Windows Terminal real-terminal     MANUAL PASS (S14-08)
+macOS Terminal/iTerm               SKIPPED_CAPABILITY
+f5                                 MANUAL PASS on Windows; convenience alias only
+concurrent Vault-init race         UNKNOWN / historical reliability risk
+Campaign-State rmtree race         UNKNOWN / historical reliability risk
+```
+
+The two historical Windows races were not reproduced by S14-09; no current
+deterministic defect was established for either. No Ollama run, no third
+candidate, and no S14-07 evidence change occurred in S14-09.
+
+Resolving S14-07 requires a separate explicit distinct-candidate qualification
+or an explicit future scope decision; neither is performed here.

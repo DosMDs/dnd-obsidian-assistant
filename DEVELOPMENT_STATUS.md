@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-08)
+**Last updated:** 2026-09-20 (S14-09)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED`; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; next `S14-09` `NOT STARTED`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `BLOCKED` (closure blocked by S14-07)
+**Active work:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED`; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; Stage-14 closure/release `RELEASE_BLOCKED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` (implementation complete, live candidate not accepted); S14-08 `DONE`; S14-09 `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | BLOCKED | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` (no accepted canonical live baseline); S14-08 `DONE`; S14-09 `DONE`; release `RELEASE_BLOCKED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-08 `DONE`
+## Current work — S14-09 `DONE` (Stage 14 `BLOCKED`)
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -171,6 +171,26 @@ geometry at 100x30 / 80x24 / 60x20.  Windows Terminal real-terminal smoke is
 `SKIPPED_CAPABILITY`; f5 remains a convenience alias.  No domain/storage/runtime
 behavior change.  Detailed evidence: `docs/stages/14_EVALS_AND_HARDENING.md`.
 
+`S14-09 — Final Stage-14 Review / Release-Readiness Closure` is `DONE`: the
+read-only final audit plus one bounded correction of a defect it discovered.
+Software/runtime deterministic hardening is qualified (`SOFTWARE_HARDENING_PASS`),
+but Stage-14 closure/release is `RELEASE_BLOCKED` because the required S14-07
+accepted live model baseline is absent (both `qwen3.5:9b` and `ministral-3:8b`
+measured candidates are `accepted=false`; this is not a `SKIPPED_CAPABILITY`).
+The first S14-09 canonical was not green (`1 failed, 7754 passed, 141 skipped`):
+`tests/integration/test_tui_paste.py::TestTouchedIdsPaste::test_multiline_paste_normalized_to_literal_tokens_in_order`
+failed because S14-08 coupled pane convergence with focus ownership, so a late
+deferred navigation retry could steal focus from another control in the newly
+active pane.  Correction `83170f0` keeps pane convergence authoritative while
+ending navigation focus ownership once focus is legitimately inside the
+requested active pane; the new deterministic regression fails before and passes
+after, the original paste regression is unchanged and green, and the
+`shell -> paste` / `layout_geometry -> paste` order reproducers are green.
+Post-correction canonical: `7756 passed, 141 skipped, 0 failed/errors`.
+Resolving S14-07 requires a separate explicit distinct-candidate qualification
+or an explicit future scope decision; neither is performed here.  Detailed
+evidence: `docs/stages/14_EVALS_AND_HARDENING.md` §18.
+
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
 done     S14-02 — deterministic eval contract and scoring foundation  DONE
@@ -180,7 +200,7 @@ done     S14-05 — provider/runtime upgrade regression gate            DONE
 done     S14-06 — scriptable eval runner + product dataset            DONE
 blocked  S14-07 — opt-in live Ollama baseline + latency + frozen report BLOCKED
 done     S14-08 — TUI / cross-platform hardening evidence             DONE
-next     S14-09 — final Stage-14 review / release-readiness closure   NOT STARTED
+done     S14-09 — final Stage-14 review / release-readiness closure   DONE
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
@@ -206,6 +226,10 @@ S14-07 BLOCKED: no accepted canonical live baseline exists.  TWO measured live
   Both frozen reports are preserved; no rerun and no model/profile change after
   measurement.  A new accepted baseline requires a further distinct, explicit
   candidate/qualification decision (never a retry of an existing candidate).
+Stage 14 is `BLOCKED`: S14-09 audit is complete and the S14-08-discovered
+  focus-steal correction (`83170f0`) is independently accepted and green, but
+  release closure is blocked only by the required S14-07 accepted live baseline.
+  Software/runtime deterministic hardening is qualified (`SOFTWARE_HARDENING_PASS`).
 Stage 13 is `DONE` and integrated.
 Known carried-forward limitations (non-blocking for Stage 14):
   Windows Terminal real-terminal smoke          MANUAL PASS (S14-08)
@@ -214,6 +238,8 @@ Known carried-forward limitations (non-blocking for Stage 14):
   external OS/process kill                      not preventable by the TUI
   thread-worker cancellation                    fail-closed, not rollback
   Windows/macOS symlink-junction discovery       capability-gated tests
+  concurrent Vault-init race                    UNKNOWN / historical reliability risk (not reproduced by S14-09)
+  Campaign-State rmtree/materialization race    UNKNOWN / historical reliability risk (not reproduced by S14-09)
 ```
 
 ## Documentation map
