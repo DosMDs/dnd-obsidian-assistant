@@ -1909,3 +1909,35 @@ current MVP release               RELEASE_READY
 S14-07                            BLOCKED / UNSATISFIED · DEFERRED_TO_FUTURE_SCOPE
 accepted canonical baseline       none exists
 ```
+
+## 22. S14-M01 — Stage-14 integration into `main` (`DONE`)
+
+`S14-M01` is a documentation-only integration task.  It fast-forwarded the
+accepted Stage-14 branch into `main` and recorded the resulting current state.
+
+```text
+integration method      fast-forward only (no merge commit)
+source branch           feat/evals-hardening
+reviewed source tip     0f8fa1e55fc71e1651c54f02c6079c1f4b632d42
+reviewed target         main @ 09fa5690b39bc1b4aeedea4fb98e26fc58c461f3
+reviewed topology       main-only 0; source-only 26; merge-base == target tip
+result                  accepted Stage-14 history integrated without source transformation
+Stage 14                DONE
+current MVP release     RELEASE_READY
+```
+
+One docs-only status-reconciliation commit followed the fast-forward on `main`;
+it changed only `DEVELOPMENT_STATUS.md` and this Stage-14 record.  No
+`src/**`, `tests/**`, `docs/evidence/evals/**`, dependency or configuration file
+was modified by `S14-M01`; §§1–21 historical evidence above is preserved
+unmodified.  The three frozen candidate artifacts remain byte-for-byte unchanged
+and their bound contract tests remain unchanged.
+
+```text
+S14-07 historical result        unchanged (BLOCKED / UNSATISFIED; no accepted baseline)
+frozen evidence                 unchanged
+tag                             none created
+release publication             none
+feat/evals-hardening            not deleted, not moved
+history rewrite                 none
+```

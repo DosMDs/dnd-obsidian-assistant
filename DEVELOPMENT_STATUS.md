@@ -1,10 +1,10 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-10-RELEASE-SCOPE-DECISION)
+**Last updated:** 2026-09-20 (S14-M01-INTEGRATION)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (prospective current-MVP release scope; accepted live-model baseline deferred — ADR-0009)
-**Active work:** Stage 14 `DONE`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
-**Current branch:** `feat/evals-hardening`
+**Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
+**Active work:** Stage 14 `DONE` and integrated into `main`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
+**Current branch:** `main`
 
 ## Status model
 
@@ -39,13 +39,14 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | DONE | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` / UNSATISFIED (no accepted canonical live baseline; disposition `DEFERRED_TO_FUTURE_SCOPE`); S14-08 `DONE`; S14-09 `DONE`; S14-10 `DONE`; release `RELEASE_READY`; `docs/stages/14_EVALS_AND_HARDENING.md`; `docs/adr/0009-release-scope-defers-live-model-qualification.md` |
+| 14. Evals / Hardening | DONE | S14-01 … S14-06 `DONE`; S14-07 `BLOCKED` / UNSATISFIED (no accepted canonical live baseline; disposition `DEFERRED_TO_FUTURE_SCOPE`); S14-08 `DONE`; S14-09 `DONE`; S14-10 `DONE`; integrated into `main`; release `RELEASE_READY`; `docs/stages/14_EVALS_AND_HARDENING.md`; `docs/adr/0009-release-scope-defers-live-model-qualification.md` |
 
-## Current work — Stage 14 `DONE`; current MVP release `RELEASE_READY`
+## Current work — Stage 14 `DONE` (integrated into `main`); current MVP release `RELEASE_READY`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
-`docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is `DONE` under the
-prospective current-MVP release scope recorded in ADR-0009.  `S14-00` (accepted
+`docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is `DONE` and
+integrated into `main` under the prospective current-MVP release scope recorded
+in ADR-0009.  `S14-00` (accepted
 planning / architecture / evidence investigation) and the accepted Stage-14
 architecture contract, gap matrix and task decomposition are recorded in
 `docs/stages/14_EVALS_AND_HARDENING.md`.
@@ -249,9 +250,9 @@ done     S14-09 — final Stage-14 review / release-readiness closure   DONE
 done     S14-10 — current-MVP release-scope decision (ADR-0009)       DONE
 ```
 
-Stage 14 is `DONE` and the current MVP release is `RELEASE_READY` under the
-prospective release scope recorded in ADR-0009; no accepted canonical
-live-model baseline currently exists.
+Stage 14 is `DONE` and integrated into `main`; the current MVP release is
+`RELEASE_READY` under the prospective release scope recorded in ADR-0009; no
+accepted canonical live-model baseline currently exists.
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
 session-ready only after `dnd time init` (or the existing `set_world_time` WRITE
@@ -267,8 +268,9 @@ enabled/visible state is never authorization.
 ## Current blockers, deferrals and prerequisites
 
 ```text
-Stage 14 is `DONE` and the current MVP release is `RELEASE_READY` under the
-prospective release scope recorded in ADR-0009.  RELEASE_READY does NOT mean a
+Stage 14 is `DONE` and integrated into `main`; the current MVP release is
+`RELEASE_READY` under the prospective release scope recorded in ADR-0009.
+RELEASE_READY does NOT mean a
 canonical local live model has been validated: no accepted canonical live-model
 baseline currently exists.
 S14-07 is BLOCKED / UNSATISFIED (canonical task status `BLOCKED`), disposition
