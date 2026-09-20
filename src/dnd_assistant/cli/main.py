@@ -15,6 +15,7 @@ from dnd_assistant.cli.bootstrap import bootstrap_app
 from dnd_assistant.cli.bootstrap_finalize import register_bootstrap_finalize_command
 from dnd_assistant.cli.bootstrap_review import register_bootstrap_review_apply_commands
 from dnd_assistant.cli.changeset import changeset_app
+from dnd_assistant.cli.eval import eval_app
 from dnd_assistant.cli.init import _init_command
 from dnd_assistant.cli.post_session import register_session_process_commands
 from dnd_assistant.cli.session import _note_command, session_app
@@ -45,6 +46,10 @@ app.add_typer(bootstrap_app)
 # ── Time command group ──────────────────────────────────────────────────────
 
 app.add_typer(time_app)
+
+# ── Eval command group ──────────────────────────────────────────────────────
+
+app.add_typer(eval_app)
 
 # ── Note root command ───────────────────────────────────────────────────────
 

@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-05)
+**Last updated:** 2026-09-20 (S14-06)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-05 — Provider/Runtime Upgrade Regression Gate` `DONE`; next `S14-06 — Scriptable Eval Runner + Product Dataset` `NOT STARTED`
+**Active work:** `S14-06 — Scriptable Eval Runner + Product Dataset` `DONE`; next `S14-07 — Opt-in Live Ollama Model Baseline` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-05 `DONE`; S14-06 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-06 `DONE`; S14-07 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-05 `DONE`
+## Current work — S14-06 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -101,8 +101,22 @@ marker, a curated offline selection
 selection (`uv run pytest -m "provider_upgrade and ollama"`), plus a static
 selection-integrity contract (`tests/contract/test_provider_upgrade_gate.py`).
 It performs **no** version bump: the `pydantic-ai-slim[openai]==2.39.0` pin,
-`uv.lock`, `src/` and runtime configuration are unchanged. Stage 14 remains
-`IN PROGRESS`; `S14-06` is next and `NOT STARTED`.
+`uv.lock`, `src/` and runtime configuration are unchanged.
+
+`S14-06 — Scriptable Eval Runner + Product Dataset (Offline Mode) + Reporting` is
+`DONE`: it adds the product-owned offline eval execution surface — a versioned
+Russian product dataset (`product-agent` v1, 13 `EVAL-P1-*` cases, sample plan
+`single-pass-v1`), deterministic dataset/sample-plan fingerprints, expected-sample
+completeness, a versioned JSON report (`report_schema_version = 1`) with strict
+round-trip serialization and baseline comparison, a synthetic in-memory fixture
+over the **real** production runtime and the four real tool registration
+functions, an offline `scripted-oracle` model recorder (`RecordingPydanticModel`),
+observation collection for both layers from one run, and the `dnd eval run|report`
+CLI.  System safety is a hard zero-unauthorized-WRITE-execution invariant; the
+product-quality gate `false_write_tool_call_rate <= 0.0` uses the existing S14-02
+denominator (3 for product-v1).  No live Ollama run, no frozen live baseline, no
+latency acceptance and **no dependency change** (`pyproject.toml`/`uv.lock`
+unchanged).  Stage 14 remains `IN PROGRESS`; `S14-07` is next and `NOT STARTED`.
 
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
@@ -110,7 +124,8 @@ done     S14-02 — deterministic eval contract and scoring foundation  DONE
 done     S14-03 — offline scripted-model full-sequence regression     DONE
 done     S14-04 — untrusted-input / path-safety gap closure           DONE
 done     S14-05 — provider/runtime upgrade regression gate            DONE
-next     S14-06 — scriptable eval runner + product dataset            NOT STARTED
+done     S14-06 — scriptable eval runner + product dataset            DONE
+next     S14-07 — opt-in live Ollama baseline + latency + frozen report NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes

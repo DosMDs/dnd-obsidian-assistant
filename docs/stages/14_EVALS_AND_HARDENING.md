@@ -7,7 +7,8 @@
 **S14-03:** `DONE`
 **S14-04:** `DONE`
 **S14-05:** `DONE`
-**Next task:** `S14-06 — Scriptable Eval Runner + Product Dataset` (`NOT STARTED`)
+**S14-06:** `DONE`
+**Next task:** `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -674,4 +675,189 @@ ruff format --check .          621 files already formatted
 uv lock --check                passed
 git diff --check               passed
 uv.lock / src unchanged        git diff --name-only HEAD -- src/ uv.lock  (empty)
+```
+
+## 14. S14-06 implementation record (`DONE`)
+
+`S14-06 — Scriptable Eval Runner + Product Dataset (Offline Mode) + Reporting` is
+`DONE`.  It adds the product-owned offline eval execution surface: a versioned
+Russian product dataset, a deterministic in-memory synthetic fixture over the
+real production runtime, an offline scripted-oracle model, observation
+collection, expected-sample completeness, a versioned JSON report, a baseline
+comparison contract and the `dnd eval` CLI.  It performs **no** live Ollama
+run, freezes no live baseline, adds no latency acceptance, no model-quality
+claim and **no dependency** (`pyproject.toml`/`uv.lock` unchanged).
+
+### Dataset identity and fingerprint policy
+
+```text
+dataset_id              product-agent
+dataset_version         1
+CLI alias               product-v1
+sample plan             single-pass-v1 (1 repetition per scenario)
+cases                   13 (EVAL-P1-001 … EVAL-P1-013)
+fingerprint             SHA-256 over canonical JSON (UTF-8, sort_keys,
+                        separators=(",",":"), ensure_ascii=False, allow_nan=False)
+                        of dataset id/version + quality policy + per-case
+                        semantic ground truth (no human descriptions)
+sample-plan fingerprint own SHA-256 over {plan_id, repetitions}
+report identity binds   dataset_id/version/fingerprint + sample_plan_id/fingerprint
+                        + prompt_version (agent-v3)
+```
+
+No repetition override is exposed on the CLI; a different measured sample policy
+is a future versioned decision (S14-07).
+
+### Scenario semantic coverage
+
+```text
+A direct answer from context        EVAL-P1-001 (tick), 008 (active id)
+B safe clarification                EVAL-P1-002 (two Варос), 009 (ambiguous write target)
+C entity discovery/read             EVAL-P1-003 (get_entity, truncated body), 004 (search_entities)
+D session read                      EVAL-P1-005 (get_session S001), 006 (list_session_events S010)
+E multi-tool READ (unordered)       EVAL-P1-007 (two list_session_events)
+F WRITE-visible but not needed      EVAL-P1-006, 008, 009  → false-WRITE denominator 3
+G authorized positive WRITE         EVAL-P1-010 (record_note), 013 (append_entity_fact)
+H hidden WRITE                      EVAL-P1-012 (READ authority, hidden_write_expected=True)
+I session WRITE                     EVAL-P1-011 (start_session)
+```
+
+Entity WRITE via `patch_entity`/`append_entity_fact` requires a caller-supplied
+`expected_revision` that is absent from model context, and the runtime permits no
+second tool batch; `EVAL-P1-013` therefore supplies the stable ID/revision
+explicitly, matching the tool schema's stated contract.  No ground truth forces a
+tool that supplied context already makes unnecessary.
+
+### Exact CLI contract
+
+```text
+dnd eval run --runtime scripted --dataset product-v1 --output REPORT.json [--overwrite]
+dnd eval report --input REPORT.json [--baseline BASELINE.json]
+
+exit 0  report produced/loaded and accepted; baseline compatible
+exit 1  safety/quality/completeness failure; runtime/setup/artifact error;
+        malformed report; baseline incompatibility; output collision w/o --overwrite
+exit 2  Typer usage errors (unknown --runtime/--dataset, missing --output)
+```
+
+Scripted mode requires no `--vault`, no `--config`, no `--profile`, no Ollama.
+`ollama` is **not** an accepted `--runtime` value in S14-06.  User-facing prose is
+Russian; machine artifact fields are stable English identifiers.
+
+### Offline scripted/oracle semantics
+
+```text
+scripted-oracle = runner/dataset/collector/scoring/report plumbing self-check
+no-tool terminal sample   exactly 1 semantic model request
+tool batch + terminal     exactly 2 semantic model requests
+extra request             fail-loud AssertionError (recorded as sample error)
+```
+
+`RecordingPydanticModel` (public `WrapperModel`) records request count, raw
+responses and durations at the model boundary, including failed requests; S14-07
+reuses it unchanged around a real Ollama model.  One `run()` feeds both
+`DecisionObservation` and `FullTurnObservation`.  `schema_valid` is computed by
+validating emitted arguments against the canonical production `input_schema`
+(fail-closed); `is_write` comes from trusted `ToolDefinition.permission` only.
+Handler/WRITE counts come from an eval-owned `ToolRegistry` subclass that wraps
+canonical handlers after the four real production registration functions ran.
+
+### Report schema / version
+
+```text
+report_schema_version = 1
+identity, runtime{mode,label,metadata}, sample_contract (completeness),
+decision_observations, full_turn_observations, metrics (all MetricId),
+sample_scores, safety, quality, runtime_error_count, accepted, reasons
+JSON: UTF-8, ensure_ascii=False, sort_keys=True, deterministic order,
+      allow_nan=False, trailing newline; strict loader (schema version, required
+      keys, primitive shapes, MetricId validation)
+```
+
+### Safety / quality / completeness policy
+
+```text
+SYSTEM SAFETY   Σ count_unauthorized_write_handler_executions(obs, expectation) == 0
+                (hard invariant; unconditional SAFETY_FAIL on non-zero)
+MODEL QUALITY   false_write_tool_call_rate <= 0.0  (product-quality gate only;
+                denominator = 3 for product-v1: EVAL-P1-006/008/009)
+other metrics   report-only (no invented live thresholds)
+completeness    expected {(scenario_id, repetition)} key set for both layers;
+                missing/duplicate/unknown/out-of-range/order all reject acceptance;
+                summarize_metrics() unchanged
+```
+
+### Artifact / filesystem policy
+
+Reports are derived, disposable and rebuildable.  `--output` is mandatory; the
+parent directory must already exist; existing targets require `--overwrite`;
+writes are atomic (temp file in the parent + `os.replace`).  No Vault argument,
+no `_system/evals/`, no campaign or golden-Vault data.
+
+### Baseline comparison
+
+`compare_eval_reports()` requires equality of report schema version, dataset
+id/version/fingerprint, sample-plan id/fingerprint, prompt version and expected
+sample count; otherwise `INCOMPATIBLE` (exit 1).  Compatible reports expose
+per-`MetricId` deltas, safety counts and quality verdicts.  No S14-07 numbers.
+
+### PAIM-13 disposition
+
+All `tests/support/paim13_*` and `test_pydantic_ai_eval_*` files are **KEPT
+unchanged** (historical test-only characterization).  No `src/` code imports
+`tests/support`; the new `RecordingPydanticModel` is an independent
+product-composition implementation.
+
+### Expected changed files
+
+```text
+src/dnd_assistant/evals/__init__.py                  modified (exports)    114
+src/dnd_assistant/evals/dataset.py                    new                   246
+src/dnd_assistant/evals/completeness.py               new                   154
+src/dnd_assistant/evals/report.py                     new                   399
+src/dnd_assistant/evals/report_json.py                new                   604
+src/dnd_assistant/evals/datasets/__init__.py          new                    23
+src/dnd_assistant/evals/datasets/product_v1.py        new                   212
+src/dnd_assistant/composition/eval_fixture.py         new                   577
+src/dnd_assistant/composition/eval_model.py           new                   158
+src/dnd_assistant/composition/eval_runner.py          new                   346
+src/dnd_assistant/composition/eval_artifacts.py       new                    68
+src/dnd_assistant/cli/eval.py                         new                   191
+src/dnd_assistant/cli/main.py                         modified (eval group)  +4
+tests/unit/test_eval_dataset.py                       new                   131
+tests/unit/test_eval_completeness.py                  new                    93
+tests/unit/test_eval_report.py                        new                   228
+tests/unit/test_eval_model.py                         new                    87
+tests/unit/test_eval_fixture.py                       new                   116
+tests/unit/test_eval_runner.py                        new                   292
+tests/integration/test_cli_eval.py                    new                   151
+tests/contract/test_eval_layering.py                  new                    73
+DEVELOPMENT_STATUS.md                                 status reconciliation
+docs/stages/14_EVALS_AND_HARDENING.md                 this record
+```
+
+No new dependency; `uv.lock` and `pyproject.toml` unchanged.  All new production
+modules are below the 700-line hard limit; all new test modules below 1000.
+
+### Literal evidence
+
+```text
+focused (Level 1)              72 passed
+affected subsystem (Level 2)   1040 passed (evals scoring/metrics/write-accounting,
+                               boundaries, maintainability, policy, bridge author.)
+runtime/path-safety subset     90 passed (Pydantic runtime, S14-04 untrusted input,
+                               CLI entrypoint/agent-runtime)
+canonical full pytest (1st)    7603 passed, 141 skipped, 1 failed
+      failure  tests/integration/test_tui_interaction.py
+               TestQuitPathAudit::test_palette_has_no_framework_quit_entry
+      classification  PRE_EXISTING_FLAKY / UNRELATED (Windows/order-dependent):
+                      passes in isolation and as a full module; no eval/TUI code
+                      touched by S14-06
+canonical full pytest (2nd)    7604 passed, 141 skipped, 0 failed, 0 errors
+pyright                        0 errors, 0 warnings, 0 informations
+ruff check . / format --check  passed / 640 files already formatted
+uv lock --check                passed
+git diff --check               passed
+pyproject / uv.lock diff       empty
+maintainability contract       green (all new modules below limits)
 ```

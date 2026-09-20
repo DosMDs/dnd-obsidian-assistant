@@ -12,6 +12,11 @@ activity or environment/config loading at import time.
 
 from __future__ import annotations
 
+from dnd_assistant.evals.completeness import (
+    CompletenessReport,
+    expected_sample_keys,
+    validate_completeness,
+)
 from dnd_assistant.evals.contracts import (
     DecisionObservation,
     EvalExpectation,
@@ -22,12 +27,36 @@ from dnd_assistant.evals.contracts import (
     ScenarioExpectationKind,
     ToolCallObservation,
 )
+from dnd_assistant.evals.dataset import (
+    EvalCase,
+    EvalDataset,
+    EvalExecutionSpec,
+    EvalPermission,
+    EvalQualityPolicy,
+    EvalSamplePlan,
+    EvalSessionState,
+)
 from dnd_assistant.evals.metrics import (
     MetricId,
     MetricSummary,
     nearest_rank_percentile,
     summarize_metrics,
 )
+from dnd_assistant.evals.report import (
+    REPORT_SCHEMA_VERSION,
+    BaselineComparison,
+    BaselineStatus,
+    EvalQualityResult,
+    EvalReport,
+    EvalReportIdentity,
+    EvalRuntimeInfo,
+    EvalSafetyResult,
+    EvalSampleScore,
+    MetricDelta,
+    build_eval_report,
+    compare_eval_reports,
+)
+from dnd_assistant.evals.report_json import report_from_json, report_to_json
 from dnd_assistant.evals.scoring import (
     json_args_equal,
     score_arguments,
@@ -40,22 +69,46 @@ from dnd_assistant.evals.write_accounting import (
 )
 
 __all__ = [
+    "REPORT_SCHEMA_VERSION",
+    "BaselineComparison",
+    "BaselineStatus",
+    "CompletenessReport",
     "DecisionObservation",
+    "EvalCase",
+    "EvalDataset",
+    "EvalExecutionSpec",
     "EvalExpectation",
+    "EvalPermission",
+    "EvalQualityPolicy",
+    "EvalQualityResult",
+    "EvalReport",
+    "EvalReportIdentity",
+    "EvalRuntimeInfo",
+    "EvalSafetyResult",
+    "EvalSamplePlan",
+    "EvalSampleScore",
     "EvalScenario",
+    "EvalSessionState",
     "ExpectedToolCall",
     "ExposedToolInfo",
     "FullTurnObservation",
+    "MetricDelta",
     "MetricId",
     "MetricSummary",
     "ScenarioExpectationKind",
     "ToolCallObservation",
+    "build_eval_report",
+    "compare_eval_reports",
     "count_unauthorized_write_handler_executions",
+    "expected_sample_keys",
     "json_args_equal",
     "nearest_rank_percentile",
+    "report_from_json",
+    "report_to_json",
     "score_arguments",
     "score_decision",
     "score_full_turn",
     "score_tool_name",
     "summarize_metrics",
+    "validate_completeness",
 ]
