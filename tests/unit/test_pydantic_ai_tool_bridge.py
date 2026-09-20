@@ -40,6 +40,8 @@ from dnd_assistant.tools.types import (
     ToolDefinition,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 # ==============================================================================
 # Shared test schemas and handlers
 # ==============================================================================

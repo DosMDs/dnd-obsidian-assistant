@@ -6,7 +6,8 @@
 **S14-02:** `DONE`
 **S14-03:** `DONE`
 **S14-04:** `DONE`
-**Next task:** `S14-05 — Provider/Runtime Upgrade Regression Gate` (`NOT STARTED`)
+**S14-05:** `DONE`
+**Next task:** `S14-06 — Scriptable Eval Runner + Product Dataset` (`NOT STARTED`)
 
 This document is the durable Stage-14 architecture/task/evidence record. Current
 roadmap state lives in `DEVELOPMENT_STATUS.md`; this record stores the accepted
@@ -551,4 +552,126 @@ ruff check . / format --check  passed / 619 files already formatted
 uv lock --check                passed
 git diff --check               passed
 maintainability contract       green; new test module below the 1000-line limit
+```
+
+## 13. S14-05 implementation record (`DONE`)
+
+`S14-05 — Provider/Runtime Upgrade Regression Gate` is `DONE`.  It turns the
+already accepted Pydantic AI / Ollama qualification evidence into an explicit
+future-upgrade regression gate.  It is infrastructure and policy; it performs
+**no** provider/runtime/model upgrade.
+
+### Runbook
+
+`docs/development/provider-runtime-upgrade.md` — operational, future-facing
+runbook: trigger classes `U1` Pydantic AI, `U2` Ollama runtime, `U3`
+model/profile, `U4` unrelated; baseline capture; authoritative upstream review
+fields; candidate isolation; `pyproject`/profile diff; `uv lock` workflow;
+`TARGET` / `REQUIRED_TRANSITIVE` / `UNRELATED` lock classification; offline
+curated gate; canonical suite; live compatibility gate; post-S14-07
+model-quality handoff; `ACCEPTED` / `BLOCKED` / `REJECTED` /
+`SKIPPED_CAPABILITY`; rollback via Git (no dual runtime, no feature-flag
+fallback).  It does not hardcode any "latest" version as policy.
+
+### Marker mechanism and commands
+
+One new pytest marker in `pyproject.toml` (test-config only):
+
+```text
+provider_upgrade
+```
+
+```text
+offline curated gate   uv run pytest -m "provider_upgrade and not ollama"
+live gate              uv run pytest -m "provider_upgrade and ollama"
+ordinary               uv run pytest   (unchanged)
+```
+
+Offline selection is deterministic, offline and non-empty (358 passed,
+7288 deselected).  Live selection self-skips before any network access when
+configuration is absent (14 skipped, 7632 deselected); set-but-invalid
+configuration fails, inherited unchanged from the live modules.
+
+### Curated semantic categories (offline)
+
+```text
+framework/API                  test_pydantic_ai_qualification.py (individually marked tests)
+ToolExecutor/policy/bridge     test_dnd_agent_policy.py, test_pydantic_ai_tool_bridge.py,
+                               test_pydantic_ai_tool_bridge_authority.py
+request/retry limits           test_pydantic_ai_blocker_limits.py
+current bounded runtime        test_pydantic_ai_agent_runtime.py, ..._boundaries.py,
+                               ..._evidence.py, ..._literal_evidence*.py
+sync/thread literal evidence   test_pydantic_ai_sync_thread_literal_evidence.py, ..._p2.py
+Ollama factory/mock transport  test_pydantic_ai_ollama.py (unit),
+                               test_pydantic_ai_ollama_runtime.py
+bootstrap extraction           test_bootstrap_pydantic_ai.py
+post-session extraction/rendering
+                               post_session/test_pydantic_ai_post_session.py,
+                               post_session/test_pydantic_ai_post_session_rendering.py
+composition wiring             test_cli_agent_runtime.py, test_bootstrap_composition.py
+```
+
+### Important exclusions
+
+```text
+blocker gate / blocker execution     parallel test-double harness; superseded by the
+                                     real production runtime/policy/bridge tests
+sync_thread_contract / _safety       superseded by PAIM-C21 literal evidence
+framework-default qualification      default parallel multi-tool execution, default
+  tests                              non-zero retry policy (not production-relevant)
+PydanticAIFastAgent tests            retained/unwired source surface; canonical-suite
+                                     protected; not part of production-reachable gate
+PAIM-13 live harness/probe modules   historical characterization only
+```
+
+### Structured extraction coverage
+
+Independent `provider_upgrade` canaries prove, for bootstrap extraction,
+post-session extraction and post-session rendering: `request_limit=1`, tool
+retry 0, output retry 0, typed Pydantic result, no project/action tool surface,
+and stable framework/provider error mapping.  Agent-runtime coverage is not
+assumed to prove extraction compatibility.
+
+### Selection-integrity contract
+
+`tests/contract/test_provider_upgrade_gate.py` (7 tests, static/AST/TOML, no
+subprocess/plugin/network): marker registered; reviewed module inventory equals
+selection; qualification tests individually marked (module not marked
+wholesale); live modules also carry `ollama`; no live module in the offline
+inventory; mandatory semantic families represented; no total-count snapshot.
+
+### No version bump / unchanged surfaces
+
+```text
+pydantic-ai-slim[openai]==2.39.0   unchanged
+uv.lock                            unchanged
+src/**                             unchanged
+runtime configuration              unchanged
+```
+
+### Expected changed files
+
+```text
+docs/development/provider-runtime-upgrade.md            new
+tests/contract/test_provider_upgrade_gate.py            new
+pyproject.toml                                          marker declaration only
+curated existing test modules (21 offline + 2 live)     marker metadata only
+DEVELOPMENT_STATUS.md                                   status reconciliation
+docs/stages/14_EVALS_AND_HARDENING.md                   this record
+```
+
+### Literal evidence
+
+```text
+selection-integrity contract   7 passed
+offline curated gate           358 passed, 7288 deselected
+live selection (absent config) 14 skipped, 7632 deselected
+harness policy + maintainability 848 passed
+canonical full pytest          7505 passed, 141 skipped, 0 failed, 0 errors
+pyright                        0 errors, 0 warnings, 0 informations
+ruff check .                   passed
+ruff format --check .          621 files already formatted
+uv lock --check                passed
+git diff --check               passed
+uv.lock / src unchanged        git diff --name-only HEAD -- src/ uv.lock  (empty)
 ```

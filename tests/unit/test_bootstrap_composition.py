@@ -12,6 +12,8 @@ from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
 from dnd_assistant.models.pydantic_ai_ollama import build_pydantic_ai_bootstrap_model
 
+pytestmark = pytest.mark.provider_upgrade
+
 
 def _config(tmp_path: Path, role: str) -> Path:
     config = tmp_path / "config.toml"

@@ -24,6 +24,8 @@ from dnd_assistant.domain.bootstrap_extraction import (
 )
 from tests.unit.bootstrap.helpers import make_report, make_source
 
+pytestmark = pytest.mark.provider_upgrade
+
 
 def _request():
     projection = prepare_bootstrap_input(

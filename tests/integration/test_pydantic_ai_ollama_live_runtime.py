@@ -65,7 +65,7 @@ from tests.support.pydantic_ai_runtime import (
     make_read_context,
 )
 
-pytestmark = pytest.mark.ollama
+pytestmark = [pytest.mark.provider_upgrade, pytest.mark.ollama]
 
 # ── Environment variable names ───────────────────────────────────────────────
 

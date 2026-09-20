@@ -16,6 +16,8 @@ from dnd_assistant.application.pydantic_ai_response_adapter import (
 )
 from dnd_assistant.errors import ModelError
 
+pytestmark = pytest.mark.provider_upgrade
+
 # ==============================================================================
 # Helpers
 # ==============================================================================

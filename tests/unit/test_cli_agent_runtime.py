@@ -44,6 +44,8 @@ from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
 from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 
+pytestmark = pytest.mark.provider_upgrade
+
 # ── Fixtures ───────────────────────────────────────────────────────────────
 
 

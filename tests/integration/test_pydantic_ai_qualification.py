@@ -30,11 +30,13 @@ from pydantic_ai.providers.openai import OpenAIProvider
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_upgrade
 def test_q1_import_and_version() -> None:
     """Package imports and installed candidate is exactly 2.39.0."""
     assert pydantic_ai.__version__ == "2.39.0"
 
 
+@pytest.mark.provider_upgrade
 def test_q1_ollama_classes_importable() -> None:
     """Required Ollama public classes can be imported."""
     # These are the public APIs needed for the remaining qualification
@@ -50,6 +52,7 @@ def test_q1_ollama_classes_importable() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_upgrade
 def test_q2_run_sync() -> None:
     """Minimal agent can execute synchronously through the public sync API."""
     model = TestModel(custom_output_text="hello from test")
@@ -64,6 +67,7 @@ def test_q2_run_sync() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_upgrade
 def test_q3_plain_text_response() -> None:
     """Deterministic plain text result from TestModel."""
     expected = "deterministic response"
@@ -86,6 +90,7 @@ class QualificationResult(BaseModel):
     value: int
 
 
+@pytest.mark.provider_upgrade
 def test_q4_structured_output() -> None:
     """Framework run returns a validated typed object.
 
@@ -107,6 +112,7 @@ def test_q4_structured_output() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_upgrade
 def test_q5_single_tool() -> None:
     """Model requests tool -> tool called exactly once -> result reaches output."""
     call_count: int = 0
@@ -308,6 +314,7 @@ def test_q6c_sync_tool_worker_thread() -> None:
 # a real Ollama instance responds correctly through the configured URL.
 
 
+@pytest.mark.provider_upgrade
 def test_q7_custom_ollama_base_url() -> None:
     """OllamaProvider accepts custom base_url ending in /v1."""
     from pydantic_ai.providers.ollama import OllamaProvider
@@ -321,6 +328,7 @@ def test_q7_custom_ollama_base_url() -> None:
     assert custom_url in base, f"expected {custom_url} in {base}"
 
 
+@pytest.mark.provider_upgrade
 def test_q7_custom_ollama_base_url_with_openai_provider() -> None:
     """OpenAIProvider with explicit /v1 suffix works for Ollama."""
     custom_url = "http://my-ollama:11434/v1"
@@ -337,6 +345,7 @@ def test_q7_custom_ollama_base_url_with_openai_provider() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_upgrade
 def test_q8_connection_failure() -> None:
     """Connection/transport failure raises ModelAPIError.
 
@@ -463,6 +472,7 @@ def test_q8b_unknown_tool_default_retry() -> None:
     assert "exceeded max retries count" in str(exc_info.value).lower()
 
 
+@pytest.mark.provider_upgrade
 def test_q8b_unknown_tool_zero_retries() -> None:
     """Unknown tool call with retries={'tools': 0}.
 
@@ -496,6 +506,7 @@ def test_q8b_unknown_tool_zero_retries() -> None:
     assert "exceeded max retries count" in str(exc_info.value).lower()
 
 
+@pytest.mark.provider_upgrade
 def test_q8_structured_output_validation_failure() -> None:
     """Structured output validation failure raises UnexpectedModelBehavior."""
     model = TestModel(custom_output_args={"bad_field": "nope"})
@@ -526,6 +537,7 @@ def test_q8_structured_output_retry_behavior() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.provider_upgrade
 def test_public_exception_classes() -> None:
     """Document the public exception hierarchy observed during qualification."""
     # ModelAPIError is the base for model/provider errors

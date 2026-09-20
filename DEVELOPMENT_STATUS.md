@@ -1,9 +1,9 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-20 (S14-04)
+**Last updated:** 2026-09-20 (S14-05)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `IN PROGRESS`
-**Active work:** `S14-04 — Untrusted-Input / Path-Safety Gap Closure` `DONE`; next `S14-05 — Provider/Runtime Upgrade Regression Gate` `NOT STARTED`
+**Active work:** `S14-05 — Provider/Runtime Upgrade Regression Gate` `DONE`; next `S14-06 — Scriptable Eval Runner + Product Dataset` `NOT STARTED`
 **Current branch:** `feat/evals-hardening`
 
 ## Status model
@@ -39,9 +39,9 @@ in `docs/development/project-invariants.md`.
 | 12. Campaign State | DONE | `docs/stages/12_CAMPAIGN_STATE.md` |
 | Textual TUI Architecture Track (non-numbered) | DONE | Integrated into `main`; `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` |
 | 13. Bootstrap | DONE | S13-01 … S13-05 `DONE`; integrated into `main`; `docs/stages/13_BOOTSTRAP.md` |
-| 14. Evals / Hardening | IN PROGRESS | S14-01, S14-02, S14-03, S14-04 `DONE`; S14-05 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
+| 14. Evals / Hardening | IN PROGRESS | S14-01 … S14-05 `DONE`; S14-06 next `NOT STARTED`; `docs/stages/14_EVALS_AND_HARDENING.md` |
 
-## Current work — S14-04 `DONE`
+## Current work — S14-05 `DONE`
 
 Stage 13 is `DONE` and integrated into `main`; its detailed evidence lives in
 `docs/stages/13_BOOTSTRAP.md`.  Stage 14 — Evals / Hardening is the active
@@ -93,12 +93,24 @@ never returned), which is explicitly not a syscall-level non-read proof.  The
 conclusion is `NO PRODUCTION DEFECT`; no production, dependency or CLI surface
 changed.
 
+`S14-05 — Provider/Runtime Upgrade Regression Gate` is `DONE`: it adds the
+future-upgrade operational runbook
+(`docs/development/provider-runtime-upgrade.md`), the `provider_upgrade` pytest
+marker, a curated offline selection
+(`uv run pytest -m "provider_upgrade and not ollama"`) and an opt-in live
+selection (`uv run pytest -m "provider_upgrade and ollama"`), plus a static
+selection-integrity contract (`tests/contract/test_provider_upgrade_gate.py`).
+It performs **no** version bump: the `pydantic-ai-slim[openai]==2.39.0` pin,
+`uv.lock`, `src/` and runtime configuration are unchanged. Stage 14 remains
+`IN PROGRESS`; `S14-06` is next and `NOT STARTED`.
+
 ```text
 done     S14-01 — contract / status / golden-campaign qualification   DONE
 done     S14-02 — deterministic eval contract and scoring foundation  DONE
 done     S14-03 — offline scripted-model full-sequence regression     DONE
 done     S14-04 — untrusted-input / path-safety gap closure           DONE
-next     S14-05 — provider/runtime upgrade regression gate            NOT STARTED
+done     S14-05 — provider/runtime upgrade regression gate            DONE
+next     S14-06 — scriptable eval runner + product dataset            NOT STARTED
 ```
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes

@@ -33,6 +33,8 @@ from tests.support.pydantic_ai_runtime import (
     make_deferred_handler,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 # ============================================================================
 # Whole-turn model request limit — defense in depth
 # ============================================================================

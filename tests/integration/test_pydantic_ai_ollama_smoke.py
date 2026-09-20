@@ -12,7 +12,7 @@ import os
 
 import pytest
 
-pytestmark = pytest.mark.ollama
+pytestmark = [pytest.mark.provider_upgrade, pytest.mark.ollama]
 
 # ---------------------------------------------------------------------------
 # Smoke configuration

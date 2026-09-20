@@ -37,6 +37,7 @@ dev = [
 [tool.pytest.ini_options]
 markers = [
     "ollama: opt-in tests requiring a real configured Ollama endpoint",
+    "provider_upgrade: curated Pydantic AI / provider / runtime upgrade regression gate",
 ]
 
 [tool.ruff]

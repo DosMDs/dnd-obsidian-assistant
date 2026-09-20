@@ -26,6 +26,8 @@ from tests.unit.post_session.extraction_helpers import (
     make_prepared_input,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 
 def _request():
     return build_post_session_extraction_request(make_prepared_input())

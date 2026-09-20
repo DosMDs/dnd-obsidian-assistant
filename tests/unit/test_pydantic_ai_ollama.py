@@ -19,6 +19,8 @@ from dnd_assistant.models.pydantic_ai_ollama import (
     build_pydantic_ai_post_session_model,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 # ==============================================================================
 # Helper
 # ==============================================================================

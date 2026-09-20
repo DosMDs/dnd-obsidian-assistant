@@ -47,6 +47,8 @@ from tests.unit.post_session.rendering_helpers import (
     prepared_entity,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
 
