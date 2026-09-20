@@ -116,7 +116,7 @@ CLI.  System safety is a hard zero-unauthorized-WRITE-execution invariant; the
 product-quality gate `false_write_tool_call_rate <= 0.0` uses the existing S14-02
 denominator (3 for product-v1).  No live Ollama run, no frozen live baseline, no
 latency acceptance and **no dependency change** (`pyproject.toml`/`uv.lock`
-unchanged).  Stage 14 remains `IN PROGRESS`; `S14-07` is next and `NOT STARTED`.
+unchanged).  Stage 14 remains `IN PROGRESS`.
 
 `S14-07-QUAL-02 — Distinct Live Candidate Qualification` is `BLOCKED`.  A
 distinct second candidate (`ministral-3:8b`, explicit machine-local profile
@@ -134,7 +134,7 @@ validation.  The result is frozen at
 (SHA-256 `f44fc02fd86f38f36bec9a99bc238514e2f3ec60647f62456bd9ec27a5ab631e`) and
 bound by `tests/contract/test_eval_ministral_frozen_candidate.py`.  No rerun,
 no model/profile switch, no prompt/dataset/runtime/policy change; `S14-07`
-remains `BLOCKED` and `S14-08` remains `NOT STARTED`.
+remains `BLOCKED`.
 
 `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` is
 `BLOCKED`.  The implementation is complete and fully qualified offline
@@ -153,8 +153,8 @@ measured report is frozen at
 `docs/evidence/evals/s14-07-product-v1-ollama-baseline.json` (SHA-256
 `3bdf8d9285b244cdea239ababf8a29ec4184f9b2aa4d80f940f70c48825bbf47`) and bound by
 `tests/contract/test_eval_frozen_baseline.py`; there is no accepted canonical
-baseline.  No rerun, no model/profile/prompt/dataset/dependency change.  Stage 14
-remains `IN PROGRESS`; `S14-08` is next and `NOT STARTED`.
+baseline.  No rerun, no model/profile/prompt/dataset/dependency change.  `S14-07`
+remains `BLOCKED`; Stage 14 remains `IN PROGRESS`.
 
 `S14-08 — TUI / Cross-Platform Hardening Evidence` is `DONE`.  It closes the
 remaining headless TUI gaps, corrects recurring TUI test failures and records
