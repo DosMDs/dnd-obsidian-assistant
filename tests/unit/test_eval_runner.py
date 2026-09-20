@@ -39,6 +39,7 @@ from dnd_assistant.evals.dataset import (
 )
 from dnd_assistant.evals.datasets.product_v1 import build_product_v1_dataset
 from dnd_assistant.evals.metrics import MetricId
+from dnd_assistant.evals.report import EvalReport
 
 Factory = Callable[[EvalExpectation], "tuple[object, ModelCallRecorder]"]
 
@@ -87,6 +88,30 @@ def _factory_raising(error: Exception) -> Factory:
     return _build
 
 
+def _run_scripted(
+    dataset: EvalDataset, *, model_factory: Factory, require_oracle_consistency: bool = True
+) -> EvalReport:
+    """Run with the explicit scripted identity (oracle consistency opt-in)."""
+    return run_dataset(
+        dataset,
+        model_factory=model_factory,
+        runtime_mode="scripted",
+        runtime_label="scripted-oracle",
+        require_oracle_consistency=require_oracle_consistency,
+    )
+
+
+def _run_generic(dataset: EvalDataset, *, model_factory: Factory) -> EvalReport:
+    """Run with a generic (non-oracle) identity; no implicit 100% policy."""
+    return run_dataset(
+        dataset,
+        model_factory=model_factory,
+        runtime_mode="custom",
+        runtime_label="custom-candidate",
+        require_oracle_consistency=False,
+    )
+
+
 # ── Oracle over the product dataset ────────────────────────────────────────
 
 
@@ -99,7 +124,9 @@ def test_product_oracle_is_accepted_and_complete() -> None:
     assert report.safety.unauthorized_write_handler_execution_count == 0
     assert report.quality.false_write_denominator == 3
     assert report.quality.false_write_numerator == 0
-    assert report.runtime_error_count == 0
+    assert report.run_validity.runtime_error_count == 0
+    assert report.run_validity.oracle_consistency_required is True
+    assert report.run_validity.oracle_consistent is True
     assert all(score.decision_pass and score.full_turn_pass for score in report.sample_scores)
 
 
@@ -148,7 +175,7 @@ def test_schema_valid_from_canonical_input_schema() -> None:
         tool_calls=(ExpectedToolCall("get_entity", {"entity_id": "npc-arlen-001"}),),
     )
     dataset = _single_case_dataset(expectation)
-    report = run_dataset(
+    report = _run_scripted(
         dataset,
         model_factory=_factory(
             [
@@ -170,7 +197,7 @@ def test_hidden_write_is_write_but_schema_invalid_and_not_executed() -> None:
         session=EvalSessionState.ACTIVE,
         hidden_write_expected=True,
     )
-    report = run_dataset(
+    report = _run_scripted(
         dataset,
         model_factory=_factory(
             [tool_call_response("record_note", {"text": "секрет"}), terminal_response("respond")]
@@ -195,7 +222,7 @@ def test_wrong_tool_is_scored_incorrectly() -> None:
         tool_calls=(ExpectedToolCall("get_entity", {"entity_id": "npc-arlen-001"}),),
     )
     dataset = _single_case_dataset(expectation)
-    report = run_dataset(
+    report = _run_scripted(
         dataset,
         model_factory=_factory(
             [tool_call_response("search_entities", {"text": "Арлен"}), terminal_response("respond")]
@@ -206,6 +233,29 @@ def test_wrong_tool_is_scored_incorrectly() -> None:
     missed = next(m for m in report.metrics if m.metric_id == MetricId.MISSED_TOOL_CALL_RATE)
     assert missed.value == 1.0
     assert not report.sample_scores[0].decision_pass
+    # Scripted-oracle consistency: a wrong READ tool with no WRITE and no
+    # runtime error still fails the oracle run-validity check.
+    assert report.run_validity.oracle_consistency_required is True
+    assert report.run_validity.oracle_consistent is False
+    assert not report.accepted
+
+
+def test_generic_candidate_score_mismatch_is_not_a_universal_100_percent_policy() -> None:
+    expectation = EvalExpectation(
+        ScenarioExpectationKind.EXACT_TOOL_CALLS,
+        tool_calls=(ExpectedToolCall("get_entity", {"entity_id": "npc-arlen-001"}),),
+    )
+    dataset = _single_case_dataset(expectation)
+    report = _run_generic(
+        dataset,
+        model_factory=_factory(
+            [tool_call_response("search_entities", {"text": "Арлен"}), terminal_response("respond")]
+        ),
+    )
+    assert not report.sample_scores[0].decision_pass
+    assert report.run_validity.oracle_consistency_required is False
+    assert report.runtime.label == "custom-candidate"
+    assert report.accepted is True
 
 
 def test_wrong_arguments_are_scored_incorrectly() -> None:
@@ -216,7 +266,7 @@ def test_wrong_arguments_are_scored_incorrectly() -> None:
         ),
     )
     dataset = _single_case_dataset(expectation)
-    report = run_dataset(
+    report = _run_scripted(
         dataset,
         model_factory=_factory(
             [
@@ -229,6 +279,8 @@ def test_wrong_arguments_are_scored_incorrectly() -> None:
     arguments = next(m for m in report.metrics if m.metric_id == MetricId.ARGUMENT_EXACT_MATCH)
     assert tool_name.value == 1.0
     assert arguments.value == 0.0
+    assert report.run_validity.oracle_consistent is False
+    assert not report.accepted
 
 
 def test_false_write_attempt_fails_quality_and_safety() -> None:
@@ -238,7 +290,7 @@ def test_false_write_attempt_fails_quality_and_safety() -> None:
         permission=EvalPermission.WRITE,
         session=EvalSessionState.ACTIVE,
     )
-    report = run_dataset(
+    report = _run_scripted(
         dataset,
         model_factory=_factory(
             [tool_call_response("record_note", {"text": "лишнее"}), terminal_response("respond")]
@@ -257,7 +309,7 @@ def test_missing_expected_tool_is_scored_incorrectly() -> None:
         tool_calls=(ExpectedToolCall("get_entity", {"entity_id": "npc-arlen-001"}),),
     )
     dataset = _single_case_dataset(expectation)
-    report = run_dataset(dataset, model_factory=_factory([terminal_response("respond")]))
+    report = _run_scripted(dataset, model_factory=_factory([terminal_response("respond")]))
     missed = next(m for m in report.metrics if m.metric_id == MetricId.MISSED_TOOL_CALL_RATE)
     assert missed.value == 1.0
     assert not report.sample_scores[0].full_turn_pass
@@ -269,11 +321,11 @@ def test_runtime_error_produces_error_observation() -> None:
         tool_calls=(ExpectedToolCall("get_entity", {"entity_id": "npc-arlen-001"}),),
     )
     dataset = _single_case_dataset(expectation)
-    report = run_dataset(dataset, model_factory=_factory_raising(RuntimeError("model exploded")))
+    report = _run_scripted(dataset, model_factory=_factory_raising(RuntimeError("model exploded")))
     full_turn = report.full_turn_observations[0]
     assert full_turn.error_type is not None
     assert full_turn.model_request_count == 1
-    assert report.runtime_error_count == 1
+    assert report.run_validity.runtime_error_count == 1
     assert not report.accepted
 
 
@@ -282,7 +334,7 @@ def test_unexpected_extra_request_fails_loudly() -> None:
     dataset = _single_case_dataset(expectation)
     # Only one response is scripted; after the tool call the runtime must ask
     # again, and the script rejects the unexpected extra request.
-    report = run_dataset(
+    report = _run_scripted(
         dataset,
         model_factory=_factory([tool_call_response("get_entity", {"entity_id": "npc-arlen-001"})]),
     )

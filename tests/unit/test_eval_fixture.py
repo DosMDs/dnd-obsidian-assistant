@@ -11,6 +11,7 @@ from dnd_assistant.composition.eval_fixture import (
 )
 from dnd_assistant.errors import NotFoundError
 from dnd_assistant.evals.dataset import EvalExecutionSpec, EvalPermission, EvalSessionState
+from dnd_assistant.evals.datasets.product_v1 import build_product_v1_dataset
 from dnd_assistant.tools.types import Permission
 
 PRODUCTION_TOOL_NAMES = {
@@ -114,3 +115,76 @@ def test_write_tool_classified_from_trusted_permission() -> None:
     fixture = build_fixture(_spec(), model=_model())
     assert fixture.registry.get("record_note").definition.permission is Permission.WRITE
     assert fixture.registry.get("get_entity").definition.permission is Permission.READ
+
+
+# ── Product scenario ground-truth ↔ AgentContext correspondence ─────────────
+# Ground truth is derived from the real AgentContextBuilder.build() over the
+# real synthetic fixture, never from dataset description text.
+
+_DATASET = build_product_v1_dataset()
+
+
+def _case(scenario_id: str):
+    return next(case for case in _DATASET.cases if case.scenario.scenario_id == scenario_id)
+
+
+def _context(scenario_id: str):
+    case = _case(scenario_id)
+    fixture = build_fixture(case.execution, model=_model(), scenario_id=scenario_id)
+    return fixture, fixture.context_builder.build(case.scenario.user_input)
+
+
+def test_context_p1_001_current_tick_available() -> None:
+    _, context = _context("EVAL-P1-001")
+    assert context.current_world_tick == 2100
+
+
+def test_context_p1_002_both_varos_candidates_visible() -> None:
+    _, context = _context("EVAL-P1-002")
+    ids = {entity.entity_id for entity in context.relevant_entities}
+    assert {"npc-varos-elder", "npc-varos-younger"} <= ids
+
+
+def test_context_p1_003_kell_truncated_and_tail_fact_absent() -> None:
+    _, context = _context("EVAL-P1-003")
+    kell = next(
+        (entity for entity in context.relevant_entities if entity.entity_id == "npc-kell-001"),
+        None,
+    )
+    assert kell is not None
+    assert kell.body_truncated is True
+    assert "печать совета" not in kell.body_excerpt
+
+
+def test_context_p1_004_five_guards_capped_but_handler_sees_all_six() -> None:
+    fixture, context = _context("EVAL-P1-004")
+    guard_ids = {entity.entity_id for entity in context.relevant_entities}
+    assert guard_ids == {f"npc-guard-{index:03d}" for index in range(1, 6)}
+
+    binding = fixture.registry.get("search_entities")
+    input_model = binding.definition.input_schema.model_validate(
+        {"text": "стража", "entity_types": ["npc"]}
+    )
+    output = binding.handler(input_model, fixture.execution_context)
+    assert len(output.results) == 6  # type: ignore[attr-defined]
+
+
+def test_context_p1_006_active_session_exposes_only_last_five_events() -> None:
+    _, context = _context("EVAL-P1-006")
+    assert context.active_session is not None
+    assert context.active_session.session_id == "S010"
+    event_ids = [event.event_id for event in context.recent_events]
+    assert event_ids == [f"evt_{number}" for number in range(103, 108)]
+
+
+def test_context_p1_008_active_session_id_available() -> None:
+    _, context = _context("EVAL-P1-008")
+    assert context.active_session is not None
+    assert context.active_session.session_id == "S010"
+    assert context.recent_events
+
+
+def test_context_p1_009_ambiguous_write_target_visible() -> None:
+    _, context = _context("EVAL-P1-009")
+    ids = {entity.entity_id for entity in context.relevant_entities}
+    assert {"npc-varos-elder", "npc-varos-younger"} <= ids

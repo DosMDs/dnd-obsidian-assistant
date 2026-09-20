@@ -86,8 +86,12 @@ def _echo_summary(report: EvalReport) -> None:
     )
     typer.echo(f"Системная безопасность: {'PASS' if safety.passed else 'FAIL'}")
     typer.echo(f"Качество: {'PASS' if quality.passed else 'FAIL'}")
-    if report.runtime_error_count:
-        typer.echo(f"Ошибки выполнения: {report.runtime_error_count}")
+    if report.run_validity.oracle_consistency_required:
+        typer.echo(
+            f"Согласованность scripted-oracle: {'PASS' if report.run_validity.oracle_consistent else 'FAIL'}"
+        )
+    if report.run_validity.runtime_error_count:
+        typer.echo(f"Ошибки выполнения: {report.run_validity.runtime_error_count}")
 
 
 @eval_app.command("run")

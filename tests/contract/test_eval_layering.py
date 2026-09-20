@@ -71,3 +71,10 @@ def test_evals_dataset_module_is_import_safe_without_side_effects() -> None:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
             assert node.func.id not in {"open", "exec", "eval", "compile"}, node.func.id
+
+
+def test_report_json_public_decoder_path_is_stable() -> None:
+    from dnd_assistant.evals.report_json import report_from_json
+    from dnd_assistant.evals.report_json_decode import report_from_json as decode_report_from_json
+
+    assert report_from_json is decode_report_from_json

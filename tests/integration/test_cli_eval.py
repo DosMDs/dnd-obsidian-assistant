@@ -128,7 +128,13 @@ def test_report_failure_gate_exit_1(tmp_path: Path) -> None:
         ]
         return build_model_from_responses(responses, recorder=recorder), recorder
 
-    failing = run_dataset(dataset, model_factory=_factory)
+    failing = run_dataset(
+        dataset,
+        model_factory=_factory,
+        runtime_mode="scripted",
+        runtime_label="scripted-oracle",
+        require_oracle_consistency=True,
+    )
     assert not failing.accepted
     path = tmp_path / "failing.json"
     path.write_text(report_to_json(failing), encoding="utf-8")

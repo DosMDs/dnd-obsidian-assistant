@@ -728,6 +728,25 @@ second tool batch; `EVAL-P1-013` therefore supplies the stable ID/revision
 explicitly, matching the tool schema's stated contract.  No ground truth forces a
 tool that supplied context already makes unnecessary.
 
+Ground truth is verified against the **actual** `AgentContextBuilder.build()`
+output over the real synthetic fixture before any model call, never against
+dataset descriptions.  The synthetic search uses deterministic Unicode token
+normalization (lowercasing, ``ё`` folding, punctuation/guillemet stripping via
+Unicode ``\\w``) plus a >=4-character prefix rule that absorbs common Russian
+inflection (``Варос``/``Варосу``); it is a fixture helper, not an NLP layer, and
+contains no scenario-ID branching.  Literal context evidence:
+
+```text
+EVAL-P1-001  current_world_tick == 2100
+EVAL-P1-002  relevant_entities contains both npc-varos-elder and npc-varos-younger
+EVAL-P1-003  npc-kell-001 present, body_truncated True, tail fact not in excerpt
+EVAL-P1-004  context contains exactly npc-guard-001..005 (cap 5 of 6); the real
+             search_entities handler returns all six
+EVAL-P1-006  active session S010; recent_events == evt_103..evt_107 (last 5 of 7)
+EVAL-P1-008  active_session.session_id == S010 already in context
+EVAL-P1-009  both npc-varos-elder and npc-varos-younger visible (ambiguous target)
+```
+
 ### Exact CLI contract
 
 ```text
@@ -762,17 +781,38 @@ validating emitted arguments against the canonical production `input_schema`
 Handler/WRITE counts come from an eval-owned `ToolRegistry` subclass that wraps
 canonical handlers after the four real production registration functions ran.
 
+Generic execution is separated from oracle identity.  `run_dataset()` takes
+explicit `runtime_mode` / `runtime_label` / `runtime_metadata` so the same
+collector/report path is reused unchanged by S14-07; `run_eval(runtime="scripted")`
+is the only product entrypoint and explicitly selects `mode=scripted`,
+`label=scripted-oracle`, `require_oracle_consistency=True`.  The scripted oracle's
+responses derive from the same ground truth, so any sample-score failure means
+the plumbing is inconsistent: `run_validity.oracle_consistency_required` and
+`run_validity.oracle_consistent` make this an explicit run-validity check that
+rejects the report.  Generic/live candidates set it false and carry no implicit
+100%-accuracy policy.
+
 ### Report schema / version
 
 ```text
 report_schema_version = 1
 identity, runtime{mode,label,metadata}, sample_contract (completeness),
 decision_observations, full_turn_observations, metrics (all MetricId),
-sample_scores, safety, quality, runtime_error_count, accepted, reasons
+sample_scores, safety, quality,
+run_validity{runtime_error_count, oracle_consistency_required, oracle_consistent},
+accepted, reasons
 JSON: UTF-8, ensure_ascii=False, sort_keys=True, deterministic order,
-      allow_nan=False, trailing newline; strict loader (schema version, required
-      keys, primitive shapes, MetricId validation)
+      allow_nan=False, trailing newline
+strict loader: schema version, primitive shapes, MetricId validation,
+      missing AND unexpected keys rejected at every fixed-shape DTO boundary,
+      runtime metadata must literally be str -> str (no coercion),
+      bool rejected wherever an integer is required
 ```
+
+The strict decoder is decomposed: `evals/report_json.py` owns encoding and the
+public `report_to_json`/`report_from_json` surface; `evals/report_json_decode.py`
+owns fixed-shape decoding and primitive validators.  Open payloads (tool-call
+`arguments`) are copied verbatim.
 
 ### Safety / quality / completeness policy
 
@@ -811,53 +851,58 @@ product-composition implementation.
 ### Expected changed files
 
 ```text
-src/dnd_assistant/evals/__init__.py                  modified (exports)    114
+src/dnd_assistant/evals/__init__.py                  modified (exports)
 src/dnd_assistant/evals/dataset.py                    new                   246
 src/dnd_assistant/evals/completeness.py               new                   154
-src/dnd_assistant/evals/report.py                     new                   399
-src/dnd_assistant/evals/report_json.py                new                   604
+src/dnd_assistant/evals/report.py                     new                   428
+src/dnd_assistant/evals/report_json.py                new (encoder/public)  174
+src/dnd_assistant/evals/report_json_decode.py         new (strict decoder)  491
 src/dnd_assistant/evals/datasets/__init__.py          new                    23
 src/dnd_assistant/evals/datasets/product_v1.py        new                   212
-src/dnd_assistant/composition/eval_fixture.py         new                   577
+src/dnd_assistant/composition/eval_fixture.py         new                   613
 src/dnd_assistant/composition/eval_model.py           new                   158
-src/dnd_assistant/composition/eval_runner.py          new                   346
+src/dnd_assistant/composition/eval_runner.py          new                   365
 src/dnd_assistant/composition/eval_artifacts.py       new                    68
-src/dnd_assistant/cli/eval.py                         new                   191
+src/dnd_assistant/cli/eval.py                         new                   195
 src/dnd_assistant/cli/main.py                         modified (eval group)  +4
 tests/unit/test_eval_dataset.py                       new                   131
 tests/unit/test_eval_completeness.py                  new                    93
-tests/unit/test_eval_report.py                        new                   228
+tests/unit/test_eval_report.py                        new                   333
 tests/unit/test_eval_model.py                         new                    87
-tests/unit/test_eval_fixture.py                       new                   116
-tests/unit/test_eval_runner.py                        new                   292
-tests/integration/test_cli_eval.py                    new                   151
-tests/contract/test_eval_layering.py                  new                    73
+tests/unit/test_eval_fixture.py                       new                   190
+tests/unit/test_eval_runner.py                        new                   344
+tests/integration/test_cli_eval.py                    new                   157
+tests/contract/test_eval_layering.py                  new                    80
 DEVELOPMENT_STATUS.md                                 status reconciliation
 docs/stages/14_EVALS_AND_HARDENING.md                 this record
 ```
 
-No new dependency; `uv.lock` and `pyproject.toml` unchanged.  All new production
-modules are below the 700-line hard limit; all new test modules below 1000.
+No new dependency; `uv.lock` and `pyproject.toml` unchanged.  All new modules are
+below the 700-line hard limit; all new test modules below 1000.  Maintainability
+review: `report_json.py` grew past 600 in the first pass, so the strict decoder
+was decomposed into `report_json_decode.py` (174 / 491, both comfortably below
+600).  `eval_fixture.py` is 613 (< 700) and remains a single cohesive synthetic
+fixture module; no further decomposition was warranted for this correction.
 
 ### Literal evidence
 
 ```text
-focused (Level 1)              72 passed
-affected subsystem (Level 2)   1040 passed (evals scoring/metrics/write-accounting,
-                               boundaries, maintainability, policy, bridge author.)
-runtime/path-safety subset     90 passed (Pydantic runtime, S14-04 untrusted input,
-                               CLI entrypoint/agent-runtime)
-canonical full pytest (1st)    7603 passed, 141 skipped, 1 failed
+focused (Level 1)              65 passed (dataset/fixture/runner/report/layering)
+complete S14-06 focused        96 passed (adds completeness/model/CLI/boundaries)
+affected subsystem (Level 2)   1070 passed (evals scoring/metrics/write-accounting,
+                               maintainability, policy, bridge authority, Pydantic
+                               runtime + boundaries + evidence)
+canonical full pytest          7622 passed, 141 skipped, 1 failed
       failure  tests/integration/test_tui_interaction.py
-               TestQuitPathAudit::test_palette_has_no_framework_quit_entry
-      classification  PRE_EXISTING_FLAKY / UNRELATED (Windows/order-dependent):
-                      passes in isolation and as a full module; no eval/TUI code
-                      touched by S14-06
-canonical full pytest (2nd)    7604 passed, 141 skipped, 0 failed, 0 errors
+               TestFocusPolicy::test_navigation_keys_focus_primary_control
+      classification  PRE_EXISTING_FLAKY / UNRELATED: passes in isolation; the TUI
+                      module passed on isolated rerun and failed in another order;
+                      no eval/TUI code touched by S14-06.  Not rerun for a lucky
+                      green per TEST-WORKFLOW-01.
 pyright                        0 errors, 0 warnings, 0 informations
-ruff check . / format --check  passed / 640 files already formatted
+ruff check . / format --check  passed / 641 files already formatted
 uv lock --check                passed
 git diff --check               passed
-pyproject / uv.lock diff       empty
-maintainability contract       green (all new modules below limits)
+pyproject / uv.lock diff       empty (no dependency change)
+maintainability contract       green (report_json decomposed; all modules < limits)
 ```

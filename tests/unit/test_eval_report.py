@@ -87,7 +87,11 @@ def _full_turn(**overrides: object) -> FullTurnObservation:
 
 
 def _report(
-    dataset: EvalDataset, decision: DecisionObservation, full_turn: FullTurnObservation
+    dataset: EvalDataset,
+    decision: DecisionObservation,
+    full_turn: FullTurnObservation,
+    *,
+    oracle: bool = False,
 ) -> EvalReport:
     return build_eval_report(
         dataset,
@@ -96,6 +100,7 @@ def _report(
         prompt_version="agent-v3",
         decision_observations=[decision],
         full_turn_observations=[full_turn],
+        oracle_consistency_required=oracle,
     )
 
 
@@ -182,7 +187,7 @@ def test_runtime_error_is_persisted_and_blocks_acceptance() -> None:
     decision = _decision(error_type="ModelError", error_message="boom", terminal_kind=None)
     full_turn = _full_turn(success=False, error_type="ModelError", error_message="boom")
     report = _report(_dataset(), decision, full_turn)
-    assert report.runtime_error_count == 1
+    assert report.run_validity.runtime_error_count == 1
     assert report.decision_observations[0].error_type == "ModelError"
     assert report.full_turn_observations[0].error_message == "boom"
     assert not report.accepted
@@ -226,3 +231,103 @@ def test_fingerprint_binding_rejects_different_ground_truth() -> None:
     baseline = _report(other_dataset, _decision(), _full_turn())
     comparison = compare_eval_reports(current, baseline)
     assert comparison.status is BaselineStatus.INCOMPATIBLE
+
+
+# ── Scripted-oracle consistency ────────────────────────────────────────────
+
+
+def test_oracle_consistency_required_and_consistent() -> None:
+    report = _report(_dataset(), _decision(), _full_turn(), oracle=True)
+    assert report.run_validity.oracle_consistency_required is True
+    assert report.run_validity.oracle_consistent is True
+    assert report.accepted
+
+
+def test_oracle_consistency_failure_rejects_report() -> None:
+    # A response with a tool call where no-tool was expected fails the score.
+    write_like = ToolCallObservation(
+        tool_name="search_entities",
+        arguments={"text": "x"},
+        call_id="c1",
+        schema_valid=True,
+        is_write=False,
+    )
+    decision = _decision(tool_calls=(write_like,), terminal_kind=None)
+    full_turn = _full_turn(initial_tool_calls=(write_like,), tool_call_count=1)
+    report = _report(_dataset(), decision, full_turn, oracle=True)
+    assert report.run_validity.oracle_consistent is False
+    assert not report.accepted
+    assert any("oracle consistency" in reason for reason in report.reasons)
+
+
+def test_generic_report_with_score_mismatch_stays_accepted_without_oracle_policy() -> None:
+    tool_call = ToolCallObservation(
+        tool_name="search_entities",
+        arguments={"text": "x"},
+        call_id="c1",
+        schema_valid=True,
+        is_write=False,
+    )
+    decision = _decision(tool_calls=(tool_call,), terminal_kind=None)
+    full_turn = _full_turn(initial_tool_calls=(tool_call,), tool_call_count=1)
+    report = _report(_dataset(), decision, full_turn, oracle=False)
+    assert report.run_validity.oracle_consistency_required is False
+    assert not report.sample_scores[0].decision_pass
+    assert report.accepted
+
+
+# ── Strict JSON decoder ────────────────────────────────────────────────────
+
+
+def _payload(report: EvalReport) -> dict[str, object]:
+    return json.loads(report_to_json(report))
+
+
+def test_strict_decoder_rejects_unknown_top_level_field() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    payload["extra_field"] = 1
+    with pytest.raises(ValueError, match="unexpected keys"):
+        report_from_json(json.dumps(payload))
+
+
+def test_strict_decoder_rejects_unknown_nested_field() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    safety = payload["safety"]
+    assert isinstance(safety, dict)
+    safety["extra_field"] = 1
+    with pytest.raises(ValueError, match="unexpected keys"):
+        report_from_json(json.dumps(payload))
+
+
+def test_strict_decoder_rejects_non_string_runtime_metadata() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    runtime = payload["runtime"]
+    assert isinstance(runtime, dict)
+    runtime["metadata"] = {"build": 7}
+    with pytest.raises(ValueError, match="string keys to string values"):
+        report_from_json(json.dumps(payload))
+
+
+def test_strict_decoder_rejects_bool_repetition() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    observations = payload["decision_observations"]
+    assert isinstance(observations, list) and observations
+    observations[0]["repetition"] = True
+    with pytest.raises(ValueError, match="must be an integer"):
+        report_from_json(json.dumps(payload))
+
+
+def test_strict_decoder_rejects_bool_metric_denominator() -> None:
+    payload = _payload(_report(_dataset(), _decision(), _full_turn()))
+    metrics = payload["metrics"]
+    assert isinstance(metrics, list) and metrics
+    metrics[0]["denominator"] = True
+    with pytest.raises(ValueError, match="must be an integer or null"):
+        report_from_json(json.dumps(payload))
+
+
+def test_strict_decoder_round_trip_and_russian_preserved() -> None:
+    report = _report(_dataset(), _decision(), _full_turn())
+    text = report_to_json(report)
+    assert "Готово: Арлен" in text
+    assert report_from_json(text) == report

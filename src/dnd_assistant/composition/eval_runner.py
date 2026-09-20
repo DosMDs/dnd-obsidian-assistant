@@ -80,15 +80,33 @@ def run_eval(
         raise ValueError(
             f"unknown eval runtime {runtime!r}; only {SCRIPTED_RUNTIME!r} is available"
         )
-    return run_dataset(dataset, model_factory=model_factory or _default_model_factory)
+    return run_dataset(
+        dataset,
+        model_factory=model_factory or _default_model_factory,
+        runtime_mode=SCRIPTED_RUNTIME,
+        runtime_label=SCRIPTED_RUNTIME_LABEL,
+        runtime_metadata={},
+        require_oracle_consistency=True,
+    )
 
 
 def run_dataset(
     dataset: EvalDataset,
     *,
     model_factory: ModelFactory,
+    runtime_mode: str,
+    runtime_label: str,
+    runtime_metadata: Mapping[str, str] | None = None,
+    require_oracle_consistency: bool = False,
 ) -> EvalReport:
-    """Run every sample with the given model factory and build the report."""
+    """Run every sample with the given model factory and build the report.
+
+    Runtime identity is an explicit parameter so this collector/report path is
+    reused unchanged by S14-07 for live candidates.  ``scripted`` oracle
+    consistency is required only when the caller sets
+    ``require_oracle_consistency=True``; generic/live candidates carry no
+    implicit 100%-accuracy requirement.
+    """
     decision_observations: list[DecisionObservation] = []
     full_turn_observations: list[FullTurnObservation] = []
 
@@ -105,12 +123,13 @@ def run_dataset(
 
     return build_eval_report(
         dataset,
-        runtime_mode=SCRIPTED_RUNTIME,
-        runtime_label=SCRIPTED_RUNTIME_LABEL,
+        runtime_mode=runtime_mode,
+        runtime_label=runtime_label,
         prompt_version=PROMPT_VERSION,
         decision_observations=decision_observations,
         full_turn_observations=full_turn_observations,
-        runtime_metadata={},
+        runtime_metadata=runtime_metadata,
+        oracle_consistency_required=require_oracle_consistency,
     )
 
 

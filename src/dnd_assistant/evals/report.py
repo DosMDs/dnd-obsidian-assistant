@@ -82,6 +82,26 @@ class EvalSampleScore:
 
 
 @dataclass(frozen=True, slots=True)
+class EvalRunValidity:
+    """Run-validity contract, including the explicit oracle-consistency check.
+
+    ``oracle_consistency_required`` is an explicit policy flag supplied by the
+    runner.  It is true only for the deterministic scripted oracle, whose
+    responses are generated from the same ground truth; any sample-score
+    failure then means the eval plumbing itself is inconsistent.  Generic/live
+    candidates set it false and are not subject to an implicit 100% policy.
+
+    ``oracle_consistent`` is ``False`` both when consistency is required and a
+    sample failed, and when it is not required (reported as not-applicable via
+    ``oracle_consistency_required``).
+    """
+
+    runtime_error_count: int
+    oracle_consistency_required: bool
+    oracle_consistent: bool
+
+
+@dataclass(frozen=True, slots=True)
 class EvalReport:
     """Complete eval report for one measured candidate."""
 
@@ -94,7 +114,7 @@ class EvalReport:
     sample_scores: tuple[EvalSampleScore, ...]
     safety: EvalSafetyResult
     quality: EvalQualityResult
-    runtime_error_count: int
+    run_validity: EvalRunValidity
     accepted: bool
     reasons: tuple[str, ...]
 
@@ -111,6 +131,7 @@ def build_eval_report(
     decision_observations: Sequence[DecisionObservation],
     full_turn_observations: Sequence[FullTurnObservation],
     runtime_metadata: Mapping[str, str] | None = None,
+    oracle_consistency_required: bool = False,
 ) -> EvalReport:
     """Build an eval report from frozen observations and dataset ground truth."""
     scenario_by_id = {case.scenario.scenario_id: case.scenario for case in dataset.cases}
@@ -145,6 +166,8 @@ def build_eval_report(
         1 for observation in full_turn_observations if observation.error_type is not None
     )
 
+    oracle_consistent = all(score.decision_pass and score.full_turn_pass for score in sample_scores)
+
     reasons: list[str] = []
     reasons.extend(completeness.errors)
     if not safety.passed:
@@ -153,6 +176,8 @@ def build_eval_report(
         reasons.append("false_write_tool_call_rate exceeds quality policy")
     if runtime_error_count:
         reasons.append(f"runtime errors: {runtime_error_count}")
+    if oracle_consistency_required and not oracle_consistent:
+        reasons.append("scripted-oracle consistency failure: a sample did not match ground truth")
 
     accepted = not reasons
 
@@ -182,7 +207,11 @@ def build_eval_report(
         sample_scores=tuple(sample_scores),
         safety=safety,
         quality=quality,
-        runtime_error_count=runtime_error_count,
+        run_validity=EvalRunValidity(
+            runtime_error_count=runtime_error_count,
+            oracle_consistency_required=oracle_consistency_required,
+            oracle_consistent=oracle_consistent,
+        ),
         accepted=accepted,
         reasons=tuple(reasons),
     )

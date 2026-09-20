@@ -21,6 +21,7 @@ text/content, never from a scenario ID.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -152,14 +153,41 @@ def _base_sessions() -> dict[str, Session]:
 # ── In-memory storage protocols ────────────────────────────────────────────
 
 
+def _normalize_tokens(text: str) -> list[str]:
+    """Lowercase Unicode word tokens, stripping punctuation and guillemets.
+
+    ``\\w`` is Unicode-aware, so Cyrillic letters and digits survive while
+    quotes (``«»``), punctuation and ``ё`` normalization are handled
+    deterministically.  This is a small normalization helper for the synthetic
+    fixture, not a general NLP/stemming layer.
+    """
+    lowered = text.lower().replace("ё", "е")
+    cleaned = re.sub(r"[^\w\s]", " ", lowered, flags=re.UNICODE)
+    return [token for token in cleaned.split() if token]
+
+
+def _token_matches(query_token: str, haystack_token: str) -> bool:
+    """Match identical tokens or tokens sharing a >=4-char prefix.
+
+    The prefix rule absorbs common Russian inflection (``Варос`` / ``Варосу``)
+    without a stemming framework.
+    """
+    if query_token == haystack_token:
+        return True
+    shortest = min(len(query_token), len(haystack_token))
+    if shortest < 4:
+        return False
+    return query_token.startswith(haystack_token) or haystack_token.startswith(query_token)
+
+
 class _InMemorySearchService:
-    """Token-substring player-visible search over the synthetic fixture."""
+    """Deterministic normalized-token player-visible search over the fixture."""
 
     def __init__(self, vault_repository: _InMemoryVaultRepository) -> None:
         self._repository = vault_repository
 
     def search(self, query: SearchQuery, *, limit: int = 20) -> Sequence[SearchHit]:
-        tokens = [t for t in query.text.lower().split() if len(t) >= 3]
+        query_tokens = [token for token in _normalize_tokens(query.text) if len(token) >= 3]
         hits: list[SearchHit] = []
         for document in self._repository._all_documents():
             entity = document.entity
@@ -167,8 +195,16 @@ class _InMemorySearchService:
                 continue
             if query.entity_types is not None and entity.type not in query.entity_types:
                 continue
-            haystack = " ".join((entity.name, entity.status, document.body, *entity.tags)).lower()
-            if any(token in haystack for token in tokens):
+            haystack_tokens = set(
+                _normalize_tokens(
+                    " ".join((entity.name, entity.status, document.body, *entity.tags))
+                )
+            )
+            if any(
+                _token_matches(query_token, haystack_token)
+                for query_token in query_tokens
+                for haystack_token in haystack_tokens
+            ):
                 hits.append(SearchHit(entity_id=entity.id, match_kind=MatchKind.FTS, score=None))
             if len(hits) >= limit:
                 break
