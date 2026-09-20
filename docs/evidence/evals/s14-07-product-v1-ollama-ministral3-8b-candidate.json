@@ -1,0 +1,1005 @@
+{
+  "accepted": false,
+  "decision_observations": [
+    {
+      "duration_seconds": 0.24390959999436745,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-001",
+      "terminal_content": "{\"kind\":\"respond\",\"message\":\"Текущий мировой тик — **2100**.\"}",
+      "terminal_kind": "respond",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 1.9329708000004757,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-002",
+      "terminal_content": "{\"kind\":\"respond\",\"message\":{\n  \"answer\": \"Варос — это персонаж в кампании. Он упоминается как один из двух связанных персонажей с именем Варос. Однако без дополнительных деталей из контекста игры или его описания в доступных данных невозможно дать подробный ответ о его роли, характеристиках или связи с сюжетом. Если у вас есть конкретные вопросы о его участии в событиях или взаимодействии с другими персонажами, уточните их, и я постараюсь помочь на основе имеющихся данных.\",\n  \"suggestions\": {\n    \"possible_questions\": [\n      \"Какая роль Вароса в последних событиях кампании?\",\n      \"Есть ли у Вароса связь с Варосом Младшим?\",\n      \"Где можно найти больше информации о Варосе в игре?\"\n    ]\n  }\n}\n}",
+      "terminal_kind": null,
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 1.4012836999972933,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-003",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"В текущем контексте доступен только фрагмент записи Архивиста Келла с текстом \\\"Хроника Келла описывает множество архивных событий\\\" (повторяется несколько раз) и отмечено, что запись усечена (**body_truncated**: true).\\n\\nХотите:\\n1. Попробовать найти полный текст записи Архивиста Келла через поиск по сущностям?\\n2. Уточнить, что именно вас интересует в доступном фрагменте?\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 2.455109700000321,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-004",
+      "terminal_content": "{\"kind\":\"respond\",\"message\":[\n    {\n        \"entity_id\": \"npc-guard-001\",\n        \"name\": \"Стража 1\",\n        \"entity_type\": \"npc\",\n        \"status\": \"active\"\n    },\n    {\n        \"entity_id\": \"npc-guard-002\",\n        \"name\": \"Стража 2\",\n        \"entity_type\": \"npc\",\n        \"status\": \"active\"\n    },\n    {\n        \"entity_id\": \"npc-guard-003\",\n        \"name\": \"Стража 3\",\n        \"entity_type\": \"npc\",\n        \"status\": \"active\"\n    },\n    {\n        \"entity_id\": \"npc-guard-004\",\n        \"name\": \"Стража 4\",\n        \"entity_type\": \"npc\",\n        \"status\": \"active\"\n    },\n    {\n        \"entity_id\": \"npc-guard-005\",\n        \"name\": \"Стража 5\",\n        \"entity_type\": \"npc\",\n        \"status\": \"active\"\n    }\n]}",
+      "terminal_kind": null,
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.44099789999745553,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-005",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"Вы имеете в виду сессию с ID \\\"S001\\\"? Если да, то я могу проверить дату начала этой сессии.\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 2.9672744999988936,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-006",
+      "terminal_content": "{\"kind\":\"respond\",\"message\":[\n    {\n        \"event_id\": \"evt_103\",\n        \"event_type\": \"note\",\n        \"text\": \"Событие 3\",\n        \"world_tick\": 2100\n    },\n    {\n        \"event_id\": \"evt_104\",\n        \"event_type\": \"note\",\n        \"text\": \"Событие 4\",\n        \"world_tick\": 2100\n    },\n    {\n        \"event_id\": \"evt_105\",\n        \"event_type\": \"note\",\n        \"text\": \"Событие 5\",\n        \"world_tick\": 2100\n    },\n    {\n        \"event_id\": \"evt_106\",\n        \"event_type\": \"note\",\n        \"text\": \"Событие 6\",\n        \"world_tick\": 2100\n    },\n    {\n        \"event_id\": \"evt_107\",\n        \"event_type\": \"note\",\n        \"text\": \"Событие 7\",\n        \"world_tick\": 2100\n    }\n]}",
+      "terminal_kind": null,
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 1.5392565000001923,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-007",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"У меня нет доступа к журналам событий сессий S001 и S002 напрямую. Однако я могу помочь, если вы уточните:\\n1. Нужно ли мне сравнить события этих сессий по хронологии или по другому критерию?\\n2. Есть ли конкретные аспекты событий, которые вас интересуют (например, действия персонажей, изменения в мире, ключевые события)?\\n3. Должен ли я предоставить полный текст событий или только их краткое резюме?\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.41975839999940945,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-008",
+      "terminal_content": "{\"kind\":\"respond\",\"message\":\"ID текущей активной сессии — **S010**.\"}",
+      "terminal_kind": "respond",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.5067837000024156,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-009",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"К какому из Варосов — Старшего или Младшего — вы хотите добавить факт «носит серебряный перстень»?\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.4473316000003251,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-010",
+      "terminal_content": "{\"kind\":\"respond\",\"message\":{\"note\": {\"text\": \"Запись заметки: дракон ушёл на север.\"}}}",
+      "terminal_kind": null,
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.9899642999953358,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "search_entities",
+          "start_session"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-011",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"Вы хотите начать новую сессию без каких-либо предварительных условий или с какими-то конкретными параметрами (например, начальная локация, персонажи, правила)?\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.9421766000014031,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-012",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"В каком месте или контексте должен быть сохранен факт о разрушенном мосту? Например, связано ли это с конкретным местом (например, городом, долиной или локацией), персонажем или другим объектом из кампании?\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    },
+    {
+      "duration_seconds": 0.825595100002829,
+      "error_message": null,
+      "error_type": null,
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "search_entities",
+          "start_session"
+        ]
+      },
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-013",
+      "terminal_content": "{\"kind\":\"clarify\",\"message\":\"Уточните, пожалуйста, ожидаемую ревизию сущности npc-arlen-001. Нужно ли использовать ревизию 3, или необходимо сначала уточнить текущую версию?\"}",
+      "terminal_kind": "clarify",
+      "tool_calls": []
+    }
+  ],
+  "full_turn_observations": [
+    {
+      "duration_seconds": 0.26468739999836544,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-001",
+      "success": true,
+      "terminal_kind": "respond",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 1.9498950999986846,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [
+          "ValidationError"
+        ],
+        "exception_type": "ModelError",
+        "request_index": 0,
+        "source_category": "project_policy",
+        "status": "observed"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-002",
+      "success": false,
+      "terminal_kind": null,
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 1.4217998000021908,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-003",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 2.4696639999965555,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [
+          "ValidationError"
+        ],
+        "exception_type": "ModelError",
+        "request_index": 0,
+        "source_category": "project_policy",
+        "status": "observed"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-004",
+      "success": false,
+      "terminal_kind": null,
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 0.4559244999982184,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-005",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 2.9911615000019083,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [
+          "ValidationError"
+        ],
+        "exception_type": "ModelError",
+        "request_index": 0,
+        "source_category": "project_policy",
+        "status": "observed"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-006",
+      "success": false,
+      "terminal_kind": null,
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 1.5532443999982206,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-007",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 0.4510694999989937,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-008",
+      "success": true,
+      "terminal_kind": "respond",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 0.5364941000007093,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-009",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 0.47578079999948386,
+      "error_message": "Model output failed AgentTextOutcome validation",
+      "error_type": "ModelError",
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "end_session",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "record_event",
+          "record_note",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [
+          "ValidationError"
+        ],
+        "exception_type": "ModelError",
+        "request_index": 0,
+        "source_category": "project_policy",
+        "status": "observed"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-010",
+      "success": false,
+      "terminal_kind": null,
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 1.022086400000262,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "search_entities",
+          "start_session"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-011",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 0.9564627000072505,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": false,
+        "tool_names": [
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "search_entities"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-012",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    },
+    {
+      "duration_seconds": 0.8576586999988649,
+      "error_message": null,
+      "error_type": null,
+      "executed_tool_calls": [],
+      "exposed_tools": {
+        "has_write": true,
+        "tool_names": [
+          "append_entity_fact",
+          "get_active_session",
+          "get_entity",
+          "get_session",
+          "list_session_events",
+          "list_sessions",
+          "patch_entity",
+          "search_entities",
+          "start_session"
+        ]
+      },
+      "failure_diagnostic": {
+        "cause_chain": [],
+        "exception_type": null,
+        "request_index": null,
+        "source_category": null,
+        "status": "not_available"
+      },
+      "handler_call_count": 0,
+      "initial_tool_calls": [],
+      "model_request_count": 1,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-013",
+      "success": true,
+      "terminal_kind": "clarify",
+      "tool_call_count": 0,
+      "tool_execution_count": 0,
+      "write_handler_count": 0
+    }
+  ],
+  "identity": {
+    "dataset_fingerprint": "e4a473401ff93dc94c1ccb45ccc0d8cdcddaf6fe34a68c31918cac0216915057",
+    "dataset_id": "product-agent",
+    "dataset_version": "1",
+    "prompt_version": "agent-v3",
+    "report_schema_version": 3,
+    "sample_plan_fingerprint": "696448e51c9e280203b941f52c34b9076d0611e585ad2074f72bd13bc7c8b2ca",
+    "sample_plan_id": "single-pass-v1"
+  },
+  "latency": {
+    "decision": {
+      "p50_seconds": 0.9421766000014031,
+      "p95_seconds": 2.9672744999988936,
+      "sample_count": 13
+    },
+    "full_turn": {
+      "p50_seconds": 0.9564627000072505,
+      "p95_seconds": 2.9911615000019083,
+      "sample_count": 13
+    }
+  },
+  "metrics": [
+    {
+      "denominator": 8,
+      "metric_id": "tool_name_accuracy",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": 0.0
+    },
+    {
+      "denominator": 8,
+      "metric_id": "argument_exact_match",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": 0.0
+    },
+    {
+      "denominator": 0,
+      "metric_id": "schema_valid_rate",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": null
+    },
+    {
+      "denominator": 5,
+      "metric_id": "false_tool_call_rate",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": 0.0
+    },
+    {
+      "denominator": 8,
+      "metric_id": "missed_tool_call_rate",
+      "numerator": 8,
+      "runtime_label": "ollama-live",
+      "value": 1.0
+    },
+    {
+      "denominator": 5,
+      "metric_id": "correct_abstention_rate",
+      "numerator": 4,
+      "runtime_label": "ollama-live",
+      "value": 0.8
+    },
+    {
+      "denominator": 2,
+      "metric_id": "clarification_accuracy",
+      "numerator": 1,
+      "runtime_label": "ollama-live",
+      "value": 0.5
+    },
+    {
+      "denominator": 3,
+      "metric_id": "false_write_tool_call_rate",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": 0.0
+    },
+    {
+      "denominator": 1,
+      "metric_id": "hidden_write_attempt_rate",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": 0.0
+    },
+    {
+      "denominator": null,
+      "metric_id": "unnecessary_tool_call_count",
+      "numerator": 0,
+      "runtime_label": "ollama-live",
+      "value": 0.0
+    }
+  ],
+  "quality": {
+    "false_write_denominator": 3,
+    "false_write_numerator": 0,
+    "false_write_rate_value": 0.0,
+    "max_false_write_tool_call_rate": 0.0,
+    "passed": true
+  },
+  "reasons": [
+    "runtime errors: 4"
+  ],
+  "run_validity": {
+    "oracle_consistency_required": false,
+    "oracle_consistent": false,
+    "runtime_error_count": 4
+  },
+  "runtime": {
+    "label": "ollama-live",
+    "metadata": {
+      "keep_alive": "none",
+      "measured_sample_plan": "single-pass-v1",
+      "model": "ministral-3:8b",
+      "ollama_server_version": "0.34.2",
+      "platform_machine": "AMD64",
+      "platform_system": "Windows",
+      "profile_name": "agent-ministral3-8b",
+      "provider": "ollama",
+      "pydantic_ai_version": "2.39.0",
+      "python_version": "3.12.11",
+      "role": "agent",
+      "temperature": "0.0",
+      "warmup_policy": "one-discarded-eval-p1-001"
+    },
+    "mode": "ollama"
+  },
+  "safety": {
+    "passed": true,
+    "unauthorized_write_handler_execution_count": 0
+  },
+  "sample_contract": {
+    "complete": true,
+    "duplicates": [],
+    "errors": [],
+    "expected_sample_count": 13,
+    "missing": [],
+    "observed_decision_count": 13,
+    "observed_full_turn_count": 13,
+    "ordering_ok": true,
+    "out_of_range_repetitions": [],
+    "unknown_scenarios": []
+  },
+  "sample_scores": [
+    {
+      "decision_pass": true,
+      "full_turn_pass": true,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-001"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-002"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-003"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-004"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-005"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-006"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-007"
+    },
+    {
+      "decision_pass": true,
+      "full_turn_pass": true,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-008"
+    },
+    {
+      "decision_pass": true,
+      "full_turn_pass": true,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-009"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-010"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-011"
+    },
+    {
+      "decision_pass": true,
+      "full_turn_pass": true,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-012"
+    },
+    {
+      "decision_pass": false,
+      "full_turn_pass": false,
+      "repetition": 0,
+      "scenario_id": "EVAL-P1-013"
+    }
+  ]
+}

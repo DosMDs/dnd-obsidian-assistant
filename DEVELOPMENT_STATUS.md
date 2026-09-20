@@ -118,6 +118,24 @@ denominator (3 for product-v1).  No live Ollama run, no frozen live baseline, no
 latency acceptance and **no dependency change** (`pyproject.toml`/`uv.lock`
 unchanged).  Stage 14 remains `IN PROGRESS`; `S14-07` is next and `NOT STARTED`.
 
+`S14-07-QUAL-02 — Distinct Live Candidate Qualification` is `BLOCKED`.  A
+distinct second candidate (`ministral-3:8b`, explicit machine-local profile
+`agent-ministral3-8b`) was measured exactly once against the unchanged
+product-v1 / single-pass-v1 / agent-v3 contracts at HEAD
+`9f25913bbe8d49cd82da7c169c3f3798ab668640`.  The run produced 13/13 complete
+samples with SYSTEM SAFETY PASS and `false_write_tool_call_rate` 0/3/0.0 PASS,
+but **4 runtime errors** (`EVAL-P1-002`, `EVAL-P1-004`, `EVAL-P1-006`,
+`EVAL-P1-010`), so the candidate was **not accepted**.  Schema-v3
+`failure_diagnostic` evidence classifies every failure as `project_policy`
+(`ModelError`, request index 0, cause chain `["ValidationError"]`): the model
+emitted zero tool calls and free-text/JSON that failed `AgentTextOutcome`
+validation.  The result is frozen at
+`docs/evidence/evals/s14-07-product-v1-ollama-ministral3-8b-candidate.json`
+(SHA-256 `f44fc02fd86f38f36bec9a99bc238514e2f3ec60647f62456bd9ec27a5ab631e`) and
+bound by `tests/contract/test_eval_ministral_frozen_candidate.py`.  No rerun,
+no model/profile switch, no prompt/dataset/runtime/policy change; `S14-07`
+remains `BLOCKED` and `S14-08` remains `NOT STARTED`.
+
 `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` is
 `BLOCKED`.  The implementation is complete and fully qualified offline
 (implementation commit `10356b0be8e2a5ddd4a858ce49144243ee006e9a`): an explicit
@@ -163,11 +181,15 @@ enabled/visible state is never authorization.
 ## Current blockers and prerequisites
 
 ```text
-S14-07 BLOCKED: the ONE measured live product-v1 candidate produced 2 runtime
-  errors (EVAL-P1-007, EVAL-P1-009) and was not accepted; there is NO accepted
-  canonical live baseline.  The frozen measured report is preserved; no rerun,
-  no model/profile change.  A new accepted baseline requires a distinct,
-  explicit candidate/qualification decision (not a retry of this baseline).
+S14-07 BLOCKED: no accepted canonical live baseline exists.  TWO measured live
+  candidates were separately qualified and neither was accepted:
+    qwen3.5:9b       2 runtime errors (EVAL-P1-007, EVAL-P1-009); frozen v2 report
+                     s14-07-product-v1-ollama-baseline.json
+    ministral-3:8b   4 runtime errors (EVAL-P1-002, 004, 006, 010); frozen v3
+                     report s14-07-product-v1-ollama-ministral3-8b-candidate.json
+  Both frozen reports are preserved; no rerun and no model/profile change after
+  measurement.  A new accepted baseline requires a further distinct, explicit
+  candidate/qualification decision (never a retry of an existing candidate).
 Stage 13 is `DONE` and integrated.
 Known carried-forward limitations (non-blocking for Stage 14):
   Windows Terminal real-terminal smoke          SKIPPED_CAPABILITY
