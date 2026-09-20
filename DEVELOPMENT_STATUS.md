@@ -170,9 +170,10 @@ execution or changes acceptance (fail-noninterference).  Only allowlisted,
 sanitized structured fields are persisted; prompts, message/terminal content,
 tool arguments, raw exception text, bodies, headers, URLs and local paths are
 never written.  The trace adds zero model requests, retries, warm-ups or tool
-calls.  No Ollama inference was executed and the accepted pending
-`S14-07-QUAL-03` `qwen3:14b` / `agent-qwen3-14b` measured attempt remains
-**PAUSED and UNCONSUMED**.  `S14-07` remains `BLOCKED`.
+calls.  No Ollama inference was executed.  `S14-07-QUAL-03` is a **PLAN
+ACCEPTED** qualification: the `qwen3:14b` / `agent-qwen3-14b` candidate is
+**UNMEASURED / PENDING** and its measured attempt remains **UNCONSUMED**.
+`S14-07` remains `BLOCKED`.
 
 `S14-08 — TUI / Cross-Platform Hardening Evidence` is `DONE`.  It closes the
 remaining headless TUI gaps, corrects recurring TUI test failures and records
@@ -245,9 +246,10 @@ S14-07 BLOCKED: no accepted canonical live baseline exists.  TWO measured live
   measurement.  A new accepted baseline requires a further distinct, explicit
   candidate/qualification decision (never a retry of an existing candidate).
   S14-07-DIAG-03 observability hardening is DONE (opt-in local diagnostic trace;
-  no live inference).  An accepted `qwen3:14b` / `agent-qwen3-14b` QUAL-03
-  candidate is still PENDING and UNCONSUMED; it must run against the new
-  DIAG-03 revision and remains the only path to an accepted baseline.
+  no live inference).  S14-07-QUAL-03 PLAN is ACCEPTED; the `qwen3:14b` /
+  `agent-qwen3-14b` candidate is UNMEASURED / PENDING and its measured attempt is
+  UNCONSUMED; it must run against the new DIAG-03 revision and remains the only
+  path to an accepted baseline.
 Stage 14 is `BLOCKED`: S14-09 audit is complete and the S14-08-discovered
   focus-steal correction (`83170f0`) is independently accepted and green, but
   release closure is blocked only by the required S14-07 accepted live baseline.
@@ -261,7 +263,7 @@ Known carried-forward limitations (non-blocking for Stage 14):
   thread-worker cancellation                    fail-closed, not rollback
   Windows/macOS symlink-junction discovery       capability-gated tests
   concurrent Vault-init race                    UNKNOWN / historical reliability risk (not reproduced by S14-09)
-  Campaign-State rmtree/materialization race    UNKNOWN / historical reliability risk (not reproduced by S14-09)
+  Campaign-State rmtree/materialization race    REPRODUCED_FLAKY / unrelated to DIAG-03 (not reproduced by S14-09; reproduced by DIAG-03 canonical on Windows; isolated owning test PASS — no deterministic product defect established, not fixed)
 ```
 
 ## Documentation map

@@ -1483,12 +1483,19 @@ Windows Terminal real-terminal     MANUAL PASS (S14-08)
 macOS Terminal/iTerm               SKIPPED_CAPABILITY
 f5                                 MANUAL PASS on Windows; convenience alias only
 concurrent Vault-init race         UNKNOWN / historical reliability risk
-Campaign-State rmtree race         UNKNOWN / historical reliability risk
+Campaign-State rmtree race         historically UNKNOWN; later REPRODUCED_FLAKY
+                                   by DIAG-03 canonical on Windows (see §19)
 ```
 
 The two historical Windows races were not reproduced by S14-09; no current
 deterministic defect was established for either. No Ollama run, no third
 candidate, and no S14-07 evidence change occurred in S14-09.
+
+That S14-09 non-reproduction statement was true at that time.  DIAG-03 later
+reproduced the Campaign-State rmtree/materialization race in its canonical run
+(`REPRODUCED_FLAKY`, unrelated to DIAG-03; the isolated owning test passes);
+this is flaky test evidence, not an established deterministic product defect and
+not a fix.  See §19.
 
 Resolving S14-07 requires a separate explicit distinct-candidate qualification
 or an explicit future scope decision; neither is performed here.
@@ -1496,9 +1503,10 @@ or an explicit future scope decision; neither is performed here.
 ## 19. S14-07-DIAG-03 — bounded eval diagnostic trace (`DONE`)
 
 `S14-07-DIAG-03` is a read-only investigation plus one bounded, opt-in,
-composition/eval-only observability patch.  It is `DONE`.  It performs no
-live Ollama inference and does not consume the accepted pending
-`S14-07-QUAL-03` `qwen3:14b` / `agent-qwen3-14b` measured attempt.
+composition/eval-only observability patch.  It is `DONE`.  It performs no live
+Ollama inference.  `S14-07-QUAL-03` is **PLAN ACCEPTED**; the `qwen3:14b` /
+`agent-qwen3-14b` candidate is **UNMEASURED / PENDING** and its measured attempt
+remains **UNCONSUMED**.
 
 ### Investigated problem: crash-survivability gap
 
@@ -1617,17 +1625,21 @@ canonical uv run pytest        1 failed, 7779 passed, 141 skipped
       failure  tests/integration/test_campaign_state_materialization.py::
                TestDeterministicRebuild::test_delete_all_managed_files_deterministic_rebuild
       cause    Windows shutil.rmtree WinError 145 (directory not empty) during test teardown
-      classification  PRE_EXISTING_FLAKY / UNRELATED: passes in isolation;
-                      documented historical "Campaign-State rmtree/materialization
-                      race" known limitation; DIAG-03 touches no campaign-state/
-                      storage code.  No blind canonical rerun performed.
+      classification  REPRODUCED_FLAKY / UNRELATED to DIAG-03: the exact failing
+                      test passes in isolation (LOCAL_REPORTED); documented
+                      historical "Campaign-State rmtree/materialization race"
+                      known limitation; DIAG-03 touches no campaign-state/storage
+                      code.  No deterministic product defect established and not
+                      fixed.  No blind canonical rerun performed.
 ```
 
 ### Status
 
 ```text
 S14-07-DIAG-03 observability hardening   DONE
-S14-07-QUAL-03 (qwen3:14b / agent-qwen3-14b)  accepted, PAUSED, UNCONSUMED
+S14-07-QUAL-03 PLAN                      ACCEPTED
+qwen3:14b / agent-qwen3-14b candidate    UNMEASURED / PENDING
+S14-07-QUAL-03 measured attempt          UNCONSUMED
 S14-07                                   BLOCKED (no accepted canonical live baseline)
 Stage 14                                 BLOCKED
 release                                  RELEASE_BLOCKED
