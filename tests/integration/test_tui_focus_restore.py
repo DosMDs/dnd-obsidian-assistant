@@ -156,6 +156,31 @@ class TestFocusRestore:
 
         _run(scenario())
 
+    def test_navigation_does_not_steal_focus_within_active_pane(self) -> None:
+        """A late navigation retry must not steal focus within the active pane.
+
+        After navigation starts, focus may legitimately move to another control
+        inside the newly requested pane before all deferred navigation focus
+        retries have drained.  Navigation owns pane convergence, not focus: it
+        must not pull focus back to the pane's configured primary control.
+        """
+
+        async def scenario() -> None:
+            app = DndTuiApp(_services())
+            async with app.run_test(size=(100, 30)) as pilot:
+                await _drain(pilot, lambda: not app._gate.is_busy)
+                app.run_semantic_command("view.session")
+                await pilot.pause()
+                touched = app.query_one("#session-touched", Input)
+                touched.focus()
+                # Drain subsequent refresh cycles; navigation must not steal.
+                for _ in range(10):
+                    await pilot.pause()
+                assert app._current_context().context_id == "session"
+                assert app.focused is touched
+
+        _run(scenario())
+
     def test_help_close_restores_exact_focus(self) -> None:
         async def scenario() -> None:
             app = DndTuiApp(_services())

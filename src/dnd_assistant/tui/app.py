@@ -243,9 +243,14 @@ class DndTuiApp(App[None]):
         re-activates that stale pane and can hide the requested pane before its
         control is displayed.  A monotonically increasing generation makes the
         last navigation authoritative: stale callbacks cannot re-activate an
-        abandoned pane, the requested pane is re-asserted, and focus is retried
-        across refreshes until the control is displayed.  No sleeps or timers
-        are used; convergence is driven by the refresh cycle.
+        abandoned pane and the requested pane is re-asserted.
+
+        Focus ownership is separate from pane convergence.  A deferred retry
+        only establishes focus while focus is still outside the requested pane.
+        Once focus has moved to a control *inside* that pane (the configured
+        primary control or any other control), navigation no longer owns focus
+        and must not steal it back.  No sleeps or timers are used; convergence
+        is bounded and driven by the refresh cycle.
         """
         if generation != self._nav_generation:
             return
@@ -255,6 +260,9 @@ class DndTuiApp(App[None]):
         if tabs.active != view_id:
             # Re-assert against a stale pane activation event.
             tabs.active = view_id
+        # Focus ownership: yield if focus already moved inside the requested pane.
+        if self._focus_within_active_pane(tabs):
+            return
         selector = _PRIMARY_FOCUS.get(view_id)
         if selector is None:
             return
@@ -268,6 +276,22 @@ class DndTuiApp(App[None]):
                 return
         if attempt < _MAX_FOCUS_ATTEMPTS:
             self.call_after_refresh(self._focus_primary_view, view_id, generation, attempt + 1)
+
+    def _focus_within_active_pane(self, tabs: TabbedContent) -> bool:
+        """Whether focus is already on a control inside the active pane.
+
+        Pane convergence stays authoritative for the current navigation
+        generation, but focus ownership does not.  Once focus has moved to a
+        focusable control inside the active pane, a pending navigation focus
+        must not steal it back to the pane's primary control.  The pane
+        container itself does not count: Textual may focus an activated pane
+        before its controls are displayable, which is not a user focus choice.
+        """
+        focused = self.focused
+        pane = tabs.active_pane
+        if focused is None or pane is None or focused is pane:
+            return False
+        return any(ancestor is pane for ancestor in focused.ancestors)
 
     def assistant_submit(self) -> None:
         view = self._first(AssistantView)
