@@ -19,6 +19,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
+from pydantic_ai.exceptions import ModelHTTPError
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -26,6 +27,11 @@ from pydantic_ai.models.wrapper import WrapperModel
 from pydantic_ai.settings import ModelSettings
 
 from dnd_assistant.composition.eval_failure_diagnostics import bounded_cause_chain
+from dnd_assistant.composition.eval_trace import (
+    EVENT_REQUEST_COMPLETED,
+    EVENT_REQUEST_FAILED,
+    EVENT_REQUEST_STARTED,
+)
 from dnd_assistant.evals.contracts import (
     EvalExpectation,
     ScenarioExpectationKind,
@@ -45,6 +51,28 @@ class ModelCallFailure:
     cause_chain: tuple[str, ...]
 
 
+@dataclass(frozen=True, slots=True)
+class ModelRequestTraceEvent:
+    """Bounded, non-sensitive observation of one semantic request lifecycle step.
+
+    Carries only sanitized type names, response *part types*, tool *names* and a
+    public integer HTTP status.  Never carries messages, prompts, arguments or
+    raw exception text.
+    """
+
+    request_index: int
+    outcome: str
+    duration_seconds: float | None = None
+    response_part_types: tuple[str, ...] = ()
+    tool_names: tuple[str, ...] = ()
+    exception_type: str | None = None
+    cause_chain: tuple[str, ...] = ()
+    provider_http_status: int | None = None
+
+
+RequestTraceObserver = Callable[[ModelRequestTraceEvent], None]
+
+
 @dataclass(slots=True)
 class ModelCallRecorder:
     """Mutable literal record of semantic model requests for one sample."""
@@ -54,11 +82,22 @@ class ModelCallRecorder:
     request_durations: list[float] = field(default_factory=list)
     failures: list[str] = field(default_factory=list)
     failure_records: list[ModelCallFailure] = field(default_factory=list)
+    request_observer: RequestTraceObserver | None = None
 
     @property
     def first_response(self) -> ModelResponse | None:
         """The first recorded model response, if any."""
         return self.responses[0] if self.responses else None
+
+    def observe(self, event: ModelRequestTraceEvent) -> None:
+        """Forward a bounded trace event; any observer failure is non-fatal."""
+        observer = self.request_observer
+        if observer is None:
+            return
+        try:
+            observer(event)
+        except Exception:  # noqa: BLE001 - trace must never alter model semantics
+            pass
 
 
 class RecordingPydanticModel(WrapperModel):
@@ -80,25 +119,66 @@ class RecordingPydanticModel(WrapperModel):
         model_request_parameters: ModelRequestParameters,
     ) -> ModelResponse:
         self.recorder.request_count += 1
+        request_index = self.recorder.request_count - 1
+
+        # Persist request_started *before* the wrapped call so a process kill
+        # inside framework/provider/HTTP still leaves a diagnostic boundary.
+        self.recorder.observe(
+            ModelRequestTraceEvent(request_index=request_index, outcome=EVENT_REQUEST_STARTED)
+        )
+
         start = self._clock()
         try:
             response = await self.wrapped.request(
                 messages, model_settings, model_request_parameters
             )
         except Exception as exc:  # noqa: BLE001 - failure evidence is the point
-            self.recorder.request_durations.append(self._clock() - start)
+            duration = self._clock() - start
+            self.recorder.request_durations.append(duration)
             self.recorder.failures.append(f"{type(exc).__name__}: {exc}")
-            self.recorder.failure_records.append(
-                ModelCallFailure(
-                    request_index=self.recorder.request_count - 1,
-                    exception_type=sanitize_type_token(type(exc).__name__),
-                    cause_chain=bounded_cause_chain(exc),
+            failure = ModelCallFailure(
+                request_index=request_index,
+                exception_type=sanitize_type_token(type(exc).__name__),
+                cause_chain=bounded_cause_chain(exc),
+            )
+            self.recorder.failure_records.append(failure)
+            self.recorder.observe(
+                ModelRequestTraceEvent(
+                    request_index=request_index,
+                    outcome=EVENT_REQUEST_FAILED,
+                    duration_seconds=duration,
+                    exception_type=failure.exception_type,
+                    cause_chain=failure.cause_chain,
+                    provider_http_status=_provider_http_status(exc),
                 )
             )
             raise
-        self.recorder.request_durations.append(self._clock() - start)
+        duration = self._clock() - start
+        self.recorder.request_durations.append(duration)
         self.recorder.responses.append(response)
+        self.recorder.observe(
+            ModelRequestTraceEvent(
+                request_index=request_index,
+                outcome=EVENT_REQUEST_COMPLETED,
+                duration_seconds=duration,
+                response_part_types=tuple(type(part).__name__ for part in response.parts),
+                tool_names=tuple(
+                    part.tool_name for part in response.parts if isinstance(part, ToolCallPart)
+                ),
+            )
+        )
         return response
+
+
+def _provider_http_status(exc: BaseException) -> int | None:
+    """Return the public HTTP status from a Pydantic AI ``ModelHTTPError``.
+
+    Only the public integer ``status_code`` is read; response bodies and headers
+    are never inspected or persisted.
+    """
+    if isinstance(exc, ModelHTTPError):
+        return exc.status_code
+    return None
 
 
 # ── Scripted oracle ────────────────────────────────────────────────────────

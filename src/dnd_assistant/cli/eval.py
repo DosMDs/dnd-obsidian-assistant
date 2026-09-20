@@ -22,6 +22,13 @@ from dnd_assistant.composition.eval_artifacts import (
     write_report_atomic,
 )
 from dnd_assistant.composition.eval_runner import SCRIPTED_RUNTIME, run_eval
+from dnd_assistant.composition.eval_trace import (
+    EVENT_REPORT_WRITTEN,
+    TRACE_FAULT_MESSAGE,
+    EvalTraceError,
+    EvalTraceWriter,
+    open_eval_trace,
+)
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.evals import (
     EvalReport,
@@ -142,35 +149,59 @@ def _eval_run(
         "--overwrite",
         help="Перезаписать существующий файл отчёта.",
     ),
+    trace: Path | None = typer.Option(  # noqa: B008
+        None,
+        "--trace",
+        help="Необязательный путь к локальному диагностическому trace (JSONL).",
+        resolve_path=True,
+    ),
 ) -> None:
     """Запустить eval и записать отчёт."""
     resolved_runtime = _resolve_runtime(runtime)
     resolved_dataset = _resolve_dataset(dataset)
 
+    # Open/validate the diagnostic trace BEFORE any warm-up or model request.
     try:
-        report = _run_selected_runtime(
-            resolved_runtime,
-            resolved_dataset,
-            config=config,
-            profile=profile,
-        )
-    except DndAssistantError as exc:
-        typer.echo(f"Ошибка live-выполнения: {exc}", err=True)
+        trace_writer = open_eval_trace(trace)
+    except EvalTraceError as exc:
+        typer.echo(f"Ошибка диагностической трассировки: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    _echo_summary(report)
-
     try:
-        write_report_atomic(output, report_to_json(report), overwrite=overwrite)
-    except EvalArtifactError as exc:
-        typer.echo(f"Ошибка записи отчёта: {exc}", err=True)
-        raise typer.Exit(code=1) from exc
+        try:
+            report = _run_selected_runtime(
+                resolved_runtime,
+                resolved_dataset,
+                config=config,
+                profile=profile,
+                trace=trace_writer,
+            )
+        except DndAssistantError as exc:
+            typer.echo(f"Ошибка live-выполнения: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
 
-    typer.echo(f"Отчёт записан: {output}")
+        _echo_summary(report)
 
-    if not report.accepted:
-        typer.echo("Оценка не принята: проверьте safety/quality/полноту.", err=True)
-        raise typer.Exit(code=1)
+        try:
+            write_report_atomic(output, report_to_json(report), overwrite=overwrite)
+        except EvalArtifactError as exc:
+            typer.echo(f"Ошибка записи отчёта: {exc}", err=True)
+            raise typer.Exit(code=1) from exc
+
+        typer.echo(f"Отчёт записан: {output}")
+
+        if trace_writer is not None:
+            # Never invalidates or deletes an already-written frozen report.
+            trace_writer.emit(EVENT_REPORT_WRITTEN)
+            if trace_writer.faulted:
+                typer.echo(TRACE_FAULT_MESSAGE, err=True)
+
+        if not report.accepted:
+            typer.echo("Оценка не принята: проверьте safety/quality/полноту.", err=True)
+            raise typer.Exit(code=1)
+    finally:
+        if trace_writer is not None:
+            trace_writer.close()
 
 
 def _run_selected_runtime(
@@ -179,16 +210,22 @@ def _run_selected_runtime(
     *,
     config: Path | None,
     profile: str | None,
+    trace: EvalTraceWriter | None = None,
 ) -> EvalReport:
     """Dispatch scripted vs explicit live runtime; validate option presence."""
     if runtime == eval_ollama.LIVE_RUNTIME:
         if config is None or profile is None:
             raise typer.BadParameter("Для --runtime ollama требуются --config и --profile.")
-        return eval_ollama.run_live_eval(dataset, config_path=config, profile_name=profile)
+        return eval_ollama.run_live_eval(
+            dataset,
+            config_path=config,
+            profile_name=profile,
+            trace=trace,
+        )
 
     if config is not None or profile is not None:
         raise typer.BadParameter("Опции --config/--profile допустимы только для --runtime ollama.")
-    return run_eval(dataset, runtime=runtime)
+    return run_eval(dataset, runtime=runtime, trace=trace)
 
 
 @eval_app.command("report")

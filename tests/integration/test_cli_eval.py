@@ -5,6 +5,7 @@ All offline: scripted mode needs no Vault, no config and no Ollama.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -106,6 +107,60 @@ def test_ollama_live_preflight_failure_is_exit_1(tmp_path: Path, monkeypatch: An
 def test_unknown_dataset_is_usage_error(tmp_path: Path) -> None:
     result = _run(tmp_path, "--dataset", "nope")
     assert result.exit_code == 2
+
+
+def _read_trace(path: Path) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line]
+
+
+def test_scripted_run_with_trace_writes_incremental_jsonl(tmp_path: Path) -> None:
+    trace = tmp_path / "run.eval-trace.jsonl"
+    result = _run(tmp_path, "--trace", str(trace))
+    assert result.exit_code == 0, result.output
+
+    events = [entry["event"] for entry in _read_trace(trace)]
+    for required in (
+        "trace_started",
+        "measurement_started",
+        "sample_started",
+        "request_started",
+        "request_completed",
+        "sample_completed",
+        "measurement_completed",
+        "report_written",
+    ):
+        assert required in events
+    assert events[0] == "trace_started"
+    assert events[-1] == "report_written"
+
+    entries = _read_trace(trace)
+    started = [e for e in entries if e["event"] == "request_started"]
+    completed = [e for e in entries if e["event"] == "request_completed"]
+    assert len(started) == len(completed)
+    assert {e["request_index"] for e in started} == {e["request_index"] for e in completed}
+
+
+def test_scripted_run_without_trace_creates_no_trace_file(tmp_path: Path) -> None:
+    assert _run(tmp_path).exit_code == 0
+    assert list(tmp_path.glob("*.jsonl")) == []
+
+
+def test_trace_open_failure_aborts_before_any_run(tmp_path: Path, monkeypatch: Any) -> None:
+    from dnd_assistant.evals.dataset import EvalDataset
+
+    calls: list[EvalDataset] = []
+
+    def _spy(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append(_args[0])
+        raise AssertionError("run_eval must not be called when trace open fails")
+
+    monkeypatch.setattr("dnd_assistant.cli.eval.run_eval", _spy)
+    missing = tmp_path / "missing" / "trace.jsonl"
+    result = _run(tmp_path, "--trace", str(missing))
+    assert result.exit_code == 1
+    assert "трассировк" in result.output.lower()
+    assert calls == []
+    assert not (tmp_path / "report.json").exists()
 
 
 def test_missing_output_directory_fails(tmp_path: Path) -> None:

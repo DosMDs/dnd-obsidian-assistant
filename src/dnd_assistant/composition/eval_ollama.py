@@ -32,9 +32,20 @@ from pydantic_ai.models import Model
 from dnd_assistant.composition.agent_model import _close_model, _load_profile
 from dnd_assistant.composition.eval_fixture import build_fixture
 from dnd_assistant.composition.eval_model import ModelCallRecorder, RecordingPydanticModel
-from dnd_assistant.composition.eval_runner import ModelFactory, run_dataset
+from dnd_assistant.composition.eval_runner import (
+    ModelFactory,
+    make_request_observer,
+    run_dataset,
+)
+from dnd_assistant.composition.eval_trace import (
+    EVENT_WARMUP_COMPLETED,
+    EVENT_WARMUP_FAILED,
+    EVENT_WARMUP_STARTED,
+    PHASE_WARMUP,
+    EvalTraceWriter,
+)
 from dnd_assistant.errors import DndAssistantError
-from dnd_assistant.evals.contracts import EvalExpectation
+from dnd_assistant.evals.contracts import EvalExpectation, sanitize_type_token
 from dnd_assistant.evals.dataset import EvalDataset
 from dnd_assistant.evals.report import EvalReport
 from dnd_assistant.models.ollama import OllamaModelProvider
@@ -183,8 +194,16 @@ def _build_live_model_factory(delegate: Model) -> ModelFactory:
     return factory
 
 
-def _warm_up(dataset: EvalDataset, model_factory: ModelFactory) -> None:
+def _warm_up(
+    dataset: EvalDataset,
+    model_factory: ModelFactory,
+    *,
+    trace: EvalTraceWriter | None = None,
+) -> None:
     """Run one discarded warm-up turn (never part of measured observations).
+
+    When ``trace`` is supplied, warm-up lifecycle events are emitted with
+    ``phase=warmup`` so they can never be confused with measured samples.
 
     Raises:
         EvalLiveError: The dataset has no warm-up scenario, or the warm-up turn
@@ -197,7 +216,22 @@ def _warm_up(dataset: EvalDataset, model_factory: ModelFactory) -> None:
     if case is None:
         raise EvalLiveError(f"warm-up scenario {WARMUP_SCENARIO_ID!r} not present in dataset")
 
-    model, _recorder = model_factory(case.scenario.expectation)
+    if trace is not None:
+        trace.emit(
+            EVENT_WARMUP_STARTED,
+            phase=PHASE_WARMUP,
+            scenario_id=WARMUP_SCENARIO_ID,
+            repetition=0,
+        )
+
+    model, recorder = model_factory(case.scenario.expectation)
+    if trace is not None:
+        recorder.request_observer = make_request_observer(
+            trace,
+            WARMUP_SCENARIO_ID,
+            0,
+            phase=PHASE_WARMUP,
+        )
     fixture = build_fixture(
         case.execution,
         model=model,
@@ -210,7 +244,23 @@ def _warm_up(dataset: EvalDataset, model_factory: ModelFactory) -> None:
             execution_context=fixture.execution_context,
         )
     except Exception as exc:  # noqa: BLE001 - warm-up must succeed fail-closed
+        if trace is not None:
+            trace.emit(
+                EVENT_WARMUP_FAILED,
+                phase=PHASE_WARMUP,
+                scenario_id=WARMUP_SCENARIO_ID,
+                repetition=0,
+                exception_type=sanitize_type_token(type(exc).__name__),
+            )
         raise EvalLiveError(f"live warm-up failed: {type(exc).__name__}: {exc}") from exc
+
+    if trace is not None:
+        trace.emit(
+            EVENT_WARMUP_COMPLETED,
+            phase=PHASE_WARMUP,
+            scenario_id=WARMUP_SCENARIO_ID,
+            repetition=0,
+        )
 
 
 def run_live_eval(
@@ -218,6 +268,7 @@ def run_live_eval(
     *,
     config_path: Path,
     profile_name: str,
+    trace: EvalTraceWriter | None = None,
 ) -> EvalReport:
     """Run one explicit live Ollama measured pass over ``dataset``.
 
@@ -225,6 +276,10 @@ def run_live_eval(
     Pydantic AI Ollama model (before any network request), preflight the
     endpoint+version, run one discarded warm-up, then execute the measured
     dataset exactly once with the shared delegate.
+
+    ``trace``, when supplied, is an opt-in local diagnostic side channel.  It
+    observes the one existing execution only and never issues an extra model
+    request, warm-up, retry or sample.
 
     Raises:
         DndAssistantError: Config/profile loading, model construction,
@@ -244,7 +299,7 @@ def run_live_eval(
             server_version=server_version,
         )
         model_factory = _build_live_model_factory(delegate)
-        _warm_up(dataset, model_factory)
+        _warm_up(dataset, model_factory, trace=trace)
         return run_dataset(
             dataset,
             model_factory=model_factory,
@@ -252,6 +307,7 @@ def run_live_eval(
             runtime_label=LIVE_RUNTIME_LABEL,
             runtime_metadata=metadata,
             require_oracle_consistency=False,
+            trace=trace,
         )
     finally:
         _close_model(delegate)

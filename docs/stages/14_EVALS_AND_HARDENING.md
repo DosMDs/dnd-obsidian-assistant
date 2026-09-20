@@ -1492,3 +1492,143 @@ candidate, and no S14-07 evidence change occurred in S14-09.
 
 Resolving S14-07 requires a separate explicit distinct-candidate qualification
 or an explicit future scope decision; neither is performed here.
+
+## 19. S14-07-DIAG-03 — bounded eval diagnostic trace (`DONE`)
+
+`S14-07-DIAG-03` is a read-only investigation plus one bounded, opt-in,
+composition/eval-only observability patch.  It is `DONE`.  It performs no
+live Ollama inference and does not consume the accepted pending
+`S14-07-QUAL-03` `qwen3:14b` / `agent-qwen3-14b` measured attempt.
+
+### Investigated problem: crash-survivability gap
+
+The measured live eval accumulates per-sample evidence only in memory
+(`ModelCallRecorder`, observations) and writes the frozen `EvalReport` JSON
+atomically at the very end (`write_report_atomic`).  If the process fails after
+measurement has begun but before that write, **no per-sample evidence
+survives**.  Schema-v3 `failure_diagnostic` improves the final report but is not
+incremental; external stdout/stderr capture is insufficient because Pydantic AI
+2.39.0 uses no stdlib logging and per-sample exceptions are caught in
+`_run_sample`; Ollama local logs are server-side and request-payload logging is
+off by default (and raises privacy/restart concerns).  Selected classification:
+**C — BOUNDED_EVAL_TRACE_PATCH**.
+
+### Bounded trace design
+
+`src/dnd_assistant/composition/eval_trace.py` (composition only):
+
+```text
+LOCAL_DIAGNOSTIC_TRACE = disposable operator evidence
+  NOT campaign Source of Truth, NOT Vault content, NOT acceptance evidence.
+Only the frozen EvalReport determines candidate acceptance.
+
+explicit caller path only; disabled by default; no discovery; no default path
+append-only JSONL, UTF-8, sort_keys, ensure_ascii=False, allow_nan=False, LF
+one line per event, flush per event, file kept open; flush NOT fsync
+  -> process-crash oriented, not power-loss-durable
+faulted state (bounded stage + sanitized exception-type token)
+```
+
+Lifecycle (unambiguous, single meaning per name):
+
+```text
+trace_started
+warmup_started / warmup_completed | warmup_failed        phase=warmup
+measurement_started
+sample_started
+  request_started
+  request_completed | request_failed                     (same request_index)
+sample_completed
+measurement_completed
+report_written
+```
+
+`request_started` is emitted before the wrapped model call, so a kill inside
+Pydantic AI / OpenAI client / HTTP / Ollama still leaves a diagnostic boundary.
+`provider_http_status` is persisted only from the public Pydantic AI
+`ModelHTTPError.status_code` integer; bodies and headers are never read.
+
+### Privacy allowlist
+
+Persisted fields (only where literal evidence exists): `trace_schema_version`,
+`event`, `phase`, `scenario_id`, `repetition`, `request_index`,
+`elapsed_seconds`, `exception_type`, `cause_chain`, `source_category`,
+`provider_http_status`, `response_part_types`, `tool_names`, `success`,
+`terminal_kind`, `failure_status`, `model_request_count`, `tool_call_count`,
+`handler_call_count`, `write_handler_count`, run identity
+(`dataset_id`/`dataset_version`/`expected_sample_count`/`prompt_version`/
+`runtime_mode`/`runtime_label`, `runtime_label` values only).
+
+Never persisted: prompt/`user_input`, campaign text, message content, terminal
+content, tool arguments, raw `str(exc)`, traceback, HTTP body/headers, Ollama
+body, endpoint URL, config path, home/user path, hostname, environment, raw
+`ModelResponse`.  Exception/cause/part/tool name strings are reduced through the
+existing `sanitize_type_token`; non-allowlisted fields fault the writer.
+
+### Non-semantic / fail-noninterference rule
+
+```text
+pre-run:  open/header failure -> EvalTraceError -> abort BEFORE warm-up or any
+          model request (CLI exit 1)
+mid-run:  serialize/write failure -> writer marked faulted, further writes
+          stopped, NEVER raised into RecordingPydanticModel.request /
+          PydanticAIAgentRuntime / run_dataset; execution continues unchanged;
+          frozen EvalReport remains the sole acceptance result; CLI surfaces a
+          bounded local warning.  A written report is never invalidated/deleted.
+```
+
+The trace adds zero model requests, zero retries, zero warm-ups and zero tool
+calls; `report_to_json` output is unchanged for the same deterministic
+execution.  Latency fields are report-only; request trace writes may add some
+wall-clock overhead to the full-turn path and this is recorded as an explicit
+limitation, not compensated for.  The existing model-request duration is
+captured before the completion/failure trace write; `sample_completed` is emitted
+after the full-turn duration is captured.
+
+### Expected changed files
+
+```text
+src/dnd_assistant/composition/eval_trace.py      new
+src/dnd_assistant/composition/eval_model.py      modified (bounded observer)
+src/dnd_assistant/composition/eval_runner.py     modified (lifecycle plumbing)
+src/dnd_assistant/composition/eval_ollama.py     modified (warm-up events)
+src/dnd_assistant/cli/eval.py                    modified (--trace plumbing)
+tests/unit/test_eval_trace.py                    new
+tests/integration/test_cli_eval.py               modified (--trace cases)
+DEVELOPMENT_STATUS.md                            status reconciliation
+docs/stages/14_EVALS_AND_HARDENING.md            this record
+```
+
+No domain/storage/application-runtime/`ModelGateway` contract, dataset, prompt,
+policy, retry, dependency (`pyproject.toml`/`uv.lock`) or frozen-artifact change.
+
+### Literal evidence (offline; no Ollama, no live eval)
+
+```text
+focused (Level 1)              120 passed (trace/cli/model/runner/diagnostics/report)
+affected subsystem (Level 2)   1174 passed (eval suites + layering + boundaries +
+                               maintainability + provider-upgrade gate + frozen v2/v3)
+provider-upgrade offline gate  358 passed, 7563 deselected  (-m "provider_upgrade and not ollama")
+pyright                        0 errors, 0 warnings, 0 informations
+ruff check . / format --check  passed / 656 files already formatted
+uv lock --check                passed
+git diff --check               passed
+canonical uv run pytest        1 failed, 7779 passed, 141 skipped
+      failure  tests/integration/test_campaign_state_materialization.py::
+               TestDeterministicRebuild::test_delete_all_managed_files_deterministic_rebuild
+      cause    Windows shutil.rmtree WinError 145 (directory not empty) during test teardown
+      classification  PRE_EXISTING_FLAKY / UNRELATED: passes in isolation;
+                      documented historical "Campaign-State rmtree/materialization
+                      race" known limitation; DIAG-03 touches no campaign-state/
+                      storage code.  No blind canonical rerun performed.
+```
+
+### Status
+
+```text
+S14-07-DIAG-03 observability hardening   DONE
+S14-07-QUAL-03 (qwen3:14b / agent-qwen3-14b)  accepted, PAUSED, UNCONSUMED
+S14-07                                   BLOCKED (no accepted canonical live baseline)
+Stage 14                                 BLOCKED
+release                                  RELEASE_BLOCKED
+```

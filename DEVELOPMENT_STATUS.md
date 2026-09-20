@@ -156,6 +156,24 @@ measured report is frozen at
 baseline.  No rerun, no model/profile/prompt/dataset/dependency change.  `S14-07`
 remains `BLOCKED`.
 
+`S14-07-DIAG-03 — One-Shot Live Eval Observability Investigation` is `DONE`.  It
+was a read-only investigation plus one bounded, opt-in, composition/eval-only
+observability patch implementing the accepted `C — BOUNDED_EVAL_TRACE_PATCH`
+classification.  A new `src/dnd_assistant/composition/eval_trace.py` writer
+emits an explicit-path, append-only, flush-per-event JSONL `LOCAL_DIAGNOSTIC_TRACE`
+(disposable operator evidence, never acceptance evidence), with
+`request_started` emitted before the wrapped model call so diagnostic evidence
+survives a process failure before the frozen `EvalReport` is written.  Pre-run
+open failure aborts before any model request; a mid-run trace write fault is
+recorded in trusted Python state and never propagates into model/runtime
+execution or changes acceptance (fail-noninterference).  Only allowlisted,
+sanitized structured fields are persisted; prompts, message/terminal content,
+tool arguments, raw exception text, bodies, headers, URLs and local paths are
+never written.  The trace adds zero model requests, retries, warm-ups or tool
+calls.  No Ollama inference was executed and the accepted pending
+`S14-07-QUAL-03` `qwen3:14b` / `agent-qwen3-14b` measured attempt remains
+**PAUSED and UNCONSUMED**.  `S14-07` remains `BLOCKED`.
+
 `S14-08 — TUI / Cross-Platform Hardening Evidence` is `DONE`.  It closes the
 remaining headless TUI gaps, corrects recurring TUI test failures and records
 honest real-terminal evidence.  Presentation-only fixes: a navigation
@@ -226,6 +244,10 @@ S14-07 BLOCKED: no accepted canonical live baseline exists.  TWO measured live
   Both frozen reports are preserved; no rerun and no model/profile change after
   measurement.  A new accepted baseline requires a further distinct, explicit
   candidate/qualification decision (never a retry of an existing candidate).
+  S14-07-DIAG-03 observability hardening is DONE (opt-in local diagnostic trace;
+  no live inference).  An accepted `qwen3:14b` / `agent-qwen3-14b` QUAL-03
+  candidate is still PENDING and UNCONSUMED; it must run against the new
+  DIAG-03 revision and remains the only path to an accepted baseline.
 Stage 14 is `BLOCKED`: S14-09 audit is complete and the S14-08-discovered
   focus-steal correction (`83170f0`) is independently accepted and green, but
   release closure is blocked only by the required S14-07 accepted live baseline.

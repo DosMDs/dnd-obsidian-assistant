@@ -15,6 +15,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from pydantic_ai.messages import ModelResponse, TextPart, ToolCallPart
 
@@ -27,7 +28,19 @@ from dnd_assistant.composition.eval_fixture import (
 )
 from dnd_assistant.composition.eval_model import (
     ModelCallRecorder,
+    ModelRequestTraceEvent,
     build_scripted_model,
+)
+from dnd_assistant.composition.eval_trace import (
+    EVENT_MEASUREMENT_COMPLETED,
+    EVENT_MEASUREMENT_STARTED,
+    EVENT_REQUEST_COMPLETED,
+    EVENT_REQUEST_FAILED,
+    EVENT_REQUEST_STARTED,
+    EVENT_SAMPLE_COMPLETED,
+    EVENT_SAMPLE_STARTED,
+    PHASE_MEASUREMENT,
+    EvalTraceWriter,
 )
 from dnd_assistant.errors import NotFoundError
 from dnd_assistant.evals.contracts import (
@@ -65,6 +78,7 @@ def run_eval(
     *,
     runtime: str = SCRIPTED_RUNTIME,
     model_factory: ModelFactory | None = None,
+    trace: EvalTraceWriter | None = None,
 ) -> EvalReport:
     """Run the full dataset offline and return the report.
 
@@ -73,6 +87,7 @@ def run_eval(
         runtime: Runtime identifier; only ``scripted`` is registered in S14-06.
         model_factory: Optional per-sample model factory (tests/negative
             candidates).  Defaults to the deterministic scripted oracle.
+        trace: Optional opt-in local diagnostic trace.  Disabled by default.
 
     Raises:
         ValueError: For an unregistered runtime identifier.
@@ -88,6 +103,7 @@ def run_eval(
         runtime_label=SCRIPTED_RUNTIME_LABEL,
         runtime_metadata={},
         require_oracle_consistency=True,
+        trace=trace,
     )
 
 
@@ -99,6 +115,7 @@ def run_dataset(
     runtime_label: str,
     runtime_metadata: Mapping[str, str] | None = None,
     require_oracle_consistency: bool = False,
+    trace: EvalTraceWriter | None = None,
 ) -> EvalReport:
     """Run every sample with the given model factory and build the report.
 
@@ -107,9 +124,25 @@ def run_dataset(
     consistency is required only when the caller sets
     ``require_oracle_consistency=True``; generic/live candidates carry no
     implicit 100%-accuracy requirement.
+
+    ``trace``, when supplied, receives an opt-in append-only local diagnostic
+    trace.  It observes the existing execution only and never alters scoring,
+    acceptance or model/runtime behavior.
     """
     decision_observations: list[DecisionObservation] = []
     full_turn_observations: list[FullTurnObservation] = []
+
+    if trace is not None:
+        trace.emit(
+            EVENT_MEASUREMENT_STARTED,
+            phase=PHASE_MEASUREMENT,
+            dataset_id=dataset.dataset_id,
+            dataset_version=dataset.dataset_version,
+            expected_sample_count=len(dataset.cases) * dataset.sample_plan.repetitions,
+            prompt_version=PROMPT_VERSION,
+            runtime_mode=runtime_mode,
+            runtime_label=runtime_label,
+        )
 
     for case in dataset.cases:
         for repetition in range(dataset.sample_plan.repetitions):
@@ -118,9 +151,13 @@ def run_dataset(
                 repetition,
                 dataset=dataset,
                 model_factory=model_factory,
+                trace=trace,
             )
             decision_observations.append(decision)
             full_turn_observations.append(full_turn)
+
+    if trace is not None:
+        trace.emit(EVENT_MEASUREMENT_COMPLETED, phase=PHASE_MEASUREMENT)
 
     return build_eval_report(
         dataset,
@@ -140,9 +177,23 @@ def _run_sample(
     *,
     dataset: EvalDataset,
     model_factory: ModelFactory,
+    trace: EvalTraceWriter | None = None,
 ) -> tuple[DecisionObservation, FullTurnObservation]:
     scenario = case.scenario
     model, recorder = model_factory(scenario.expectation)
+    if trace is not None:
+        trace.emit(
+            EVENT_SAMPLE_STARTED,
+            phase=PHASE_MEASUREMENT,
+            scenario_id=scenario.scenario_id,
+            repetition=repetition,
+        )
+        recorder.request_observer = make_request_observer(
+            trace,
+            scenario.scenario_id,
+            repetition,
+            phase=PHASE_MEASUREMENT,
+        )
     fixture = build_fixture(
         case.execution,
         model=model,
@@ -163,7 +214,7 @@ def _run_sample(
         error = exc
     duration = time.perf_counter() - started
 
-    return _collect(
+    decision, full_turn = _collect(
         scenario.scenario_id,
         repetition,
         fixture=fixture,
@@ -173,6 +224,29 @@ def _run_sample(
         error=error,
         total_duration=duration,
     )
+
+    if trace is not None:
+        diagnostic = full_turn.failure_diagnostic
+        trace.emit(
+            EVENT_SAMPLE_COMPLETED,
+            phase=PHASE_MEASUREMENT,
+            scenario_id=scenario.scenario_id,
+            repetition=repetition,
+            success=full_turn.success,
+            terminal_kind=full_turn.terminal_kind,
+            model_request_count=full_turn.model_request_count,
+            tool_call_count=full_turn.tool_call_count,
+            handler_call_count=full_turn.handler_call_count,
+            write_handler_count=full_turn.write_handler_count,
+            failure_status=diagnostic.status.value,
+            source_category=(
+                None if diagnostic.source_category is None else diagnostic.source_category.value
+            ),
+            exception_type=diagnostic.exception_type,
+            cause_chain=list(diagnostic.cause_chain),
+        )
+
+    return decision, full_turn
 
 
 def _collect(
@@ -242,6 +316,45 @@ def _collect(
         failure_diagnostic=failure_diagnostic,
     )
     return decision, full_turn
+
+
+def make_request_observer(
+    trace: EvalTraceWriter,
+    scenario_id: str,
+    repetition: int,
+    *,
+    phase: str,
+) -> Callable[[ModelRequestTraceEvent], None]:
+    """Build a bounded trace observer bound to one (scenario, repetition).
+
+    The observer forwards only allowlisted, sanitized fields.  It never raises:
+    :meth:`ModelCallRecorder.observe` isolates observer failures.
+    """
+
+    def _observe(event: ModelRequestTraceEvent) -> None:
+        fields: dict[str, Any] = {
+            "phase": phase,
+            "scenario_id": scenario_id,
+            "repetition": repetition,
+            "request_index": event.request_index,
+        }
+        if event.outcome == EVENT_REQUEST_STARTED:
+            trace.emit(EVENT_REQUEST_STARTED, **fields)
+            return
+        if event.duration_seconds is not None:
+            fields["elapsed_seconds"] = event.duration_seconds
+        if event.outcome == EVENT_REQUEST_COMPLETED:
+            fields["response_part_types"] = list(event.response_part_types)
+            fields["tool_names"] = list(event.tool_names)
+            trace.emit(EVENT_REQUEST_COMPLETED, **fields)
+            return
+        fields["exception_type"] = event.exception_type
+        fields["cause_chain"] = list(event.cause_chain)
+        if event.provider_http_status is not None:
+            fields["provider_http_status"] = event.provider_http_status
+        trace.emit(EVENT_REQUEST_FAILED, **fields)
+
+    return _observe
 
 
 # ── Extraction helpers ─────────────────────────────────────────────────────
