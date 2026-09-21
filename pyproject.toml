@@ -38,6 +38,7 @@ dev = [
 markers = [
     "ollama: opt-in tests requiring a real configured Ollama endpoint",
     "provider_upgrade: curated Pydantic AI / provider / runtime upgrade regression gate",
+    "deepseek: opt-in RM-02 DeepSeek compatibility spike requiring DEEPSEEK_API_KEY and network",
 ]
 
 [tool.ruff]

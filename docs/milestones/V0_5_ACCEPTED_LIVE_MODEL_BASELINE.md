@@ -117,6 +117,10 @@ No product live run.
 
 ### RM-02 — DeepSeek protocol compatibility spike + A/B architecture decision
 
+Status: `BLOCKED` (implementation + offline evidence complete; opt-in live
+confirmation unavailable). Selected strategy: **Option B** (narrow public
+profile override).
+
 Follows RM-01. Executable qualification of the pinned Pydantic AI path, and the
 decision between:
 
@@ -151,6 +155,22 @@ If the public built-in path (Option A) cannot preserve the required semantics fo
 public adapter) or rejection; a provider-private patch is not an acceptable
 outcome. The retired `deepseek-v4-flash` routing may be recorded as diagnostic
 evidence only, not adopted as the project model identifier.
+
+RM-02 result: pinned source inspection and deterministic offline tests show the
+built-in `deepseek-flash` profile reports `supports_thinking=False` (unified
+`thinking` stripped) and incorrectly permits forced tool choice while thinking is
+active, so Option A in its unmodified built-in form is not capability-truthful.
+Option B was selected accordingly: a narrow public adapter
+(`src/dnd_assistant/models/pydantic_ai_deepseek.py`) applies a minimal public
+`profile=` override and maps RM-01 settings through provider-specific
+`extra_body` / `openai_reasoning_effort`. Offline tests prove the request shape,
+`tool_choice="auto"`, the `reasoning_content` conversion/replay path, and
+non-leakage. The explicit opt-in live spike is implemented under the `deepseek`
+marker with a hard budget of 4 HTTP requests and zero retries, but was not
+executed because the machine-local `DEEPSEEK_API_KEY` was unavailable; the
+explicitly-selected live path fails closed rather than skipping. RM-02 therefore
+remains `BLOCKED` on live evidence, no accepted canonical live baseline exists,
+production composition is unchanged, and RM-03 has not started.
 
 No product baseline measurement yet.
 

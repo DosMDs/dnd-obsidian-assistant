@@ -112,6 +112,39 @@ reasoning-effort behavior for the current official `deepseek-flash` identifier i
 executable evidence and decide between Option A (public built-in path) and
 Option B (narrow public adapter). Do not record this blocker as solved.
 
+RM-02 resolution: the blocker is resolved at the source and offline-execution
+level and the strategy is **Option B**. Pinned source inspection
+(`profiles/deepseek.py`, `providers/deepseek.py`, `models/__init__.py`) confirms
+that `deepseek-flash` resolves with `supports_thinking=False` (stripping the
+unified `thinking` setting) and with
+`openai_supports_forced_tool_choice_with_thinking=True`, which is not truthful
+for a V4-family thinking model. RM-02 therefore adds a narrow public adapter
+(`src/dnd_assistant/models/pydantic_ai_deepseek.py`) that applies a minimal
+public `profile=` override (`supports_thinking=True`,
+`thinking_always_enabled=False`,
+`openai_supports_forced_tool_choice_with_thinking=False`) and maps the RM-01
+contract through public provider-specific settings
+(`extra_body={"thinking":{"type":"enabled"|"disabled"}}` and
+`openai_reasoning_effort=<low|high|max>`); it does not use the stripped unified
+`thinking` setting, copy the built-in provider profile, or patch framework
+internals.
+
+Deterministic offline evidence (`tests/unit/test_pydantic_ai_deepseek_factory.py`,
+`tests/integration/test_pydantic_ai_deepseek_compatibility.py`) proves the
+canonical `deepseek-flash` identifier, the thinking toggle, `reasoning_effort`
+(low/high/max), `tool_choice="auto"`, `reasoning_content` → `ThinkingPart`
+conversion and replay on the tool-continuation request, and the absence of
+reasoning text / prompts / credentials / authorization headers from captured
+evidence.
+
+The live wire confirmation was **not executed**: the explicit opt-in spike
+(`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek` marker,
+hard budget 4 HTTP requests, zero retries) requires
+`DND_ASSISTANT_DEEPSEEK_LIVE=1` and a machine-local `DEEPSEEK_API_KEY`, and the
+credential was unavailable at implementation time. The explicitly-selected live
+path fails closed rather than skipping. RM-02 remains `BLOCKED` on that live
+evidence; do not record live protocol compatibility as proven.
+
 Required assertions:
 
 ```text

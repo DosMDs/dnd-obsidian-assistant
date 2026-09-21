@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-21 (RM-01)
+**Last updated:** 2026-09-21 (RM-02)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` not started)
+**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `BLOCKED` — implementation + offline evidence complete, opt-in live confirmation unavailable; `RM-03`…`RM-06` not started)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
 **Active work:** Stage 14 `DONE` and integrated into `main`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
 **Current branch:** `main`
@@ -299,24 +299,50 @@ The first intended qualification candidate is DeepSeek (`deepseek-flash`,
 thinking enabled, `reasoning_effort=high`, role `agent`). Canonical project
 reasoning-effort values are `low`, `high` and `max`.
 
+`RM-02 — DeepSeek protocol compatibility spike + A/B architecture decision` is
+`BLOCKED` on live confirmation, with its implementation and offline evidence
+complete. It adds a narrow project-owned DeepSeek factory
+(`src/dnd_assistant/models/pydantic_ai_deepseek.py`) that builds the public
+`DeepSeekProvider` + `OpenAIChatModel` path for the canonical `deepseek-flash`
+identifier, applies a minimal public `profile=` correction, and maps the RM-01
+contract through public provider-specific settings
+(`extra_body={"thinking":{"type":"enabled"|"disabled"}}` plus
+`openai_reasoning_effort=<low|high|max>`), deliberately avoiding the unified
+`thinking` setting. Deterministic offline tests prove the outbound request shape
+(thinking toggle, effort, tools, `tool_choice="auto"`), the `reasoning_content`
+round-trip across one tool continuation, and no reasoning/credential leakage;
+they also freeze the pinned Pydantic AI 2.39.0 `deepseek-flash` capability
+mis-recognition that motivates the factory. The A/B decision is **Option B**
+(a narrow public profile override is required to make `supports_thinking` and
+forced-tool-choice-with-thinking truthful for `deepseek-flash`), recorded in
+ADR-0010. The explicit opt-in live spike
+(`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek` marker,
+hard budget 4 HTTP requests) is implemented but was **not executed**: the
+machine-local `DEEPSEEK_API_KEY` was unavailable, and the explicitly-selected
+live path fails closed (never silently skips) in that case. RM-02 does not flip
+production composition, add a dependency, alter RM-01 semantics, or start RM-03;
+no accepted canonical live baseline exists.
+
 Task order:
 
 ```text
 RM-00  architecture + qualification plan                 DONE (docs adoption)
 RM-01  provider/profile/credential contract              DONE (typed contract only)
-RM-02  protocol compatibility spike + A/B decision       NOT STARTED
+RM-02  protocol compatibility spike + A/B decision       BLOCKED (offline complete; live confirmation unavailable)
 RM-03  production agent composition                      NOT STARTED
 RM-04  DeepSeek live smoke / provider gate               NOT STARTED
 RM-05  product-v1 DeepSeek candidate qualification       NOT STARTED
 RM-06  accepted-baseline decision / closure              NOT STARTED
 ```
 
-`RM-01` completing does not advance `RM-02`, which remains `NOT STARTED`. The
-primary unresolved blocker is that pinned Pydantic AI 2.39.0 appears to support
-DeepSeek `reasoning_content` round-trip semantics, but explicit thinking/effort
-behavior for the current official `deepseek-flash` identifier is not yet proven;
-`RM-02` must resolve it with executable evidence before any product measurement.
-`RM-02` is not solved by RM-01 and no accepted canonical live baseline exists.
+`RM-02` resolved the pinned-source question: for `deepseek-flash` the unified
+`thinking` setting is stripped (the pinned profile reports `supports_thinking`
+false) and the built-in profile incorrectly permits forced tool choice while
+thinking is active. A narrow public profile override plus provider-specific
+settings is therefore required (Option B). What remains unexecuted is only the
+opt-in live wire confirmation of thinking/reasoning/`reasoning_content`
+continuation against the real provider; no product measurement or accepted
+canonical live baseline exists.
 
 ## Current blockers, deferrals and prerequisites
 

@@ -138,6 +138,50 @@ must be implementable and acceptable without depending on a future `RM-02`
 result. Do not duplicate the agent runtime, ToolExecutor, domain services or
 Vault write path for DeepSeek.
 
+## RM-02 resolution: Option B (public profile override)
+
+`RM-02` resolved the supported-implementation-strategy question from pinned
+source inspection plus deterministic offline execution. The selected strategy is
+**Option B** — a narrow project-owned adapter using only public Pydantic AI
+extension points — because the pinned built-in DeepSeek profile is not
+capability-truthful for the canonical `deepseek-flash` identifier:
+
+- `pydantic_ai.profiles.deepseek.deepseek_model_profile` recognizes thinking
+  support only for `deepseek-reasoner` / `deepseek-r1*` / `deepseek-v4-*` names,
+  so `deepseek-flash` resolves with `supports_thinking=False` and the unified
+  `thinking` setting is stripped before reaching the wire;
+- `DeepSeekProvider.model_profile` derives
+  `openai_supports_forced_tool_choice_with_thinking` from the same outdated
+  `is_v4` model-name test, so it incorrectly reports forced tool choice as
+  supported for `deepseek-flash` while thinking is active.
+
+The accepted concrete mechanism is
+`src/dnd_assistant/models/pydantic_ai_deepseek.py`:
+`build_pydantic_ai_deepseek_model()` constructs the public `DeepSeekProvider` and
+`OpenAIChatModel`, applies a minimal public `profile=` override
+(`supports_thinking=True`, `thinking_always_enabled=False`,
+`openai_supports_forced_tool_choice_with_thinking=False`), and maps the RM-01
+contract through public provider-specific settings
+(`extra_body={"thinking":{"type":"enabled"|"disabled"}}` and
+`openai_reasoning_effort=<low|high|max>`). It does not copy the built-in
+provider profile, duplicate OpenAI transport or message/reasoning mapping,
+subclass the provider, or patch framework-private state.
+
+The `reasoning_content` round-trip is provided by the pinned provider profile
+(`openai_chat_thinking_field='reasoning_content'`,
+`openai_chat_send_back_thinking_parts='field'`) and is independent of the
+thinking-capability flag; offline tests confirm conversion to `ThinkingPart` and
+replay on the tool-continuation request.
+
+Live confirmation is pending: `RM-02` provides an explicit opt-in live spike
+(`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek` marker,
+hard budget of 4 HTTP model requests, zero retries) but the machine-local
+`DEEPSEEK_API_KEY` was unavailable at implementation time, so no real-provider
+request was executed and `RM-02` remains `BLOCKED` on that live evidence. This
+decision does not authorize production DeepSeek dispatch: `composition/
+agent_model.py` and the production CLI/TUI remain Ollama-only; `RM-03` owns
+production integration.
+
 ## Credentials and data boundary
 
 DeepSeek API credentials are machine-local secrets.
