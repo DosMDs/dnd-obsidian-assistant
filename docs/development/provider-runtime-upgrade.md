@@ -250,15 +250,33 @@ requests. RM-02 spike selection (diagnostic only):
 uv run pytest -m "deepseek and not provider_upgrade"
 ```
 
-Do not add latency or product-quality thresholds here. Those belong to the
-S14-07 baseline.
+Do not add latency or product-quality thresholds here. Product-quality
+measurement belongs to the prospective `v0.5.0 — Accepted Live Model Baseline`
+product-qualification workflow (RM-05), not to this compatibility gate.
 
-## 12. Post-S14-07 model-quality gate handoff
+## 12. Model-quality gate handoff
 
-Once the accepted S14-07 product live eval / frozen baseline exists, a U3
-model/profile qualification **also** requires that accepted S14-07 product live
-eval / baseline comparison. Until then, the live gate proves runtime
-compatibility, not model-quality acceptance.
+The provider/runtime live gate proves **compatibility only**; it never proves
+model-quality acceptance.
+
+A model/profile candidate that requires product qualification must pass the
+current accepted product-eval contract before it can become an accepted
+baseline. For the current `v0.5.0 — Accepted Live Model Baseline` workstream:
+
+```text
+RM-05  bounded measured product-v1 DeepSeek candidate qualification
+RM-06  accepted-baseline decision / closure
+```
+
+After an accepted canonical live baseline exists, future applicable U3
+model/profile changes must use the then-current product qualification /
+baseline-comparison procedure defined by the active milestone/runbook at that
+time. Until such a baseline exists, the live gate proves runtime compatibility,
+not model-quality acceptance.
+
+This is a prospective, provider-neutral rule. It is not bound to the historical
+Stage-14 task `S14-07` (which remains `BLOCKED` / `UNSATISFIED`, with its
+consumed candidates and the ADR-0009 deferral preserved as history).
 
 ## 13. Outcome classification
 
