@@ -108,9 +108,9 @@ the DeepSeek `reasoning_content` round-trip (its `DeepSeekProvider` profile sets
 reasoning-effort behavior for the current official `deepseek-flash` identifier is
 **not yet proven**: the pinned model profile gates thinking support on
 `deepseek-reasoner` / `deepseek-r1*` / `deepseek-v4-*` names, and the unified
-`thinking` setting is silently stripped otherwise. RM-02 must resolve this with
-executable evidence and decide between Option A (public built-in path) and
-Option B (narrow public adapter). Do not record this blocker as solved.
+`thinking` setting is silently stripped otherwise. RM-02 resolves this with
+executable evidence and decides between Option A (public built-in path) and
+Option B (narrow public adapter); the recorded resolution is below.
 
 RM-02 resolution: the blocker is resolved at the source and offline-execution
 level and the strategy is **Option B**. Pinned source inspection
@@ -137,13 +137,22 @@ conversion and replay on the tool-continuation request, and the absence of
 reasoning text / prompts / credentials / authorization headers from captured
 evidence.
 
-The live wire confirmation was **not executed**: the explicit opt-in spike
-(`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek` marker,
-hard budget 4 HTTP requests, zero retries) requires
-`DND_ASSISTANT_DEEPSEEK_LIVE=1` and a machine-local `DEEPSEEK_API_KEY`, and the
-credential was unavailable at implementation time. The explicitly-selected live
-path fails closed rather than skipping. RM-02 remains `BLOCKED` on that live
-evidence; do not record live protocol compatibility as proven.
+The live wire confirmation was executed once and **passed**: the explicit opt-in
+spike (`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek`
+marker, hard budget 4 model HTTP requests, zero retries) ran with
+`DND_ASSISTANT_DEEPSEEK_LIVE=1` and a machine-local `DEEPSEEK_API_KEY`. Case A
+(thinking enabled, no tools) and Case B (thinking disabled, no tools) each made
+exactly one model HTTP request with a valid terminal result; Case C (thinking
+enabled with one deterministic READ tool) made exactly two — one tool invocation
+plus its continuation — with request 1 carrying tools and `tool_choice="auto"`,
+provider reasoning converted to a non-empty `ThinkingPart`, request 2 carrying
+assistant `reasoning_content` and the matching tool result while keeping
+`tool_choice="auto"`, and a terminal result containing the expected synthetic
+tool result. Total model HTTP requests: exactly 4, retries 0. This proves live
+protocol compatibility; it is **not** RM-04 provider qualification and **not**
+RM-05 product qualification, and no product baseline was measured. Only
+structural sanitized evidence was observed (presence/type/category), never
+reasoning text, prompts, bodies, headers or credentials.
 
 Required assertions:
 

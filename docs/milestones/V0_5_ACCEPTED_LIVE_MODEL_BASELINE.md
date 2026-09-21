@@ -117,9 +117,8 @@ No product live run.
 
 ### RM-02 — DeepSeek protocol compatibility spike + A/B architecture decision
 
-Status: `BLOCKED` (implementation + offline evidence complete; opt-in live
-confirmation unavailable). Selected strategy: **Option B** (narrow public
-profile override).
+Status: `DONE`. Live protocol compatibility `PASS`. Selected strategy:
+**Option B** (narrow public profile override).
 
 Follows RM-01. Executable qualification of the pinned Pydantic AI path, and the
 decision between:
@@ -165,12 +164,17 @@ Option B was selected accordingly: a narrow public adapter
 `profile=` override and maps RM-01 settings through provider-specific
 `extra_body` / `openai_reasoning_effort`. Offline tests prove the request shape,
 `tool_choice="auto"`, the `reasoning_content` conversion/replay path, and
-non-leakage. The explicit opt-in live spike is implemented under the `deepseek`
-marker with a hard budget of 4 HTTP requests and zero retries, but was not
-executed because the machine-local `DEEPSEEK_API_KEY` was unavailable; the
-explicitly-selected live path fails closed rather than skipping. RM-02 therefore
-remains `BLOCKED` on live evidence, no accepted canonical live baseline exists,
-production composition is unchanged, and RM-03 has not started.
+non-leakage. The explicit opt-in live spike was then executed once against the
+real provider under the `deepseek` marker with a hard budget of 4 model HTTP
+requests and zero retries and **passed**: Case A (thinking enabled, no tools) and
+Case B (thinking disabled, no tools) each made exactly one request, and Case C
+(thinking enabled with one deterministic READ tool) made exactly two — one tool
+invocation plus its continuation — with the framework replaying assistant
+`reasoning_content` and the matching tool result while keeping
+`tool_choice="auto"`, for exactly four model HTTP requests total. This proves
+live protocol compatibility only: no product baseline was measured, no accepted
+canonical live baseline exists, production composition is unchanged, and RM-03
+has not started.
 
 No product baseline measurement yet.
 
