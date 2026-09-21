@@ -22,6 +22,8 @@ from dnd_assistant.models.profiles import (
     load_model_profiles,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 
 def _write_toml(path: Path, content: str) -> Path:
     """Write a TOML string to a temporary file and return its path."""

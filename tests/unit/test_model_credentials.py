@@ -22,6 +22,8 @@ from dnd_assistant.models import credentials
 from dnd_assistant.models import profiles as profiles_module
 from dnd_assistant.models.profiles import load_model_profiles
 
+pytestmark = pytest.mark.provider_upgrade
+
 _SECRET = "sk-test-secret-value-1234567890"
 
 

@@ -38,6 +38,8 @@ EXPECTED_OFFLINE_MODULES: frozenset[str] = frozenset(
         "integration/test_pydantic_ai_agent_runtime_literal_evidence_p2.py",
         "integration/test_pydantic_ai_agent_runtime_literal_evidence_p3.py",
         "integration/test_pydantic_ai_blocker_limits.py",
+        "integration/test_pydantic_ai_deepseek_compatibility.py",
+        "integration/test_pydantic_ai_deepseek_production_runtime.py",
         "integration/test_pydantic_ai_ollama_runtime.py",
         "integration/test_pydantic_ai_sync_thread_literal_evidence.py",
         "integration/test_pydantic_ai_sync_thread_literal_evidence_p2.py",
@@ -47,6 +49,10 @@ EXPECTED_OFFLINE_MODULES: frozenset[str] = frozenset(
         "unit/test_bootstrap_pydantic_ai.py",
         "unit/test_cli_agent_runtime.py",
         "unit/test_dnd_agent_policy.py",
+        "unit/test_model_credentials.py",
+        "unit/test_model_profiles_reasoning.py",
+        "unit/test_pydantic_ai_agent_runtime_lifecycle.py",
+        "unit/test_pydantic_ai_deepseek_factory.py",
         "unit/test_pydantic_ai_ollama.py",
         "unit/test_pydantic_ai_response_adapter.py",
         "unit/test_pydantic_ai_run_deps.py",
@@ -55,12 +61,24 @@ EXPECTED_OFFLINE_MODULES: frozenset[str] = frozenset(
     }
 )
 
-EXPECTED_LIVE_MODULES: frozenset[str] = frozenset(
+# Provider-specific live inventories.  Offline selection must exclude both via
+# ``-m "provider_upgrade and not ollama and not deepseek"``.
+EXPECTED_OLLAMA_LIVE_MODULES: frozenset[str] = frozenset(
     {
         "integration/test_pydantic_ai_ollama_live_runtime.py",
         "integration/test_pydantic_ai_ollama_smoke.py",
     }
 )
+
+EXPECTED_DEEPSEEK_LIVE_MODULES: frozenset[str] = frozenset(
+    {
+        "integration/test_pydantic_ai_deepseek_live_runtime.py",
+    }
+)
+
+# The RM-02 protocol-compatibility spike is historical/focused evidence.  It is
+# deliberately NOT part of the durable provider_upgrade gate.
+RM02_SPIKE_MODULE = "integration/test_pydantic_ai_deepseek_live_spike.py"
 
 # The qualification module is intentionally NOT marked wholesale: it mixes
 # current production canaries with historical framework-default characterization.
@@ -124,6 +142,31 @@ SEMANTIC_FAMILIES: dict[str, frozenset[str]] = {
             "unit/test_bootstrap_composition.py",
         }
     ),
+    "deepseek_factory_mapping": frozenset(
+        {
+            "unit/test_pydantic_ai_deepseek_factory.py",
+            "integration/test_pydantic_ai_deepseek_compatibility.py",
+        }
+    ),
+    "deepseek_reasoning_continuation": frozenset(
+        {
+            "integration/test_pydantic_ai_deepseek_compatibility.py",
+            "integration/test_pydantic_ai_deepseek_production_runtime.py",
+        }
+    ),
+    "provider_client_lifecycle": frozenset(
+        {
+            "unit/test_pydantic_ai_agent_runtime_lifecycle.py",
+        }
+    ),
+    "production_provider_dispatch": frozenset(
+        {
+            "unit/test_cli_agent_runtime.py",
+            "integration/test_pydantic_ai_deepseek_production_runtime.py",
+        }
+    ),
+    "provider_credential_boundary": frozenset({"unit/test_model_credentials.py"}),
+    "provider_reasoning_profile_contract": frozenset({"unit/test_model_profiles_reasoning.py"}),
 }
 
 
@@ -219,13 +262,23 @@ def test_marker_registered_in_pyproject() -> None:
 
 
 def test_all_expected_modules_exist() -> None:
-    for rel in EXPECTED_OFFLINE_MODULES | EXPECTED_LIVE_MODULES | {QUALIFICATION_MODULE}:
+    reviewed = (
+        EXPECTED_OFFLINE_MODULES
+        | EXPECTED_OLLAMA_LIVE_MODULES
+        | EXPECTED_DEEPSEEK_LIVE_MODULES
+        | {QUALIFICATION_MODULE, RM02_SPIKE_MODULE}
+    )
+    for rel in reviewed:
         assert (TESTS_ROOT / rel).is_file(), f"reviewed gate module is missing: {rel}"
 
 
 def test_reviewed_module_inventory_matches_selection() -> None:
     module_level, _, _ = _observed()
-    expected = set(EXPECTED_OFFLINE_MODULES) | set(EXPECTED_LIVE_MODULES)
+    expected = (
+        set(EXPECTED_OFFLINE_MODULES)
+        | set(EXPECTED_OLLAMA_LIVE_MODULES)
+        | set(EXPECTED_DEEPSEEK_LIVE_MODULES)
+    )
     missing = expected - module_level
     unexpected = module_level - expected
     assert not missing and not unexpected, (
@@ -248,15 +301,40 @@ def test_qualification_tests_marked_individually() -> None:
     )
 
 
-def test_live_modules_also_carry_ollama() -> None:
-    for rel in EXPECTED_LIVE_MODULES:
-        tree = _parse(TESTS_ROOT / rel)
-        markers = _module_level_markers(tree)
-        assert "ollama" in markers, f"live module {rel} must also carry the ollama marker"
+def test_ollama_live_modules_carry_ollama_and_not_deepseek() -> None:
+    for rel in EXPECTED_OLLAMA_LIVE_MODULES:
+        markers = _module_level_markers(_parse(TESTS_ROOT / rel))
+        assert "ollama" in markers, f"live module {rel} must carry the ollama marker"
+        assert "deepseek" not in markers, f"ollama live module {rel} must not carry deepseek"
+
+
+def test_deepseek_live_modules_carry_deepseek_and_not_ollama() -> None:
+    for rel in EXPECTED_DEEPSEEK_LIVE_MODULES:
+        markers = _module_level_markers(_parse(TESTS_ROOT / rel))
+        assert "deepseek" in markers, f"live module {rel} must carry the deepseek marker"
+        assert "ollama" not in markers, f"deepseek live module {rel} must not carry ollama"
+
+
+def test_rm02_spike_is_not_part_of_durable_gate() -> None:
+    markers = _module_level_markers(_parse(TESTS_ROOT / RM02_SPIKE_MODULE))
+    assert "deepseek" in markers, "RM-02 spike must keep its deepseek marker"
+    assert MARKER not in markers, (
+        "RM-02 spike must remain historical/focused evidence, not part of the "
+        "durable provider_upgrade gate"
+    )
+    durable = (
+        set(EXPECTED_OFFLINE_MODULES)
+        | set(EXPECTED_OLLAMA_LIVE_MODULES)
+        | set(EXPECTED_DEEPSEEK_LIVE_MODULES)
+    )
+    assert RM02_SPIKE_MODULE not in durable, (
+        "RM-02 spike must not be classified as the durable RM-04 live gate"
+    )
 
 
 def test_no_live_module_in_offline_inventory() -> None:
-    overlap = set(EXPECTED_OFFLINE_MODULES) & set(EXPECTED_LIVE_MODULES)
+    live = set(EXPECTED_OLLAMA_LIVE_MODULES) | set(EXPECTED_DEEPSEEK_LIVE_MODULES)
+    overlap = set(EXPECTED_OFFLINE_MODULES) & live
     assert not overlap, f"modules cannot be both offline-only and live: {sorted(overlap)}"
 
 

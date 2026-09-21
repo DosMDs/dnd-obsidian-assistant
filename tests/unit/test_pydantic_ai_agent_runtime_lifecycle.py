@@ -53,6 +53,8 @@ from tests.support.pydantic_ai_runtime import (
     make_tool_registry,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 _ALPHA_INPUT = {"value": "x"}
 
 

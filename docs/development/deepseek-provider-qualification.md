@@ -196,6 +196,77 @@ final:
 A 400 caused by missing reasoning continuity is a provider compatibility failure,
 not a model-quality failure.
 
+## 3a. RM-04 durable provider/runtime live gate
+
+RM-02 proved protocol compatibility once (spike). RM-04 converts that into the
+repeatable, opt-in, provider/runtime qualification gate used for future Pydantic
+AI upgrades, DeepSeek protocol/adapter changes and pre-RM-05 qualification.
+
+Module: `tests/integration/test_pydantic_ai_deepseek_live_runtime.py`
+(`provider_upgrade` + `deepseek`). The RM-02 spike
+(`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, marker `deepseek`
+only) remains separate historical evidence and is not part of the durable gate.
+
+Durable selection:
+
+```text
+uv run pytest -m "provider_upgrade and deepseek"
+```
+
+Explicit machine-local configuration:
+
+```text
+DND_ASSISTANT_DEEPSEEK_LIVE=1
+DND_ASSISTANT_DEEPSEEK_CONFIG=<path-to-models.toml>
+DND_ASSISTANT_DEEPSEEK_AGENT_PROFILE=<profile-name>
+DEEPSEEK_API_KEY=<secret>
+```
+
+Semantics:
+
+```text
+selector absent                          SKIP before config/credential/network
+selector set + missing config/profile    FAIL before network, zero requests
+selector set + non-canonical profile     FAIL before network, zero requests
+selector set + missing/empty credential  FAIL before network, zero requests
+real provider/runtime failure            FAIL with sanitized classification
+```
+
+The selected profile must be `provider=deepseek`, `role=agent`,
+`model=deepseek-flash`, `thinking=true`, `reasoning_effort=high`, canonical base
+URL `https://api.deepseek.com`. A distinct candidate is never silently
+substituted.
+
+Scenarios and hard budget:
+
+```text
+D1  production dispatch + runtime, thinking/high, zero tools, terminal RESPOND   1 request
+D2  production dispatch + runtime, thinking/high, one READ probe + continuation   2 requests
+--------------------------------------------------------------------------------------------
+total maximum                                                                    3 requests
+retries                                                                          0
+```
+
+Both cases use the real production-sensitive path: `_load_profile` ->
+`_build_agent_model` -> `build_pydantic_ai_deepseek_model` ->
+`PydanticAIAgentRuntime`, with a synthetic context-builder double, no Vault and
+no WRITE tool. D2 asserts, structurally only, that request 1 carries tools with
+`tool_choice=auto`, that request 2 replays assistant `reasoning_content` with a
+matching tool result and `tool_choice=auto`, and that the tool handler executed
+exactly once. No reasoning text, prompt, body, header or credential is ever
+retained or printed.
+
+Lifecycle ownership: the injected `httpx2.AsyncClient` that carries the
+sanitized recorder is **caller-owned test infrastructure** and is closed
+explicitly in test cleanup; it is not provider-lifecycle evidence. Provider-owned
+Ollama/DeepSeek client closure through the RM-03 managed `Agent`/`Model` context
+is proven offline by `tests/unit/test_pydantic_ai_agent_runtime_lifecycle.py`
+(part of `provider_upgrade`).
+
+DeepSeek structured output is **not** part of RM-04: project DeepSeek support is
+AGENT-role only and the AGENT runtime uses `str | DeferredToolRequests`, not
+structured extraction.
+
 ## 4. Hidden reasoning policy
 
 Provider reasoning content is transport/runtime state only.

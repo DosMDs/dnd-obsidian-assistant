@@ -28,6 +28,8 @@ from tests.support.deepseek_transport import (
     deepseek_chat_completion,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 _OFFLINE_DUMMY_KEY = "offline-dummy-key"
 _REASONING_TEXT = "synthetic-reasoning-text"
 

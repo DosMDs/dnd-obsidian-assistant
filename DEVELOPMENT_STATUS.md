@@ -2,7 +2,7 @@
 
 **Last updated:** 2026-09-21 (RM-03)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04`…`RM-06` not started)
+**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05`…`RM-06` not started)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
 **Active work:** Stage 14 `DONE` and integrated into `main`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
 **Current branch:** `main`
@@ -333,7 +333,7 @@ RM-00  architecture + qualification plan                 DONE (docs adoption)
 RM-01  provider/profile/credential contract              DONE (typed contract only)
 RM-02  protocol compatibility spike + A/B decision       DONE (Option B; live protocol compatibility PASS)
 RM-03  production agent composition                      DONE (ollama|deepseek; generic provider lifecycle)
-RM-04  DeepSeek live smoke / provider gate               NOT STARTED
+RM-04  DeepSeek live smoke / provider gate               DONE (durable provider/runtime live gate PASS)
 RM-05  product-v1 DeepSeek candidate qualification       NOT STARTED
 RM-06  accepted-baseline decision / closure              NOT STARTED
 ```
@@ -371,6 +371,39 @@ performed **no** live DeepSeek call, no product-v1 run and no dependency change:
 production composition supports DeepSeek, but no provider runtime gate is
 qualified, no product candidate is accepted and no accepted canonical live
 baseline exists.
+
+`RM-04 — DeepSeek live smoke / provider gate` is `DONE` — durable DeepSeek
+provider/runtime live gate `PASS`. The `provider_upgrade` marker gate is now
+provider-neutral: the offline curated selection is
+`uv run pytest -m "provider_upgrade and not ollama and not deepseek"` (it cannot
+accidentally execute either live provider), and the provider-sensitive RM-01 /
+RM-02 / RM-03 offline regressions joined the reviewed `provider_upgrade`
+inventory — the DeepSeek factory mapping
+(`tests/unit/test_pydantic_ai_deepseek_factory.py`), DeepSeek protocol
+compatibility (`tests/integration/test_pydantic_ai_deepseek_compatibility.py`),
+provider-neutral managed lifecycle
+(`tests/unit/test_pydantic_ai_agent_runtime_lifecycle.py`), DeepSeek reasoning
+profile contract (`tests/unit/test_model_profiles_reasoning.py`), credential
+boundary (`tests/unit/test_model_credentials.py`), and a new offline
+production-runtime preflight
+(`tests/integration/test_pydantic_ai_deepseek_production_runtime.py`). The
+durable live gate
+(`tests/integration/test_pydantic_ai_deepseek_live_runtime.py`,
+`provider_upgrade + deepseek`) runs only via
+`uv run pytest -m "provider_upgrade and deepseek"`, requires explicit opt-in
+(`DND_ASSISTANT_DEEPSEEK_LIVE=1`, `DND_ASSISTANT_DEEPSEEK_CONFIG`,
+`DND_ASSISTANT_DEEPSEEK_AGENT_PROFILE`, `DEEPSEEK_API_KEY`), skips before any
+config/credential/network access when the selector is absent, fails before
+network on missing/invalid/non-canonical configuration, and exercises the real
+production path `_load_profile -> _build_agent_model ->
+build_pydantic_ai_deepseek_model -> PydanticAIAgentRuntime` with a synthetic
+context and one READ-only probe. Hard budget D1 = 1 and D2 = 2 model HTTP
+requests (total 3, zero retries); D2 structurally proves `tool_choice=auto`,
+assistant `reasoning_content` replay with a matching tool result, and exactly
+one handler execution. The historical RM-02 spike remains separate (`deepseek`
+only, not `provider_upgrade`); provider-owned client closure remains proven
+offline, and the injected observing client is caller-owned. No production Python
+changed, no product-v1 ran and no accepted canonical live baseline exists.
 
 ## Current blockers, deferrals and prerequisites
 

@@ -23,6 +23,8 @@ from dnd_assistant.models.pydantic_ai_deepseek import (
     build_pydantic_ai_deepseek_model,
 )
 
+pytestmark = pytest.mark.provider_upgrade
+
 
 def _deepseek_agent(
     *,

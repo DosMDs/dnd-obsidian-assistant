@@ -207,6 +207,8 @@ baseline.
 
 ### RM-04 — DeepSeek live smoke / provider gate
 
+Status: `DONE` — durable DeepSeek provider/runtime live gate `PASS`.
+
 Add explicit opt-in live provider tests and update the provider/runtime upgrade
 runbook.
 
@@ -214,6 +216,30 @@ Normal `uv run pytest` remains secret/network independent.
 
 Required live configuration must fail rather than silently skip when explicitly
 requested and invalid.
+
+Result: `provider_upgrade` is provider-neutral. The offline curated gate is now
+`uv run pytest -m "provider_upgrade and not ollama and not deepseek"` (it can no
+longer accidentally execute either live provider), and RM-01/RM-02/RM-03
+provider-sensitive offline regressions (DeepSeek factory, DeepSeek protocol
+compatibility, provider-neutral managed lifecycle, DeepSeek reasoning profile
+contract, credential boundary, and a new DeepSeek production-runtime offline
+preflight) joined the reviewed `provider_upgrade` inventory protected by
+`tests/contract/test_provider_upgrade_gate.py`. The durable live gate
+(`tests/integration/test_pydantic_ai_deepseek_live_runtime.py`,
+`provider_upgrade + deepseek`) runs only via
+`uv run pytest -m "provider_upgrade and deepseek"`, requires explicit opt-in
+(`DND_ASSISTANT_DEEPSEEK_LIVE=1` plus `DND_ASSISTANT_DEEPSEEK_CONFIG`,
+`DND_ASSISTANT_DEEPSEEK_AGENT_PROFILE`, `DEEPSEEK_API_KEY`), skips before any
+config/credential/network access when the selector is absent, fails before
+network on missing/invalid/non-canonical configuration, and exercises the real
+production path `_load_profile -> _build_agent_model ->
+build_pydantic_ai_deepseek_model -> PydanticAIAgentRuntime` with a synthetic
+context and one READ-only probe. Hard budget: D1 = 1 and D2 = 2 model HTTP
+requests (total 3, zero retries); D2 structurally proves `tool_choice=auto`,
+assistant `reasoning_content` replay with a matching tool result, and exactly
+one handler execution. The historical RM-02 spike remains separate
+(`deepseek` only, not `provider_upgrade`). No production Python changed, no
+product-v1 ran, and no accepted canonical live baseline exists.
 
 ### RM-05 — Product-v1 DeepSeek candidate qualification
 

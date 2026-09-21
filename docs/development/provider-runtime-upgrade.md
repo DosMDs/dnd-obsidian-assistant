@@ -18,6 +18,8 @@ This runbook applies when a change touches any of:
 
 - the Pydantic AI package family resolved through `uv.lock`;
 - the Ollama runtime binary;
+- a remote provider protocol/API compatibility surface or the project-owned
+  remote-provider adapter (currently the DeepSeek adapter);
 - a model/profile value that changes provider behavior.
 
 It does **not** apply to ordinary product work that merely happens to live in a
@@ -29,11 +31,18 @@ repository containing Pydantic AI.
 |---|---|---|
 | U1 | Pydantic AI framework/package change (`pydantic-ai-slim`, `pydantic-ai`, `pydantic-graph`, or directly coupled OpenAI client changes produced by lock resolution) | Provider integration may have changed |
 | U2 | Ollama runtime binary change | No Python dependency bump may occur |
-| U3 | model / profile change (model tag, temperature, timeout, role profile, base-URL semantics) | Config-only; may accompany U1/U2 or stand alone |
+| U3 | model / profile value change (model tag, temperature, timeout, role profile, base-URL semantics), for any provider including DeepSeek | Config-only; may accompany U1/U2/U5 or stand alone |
 | U4 | no provider/runtime-related change | No special gate required |
+| U5 | remote-provider compatibility change: the DeepSeek provider protocol/API surface, or the project-owned DeepSeek adapter (`src/dnd_assistant/models/pydantic_ai_deepseek.py`) | External/API or adapter code; a DeepSeek *model/profile value* change stays U3, not U5 |
 
-A change is only a U4 when it touches none of the U1–U3 surfaces. The existence
-of Pydantic AI in the repository is not by itself a trigger.
+A change is only a U4 when it touches none of the U1–U3/U5 surfaces. The
+existence of Pydantic AI in the repository is not by itself a trigger.
+
+Each applicable change must have exactly one primary trigger classification:
+DeepSeek model/profile **values** are classified U3; only the DeepSeek
+protocol/API compatibility surface or adapter code is U5. A single change may
+*additionally* accompany another class, but it is not simultaneously the primary
+trigger of two classes.
 
 ## 3. Baseline capture (before any change)
 
@@ -65,6 +74,11 @@ Pydantic AI
 Ollama
   https://github.com/ollama/ollama/releases
   native endpoints /api/version, /api/tags (already read by the live gate)
+
+DeepSeek (remote provider protocol/API, for U5)
+  https://api-docs.deepseek.com/guides/thinking_mode/
+  https://api-docs.deepseek.com/guides/tool_calls/
+  https://api-docs.deepseek.com/api/create-chat-completion/
 ```
 
 Recorded review fields (required):
@@ -139,13 +153,16 @@ transitive changes can be legitimate.
 ## 8. Offline curated gate
 
 ```text
-uv run pytest -m "provider_upgrade and not ollama"
+uv run pytest -m "provider_upgrade and not ollama and not deepseek"
 ```
 
 This selection is deterministic, offline and requires no running Ollama, no
 internet and no secrets. It is the curated Pydantic AI / provider / runtime
-regression gate. Its reviewed inventory is protected by
-`tests/contract/test_provider_upgrade_gate.py`.
+regression gate for **all** supported providers. The provider-specific live
+markers must be excluded explicitly: a durable live module carries
+`provider_upgrade + deepseek`, so an older `provider_upgrade and not ollama`
+expression would incorrectly collect DeepSeek live tests. Its reviewed
+inventory is protected by `tests/contract/test_provider_upgrade_gate.py`.
 
 For a U3 profile change, also run the profile/provider tests it affects
 (provider factory, composition, profile validation) even if they are outside
@@ -169,28 +186,68 @@ uv run pytest
 One canonical run after focused/affected/static gates are stable. Follow
 `docs/development/quality-and-evidence.md` for failure-loop and rerun policy.
 
-## 11. Live compatibility gate
+## 11. Live compatibility gates
 
-Mandatory for every applicable U1/U2 (and for U3 where provider interaction is
-involved):
+Mandatory for every applicable U1/U2 and for U5 (DeepSeek protocol/adapter
+changes); for a U3 model/profile change when provider interaction is involved.
+Each provider has its own explicit live selection.
+
+### 11.1 Ollama live gate
 
 ```text
 uv run pytest -m "provider_upgrade and ollama"
 ```
 
-Semantics:
+Live configuration:
 
-- absent live configuration → skip **before** any network access;
-- set-but-invalid configuration (missing file, missing profile, wrong provider,
-  unreachable endpoint, missing model) → fail, never silently skip.
+```text
+integration/test_pydantic_ai_ollama_smoke.py
+    DND_ASSISTANT_OLLAMA_SMOKE_CONFIG=<base_url>,<model_name>
+integration/test_pydantic_ai_ollama_live_runtime.py
+    DND_ASSISTANT_PAIM12_CONFIG=<path-to-models.toml>
+    DND_ASSISTANT_PAIM12_AGENT_PROFILE=<profile-name>
+```
 
-The two live modules have distinct roles:
+The two Ollama live modules have distinct roles:
 
 ```text
 integration/test_pydantic_ai_ollama_smoke.py
     standalone OllamaModel/OllamaProvider + real structured output
 integration/test_pydantic_ai_ollama_live_runtime.py
     production factory/runtime + real tool continuation
+```
+
+### 11.2 DeepSeek durable live gate
+
+```text
+uv run pytest -m "provider_upgrade and deepseek"
+```
+
+Live configuration:
+
+```text
+DND_ASSISTANT_DEEPSEEK_LIVE=1
+DND_ASSISTANT_DEEPSEEK_CONFIG=<path-to-models.toml>
+DND_ASSISTANT_DEEPSEEK_AGENT_PROFILE=<profile-name>
+DEEPSEEK_API_KEY=<secret>
+```
+
+The selected profile must be the canonical AGENT identity
+(`provider=deepseek`, `model=deepseek-flash`, `thinking=true`,
+`reasoning_effort=high`, canonical base URL). The gate exercises the real
+production path `_load_profile -> _build_agent_model -> factory ->
+PydanticAIAgentRuntime` with a synthetic context, zero tools (D1) and exactly
+one deterministic READ probe (D2); hard budget 3 model HTTP requests, zero
+retries. Full procedure: `docs/development/deepseek-provider-qualification.md`.
+
+Do **not** use bare `-m deepseek` as the maintenance gate: it also collects the
+historical RM-02 protocol-compatibility spike
+(`integration/test_pydantic_ai_deepseek_live_spike.py`, marker `deepseek`, **not**
+`provider_upgrade`), which is separate focused evidence and would spend extra
+requests. RM-02 spike selection (diagnostic only):
+
+```text
+uv run pytest -m "deepseek and not provider_upgrade"
 ```
 
 Do not add latency or product-quality thresholds here. Those belong to the
