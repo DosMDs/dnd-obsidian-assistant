@@ -37,8 +37,20 @@ thinking = true
 reasoning_effort = "high"
 ```
 
+`deepseek-flash` is the current official model identifier (served as
+DeepSeek-V4.1-Flash at the decision date). Do not substitute the retired
+`deepseek-v4-flash` name as the project identifier; its compatibility routing is
+diagnostic-only evidence for RM-02.
+
+Canonical project reasoning-effort values are `low`, `high` and `max`. `medium`
+is a provider compatibility alias and is not a canonical project value. Thinking
+disabled is represented separately, not as an effort value.
+
 Exact profile schema is finalized by RM-01; this sample is normative intent, not
-permission to bypass current `extra="forbid"` validation.
+permission to bypass current `extra="forbid"` validation. RM-01 owns the
+provider/profile/credential contract and is independently acceptable: RM-02
+follows RM-01 and decides the concrete DeepSeek Pydantic-AI construction
+strategy (public built-in path vs narrow public adapter).
 
 ## 3. Mandatory pre-product blocker gate
 
@@ -48,6 +60,17 @@ tests/smoke.
 DeepSeek thinking tool calls require reasoning continuity across tool
 continuation. The test must observe literal outbound/inbound protocol state
 without persisting chain-of-thought content.
+
+Primary unresolved blocker (RM-02): pinned Pydantic AI 2.39.0 appears to support
+the DeepSeek `reasoning_content` round-trip (its `DeepSeekProvider` profile sets
+`openai_chat_thinking_field='reasoning_content'` and
+`openai_chat_send_back_thinking_parts='field'`), but explicit thinking /
+reasoning-effort behavior for the current official `deepseek-flash` identifier is
+**not yet proven**: the pinned model profile gates thinking support on
+`deepseek-reasoner` / `deepseek-r1*` / `deepseek-v4-*` names, and the unified
+`thinking` setting is silently stripped otherwise. RM-02 must resolve this with
+executable evidence and decide between Option A (public built-in path) and
+Option B (narrow public adapter). Do not record this blocker as solved.
 
 Required assertions:
 
@@ -113,6 +136,18 @@ PROJECT_POLICY
 Do not classify all remote failures as model-quality failures.
 
 ## 6. Reasoning-effort qualification policy
+
+Canonical project reasoning-effort values:
+
+```text
+low
+high
+max
+```
+
+`medium` is a provider compatibility alias (`medium` maps to `high`), not a
+canonical project value. Thinking disabled is represented separately from
+reasoning effort, not as an effort level.
 
 Initial agent baseline:
 

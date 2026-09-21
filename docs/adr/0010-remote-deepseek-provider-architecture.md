@@ -1,16 +1,22 @@
 # ADR-0010: Remote DeepSeek provider architecture
 
-- **Status:** Proposed for acceptance
+- **Status:** Accepted
 - **Date:** 2026-09-21
 - **Milestone:** `v0.5.0 — Accepted Live Model Baseline`
 - **Initial task:** `RM-00`
+
+This ADR adopts the architecture direction for the post-MVP milestone
+`v0.5.0 — Accepted Live Model Baseline`. It does not implement it: no provider
+code, dependency, credential use, network/model call or live eval is authorized
+by this decision. Current roadmap state remains authoritative in
+`DEVELOPMENT_STATUS.md`; this ADR is durable architecture/decision context.
 
 ## Context
 
 The repository is currently on `main` after Stage-14 integration. The current MVP
 is `RELEASE_READY` under ADR-0009, while the historical accepted-live-model
 requirement remains `BLOCKED / UNSATISFIED` and is explicitly deferred to the
-post-MVP milestone concept `v0.5.0 — Accepted Live Model Baseline`.
+adopted post-MVP milestone `v0.5.0 — Accepted Live Model Baseline`.
 
 Three local Ollama candidates were consumed under the frozen Stage-14 product
 contract and none was accepted. Their evidence is historical and immutable.
@@ -56,12 +62,22 @@ thinking          enabled
 role              agent
 ```
 
-At the decision date, `deepseek-flash` routes to DeepSeek V4.1 Flash.
+The canonical project model identifier is the current official
+`deepseek-flash` (served as DeepSeek-V4.1-Flash at the decision date). The
+retired `deepseek-v4-flash` name must **not** be adopted as the project model
+identifier merely to work around the pinned Pydantic AI model-profile mismatch;
+its temporary compatibility routing may be used only as diagnostic evidence
+inside the RM-02 spike.
 
-`high` is chosen as the first agent qualification level because the provider
-documents it as the normal/default reasoning level for agent workloads.
-`low` and `max` remain explicit future comparison candidates; neither becomes an
-implicit fallback.
+The canonical project reasoning-effort values are `low`, `high` and `max`,
+matching documented DeepSeek OpenAI-format effort control. `medium` is a
+provider compatibility alias, not a canonical project value. Thinking disabled
+is represented separately from reasoning effort, not as an effort level.
+
+`high` is the initial agent qualification level because the provider documents
+it as the default reasoning level for agent workloads (thinking enabled by
+default). `low` and `max` remain explicit future comparison candidates; neither
+becomes an implicit fallback.
 
 Model name and reasoning effort remain profile configuration and eval evidence,
 not domain/application architecture.
@@ -70,7 +86,7 @@ not domain/application architecture.
 
 DeepSeek thinking-mode tool calling requires assistant `reasoning_content` to be
 preserved in subsequent tool-bearing requests. Failure to preserve it causes a
-provider protocol failure.
+provider protocol failure (HTTP 400).
 
 The project currently pins:
 
@@ -78,10 +94,27 @@ The project currently pins:
 pydantic-ai-slim[openai] == 2.39.0
 ```
 
-Therefore DeepSeek adoption is blocked until executable evidence proves that the
-selected Pydantic AI integration path:
+Repository/API inspection at the decision date found:
 
-1. sends thinking/reasoning settings correctly;
+- the pinned Pydantic AI ships a `DeepSeekProvider` (OpenAI-compatible), whose
+  model profile configures `openai_chat_thinking_field='reasoning_content'` and
+  `openai_chat_send_back_thinking_parts='field'`, citing DeepSeek's
+  "pass reasoning_content back" requirement — so the reasoning round-trip
+  mechanism **appears** supported for the pinned version;
+- however, the same pinned version recognizes thinking support only for
+  `deepseek-reasoner` / `deepseek-r1*` / `deepseek-v4-*` model names, and its
+  unified `thinking` setting is silently stripped when the profile does not
+  declare thinking support.
+
+Therefore explicit thinking/reasoning-effort behavior for the current official
+`deepseek-flash` identifier is **not yet proven**. This is the primary unresolved
+blocker and must be resolved by executable RM-02 evidence, not by assumption or
+by switching the project model identifier to a retired name.
+
+DeepSeek adoption is blocked until executable evidence proves that the selected
+Pydantic AI integration path:
+
+1. sends thinking/reasoning settings correctly for `deepseek-flash`;
 2. preserves provider-required reasoning state across model→tool→model;
 3. preserves the existing bounded request/tool budgets;
 4. does not persist or present hidden reasoning content;
@@ -94,13 +127,16 @@ No assumption of "OpenAI compatibility" is sufficient evidence by itself.
 Preferred order:
 
 ```text
-Pydantic AI public OpenAI-compatible provider/model path
-→ public extension point / narrow project-owned adapter if required
-→ reject adoption if preserving invariants requires framework-private patching
+A. Pydantic AI public OpenAI-compatible built-in provider/model path
+B. narrow project-owned adapter using public Pydantic AI extension points
+C. reject adoption if preserving invariants requires framework-private patching
 ```
 
-Do not duplicate the agent runtime, ToolExecutor, domain services or Vault write
-path for DeepSeek.
+The concrete A-vs-B decision belongs to `RM-02` and must be made from executable
+evidence. `RM-01` owns the provider/profile/credential contract independently and
+must be implementable and acceptable without depending on a future `RM-02`
+result. Do not duplicate the agent runtime, ToolExecutor, domain services or
+Vault write path for DeepSeek.
 
 ## Credentials and data boundary
 

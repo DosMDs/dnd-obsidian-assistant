@@ -1,8 +1,8 @@
 # v0.5.0 — Accepted Live Model Baseline
 
-**Status:** proposed post-MVP milestone  
-**Created:** 2026-09-21  
-**Predecessor:** current MVP `RELEASE_READY` under ADR-0009
+- **Status:** adopted post-MVP milestone
+- **Created:** 2026-09-21
+- **Predecessor:** current MVP `RELEASE_READY` under ADR-0009
 
 ## 1. Goal
 
@@ -17,12 +17,16 @@ Stage 15 and does not alter Stage-14 historical outcomes.
 ## 2. Entry state
 
 ```text
-main                                6136512ae1ee52fb3bc9cd57adcf80061bf140f9
 Stage 14                            DONE / integrated
 current MVP                          RELEASE_READY
 historical S14-07                    BLOCKED / UNSATISFIED
 accepted canonical live baseline     none
 ```
+
+Current branch, HEAD and roadmap status are mutable and are **not** snapshotted
+here as continuing state. The authoritative current state is
+`DEVELOPMENT_STATUS.md` plus live Git/GitHub; this milestone record stores the
+durable entry scope and task contract only.
 
 Consumed local candidates remain historical evidence:
 
@@ -59,6 +63,12 @@ reasoning_effort   high
 role               agent
 ```
 
+Canonical project reasoning-effort values are `low`, `high` and `max`; `medium`
+is a provider compatibility alias and is not a canonical project value. Thinking
+disabled is represented separately. The retired `deepseek-v4-flash` name must not
+replace `deepseek-flash` as the project identifier; its compatibility routing is
+diagnostic evidence for RM-02 only.
+
 The exact served model version must be captured at qualification time if the
 provider exposes it; otherwise record the documented routing/version and
 qualification date.
@@ -67,10 +77,15 @@ qualification date.
 
 ### RM-00 — Remote-provider architecture + DeepSeek qualification plan
 
-`PLAN_REQUIRED`.
+`PLAN_REQUIRED` / documentation-adoption only.
 
-Read-only investigation. Prove owning layers, exact compatibility blocker,
-intended changed files, acceptance→evidence map and rollback path.
+Read-only investigation plus architecture/documentation adoption. Proves owning
+layers, the exact compatibility blocker, intended changed files,
+acceptance→evidence map and rollback path. Deliverables: accepted
+`docs/adr/0010-remote-deepseek-provider-architecture.md`, this milestone record,
+`docs/development/deepseek-provider-qualification.md`, and a reconciled
+`DEVELOPMENT_STATUS.md`. RM-00 performs no production Python, provider,
+dependency, credential, network/model or live-eval change.
 
 ### RM-01 — Provider/profile/credential contract
 
@@ -83,11 +98,29 @@ DeepSeek:
 - secret-safe errors/metadata;
 - no Vault configuration coupling.
 
+RM-01 must be independently implementable and acceptable as the typed
+provider/profile/credential contract. Its acceptance must **not** depend on a
+future RM-02 result: it defines the contract, not the concrete DeepSeek
+construction strategy.
+
 No product live run.
 
-### RM-02 — DeepSeek protocol compatibility spike
+### RM-02 — DeepSeek protocol compatibility spike + A/B architecture decision
 
-Executable qualification of the pinned Pydantic AI path.
+Follows RM-01. Executable qualification of the pinned Pydantic AI path, and the
+decision between:
+
+```text
+A. Pydantic AI public OpenAI-compatible built-in provider/model path
+B. narrow project-owned adapter using public Pydantic AI extension points
+```
+
+RM-02 must resolve the primary unresolved blocker: pinned Pydantic AI 2.39.0
+appears to support DeepSeek `reasoning_content` round-trip semantics, but
+explicit thinking/effort behavior for the current official `deepseek-flash`
+identifier is not yet proven (the pinned model profile gates thinking support on
+`deepseek-reasoner` / `deepseek-r1*` / `deepseek-v4-*` names and silently strips
+the unified `thinking` setting otherwise).
 
 Must prove at minimum:
 
@@ -103,8 +136,11 @@ provider 4xx/5xx/auth/timeout mapping
 zero hidden-reasoning persistence
 ```
 
-If the generic Pydantic AI/OpenAI-compatible path fails, decide between a narrow
-public adapter and rejection.
+If the public built-in path (Option A) cannot preserve the required semantics for
+`deepseek-flash`, RM-02 records explicit evidence and decides Option B (narrow
+public adapter) or rejection; a provider-private patch is not an acceptable
+outcome. The retired `deepseek-v4-flash` routing may be recorded as diagnostic
+evidence only, not adopted as the project model identifier.
 
 No product baseline measurement yet.
 
