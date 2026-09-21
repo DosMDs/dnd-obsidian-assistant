@@ -92,6 +92,24 @@ RM-01 owns the provider/profile/credential contract and is independently
 acceptable: RM-02 follows RM-01 and decides the concrete DeepSeek Pydantic-AI
 construction strategy (public built-in path vs narrow public adapter).
 
+Production integration (RM-03): the shared AGENT provider dispatch in
+`src/dnd_assistant/composition/agent_model.py` now selects exactly one factory
+from the named AGENT profile — `provider="ollama"` →
+`build_pydantic_ai_ollama_model()` and `provider="deepseek"` →
+`build_pydantic_ai_deepseek_model()` — and fails closed for any other provider.
+Provider selection lives below presentation: both `dnd ask` and `dnd tui` reach
+it through the same composition, with no provider CLI flag or TUI state. The
+canonical profile above is therefore usable for the AGENT role; the credential
+is resolved only when the DeepSeek factory is actually selected (an Ollama
+profile never reads `DEEPSEEK_API_KEY`), and missing/empty credentials fail
+closed with `CredentialError`. `PydanticAIAgentRuntime.run()` keeps its public
+synchronous contract while executing one managed public `async with Agent` +
+`await Agent.run(...)` run, so provider-owned HTTP clients are closed
+deterministically for both Ollama and DeepSeek. This establishes production
+wiring only: it is **not** the RM-04 provider/runtime live gate and **not** RM-05
+product qualification; no live DeepSeek request or product measurement is part
+of RM-03.
+
 ## 3. Mandatory pre-product blocker gate
 
 Before any product-v1 measured run, prove the provider protocol in focused

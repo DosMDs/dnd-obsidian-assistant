@@ -180,12 +180,30 @@ No product baseline measurement yet.
 
 ### RM-03 — Production agent composition integration
 
+Status: `DONE`. Production AGENT composition supports `ollama | deepseek`;
+provider lifecycle is managed generically.
+
 Extend shared presentation-neutral production composition so an AGENT profile
 can select `ollama` or `deepseek`.
 
 Do not fork the agent runtime.
 
 Typer and Textual must continue to use the same application behavior.
+
+Result: the shared dispatch in
+`src/dnd_assistant/composition/agent_model.py` selects exactly one provider
+factory (`ollama` → `build_pydantic_ai_ollama_model()`, `deepseek` →
+`build_pydantic_ai_deepseek_model()`) and fails closed for any other provider.
+CLI and TUI both reach selection through the same shared composition with no new
+flag or UI. `PydanticAIAgentRuntime.run()` keeps its public synchronous contract
+while executing one managed public `async with Agent` + `await Agent.run(...)`
+run, closing provider-owned HTTP clients deterministically for both providers;
+a narrow project-owned re-entry guard preserves the fail-fast nested/active-loop
+invariant without framework-private APIs. No live DeepSeek call, no product-v1
+run, no dependency change, and no new runtime were introduced. Production
+composition now supports DeepSeek, but this does **not** qualify the provider
+runtime gate, accept a product candidate or establish an accepted canonical live
+baseline.
 
 ### RM-04 — DeepSeek live smoke / provider gate
 

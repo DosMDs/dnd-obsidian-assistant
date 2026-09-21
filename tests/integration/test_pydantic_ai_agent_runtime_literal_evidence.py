@@ -18,7 +18,7 @@ Required evidence:
     C17-E11 — build_results ValueError -> ModelError mapping
     C17-E12 — structural whole-batch preflight with bridge spy
     C17-E13 — sequential schema fail-fast with bridge spy
-    C17-E14 — same-run evidence (Agent.run_sync == 1)
+    C17-E14 — same-run evidence (Agent.run == 1)
 """
 
 from __future__ import annotations

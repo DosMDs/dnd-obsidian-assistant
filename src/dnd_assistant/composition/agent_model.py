@@ -21,6 +21,7 @@ from pydantic_ai.models import Model
 
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, load_model_profiles
+from dnd_assistant.models.pydantic_ai_deepseek import build_pydantic_ai_deepseek_model
 from dnd_assistant.models.pydantic_ai_ollama import build_pydantic_ai_ollama_model
 from dnd_assistant.storage.audit import AuditContext
 
@@ -43,24 +44,30 @@ def _new_operation_id() -> str:
 def _build_agent_model(profile: ModelProfile) -> Model:
     """Construct a Pydantic AI ``Model`` from a profile.
 
-    This is a narrow factory seam for testing — automated tests replace
-    this function to inject a deterministic Pydantic AI ``Model`` without
-    changing the production composition.
+    This is the shared, presentation-neutral provider-dispatch seam.  Provider
+    selection comes exclusively from the named model profile; the concrete
+    provider factory owns provider-specific validation.
 
     Args:
-        profile: A validated ``ModelProfile`` with ``provider == "ollama"``.
+        profile: A validated ``ModelProfile`` with ``provider`` ``"ollama"``
+            or ``"deepseek"``, both with ``role == AGENT``.
 
     Returns:
-        A configured Pydantic AI ``OllamaModel`` instance.
+        A configured Pydantic AI ``OllamaModel`` or ``OpenAIChatModel`` instance.
 
     Raises:
-        ValidationError: If the profile's provider is not supported.
+        ValidationError: If the profile's provider is not supported, or the
+            selected provider factory rejects the profile.
     """
     if profile.provider == "ollama":
         return build_pydantic_ai_ollama_model(profile)
 
+    if profile.provider == "deepseek":
+        return build_pydantic_ai_deepseek_model(profile)
+
     raise ValidationError(
-        f"Unsupported model provider '{profile.provider}'. Currently only 'ollama' is supported."
+        f"Unsupported model provider {profile.provider!r} for the AGENT role. "
+        f"Supported providers: 'deepseek', 'ollama'."
     )
 
 

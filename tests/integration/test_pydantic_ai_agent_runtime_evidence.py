@@ -319,7 +319,7 @@ class TestC15S3RuntimeDepsBinding:
 
 
 class TestC15S4SameRunEvidence:
-    """C15-S4: one Agent.run_sync, two model requests."""
+    """C15-S4: one framework agent run, two model requests."""
 
     def test_same_run_two_requests(
         self,
@@ -329,7 +329,7 @@ class TestC15S4SameRunEvidence:
         context_builder: AgentContextBuilder,
         read_context: ExecutionContext,
     ) -> None:
-        """One Agent.run_sync invocation, two FunctionModel requests."""
+        """One managed framework run, two FunctionModel requests."""
         request_count: list[int] = [0]
 
         def model_fn(messages: Sequence[Any], agent_info: Any) -> ModelResponse:
@@ -660,12 +660,17 @@ class TestC16E1CtxDepsIdentity:
 
 
 # ==============================================================================
-# C16-E2 — same-run evidence: Agent.run_sync invocations (Defect C)
+# C16-E2 — same-run evidence: Agent.run invocations (Defect C)
 # ==============================================================================
+#
+# RM-03 control change: the runtime now executes one public managed
+# ``async with Agent`` + ``await Agent.run(...)`` instead of ``Agent.run_sync``.
+# The evidence intent is unchanged — exactly one framework run per project run —
+# so the spy observes ``Agent.run`` rather than the retired sync entry point.
 
 
 class TestC16E2SameRunEvidence:
-    """C16-E2: one Agent.run_sync, two FunctionModel requests."""
+    """C16-E2: one Agent.run, two FunctionModel requests."""
 
     def test_same_run_two_requests(
         self,
@@ -675,17 +680,17 @@ class TestC16E2SameRunEvidence:
         context_builder: AgentContextBuilder,
         read_context: ExecutionContext,
     ) -> None:
-        """One Agent.run_sync invocation, two FunctionModel requests."""
-        run_sync_count: list[int] = [0]
+        """One managed Agent.run invocation, two FunctionModel requests."""
+        agent_run_count: list[int] = [0]
         request_count: list[int] = [0]
 
-        original_run_sync = Agent.run_sync
+        original_run = Agent.run
 
-        def spy_run_sync(self_agent: Any, *args: Any, **kwargs: Any) -> Any:
-            run_sync_count[0] += 1
-            return original_run_sync(self_agent, *args, **kwargs)
+        def spy_run(self_agent: Any, *args: Any, **kwargs: Any) -> Any:
+            agent_run_count[0] += 1
+            return original_run(self_agent, *args, **kwargs)
 
-        Agent.run_sync = spy_run_sync  # type: ignore[method-assign]
+        Agent.run = spy_run  # type: ignore[method-assign]
 
         try:
 
@@ -703,8 +708,8 @@ class TestC16E2SameRunEvidence:
             runtime = _make_runtime(model, tool_registry, tool_catalog, context_builder)
             result = runtime.run("test", execution_context=read_context)
 
-            assert run_sync_count[0] == 1
+            assert agent_run_count[0] == 1
             assert request_count[0] == 2
             assert len(result.tool_executions) == 1
         finally:
-            Agent.run_sync = original_run_sync
+            Agent.run = original_run

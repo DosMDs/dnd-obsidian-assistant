@@ -50,6 +50,9 @@ This module must not import from::
 
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Sequence
+from contextvars import ContextVar, Token
 from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent, UsageLimits
@@ -65,8 +68,10 @@ from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 
 if TYPE_CHECKING:
     from pydantic_ai import RunContext
+    from pydantic_ai.capabilities import AgentCapability
     from pydantic_ai.messages import ModelMessage, ModelResponse
     from pydantic_ai.run import AgentRunResult as PydanticAgentRunResult
+    from pydantic_ai.toolsets import AbstractToolset
 
     from dnd_assistant.application.agent_contracts import (
         AgentDecision,
@@ -80,6 +85,52 @@ if TYPE_CHECKING:
     )
     from dnd_assistant.models.types import ChatRequest, ToolCall
     from dnd_assistant.tools.types import ExecutionContext
+
+
+# ── Provider-neutral synchronous re-entry guard ──────────────────────────────
+#
+# The managed run below delegates to a public asyncio bridge.  Framework
+# ``Agent.run_sync()`` fails fast both from an active event loop and from a
+# synchronous callback/tool dispatched inside another agent run; the bridge
+# must preserve that invariant without importing framework-private guards.
+# This module therefore owns a narrow ContextVar set for the whole duration of
+# a synchronous run.  The flag is copied into the run task (and into any
+# synchronous tool thread the framework dispatches), so a nested synchronous
+# invocation fails closed before a second event loop can start.
+
+_IN_PROJECT_SYNC_RUN: ContextVar[bool] = ContextVar(
+    "dnd_assistant_pydantic_ai_agent_runtime_in_sync_run",
+    default=False,
+)
+
+_NESTED_SYNC_RUN_MESSAGE = (
+    "PydanticAIAgentRuntime.run() cannot be called from a synchronous callback "
+    "or tool executing inside an already-running agent run; make the callback "
+    "async and await the agent instead."
+)
+_ACTIVE_EVENT_LOOP_MESSAGE = (
+    "PydanticAIAgentRuntime.run() cannot be called from a running event loop."
+)
+
+
+def _acquire_sync_run_guard() -> Token[bool]:
+    """Fail fast on re-entry, then mark the current context as running.
+
+    Raises:
+        RuntimeError: If a synchronous project run is already active in this
+            context, or if an asyncio event loop is already running.
+    """
+    if _IN_PROJECT_SYNC_RUN.get():
+        raise RuntimeError(_NESTED_SYNC_RUN_MESSAGE)
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(_ACTIVE_EVENT_LOOP_MESSAGE)
+
+    return _IN_PROJECT_SYNC_RUN.set(True)
 
 
 class PydanticAIAgentRuntime:
@@ -140,6 +191,8 @@ class PydanticAIAgentRuntime:
         Raises:
             ModelError: If the model violates safety policy, framework
                 errors occur, or model output is malformed.
+            RuntimeError: If called from an already-running event loop or from
+                a synchronous callback/tool inside another project agent run.
             ValidationError: Propagated from context builder or tool
                 execution.
             NotFoundError: Propagated from tool execution.
@@ -152,54 +205,95 @@ class PydanticAIAgentRuntime:
         )
         from dnd_assistant.prompts.agent_v3 import SYSTEM_PROMPT
 
-        # 1. Prepare exactly once (validates input, builds context, selects
-        #    tools, issues snapshot, creates fresh policy).
-        prepared = self._run_preparer.prepare(
-            user_input,
-            execution_context=execution_context,
-        )
-
-        # 2. Build exact provider-neutral request snapshot
-        request = build_agent_request(prepared.deps.agent_context)
-
-        # 3. Fresh ExternalToolset from the issued snapshot
-        external_toolset = prepared.deps.tool_bridge.to_external_toolset(
-            prepared.deps.tool_snapshot,
-        )
-
-        # 4. Fresh HandleDeferredToolCalls bound to this run
-        deferred_handler, captured_executions = _make_deferred_handler(prepared)
-
-        # 5. Build framework Agent with:
-        #    - instructions = SYSTEM_PROMPT only
-        #    - output_type = str | DeferredToolRequests
-        #    - retries = 0 (tools and output)
-        agent = Agent(
-            self._model,
-            deps_type=type(prepared.deps),
-            instructions=SYSTEM_PROMPT,
-            output_type=str | DeferredToolRequests,
-            retries={"tools": 0, "output": 0},
-        )
-
-        # 6. Perform one bounded Pydantic AI run (max 2 model requests)
-        user_payload = request.messages[1].content or ""
+        # 0. Provider-neutral synchronous re-entry guard.  Fails fast on a
+        #    nested synchronous run or an already-running event loop, and is
+        #    always reset on success or failure.
+        guard_token = _acquire_sync_run_guard()
         try:
-            result = agent.run_sync(
-                user_payload,
-                deps=prepared.deps,
-                toolsets=[external_toolset],
-                capabilities=[deferred_handler],
-                usage_limits=UsageLimits(request_limit=MAX_MODEL_REQUESTS_PER_RUN),
+            # 1. Prepare exactly once (validates input, builds context, selects
+            #    tools, issues snapshot, creates fresh policy).
+            prepared = self._run_preparer.prepare(
+                user_input,
+                execution_context=execution_context,
             )
-        except AgentRunError as exc:
-            raise ModelError(
-                "Pydantic AI model request failed",
-                cause=exc,
-            ) from exc
 
-        # 7. Map framework result to AgentRunResult
-        return _map_to_agent_run_result(result, prepared, request, captured_executions)
+            # 2. Build exact provider-neutral request snapshot
+            request = build_agent_request(prepared.deps.agent_context)
+
+            # 3. Fresh ExternalToolset from the issued snapshot
+            external_toolset = prepared.deps.tool_bridge.to_external_toolset(
+                prepared.deps.tool_snapshot,
+            )
+
+            # 4. Fresh HandleDeferredToolCalls bound to this run
+            deferred_handler, captured_executions = _make_deferred_handler(prepared)
+
+            # 5. Build framework Agent with:
+            #    - instructions = SYSTEM_PROMPT only
+            #    - output_type = str | DeferredToolRequests
+            #    - retries = 0 (tools and output)
+            agent = Agent(
+                self._model,
+                deps_type=type(prepared.deps),
+                instructions=SYSTEM_PROMPT,
+                output_type=str | DeferredToolRequests,
+                retries={"tools": 0, "output": 0},
+            )
+
+            # 6. Perform one bounded Pydantic AI run (max 2 model requests)
+            #    through a managed public Agent/Model async context, so
+            #    provider-owned HTTP clients are closed deterministically
+            #    before this method returns.
+            user_payload = request.messages[1].content or ""
+            try:
+                result = asyncio.run(
+                    _run_agent_in_managed_context(
+                        agent,
+                        user_payload,
+                        deps=prepared.deps,
+                        toolsets=[external_toolset],
+                        capabilities=[deferred_handler],
+                        usage_limits=UsageLimits(request_limit=MAX_MODEL_REQUESTS_PER_RUN),
+                    )
+                )
+            except AgentRunError as exc:
+                raise ModelError(
+                    "Pydantic AI model request failed",
+                    cause=exc,
+                ) from exc
+
+            # 7. Map framework result to AgentRunResult
+            return _map_to_agent_run_result(result, prepared, request, captured_executions)
+        finally:
+            _IN_PROJECT_SYNC_RUN.reset(guard_token)
+
+
+async def _run_agent_in_managed_context(
+    agent: Agent[DndAgentDeps, str | DeferredToolRequests],
+    user_payload: str,
+    *,
+    deps: DndAgentDeps,
+    toolsets: Sequence[AbstractToolset[DndAgentDeps]],
+    capabilities: Sequence[AgentCapability[DndAgentDeps]],
+    usage_limits: UsageLimits,
+) -> PydanticAgentRunResult[str | DeferredToolRequests]:
+    """Run one agent inside the public managed Agent/Model async context.
+
+    Entering ``async with agent`` delegates to ``Model.__aenter__`` and then to
+    ``Provider.__aenter__``; exiting closes any provider-owned HTTP client.
+    This is provider-neutral: ``OllamaModel`` and ``OpenAIChatModel`` follow
+    the same public ``Model``/``Provider`` contract.  Request/tool budgets,
+    deps, per-run toolset and deferred-tool capability are forwarded unchanged.
+    """
+    async with agent:
+        return await agent.run(
+            user_payload,
+            deps=deps,
+            toolsets=toolsets,
+            capabilities=capabilities,
+            usage_limits=usage_limits,
+            infer_name=False,
+        )
 
 
 # ── Deferred handler factory ──────────────────────────────────────────────────

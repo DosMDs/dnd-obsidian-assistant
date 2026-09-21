@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-21 (RM-02)
+**Last updated:** 2026-09-21 (RM-03)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03`…`RM-06` not started)
+**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04`…`RM-06` not started)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
 **Active work:** Stage 14 `DONE` and integrated into `main`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
 **Current branch:** `main`
@@ -332,7 +332,7 @@ Task order:
 RM-00  architecture + qualification plan                 DONE (docs adoption)
 RM-01  provider/profile/credential contract              DONE (typed contract only)
 RM-02  protocol compatibility spike + A/B decision       DONE (Option B; live protocol compatibility PASS)
-RM-03  production agent composition                      NOT STARTED
+RM-03  production agent composition                      DONE (ollama|deepseek; generic provider lifecycle)
 RM-04  DeepSeek live smoke / provider gate               NOT STARTED
 RM-05  product-v1 DeepSeek candidate qualification       NOT STARTED
 RM-06  accepted-baseline decision / closure              NOT STARTED
@@ -345,6 +345,32 @@ thinking is active. A narrow public profile override plus provider-specific
 settings is therefore required (Option B). Option B is retained as the accepted
 implementation mechanism. Live protocol compatibility is `PASS`; no product
 measurement has run and no accepted canonical live baseline exists.
+
+`RM-03 — Production agent composition integration` is `DONE`. The shared,
+presentation-neutral provider dispatch in
+`src/dnd_assistant/composition/agent_model.py` now selects exactly one factory
+from the AGENT profile: `provider="ollama"` →
+`build_pydantic_ai_ollama_model()`, `provider="deepseek"` →
+`build_pydantic_ai_deepseek_model()` (the accepted RM-02 factory), and any other
+provider fails closed with a deterministic error naming the provider and the
+supported set. No new runtime, CLI flag, TUI provider state/UI or dependency was
+added; CLI (`dnd ask`) and TUI (`dnd tui`) both reach provider selection through
+the same shared composition, and the canonical `deepseek-flash` identity,
+credential timing (resolved only when the DeepSeek factory is selected), tool
+registry/policy, READ/WRITE authorization, audit identity and prompt/context
+behavior are unchanged. RM-03 also corrected a provider-symmetric lifecycle
+defect: `PydanticAIAgentRuntime.run()` now keeps its public synchronous contract
+while executing one managed public `async with Agent` + `await Agent.run(...)`
+run, so provider-owned HTTP clients are closed deterministically for both Ollama
+and DeepSeek; the sync path gained a narrow project-owned re-entry guard that
+fails fast on nested synchronous runs and running event loops (replacing the
+retired `Agent.run_sync` path without importing framework-private guards). Two
+historical `Agent.run_sync` same-run spies were re-pointed to `Agent.run` with
+their evidence intent preserved and the control change disclosed. RM-03
+performed **no** live DeepSeek call, no product-v1 run and no dependency change:
+production composition supports DeepSeek, but no provider runtime gate is
+qualified, no product candidate is accepted and no accepted canonical live
+baseline exists.
 
 ## Current blockers, deferrals and prerequisites
 

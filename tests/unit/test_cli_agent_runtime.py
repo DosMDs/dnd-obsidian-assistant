@@ -39,8 +39,12 @@ from dnd_assistant.cli.agent_runtime import (
     _new_operation_id,
     _now_utc,
 )
-from dnd_assistant.errors import DndAssistantError, ValidationError
-from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
+from dnd_assistant.errors import CredentialError, DndAssistantError, ValidationError
+from dnd_assistant.models.profiles import (
+    ModelProfile,
+    ModelProfileRole,
+    ReasoningEffort,
+)
 from dnd_assistant.prompts.agent_v3 import PROMPT_VERSION
 from dnd_assistant.tools.types import ExecutionContext, Permission, SessionMode
 
@@ -146,7 +150,7 @@ class TestLoadProfile:
 
 
 class TestBuildAgentModel:
-    """Pydantic AI model construction."""
+    """Pydantic AI model construction and provider dispatch."""
 
     def test_ollama_model_created(self, valid_agent_profile: ModelProfile) -> None:
         """A Pydantic AI OllamaModel is created for an ollama profile."""
@@ -162,6 +166,72 @@ class TestBuildAgentModel:
         """An unsupported provider raises ValidationError."""
         with pytest.raises(ValidationError, match="Unsupported"):
             _build_agent_model(unsupported_provider_profile)
+
+    def test_unsupported_provider_error_names_provider_and_supported_set(
+        self, unsupported_provider_profile: ModelProfile
+    ) -> None:
+        """The dispatch error names the offending provider and supported set."""
+        with pytest.raises(ValidationError, match="'openai'"):
+            _build_agent_model(unsupported_provider_profile)
+        with pytest.raises(ValidationError, match="'deepseek', 'ollama'"):
+            _build_agent_model(unsupported_provider_profile)
+
+
+def _deepseek_agent_profile() -> ModelProfile:
+    """Return a valid canonical DeepSeek AGENT profile."""
+    return ModelProfile(
+        provider="deepseek",
+        model="deepseek-flash",
+        base_url="https://api.deepseek.com",
+        role=ModelProfileRole.AGENT,
+        thinking=True,
+        reasoning_effort=ReasoningEffort.HIGH,
+    )
+
+
+class TestProviderDispatch:
+    """Provider routing selects exactly one provider factory."""
+
+    def _patch_factories(self, monkeypatch: Any) -> tuple[dict[str, int], object]:
+        from dnd_assistant.composition import agent_model
+
+        sentinel = object()
+        calls = {"ollama": 0, "deepseek": 0}
+
+        def fake_ollama(profile: ModelProfile) -> object:
+            calls["ollama"] += 1
+            return sentinel
+
+        def fake_deepseek(profile: ModelProfile) -> object:
+            calls["deepseek"] += 1
+            return sentinel
+
+        monkeypatch.setattr(agent_model, "build_pydantic_ai_ollama_model", fake_ollama)
+        monkeypatch.setattr(agent_model, "build_pydantic_ai_deepseek_model", fake_deepseek)
+        return calls, sentinel
+
+    def test_ollama_profile_calls_only_ollama_factory(
+        self, monkeypatch: Any, valid_agent_profile: ModelProfile
+    ) -> None:
+        calls, sentinel = self._patch_factories(monkeypatch)
+
+        assert _build_agent_model(valid_agent_profile) is sentinel
+        assert calls == {"ollama": 1, "deepseek": 0}
+
+    def test_deepseek_profile_calls_only_deepseek_factory(self, monkeypatch: Any) -> None:
+        calls, sentinel = self._patch_factories(monkeypatch)
+
+        assert _build_agent_model(_deepseek_agent_profile()) is sentinel
+        assert calls == {"ollama": 0, "deepseek": 1}
+
+    def test_unsupported_provider_calls_no_factory(
+        self, monkeypatch: Any, unsupported_provider_profile: ModelProfile
+    ) -> None:
+        calls, _ = self._patch_factories(monkeypatch)
+
+        with pytest.raises(ValidationError, match="Unsupported"):
+            _build_agent_model(unsupported_provider_profile)
+        assert calls == {"ollama": 0, "deepseek": 0}
 
 
 # ── ExecutionContext construction tests ────────────────────────────────────
@@ -666,3 +736,142 @@ class TestComposeAskRuntimeCampaignState:
             assert provider._recent_session_limit == FAST_AGENT_RECENT_SESSION_LIMIT
         finally:
             runtime.close()
+
+
+# ── RM-03 provider-neutral composition / credential boundary ───────────────
+
+
+class TestProviderNeutralComposition:
+    """Provider selection changes only model construction, not composition."""
+
+    def _minimal_vault(self, tmp_path: Path) -> Path:
+        vault_root = tmp_path / "vault"
+        vault_root.mkdir()
+        (vault_root / "Characters" / "NPCs").mkdir(parents=True)
+        (vault_root / "Locations").mkdir()
+        (vault_root / "Quests").mkdir()
+        (vault_root / "Items").mkdir()
+        (vault_root / "Sessions").mkdir()
+        (vault_root / "_system" / "audit").mkdir(parents=True)
+        (vault_root / "_system" / "raw" / "sessions").mkdir(parents=True)
+        (vault_root / "_system" / "indexes").mkdir(parents=True)
+        return vault_root
+
+    def _write_config(self, tmp_path: Path, body: str) -> Path:
+        config_path = tmp_path / "config.toml"
+        config_path.write_text(body, encoding="utf-8")
+        return config_path
+
+    def _deepseek_config(self, tmp_path: Path) -> Path:
+        return self._write_config(
+            tmp_path,
+            "[profiles.agent-deepseek]\n"
+            "provider='deepseek'\n"
+            "model='deepseek-flash'\n"
+            "base_url='https://api.deepseek.com'\n"
+            "role='agent'\n"
+            "thinking=true\n"
+            "reasoning_effort='high'\n",
+        )
+
+    def _ollama_config(self, tmp_path: Path) -> Path:
+        return self._write_config(
+            tmp_path,
+            "[profiles.test-agent]\nprovider='ollama'\nmodel='test'\n"
+            "base_url='http://localhost:11434'\nrole='agent'\n",
+        )
+
+    def test_deepseek_profile_reaches_shared_composition_factory(self, tmp_path: Path) -> None:
+        """The injected composition factory receives the deepseek profile."""
+        from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+        seen: list[str] = []
+
+        def factory(profile: ModelProfile) -> Any:
+            seen.append(profile.provider)
+            return _ClosableTestModel()
+
+        runtime = compose_ask_runtime(
+            vault_root=self._minimal_vault(tmp_path),
+            config_path=self._deepseek_config(tmp_path),
+            profile_name="agent-deepseek",
+            model_factory=factory,
+        )
+        try:
+            assert seen == ["deepseek"]
+            assert runtime.execution_context.granted_permission is Permission.READ
+            assert runtime.execution_context.audit is None
+        finally:
+            runtime.close()
+
+    def test_deepseek_profile_write_context_audit(self, tmp_path: Path) -> None:
+        """A DeepSeek profile with --allow-write yields WRITE + model_tool audit."""
+        from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+        runtime = compose_ask_runtime(
+            vault_root=self._minimal_vault(tmp_path),
+            config_path=self._deepseek_config(tmp_path),
+            profile_name="agent-deepseek",
+            allow_write=True,
+            model_factory=lambda p: _ClosableTestModel(),
+        )
+        try:
+            context = runtime.execution_context
+            assert context.granted_permission is Permission.WRITE
+            assert context.audit is not None
+            assert context.audit.source == "model_tool"
+            assert context.audit.model_profile == "agent-deepseek"
+            assert context.audit.prompt_version == PROMPT_VERSION
+        finally:
+            runtime.close()
+
+    def test_ollama_profile_does_not_read_deepseek_credential(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """An Ollama profile composes without DEEPSEEK_API_KEY present."""
+        from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+        runtime = compose_ask_runtime(
+            vault_root=self._minimal_vault(tmp_path),
+            config_path=self._ollama_config(tmp_path),
+            profile_name="test-agent",
+            model_factory=lambda p: _ClosableTestModel(),
+        )
+        try:
+            assert runtime.execution_context.granted_permission is Permission.READ
+        finally:
+            runtime.close()
+
+    def test_deepseek_missing_credential_fails_closed(
+        self, tmp_path: Path, monkeypatch: Any
+    ) -> None:
+        """A DeepSeek profile fails closed when DEEPSEEK_API_KEY is absent."""
+        from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+
+        with pytest.raises(CredentialError, match="DEEPSEEK_API_KEY"):
+            compose_ask_runtime(
+                vault_root=self._minimal_vault(tmp_path),
+                config_path=self._deepseek_config(tmp_path),
+                profile_name="agent-deepseek",
+            )
+
+    def test_unsupported_provider_fails_closed_at_composition(self, tmp_path: Path) -> None:
+        """An unsupported provider fails at model composition, not presentation."""
+        from dnd_assistant.cli.agent_runtime import compose_ask_runtime
+
+        config_path = self._write_config(
+            tmp_path,
+            "[profiles.agent-openai]\nprovider='openai'\nmodel='gpt-4'\n"
+            "base_url='https://api.openai.com/v1'\nrole='agent'\n",
+        )
+
+        with pytest.raises(ValidationError, match="Unsupported"):
+            compose_ask_runtime(
+                vault_root=self._minimal_vault(tmp_path),
+                config_path=config_path,
+                profile_name="agent-openai",
+            )
