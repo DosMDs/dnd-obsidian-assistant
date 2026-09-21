@@ -22,9 +22,9 @@ Three local Ollama candidates were consumed under the frozen Stage-14 product
 contract and none was accepted. Their evidence is historical and immutable.
 
 The codebase already has provider-neutral concepts (`ModelProfile`,
-`ModelGateway`, Pydantic AI `Model`) but production agent composition currently
-accepts only `provider="ollama"`, and the live product eval path currently
-dispatches only `scripted` and `ollama`.
+`ModelGateway`, Pydantic AI `Model`) but, at the decision date, production agent
+composition accepted only `provider="ollama"`, and the live product eval path
+dispatched only `scripted` and `ollama`.
 
 A remote provider is therefore a bounded infrastructure extension, not a domain
 redesign.
@@ -173,14 +173,56 @@ The `reasoning_content` round-trip is provided by the pinned provider profile
 thinking-capability flag; offline tests confirm conversion to `ThinkingPart` and
 replay on the tool-continuation request.
 
-Live confirmation is pending: `RM-02` provides an explicit opt-in live spike
-(`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek` marker,
-hard budget of 4 HTTP model requests, zero retries) but the machine-local
-`DEEPSEEK_API_KEY` was unavailable at implementation time, so no real-provider
-request was executed and `RM-02` remains `BLOCKED` on that live evidence. This
-decision does not authorize production DeepSeek dispatch: `composition/
-agent_model.py` and the production CLI/TUI remain Ollama-only; `RM-03` owns
-production integration.
+Live confirmation was initially pending: `RM-02` added an explicit opt-in live
+spike (`tests/integration/test_pydantic_ai_deepseek_live_spike.py`, `deepseek`
+marker, hard budget of 4 model HTTP requests, zero retries), but the
+machine-local `DEEPSEEK_API_KEY` was unavailable at implementation time, so no
+real-provider request was executed at that point. This decision did not by
+itself authorize production DeepSeek dispatch; `RM-03` owned production
+integration. The subsequent live confirmation and production integration are
+recorded in the implementation outcome below.
+
+## Implementation outcome / RM-06 closure
+
+The architecture in this ADR was implemented and qualified by the `v0.5.0 —
+Accepted Live Model Baseline` workstream, closed by `RM-06`:
+
+```text
+Option B implemented
+RM-02 live protocol compatibility PASS
+RM-03 production ollama|deepseek composition DONE
+RM-04 durable provider/runtime gate PASS
+RM-05 product qualification PASS
+RM-06 canonical baseline adoption DONE
+```
+
+- **Option B implemented:** `src/dnd_assistant/models/pydantic_ai_deepseek.py`
+  provides the narrow public profile override described above.
+- **RM-02 live protocol compatibility `PASS`:** the opt-in live spike executed
+  once against the real provider within its 4-request budget, proving
+  explicit thinking/effort behavior and `reasoning_content` round-trip across a
+  tool continuation.
+- **RM-03 production composition `DONE`:** `composition/agent_model.py` now
+  selects `ollama | deepseek` through one shared dispatch; the production CLI/TUI
+  are no longer Ollama-only.
+- **RM-04 durable provider/runtime gate `PASS`:** the repeatable opt-in
+  `provider_upgrade + deepseek` gate exercises the real production path.
+- **RM-05 product qualification `PASS`:** one measured product-v1 candidate run
+  was accepted (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE,
+  quality 0/3 PASS).
+- **RM-06 canonical baseline adoption `DONE`:** the frozen RM-05 candidate is the
+  accepted canonical AGENT qualification baseline
+  (`deepseek / deepseek-flash / role=agent / thinking=true / reasoning_effort=high`),
+  frozen at
+  `docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json`
+  (SHA-256 `3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd`).
+
+This outcome is recorded only as prospective closure. It does not retroactively
+change the historical Stage-14 result: `S14-07` remains `BLOCKED` /
+`UNSATISFIED` (`DEFERRED_TO_FUTURE_SCOPE`), and the three consumed Ollama
+candidates remain rejected historical evidence. The frozen baseline is
+qualification-time evidence; it does not prove that a remote alias will forever
+route to the same server model.
 
 ## Credentials and data boundary
 

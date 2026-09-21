@@ -443,9 +443,33 @@ structurally proves the artifact contains no `Authorization`, `reasoning_content
 request-header/body persistence. Report-only metric and sample-score misses
 (EVAL-P1-002/004/007) are descriptive and add no acceptance requirement.
 
-The candidate is consumed and must never be rerun. This measured result is a
-candidate qualification only: the accepted canonical live baseline remains
-`NONE`, and the baseline adoption/closure decision belongs to RM-06.
+The candidate is consumed and must never be rerun.
+
+### 7c. RM-06 canonical baseline adoption
+
+`RM-06` adopted this frozen measured candidate as the accepted canonical AGENT
+qualification baseline and closed the milestone:
+
+```text
+RM-05 measured candidate        PASS
+RM-06 canonical adoption        DONE
+candidate                       consumed
+rerun                           prohibited
+canonical artifact              docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json
+artifact SHA-256                3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd
+accepted baseline identity      deepseek / deepseek-flash / role=agent / thinking=true / high
+```
+
+This is the AGENT baseline; structured-output semantics are `NOT APPLICABLE`
+(AGENT-role-only support; the AGENT runtime uses `str | DeferredToolRequests`).
+The frozen JSON itself is the canonical machine-readable evidence; no registry,
+symlink or copied artifact was created, and the artifact is immutable.
+
+`documented_route = DeepSeek-V4.1-Flash` recorded during RM-05 is
+**qualification-time evidence**. It is distinct from whatever route the remote
+provider serves in the future; a material provider-side routing/API change is
+handled prospectively by `docs/development/provider-runtime-upgrade.md`, and the
+frozen artifact is not reinterpreted.
 
 ## 8. External references
 

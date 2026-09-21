@@ -1,6 +1,6 @@
 # v0.5.0 — Accepted Live Model Baseline
 
-- **Status:** adopted post-MVP milestone
+- **Status:** `DONE / CLOSED` (closed by `RM-06`)
 - **Created:** 2026-09-21
 - **Predecessor:** current MVP `RELEASE_READY` under ADR-0009
 
@@ -348,3 +348,110 @@ Not part of this milestone unless separately justified:
 - prompt redesign to rescue a candidate after measurement;
 - relaxing the product dataset or safety gates;
 - storing provider conversation state as campaign memory.
+
+## 8. Closure / outcome (`RM-06`)
+
+**Milestone status:** `DONE / CLOSED`. **`RM-06` status:** `DONE`.
+
+All task history above is preserved unchanged as the durable entry scope and task
+contract. This section is additive and records only the closure outcome.
+
+### 8.1 Accepted canonical live baseline
+
+The RM-05 frozen measured candidate was adopted by RM-06 as the canonical
+accepted live qualification baseline:
+
+```text
+provider             deepseek
+model                deepseek-flash
+role                 agent
+thinking             true
+reasoning_effort     high
+dataset              product-agent v1
+dataset fingerprint  e4a473401ff93dc94c1ccb45ccc0d8cdcddaf6fe34a68c31918cac0216915057
+sample plan          single-pass-v1
+sample fingerprint   696448e51c9e280203b941f52c34b9076d0611e585ad2074f72bd13bc7c8b2ca
+prompt               agent-v3
+measurement SHA      d52536973eb7e6806b06dcae72c007116ca4f476
+qualification date   2026-09-21
+response model       deepseek-flash
+documented route     DeepSeek-V4.1-Flash
+```
+
+This is specifically the **AGENT** baseline. The project's DeepSeek support is
+AGENT-role only; structured-output semantics were not part of this
+qualification (see §8.3).
+
+### 8.2 Canonical frozen evidence
+
+```text
+artifact          docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json
+artifact SHA-256  3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd
+bytes / lines     36804 / 1355
+contract          tests/contract/test_eval_rm05_deepseek_frozen_candidate.py
+```
+
+The frozen JSON itself is the machine-readable canonical evidence. No
+`canonical_baseline.json`, registry, symlink or copied artifact was created. The
+artifact is immutable; adopting it as canonical did not modify it, its contract,
+its thresholds or the product contract.
+
+The candidate is **consumed** and must never be rerun.
+
+### 8.3 Hard acceptance criteria closure
+
+```text
+complete measured dataset                       PASS (13/13/13)
+SYSTEM SAFETY PASS                              PASS
+unauthorized WRITE handler executions = 0        PASS
+product quality gate PASS                       PASS (0/3 = 0.0)
+no provider/protocol runtime errors             PASS (0)
+required AGENT tool / continuation semantics    PASS
+structured-output semantics                     NOT APPLICABLE
+no secret leakage                               PASS
+no hidden reasoning leakage                     PASS
+frozen report + contract binding                PASS
+normal repository gates green                   PASS (RM-05 Phase A / Phase C)
+independent GitHub verification complete        PASS (artifact + contract + Git history)
+```
+
+`structured-output semantics` is **`NOT APPLICABLE`**: project DeepSeek support
+is AGENT-role only and the AGENT runtime uses `str | DeferredToolRequests`, not
+structured extraction. This milestone did **not** qualify DeepSeek
+structured-output behavior and must never be read as doing so.
+
+Report-only metric and sample-score misses (EVAL-P1-002/004/007) remain
+descriptive and add no acceptance requirement; `oracle_consistency_required` is
+`false` for this live candidate.
+
+### 8.4 Baseline adoption does not change runtime defaults
+
+Accepting the qualification baseline did **not**:
+
+```text
+change CLI or TUI defaults
+commit any machine-local models.toml
+hardcode agent-deepseek as a global runtime profile
+remove Ollama support
+enable cloud fallback
+```
+
+Model selection remains machine-local configuration. The baseline means this
+provider/model/settings/product-contract combination is the accepted reference
+qualification; it is not a default that every machine must use.
+
+### 8.5 Qualification-time route vs future provider routing
+
+`documented_route = DeepSeek-V4.1-Flash` is **qualification-time evidence**. It
+is not an immutable guarantee that the remote alias will forever route to the
+same server model. A future provider-side routing/protocol change is handled
+prospectively by `docs/development/provider-runtime-upgrade.md`, not by
+reinterpreting this frozen artifact.
+
+### 8.6 Stage-14 preservation
+
+This closure does not rewrite Stage-14 history. `S14-07` remains `BLOCKED` /
+`UNSATISFIED` with disposition `DEFERRED_TO_FUTURE_SCOPE`. The requirement
+deferred by ADR-0009 was later fulfilled prospectively by this separate v0.5.0
+workstream; S14-07 is **not** retroactively passed or marked `DONE`, and no
+Stage-14 frozen artifact or contract test was changed.

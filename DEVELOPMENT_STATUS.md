@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-21 (RM-05 DONE)
+**Last updated:** 2026-09-21 (RM-06 DONE)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `DONE` — measured candidate `PASS` (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE, quality 0/3 PASS), candidate consumed, no accepted baseline yet; `RM-06` not started)
+**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (`DONE / CLOSED`; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `DONE` — measured candidate `PASS` (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE, quality 0/3 PASS), candidate consumed; `RM-06` accepted-baseline decision/closure `DONE` — accepted canonical live baseline: `deepseek` / `deepseek-flash` / role `agent` / thinking=true / `reasoning_effort=high`, frozen RM-05 artifact)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
 **Active work:** Stage 14 `DONE` and integrated into `main`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
 **Current branch:** `main`
@@ -252,8 +252,9 @@ done     S14-10 — current-MVP release-scope decision (ADR-0009)       DONE
 ```
 
 Stage 14 is `DONE` and integrated into `main`; the current MVP release is
-`RELEASE_READY` under the prospective release scope recorded in ADR-0009; no
-accepted canonical live-model baseline currently exists.
+`RELEASE_READY` under the prospective release scope recorded in ADR-0009. The
+accepted canonical live-model baseline was later established by the separate
+`v0.5.0` workstream (see the post-MVP section below).
 
 `dnd init` still yields a **structurally initialized** Vault; it becomes
 session-ready only after `dnd time init` (or the existing `set_world_time` WRITE
@@ -266,7 +267,7 @@ the side-effect authorization boundary, and Typer remains supported for
 scripting, administration, bootstrap, recovery, diagnostics and evals. UI
 enabled/visible state is never authorization.
 
-## Post-MVP workstream — `v0.5.0 — Accepted Live Model Baseline` (adopted)
+## Post-MVP workstream — `v0.5.0 — Accepted Live Model Baseline` (`DONE / CLOSED`)
 
 ADR-0009 removed the accepted live-model baseline from current-MVP release
 closure and deferred it to the non-stage post-MVP milestone
@@ -335,7 +336,7 @@ RM-02  protocol compatibility spike + A/B decision       DONE (Option B; live pr
 RM-03  production agent composition                      DONE (ollama|deepseek; generic provider lifecycle)
 RM-04  DeepSeek live smoke / provider gate               DONE (durable provider/runtime live gate PASS)
 RM-05  product-v1 DeepSeek candidate qualification       DONE (measured candidate PASS; consumed)
-RM-06  accepted-baseline decision / closure              NOT STARTED
+RM-06  accepted-baseline decision / closure              DONE (canonical baseline adopted)
 ```
 
 `RM-02` resolved the pinned-source question: for `deepseek-flash` the unified
@@ -438,27 +439,60 @@ The result is frozen at
 model requests = 22 (warm-up requests = 1; local diagnostic trace total = 23
 `request_started`, ceiling 28); the local trace is non-committed. Report-only
 metric/sample misses (EVAL-P1-002/004/007) are descriptive and add no acceptance
-requirement. The candidate is consumed and must never be rerun. `RM-05` did
-**not** establish an accepted canonical live baseline: the accepted canonical
-live baseline remains `NONE` and `RM-06` has not started. Product-v1 ground
-truth, `agent-v3`, acceptance thresholds and the accepted Ollama path are
-unchanged.
+requirement. The candidate is consumed and must never be rerun. At the
+completion of `RM-05`, no accepted canonical live baseline had yet been
+established (`RM-06` owned that decision). Product-v1 ground truth, `agent-v3`,
+acceptance thresholds and the accepted Ollama path are unchanged.
+
+`RM-06 — Accepted-baseline decision + closure` is `DONE`. It re-verified the
+frozen RM-05 evidence directly (artifact SHA-256
+`3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd`, 36804
+bytes, 1355 lines, bound by its contract) and confirmed every existing milestone
+hard criterion, so the frozen RM-05 candidate was adopted as the **accepted
+canonical live qualification baseline** and the milestone `v0.5.0 — Accepted
+Live Model Baseline` was closed:
+
+```text
+accepted canonical live baseline
+    provider          deepseek
+    model             deepseek-flash
+    role              agent
+    thinking          true
+    reasoning_effort  high
+    evidence          docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json
+```
+
+This is the **AGENT** baseline. Required AGENT tool/continuation semantics
+`PASS`; structured-output semantics are `NOT APPLICABLE` (project DeepSeek
+support is AGENT-role only and the AGENT runtime uses `str | DeferredToolRequests`);
+DeepSeek structured-output behavior was **not** qualified. The frozen JSON is the
+machine-readable canonical evidence; no registry, symlink or copied artifact was
+created and the artifact is immutable. The candidate remains consumed and must
+never be rerun. `documented_route = DeepSeek-V4.1-Flash` is qualification-time
+evidence, not a perpetual routing guarantee. Adopting the baseline did not change
+CLI/TUI defaults, machine-local configuration, Ollama support or cloud fallback.
+RM-06 performed no model/network request and changed no runtime code; see
+`docs/milestones/V0_5_ACCEPTED_LIVE_MODEL_BASELINE.md` §8.
 
 ## Current blockers, deferrals and prerequisites
 
 ```text
 Stage 14 is `DONE` and integrated into `main`; the current MVP release is
 `RELEASE_READY` under the prospective release scope recorded in ADR-0009.
-RELEASE_READY does NOT mean a
-canonical local live model has been validated: no accepted canonical live-model
-baseline currently exists.
+RELEASE_READY was decided under ADR-0009, which removed the accepted live-model
+baseline from current-MVP release closure criteria; that release decision is
+unchanged. An accepted canonical live baseline now exists (adopted by `RM-06`):
+`deepseek` / `deepseek-flash` / role `agent` / thinking=true /
+`reasoning_effort=high`, frozen at
+docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json.
 S14-07 is BLOCKED / UNSATISFIED (canonical task status `BLOCKED`), disposition
   DEFERRED_TO_FUTURE_SCOPE (descriptive disposition metadata, not a fifth task
-  status).  The requirement is removed from current MVP release closure criteria
+  status).  The requirement was removed from current MVP release closure criteria
   and carried to the non-stage post-MVP milestone
   `v0.5.0 — Accepted Live Model Baseline`; no Stage 15 is created.  That
-  workstream is now adopted with its `RM-00`…`RM-06` task contract (see the
-  post-MVP section above).
+  workstream completed and closed with the `RM-00`…`RM-06` task contract (see the
+  post-MVP section above); the deferred requirement was later fulfilled by that
+  separate workstream, not retroactively by S14-07.
   THREE measured live candidates were separately qualified and none was accepted:
     qwen3.5:9b       2 runtime errors (EVAL-P1-007, EVAL-P1-009); frozen v2 report
                      s14-07-product-v1-ollama-baseline.json
@@ -503,7 +537,7 @@ Known carried-forward limitations (non-blocking for Stage 14):
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/adr/0009-release-scope-defers-live-model-qualification.md` | Current-MVP release scope defers accepted live-model qualification |
 | `docs/adr/0010-remote-deepseek-provider-architecture.md` | Accepted remote DeepSeek provider architecture (`v0.5.0`) |
-| `docs/milestones/V0_5_ACCEPTED_LIVE_MODEL_BASELINE.md` | Adopted post-MVP milestone workstream and RM task contract |
+| `docs/milestones/V0_5_ACCEPTED_LIVE_MODEL_BASELINE.md` | Closed post-MVP milestone workstream, RM task contract and canonical baseline closure |
 | `docs/development/deepseek-provider-qualification.md` | DeepSeek provider qualification runbook |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
 | `docs/adr/0007-campaign-state-materialized-derived-projection.md` | Campaign State architecture decision |

@@ -261,22 +261,68 @@ model-quality acceptance.
 
 A model/profile candidate that requires product qualification must pass the
 current accepted product-eval contract before it can become an accepted
-baseline. For the current `v0.5.0 — Accepted Live Model Baseline` workstream:
+baseline. The `v0.5.0 — Accepted Live Model Baseline` workstream performed this
+(`RM-05` measured product-v1 DeepSeek candidate qualification; `RM-06`
+accepted-baseline decision / closure).
+
+### 12.1 Accepted canonical baseline
+
+An accepted canonical live baseline now exists:
 
 ```text
-RM-05  bounded measured product-v1 DeepSeek candidate qualification
-RM-06  accepted-baseline decision / closure
+provider             deepseek
+model                deepseek-flash
+role                 agent
+thinking             true
+reasoning_effort     high
+dataset              product-agent v1
+sample plan          single-pass-v1
+prompt               agent-v3
+qualification date   2026-09-21
+measurement SHA      d52536973eb7e6806b06dcae72c007116ca4f476
+artifact             docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json
+artifact SHA-256     3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd
+contract             tests/contract/test_eval_rm05_deepseek_frozen_candidate.py
 ```
 
-After an accepted canonical live baseline exists, future applicable U3
-model/profile changes must use the then-current product qualification /
-baseline-comparison procedure defined by the active milestone/runbook at that
-time. Until such a baseline exists, the live gate proves runtime compatibility,
-not model-quality acceptance.
+This is the accepted **AGENT** qualification baseline. It covers AGENT tool /
+continuation semantics; it does **not** qualify structured-output behavior
+(project DeepSeek support is AGENT-role only and the AGENT runtime uses
+`str | DeferredToolRequests`). `documented_route = DeepSeek-V4.1-Flash` is
+qualification-time evidence, not a perpetual routing guarantee. The artifact is
+immutable; no future task mutates, copies or reuses it as a live candidate.
+
+### 12.2 Prospective requalification policy
+
+```text
+U1/U5 (provider-framework / protocol / adapter change)
+  → run the applicable offline + live provider/runtime gates before trusting
+    compatibility
+
+U3 materially different model/profile value
+  → a distinct qualification candidate
+  → never mutate or reuse the frozen accepted artifact
+  → apply the then-current accepted product-eval contract and make an explicit
+    acceptance decision
+
+material remote provider-side routing / API change
+  → the frozen artifact remains historical accepted qualification evidence
+  → requalify current provider/runtime compatibility under this runbook
+  → run a distinct product qualification when product identity materially
+    changes
+```
+
+A frozen remote baseline does not prove that an external alias will forever
+behave identically. Baseline comparison is available through the existing
+`dnd eval report --input <candidate> --baseline <accepted-artifact>` path; the
+accepted artifact is supplied explicitly and no repository default/registry is
+introduced. A newer accepted baseline supersedes the current one prospectively
+only through another explicit baseline-adoption task.
 
 This is a prospective, provider-neutral rule. It is not bound to the historical
 Stage-14 task `S14-07` (which remains `BLOCKED` / `UNSATISFIED`, with its
-consumed candidates and the ADR-0009 deferral preserved as history).
+consumed candidates and the ADR-0009 deferral preserved as history; that
+requirement was later fulfilled by the separate `v0.5.0` workstream).
 
 ## 13. Outcome classification
 
