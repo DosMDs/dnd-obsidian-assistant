@@ -1,8 +1,8 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-21 (RM-05 Phase A)
+**Last updated:** 2026-09-21 (RM-05 DONE)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
-**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `IN PROGRESS` — Phase A implementation/preflight only, no candidate measured; `RM-06` not started)
+**Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (adopted; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `DONE` — measured candidate `PASS` (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE, quality 0/3 PASS), candidate consumed, no accepted baseline yet; `RM-06` not started)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
 **Active work:** Stage 14 `DONE` and integrated into `main`; current MVP release `RELEASE_READY`; `S14-07 — Opt-in Live Ollama Model Baseline + Latency Metrics + Frozen Report` `BLOCKED` / UNSATISFIED (disposition `DEFERRED_TO_FUTURE_SCOPE`); `S14-07-DIAG-03` `DONE`; `S14-07-QUAL-03` measured / not accepted; `S14-08 — TUI / Cross-Platform Hardening Evidence` `DONE`; `S14-09 — Final Stage-14 Review / Release-Readiness Closure` `DONE`; `S14-10-RELEASE-SCOPE-DECISION` `DONE` (ADR-0009)
 **Current branch:** `main`
@@ -334,7 +334,7 @@ RM-01  provider/profile/credential contract              DONE (typed contract on
 RM-02  protocol compatibility spike + A/B decision       DONE (Option B; live protocol compatibility PASS)
 RM-03  production agent composition                      DONE (ollama|deepseek; generic provider lifecycle)
 RM-04  DeepSeek live smoke / provider gate               DONE (durable provider/runtime live gate PASS)
-RM-05  product-v1 DeepSeek candidate qualification       IN PROGRESS (Phase A; measurement pending)
+RM-05  product-v1 DeepSeek candidate qualification       DONE (measured candidate PASS; consumed)
 RM-06  accepted-baseline decision / closure              NOT STARTED
 ```
 
@@ -405,9 +405,11 @@ only, not `provider_upgrade`); provider-owned client closure remains proven
 offline, and the injected observing client is caller-owned. No production Python
 changed, no product-v1 ran and no accepted canonical live baseline exists.
 
-`RM-05 — Product-v1 DeepSeek candidate qualification` is `IN PROGRESS` (Phase A
-implementation/preflight only; **no candidate measured yet**). It adds the
-explicit live DeepSeek product path `dnd eval run --runtime deepseek`
+`RM-05 — Product-v1 DeepSeek candidate qualification` is `DONE` — measured
+DeepSeek candidate product qualification `PASS`. Measurement SHA
+`d52536973eb7e6806b06dcae72c007116ca4f476` (the Phase-A implementation/preflight
+commit). It adds the explicit live DeepSeek product path
+`dnd eval run --runtime deepseek`
 (`src/dnd_assistant/composition/eval_deepseek.py`) which reuses the accepted
 provider-neutral runner/report machinery unchanged and constructs the exact
 production candidate through the shared `_build_agent_model` dispatch. The
@@ -417,17 +419,30 @@ canonical DeepSeek AGENT identity (`provider=deepseek`,
 credential/network access; the run performs exactly one discarded
 `EVAL-P1-001` warm-up followed by exactly one `run_dataset(product-v1)` measured
 pass (13 samples). A deterministic output-target preflight
-(`preflight_report_target`) now runs before trace open, runtime selection,
-credential resolution or any model request; it rejects a missing parent, a
-directory target and an existing target without `--overwrite`, probes
-destination-directory writability and always removes its probe. Runtime metadata
-records the public provider response model id (`response_model`, with
-`not-reported`/`multiple` fallbacks) plus `documented_route` and
-`qualification_date`, using public framework APIs and zero extra requests.
-No DeepSeek request or product-v1 live pass has executed; no frozen RM-05
-candidate artifact exists; no candidate is consumed; `RM-06` has not started.
-Product-v1 ground truth, `agent-v3`, acceptance thresholds and the accepted
-Ollama path are unchanged.
+(`preflight_report_target`) runs before trace open, runtime selection,
+credential resolution or any model request. Runtime metadata records the public
+provider response model id (`response_model`, with `not-reported`/`multiple`
+fallbacks) plus `documented_route` and `qualification_date`, using public
+framework APIs and zero extra requests. The ONE measured live run (candidate
+`deepseek` / `deepseek-flash`, thinking=true, `reasoning_effort=high`, role
+`agent`, profile `agent-deepseek`, Pydantic AI 2.39.0, `response_model`
+`deepseek-flash`, `documented_route` `DeepSeek-V4.1-Flash`) produced 13/13
+complete samples, **0 runtime errors**, **0 unauthorized WRITE handler
+executions** (SYSTEM SAFETY `PASS`) and `false_write_tool_call_rate` 0/3/0.0
+`PASS`, so the frozen schema-v3 report is `accepted=true` with `reasons=[]`.
+The result is frozen at
+`docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json`
+(SHA-256 `3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd`,
+36804 bytes, 1355 lines) and bound by
+`tests/contract/test_eval_rm05_deepseek_frozen_candidate.py`. Literal measured
+model requests = 22 (warm-up requests = 1; local diagnostic trace total = 23
+`request_started`, ceiling 28); the local trace is non-committed. Report-only
+metric/sample misses (EVAL-P1-002/004/007) are descriptive and add no acceptance
+requirement. The candidate is consumed and must never be rerun. `RM-05` did
+**not** establish an accepted canonical live baseline: the accepted canonical
+live baseline remains `NONE` and `RM-06` has not started. Product-v1 ground
+truth, `agent-v3`, acceptance thresholds and the accepted Ollama path are
+unchanged.
 
 ## Current blockers, deferrals and prerequisites
 

@@ -243,6 +243,9 @@ product-v1 ran, and no accepted canonical live baseline exists.
 
 ### RM-05 — Product-v1 DeepSeek candidate qualification
 
+Status: `DONE` — measured DeepSeek candidate product qualification `PASS`.
+Candidate consumed; rerun prohibited.
+
 After RM-01…04 acceptance only.
 
 One bounded measured candidate run:
@@ -261,6 +264,43 @@ finds a provider-specific measurement requirement that is accepted
 prospectively before the run.
 
 A measured run is consumed and must not be casually rerun.
+
+Result: Measurement SHA `d52536973eb7e6806b06dcae72c007116ca4f476`.
+
+The explicit live path `dnd eval run --runtime deepseek`
+(`src/dnd_assistant/composition/eval_deepseek.py`) reuses the accepted
+provider-neutral runner/report machinery and the shared production
+`_build_agent_model` dispatch; it validates the canonical DeepSeek AGENT identity
+before credential/network access, runs one discarded `EVAL-P1-001` warm-up, then
+exactly one measured `run_dataset(product-v1)` pass. Measured candidate:
+`deepseek` / `deepseek-flash` / thinking=true / `reasoning_effort=high` / role
+`agent`, profile `agent-deepseek`, Pydantic AI 2.39.0, `response_model`
+`deepseek-flash`, `documented_route` `DeepSeek-V4.1-Flash`.
+
+Literal hard results:
+
+```text
+complete measured samples          13/13 (13 decision + 13 full-turn)
+runtime errors                     0
+unauthorized WRITE executions      0 (SYSTEM SAFETY PASS)
+false-write quality                0/3 = 0.0 PASS (threshold 0.0)
+accepted                           true
+reasons                            []
+measured model requests            22 (warm-up 1; trace total 23; ceiling 28)
+```
+
+Frozen artifact:
+`docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json`
+(SHA-256 `3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd`,
+36804 bytes, 1355 lines), bound by
+`tests/contract/test_eval_rm05_deepseek_frozen_candidate.py`. Report-only metric
+and sample-score misses (EVAL-P1-002/004/007) remain descriptive and add no
+acceptance requirement. The one-time real-secret absence check over the frozen
+JSON `PASS`ed and is recorded as measurement evidence; it is not
+secret-dependent test logic.
+
+RM-05 did **not** establish an accepted canonical live baseline. Baseline
+adoption/closure remains RM-06.
 
 ### RM-06 — Accepted-baseline decision + closure
 

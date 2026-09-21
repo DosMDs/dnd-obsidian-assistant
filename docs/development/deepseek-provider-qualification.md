@@ -415,6 +415,38 @@ uv run dnd eval run --runtime deepseek --dataset product-v1 `
 A completed measurement is consumed: no model/profile/prompt/dataset/threshold
 change and no second measured pass, whether `accepted=true` or `accepted=false`.
 
+### 7b. RM-05 measured result
+
+```text
+measurement SHA          d52536973eb7e6806b06dcae72c007116ca4f476
+candidate                deepseek-flash / thinking=true / reasoning_effort=high
+profile                  agent-deepseek
+frozen artifact          docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json
+artifact SHA-256         3331181cc24ef51d8b36e4736b7c46d584e2c2b7044b3719600c14490ce893bd
+artifact bytes / lines   36804 / 1355
+accepted                 true
+reasons                  []
+complete samples         13/13
+runtime errors           0
+unauthorized WRITE       0 (SYSTEM SAFETY PASS)
+false-write quality      0/3 = 0.0 PASS (threshold 0.0)
+measured model requests  22
+warm-up requests         1
+local trace total        23 request_started (non-committed; ceiling 28)
+```
+
+The one-time real-secret absence check over the frozen artifact `PASS`ed during
+measurement (the value was never printed). The committed frozen-artifact
+contract is fully offline and does **not** require `DEEPSEEK_API_KEY`; it
+structurally proves the artifact contains no `Authorization`, `reasoning_content`,
+`api_key`/credential, config-path, machine user/home path or raw
+request-header/body persistence. Report-only metric and sample-score misses
+(EVAL-P1-002/004/007) are descriptive and add no acceptance requirement.
+
+The candidate is consumed and must never be rerun. This measured result is a
+candidate qualification only: the accepted canonical live baseline remains
+`NONE`, and the baseline adoption/closure decision belongs to RM-06.
+
 ## 8. External references
 
 - https://api-docs.deepseek.com/guides/thinking_mode/
