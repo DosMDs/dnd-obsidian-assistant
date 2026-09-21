@@ -26,6 +26,7 @@ import httpx2
 
 __all__ = [
     "DeepSeekTransportCapture",
+    "LiveRequestRecorder",
     "SanitizedRequest",
     "deepseek_chat_completion",
     "project_request",
@@ -162,6 +163,31 @@ def project_request(index: int, raw_body: bytes) -> SanitizedRequest:
         tool_result_ids=tuple(tool_result_ids),
         message_roles=tuple(roles),
     )
+
+
+class LiveRequestRecorder:
+    """Async ``httpx2`` request hook retaining only sanitized projections.
+
+    Intended for the RM-02 opt-in live spike: it is attached as an ``httpx2``
+    ``request`` event hook, where the async client awaits it.  The raw body is
+    projected immediately through :func:`project_request` and then discarded;
+    nothing in :attr:`requests` can contain reasoning text, prompt text,
+    headers or credentials.
+    """
+
+    def __init__(self) -> None:
+        self.requests: list[SanitizedRequest] = []
+
+    async def __call__(self, request: httpx2.Request) -> None:
+        try:
+            raw_body = request.content
+        except httpx2.RequestNotRead:
+            raw_body = b""
+        self.requests.append(project_request(len(self.requests), raw_body))
+
+    @property
+    def count(self) -> int:
+        return len(self.requests)
 
 
 class DeepSeekTransportCapture:

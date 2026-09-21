@@ -224,8 +224,7 @@ class ModelProfile(BaseModel):
         if self.thinking and self.reasoning_effort is None:
             effort_values = "|".join(effort.value for effort in ReasoningEffort)
             raise ValueError(
-                "thinking=true requires an explicit reasoning_effort "
-                f"({effort_values})"
+                f"thinking=true requires an explicit reasoning_effort ({effort_values})"
             )
         if not self.thinking and self.reasoning_effort is not None:
             raise ValueError("thinking=false must not set reasoning_effort")

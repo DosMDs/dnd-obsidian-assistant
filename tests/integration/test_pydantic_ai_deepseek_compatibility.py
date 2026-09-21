@@ -11,8 +11,10 @@ No test here requires ``DEEPSEEK_API_KEY`` and none performs a real request.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
+import httpx2
 import pytest
 from pydantic_ai import Agent
 from pydantic_ai.messages import ThinkingPart
@@ -22,6 +24,7 @@ from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, Reason
 from dnd_assistant.models.pydantic_ai_deepseek import build_pydantic_ai_deepseek_model
 from tests.support.deepseek_transport import (
     DeepSeekTransportCapture,
+    LiveRequestRecorder,
     deepseek_chat_completion,
 )
 
@@ -237,3 +240,56 @@ def test_all_canonical_efforts_reach_wire(effort: ReasoningEffort) -> None:
 
     assert capture.requests[0].reasoning_effort == effort.value
     assert capture.requests[0].thinking_type == "enabled"
+
+
+# ── Live request-recorder contract (test-only, no network) ───────────────────
+
+
+class TestLiveRequestRecorderContract:
+    """Prove the live spike's async hook projects sanitized evidence offline."""
+
+    def test_async_hook_projects_and_sanitizes(self) -> None:
+        recorder = LiveRequestRecorder()
+
+        async def _exercise() -> None:
+            async def _handler(request: httpx2.Request) -> httpx2.Response:
+                return httpx2.Response(200, json={"ok": True})
+
+            client = httpx2.AsyncClient(
+                transport=httpx2.MockTransport(_handler),
+                event_hooks={"request": [recorder]},
+            )
+            try:
+                await client.post(
+                    "https://api.deepseek.com/chat/completions",
+                    headers={"Authorization": f"Bearer {_OFFLINE_DUMMY_KEY}"},
+                    json={
+                        "model": "deepseek-flash",
+                        "messages": [
+                            {"role": "assistant", "reasoning_content": _REASONING_TEXT},
+                            {"role": "tool", "tool_call_id": "call-1", "content": "probe-42"},
+                            {"role": "user", "content": "read_probe with key"},
+                        ],
+                        "tools": [{"type": "function", "function": {"name": "read_probe"}}],
+                        "tool_choice": "auto",
+                        "reasoning_effort": "high",
+                    },
+                )
+            finally:
+                await client.aclose()
+
+        asyncio.run(_exercise())
+
+        assert recorder.count == 1
+        projected = recorder.requests[0]
+        assert projected.model == "deepseek-flash"
+        assert projected.tools_present is True
+        assert projected.tool_choice_category == "auto"
+        assert projected.assistant_reasoning_content_present is True
+        assert projected.tool_result_ids == ("call-1",)
+
+        evidence = projected.safe_repr()
+        assert _REASONING_TEXT not in evidence
+        assert _OFFLINE_DUMMY_KEY not in evidence
+        assert "authorization" not in evidence.lower()
+        assert "read_probe with key" not in evidence

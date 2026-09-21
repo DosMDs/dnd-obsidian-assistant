@@ -93,9 +93,7 @@ class TestResolveProviderApiKey:
         with pytest.raises(CredentialError, match="Missing or empty"):
             credentials.resolve_provider_api_key("deepseek")
 
-    def test_unknown_provider_performs_no_env_lookup(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_unknown_provider_performs_no_env_lookup(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_credentials_env(monkeypatch)
         with pytest.raises(DndValidationError, match="No machine-local credential"):
             credentials.resolve_provider_api_key("unknown-provider")
