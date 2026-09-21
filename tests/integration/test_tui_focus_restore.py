@@ -103,12 +103,17 @@ def _services() -> TuiServices:
 
 
 async def _focus_session_note(app: DndTuiApp, pilot: Any) -> Input:
-    """Navigate to the session view and settle on its non-default primary widget."""
+    """Open the session screen and settle focus on its note input."""
     await _drain(pilot, lambda: not app._gate.is_busy)
     app.run_semantic_command("view.session")
-    note = app.query_one("#session-note-input", Input)
-    await _drain(pilot, lambda: app.focused is note)
-    return note
+    for _ in range(300):
+        if (
+            app._current_context().context_id == "session"
+            and getattr(app.focused, "id", None) == "session-note-input"
+        ):
+            return app.screen.query_one("#session-note-input", Input)
+        await pilot.pause()
+    raise AssertionError("session note input did not receive focus")
 
 
 class TestFocusRestore:
@@ -139,10 +144,8 @@ class TestFocusRestore:
             async with app.run_test(size=(100, 30)) as pilot:
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 # No settle between navigations: deferred focus callbacks for
-                # earlier views must not re-activate a stale pane or blur the
-                # final primary control.
+                # the earlier screen must not blur the final composer.
                 app.run_semantic_command("view.session")
-                app.run_semantic_command("view.campaign-state")
                 app.run_semantic_command("view.assistant")
                 editor = app.query_one("#assistant-query", TextArea)
                 await _drain(
@@ -153,6 +156,23 @@ class TestFocusRestore:
                 )
                 assert app._current_context().context_id == "assistant"
                 assert app.focused is editor
+
+        _run(scenario())
+
+    def test_repeated_session_navigation_does_not_stack_screens(self) -> None:
+        async def scenario() -> None:
+            app = DndTuiApp(_services())
+            async with app.run_test(size=(100, 30)) as pilot:
+                await _drain(pilot, lambda: not app._gate.is_busy)
+                app.run_semantic_command("view.session")
+                await _drain(pilot, lambda: app._current_context().context_id == "session")
+                depth = len(app.screen_stack)
+                app.run_semantic_command("view.session")
+                app.run_semantic_command("view.session")
+                await pilot.pause()
+                await pilot.pause()
+                assert app._current_context().context_id == "session"
+                assert len(app.screen_stack) == depth
 
         _run(scenario())
 
@@ -170,14 +190,39 @@ class TestFocusRestore:
             async with app.run_test(size=(100, 30)) as pilot:
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 app.run_semantic_command("view.session")
-                await pilot.pause()
-                touched = app.query_one("#session-touched", Input)
+                await _drain(
+                    pilot,
+                    lambda: (
+                        app._current_context().context_id == "session"
+                        and app.screen.query("#session-touched")
+                    ),
+                )
+                touched = app.screen.query_one("#session-touched", Input)
                 touched.focus()
                 # Drain subsequent refresh cycles; navigation must not steal.
                 for _ in range(10):
                     await pilot.pause()
                 assert app._current_context().context_id == "session"
                 assert app.focused is touched
+
+        _run(scenario())
+
+    def test_escape_returns_to_assistant_workspace(self) -> None:
+        async def scenario() -> None:
+            app = DndTuiApp(_services())
+            async with app.run_test(size=(100, 30)) as pilot:
+                await pilot.pause()
+                await _focus_session_note(app, pilot)
+                await pilot.press("escape")
+                editor = app.query_one("#assistant-query", TextArea)
+                await _drain(
+                    pilot,
+                    lambda: (
+                        app._current_context().context_id == "assistant" and app.focused is editor
+                    ),
+                )
+                assert app._current_context().context_id == "assistant"
+                assert app.focused is editor
 
         _run(scenario())
 

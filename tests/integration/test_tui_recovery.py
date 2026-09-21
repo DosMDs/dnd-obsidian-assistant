@@ -1,8 +1,13 @@
-"""TUI-05 error-recovery and input-preservation headless tests.
+"""TUI-05 error-recovery and input-preservation headless tests (TUI-UX-01).
 
 Uses the production app with deterministic fakes.  Proves expected errors keep
-the app usable, preserve the exact input, and permit exactly one manual retry
-with no automatic retry.  No Ollama, no network, no personal Vault.
+the app usable and permit exactly one manual retry with no automatic retry.
+
+Composer lifecycle (accepted-plan contract): the composer is cleared when a
+non-empty submission is accepted for execution, before the worker starts; it is
+never cleared again when the result arrives.  Therefore an expected execution
+error leaves the composer empty and the user turn is preserved in the
+transcript.  No Ollama, no network, no personal Vault.
 """
 
 from __future__ import annotations
@@ -29,6 +34,8 @@ from dnd_assistant.storage.session_events import RawSessionEvent
 from dnd_assistant.tui.app import DndTuiApp
 from dnd_assistant.tui.dispatch import DispatchResult
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
+from dnd_assistant.tui.session import SessionView
+from dnd_assistant.tui.transcript import TranscriptRole, TranscriptView
 
 _LAUNCH = TuiLaunchContext(
     vault_root=Path("vault"),
@@ -149,15 +156,33 @@ def _services(assistant: Any, session: Any) -> TuiServices:
     )
 
 
+def _transcript_text(app: DndTuiApp) -> str:
+    view = app.query_one(TranscriptView)
+    return "\n".join(entry.text for entry in view.entries)
+
+
+def _session_wired(app: DndTuiApp) -> bool:
+    view = app._first(SessionView)
+    return view is not None and view.is_configured
+
+
+async def _open_session(app: DndTuiApp, pilot: Any) -> None:
+    app.run_semantic_command("view.session")
+    await _drain(
+        pilot,
+        lambda: app._current_context().context_id == "session" and _session_wired(app),
+    )
+
+
 def _output(app: DndTuiApp, widget_id: str) -> str:
-    return str(app.query_one(f"#{widget_id}", Static).content)
+    return str(app.screen.query_one(f"#{widget_id}", Static).content)
 
 
 # ── Assistant expected error / retry / clear policy ──────────────────────────
 
 
 class TestAssistantRecovery:
-    def test_expected_error_retains_editor_and_manual_retry_once(self) -> None:
+    def test_expected_error_keeps_app_usable_and_allows_manual_retry(self) -> None:
         async def scenario() -> None:
             assistant = ScriptedAssistant(error=ModelError("сбой модели"))
             app = DndTuiApp(_services(assistant, ScriptedSession()))
@@ -168,20 +193,25 @@ class TestAssistantRecovery:
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, lambda: not app._gate.is_busy)
 
-                assert "Ошибка модели: сбой модели" in _output(app, "assistant-output")
-                assert editor.text == "Кто такой Варос?", "expected error must retain input"
+                assert "Ошибка модели: сбой модели" in _transcript_text(app)
+                # The accepted submission cleared the composer immediately.
+                assert editor.text == ""
+                entries = app.query_one(TranscriptView).entries
+                assert entries[0].role is TranscriptRole.USER
+                assert entries[0].text == "Кто такой Варос?"
                 # No automatic retry.
                 await pilot.pause()
                 assert len(assistant.calls) == 1
 
                 # Exactly one manual retry.
+                editor.text = "Кто такой Варос?"
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 assert len(assistant.calls) == 2
 
         _run(scenario())
 
-    def test_clarify_retains_editor_and_respond_clears(self) -> None:
+    def test_clarify_and_respond_clear_composer_immediately(self) -> None:
         async def scenario() -> None:
             clarify = ScriptedAssistant(
                 outcome=AgentTextOutcome(kind=AgentOutcomeKind.CLARIFY, message="Какой Варос?")
@@ -193,12 +223,14 @@ class TestAssistantRecovery:
                 editor.text = "Варос"
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, lambda: not app._gate.is_busy)
-                assert editor.text == "Варос", "CLARIFY must retain the query"
-                assert "Уточнение: Какой Варос?" in _output(app, "assistant-output")
+                assert editor.text == "", "composer clears on accepted submission"
+                entries = app.query_one(TranscriptView).entries
+                assert entries[1].role is TranscriptRole.CLARIFY
+                assert entries[1].text == "Какой Варос?"
 
         _run(scenario())
 
-    def test_blocking_recovery_retains_editor(self) -> None:
+    def test_blocking_recovery_prevents_run_and_clears_composer(self) -> None:
         class BlockingSession(ScriptedSession):
             def recovery_partition(self) -> RecoveryPartition:
                 from dnd_assistant.storage.session_recovery import RecoveryIssue
@@ -218,8 +250,8 @@ class TestAssistantRecovery:
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 assert assistant.calls == []
-                assert editor.text == "запрос"
-                assert "повреждённое" in _output(app, "assistant-output")
+                assert editor.text == ""
+                assert "повреждённое" in _transcript_text(app)
 
         _run(scenario())
 
@@ -234,10 +266,9 @@ class TestSessionRecovery:
             app = DndTuiApp(_services(ScriptedAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _open_session(app, pilot)
                 app.set_active_session(True)
-                note = app.query_one("#session-note-input", Input)
+                note = app.screen.query_one("#session-note-input", Input)
                 note.value = "плохая заметка"
                 app.run_semantic_command("session.note")
                 await _drain(pilot, lambda: not app._gate.is_busy)
@@ -252,10 +283,9 @@ class TestSessionRecovery:
             app = DndTuiApp(_services(ScriptedAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _open_session(app, pilot)
                 app.set_active_session(True)
-                touched = app.query_one("#session-touched", Input)
+                touched = app.screen.query_one("#session-touched", Input)
                 touched.value = "npc-varos, item-001"
                 assert app.run_semantic_command("session.end") is DispatchResult.EXECUTED
                 await _drain(pilot, lambda: not app._gate.is_busy)
@@ -270,11 +300,10 @@ class TestSessionRecovery:
             app = DndTuiApp(_services(ScriptedAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _open_session(app, pilot)
                 app.set_active_session(True)
-                note = app.query_one("#session-note-input", Input)
-                touched = app.query_one("#session-touched", Input)
+                note = app.screen.query_one("#session-note-input", Input)
+                touched = app.screen.query_one("#session-touched", Input)
                 note.value = "заметка"
                 touched.value = "npc-varos"
                 app.run_semantic_command("session.note")
@@ -290,11 +319,10 @@ class TestSessionRecovery:
             app = DndTuiApp(_services(ScriptedAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _open_session(app, pilot)
                 app.set_active_session(True)
-                note = app.query_one("#session-note-input", Input)
-                touched = app.query_one("#session-touched", Input)
+                note = app.screen.query_one("#session-note-input", Input)
+                touched = app.screen.query_one("#session-touched", Input)
                 note.value = "заметка"
                 touched.value = "npc-varos"
                 app.run_semantic_command("session.end")
@@ -310,11 +338,10 @@ class TestSessionRecovery:
             app = DndTuiApp(_services(ScriptedAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _open_session(app, pilot)
                 app.set_active_session(False)
-                note = app.query_one("#session-note-input", Input)
-                touched = app.query_one("#session-touched", Input)
+                note = app.screen.query_one("#session-note-input", Input)
+                touched = app.screen.query_one("#session-touched", Input)
                 note.value = "заметка"
                 touched.value = "npc-varos"
                 app.run_semantic_command("session.start")

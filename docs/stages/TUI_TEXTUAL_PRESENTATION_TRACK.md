@@ -1113,3 +1113,173 @@ track into `main`. Stage 13 is ready to begin with `S13-01` but remains `NOT
 STARTED` until that task starts. The durable Stage-13 handoff contract (including
 the non-negotiable split between `dnd init` and existing-campaign bootstrap)
 lives in `docs/stages/13_BOOTSTRAP.md`.
+
+## Durable record — TUI-UX-01 (2026-09-21) — agent-style workspace redesign
+
+- Status: `DONE`.
+- Baseline HEAD: `43e31115067802ba8cc064a3c98628f7755719eb` (`main`).
+- Presentation-only redesign of the production Textual TUI into a persistent
+  agent-style workspace. No domain/storage/tools/models/application/composition
+  change; no dependency change; `Textual` stays `8.2.8`.
+
+### Target layout
+
+```text
+Header
+main-body:
+  assistant workspace (1fr)            campaign sidebar (fixed width)
+    transcript (scroll, 1fr)           profile / agent-write mode
+    composer at the bottom             session summary + "Открыть сессию…"
+      TextArea (multiline)             Campaign-State status + recently touched
+      status / actions / mode          campaign reload / rebuild actions
+Footer
+```
+
+The composer is at the bottom of the assistant pane and does **not** extend
+under the sidebar. `SessionScreen` (pushed, `CONTEXT_ID="session"`) hosts the
+session lifecycle; the main workspace remains mounted beneath it.
+
+### Navigation / command migration
+
+```text
+view.assistant      kept; global; idempotent return to the workspace (F2)
+view.session        kept; scope "assistant"; opens SessionScreen (F3), idempotent
+view.campaign-state REMOVED (campaign state is permanently in the sidebar)
+assistant.submit    default_keys ("ctrl+enter", "f5"); scope "assistant"
+campaign-state.*    scope "campaign-state" -> "assistant" (sidebar context)
+session.*           unchanged; scope "session" (SessionScreen)
+```
+
+`view.assistant`/`view.session` are `_idle`-gated at the presentation level where
+needed; screen-scoped commands are never offered from the wrong context, so a
+hidden MainScreen action cannot become available from `SessionScreen`. `Escape`
+on `SessionScreen` returns through the semantic `view.assistant` path.
+
+### Composer contract
+
+```text
+Enter       -> newline (zero invocation)
+Ctrl+Enter  -> assistant.submit exactly once, no newline
+Send button -> assistant.submit exactly once
+F5          -> portable compatibility fallback
+all routes  -> one semantic dispatcher / one handler
+```
+
+Accepted-submission lifecycle: `strip()` emptiness check -> acquire exclusive
+path -> append user transcript entry -> clear composer -> run worker. The
+composer is cleared only at acceptance and never again on result, so a new draft
+typed while the worker runs survives completion; rejected/empty submissions
+preserve the composer and append no transcript entry. The exact original
+unstripped text is passed and displayed.
+
+### Ephemeral transcript
+
+New `tui/transcript.py`: append-only in-memory `TranscriptEntry` list rendered
+as plain Rich `Text`. Never persisted, never Source of Truth, no hidden
+reasoning; untrusted model text is not interpreted as markup. No Vault/IO import.
+
+### Sidebar data contract
+
+`tui/sidebar.py` renders only accepted PLAYER-safe surfaces: launch profile /
+agent-write mode (`TuiLaunchContext`), session summary from
+`SessionCapability.status()`, and the Campaign-State panel from
+`PlayerCampaignStateView` (exact status + PLAYER-projected `recently_touched`).
+No location/quest/importance/party-objective inference. Session status
+converges after lifecycle actions by re-reading the trusted capability on return
+to the main workspace (presentation-level coordination; no second state source).
+
+### Responsive policy
+
+```text
+100x30 reference   sidebar 34, transcript + composer positive
+ 80x24 baseline    sidebar 30
+ 60x20 minimum     sidebar 24 (compact); all sidebar + session controls reachable
+ below minimum     sidebar hidden; screen scrolls (degraded, not claimed usable)
+```
+
+### Intended changed files
+
+```text
+src/dnd_assistant/tui/app.py            navigation/screens/context wiring
+src/dnd_assistant/tui/screens.py        MainScreen redesign + SessionScreen
+src/dnd_assistant/tui/assistant.py      transcript + composer integration
+src/dnd_assistant/tui/transcript.py     new: ephemeral transcript widget
+src/dnd_assistant/tui/sidebar.py        new: persistent campaign/session sidebar
+src/dnd_assistant/tui/commands.py       inventory/alias/scope migration
+src/dnd_assistant/tui/styles.py         responsive layout/CSS redesign
+src/dnd_assistant/tui/view.py           acquire/start worker split
+tests/unit/test_tui_commands.py
+tests/integration/test_tui_{shell,assistant,session,campaign_state,interaction,
+  resize,recovery,paste,focus_restore,layout_geometry}.py
+tests/integration/test_tui_composer.py (new)
+tests/integration/test_tui_sidebar.py (new)
+tests/integration/test_tui_transcript.py (new)
+tests/contract/test_tui_boundaries.py
+docs/development/tui-terminal-smoke.md
+```
+
+`campaign_state.py`, `services.py`, `dispatch.py`, `bindings.py`, `inputs.py`,
+`errors.py`, `inflight.py`, `launcher.py`, `__init__.py` unchanged. No non-`tui/`
+production file changed.
+
+### Correction regressions (literal)
+
+```text
+empty/whitespace submit      -> zero invocation, zero user entry
+busy submit                  -> zero invocation, zero phantom entry, draft kept
+accepted submit              -> composer clears immediately (before result)
+new draft during worker      -> survives RESPOND completion
+repeated view.session        -> single SessionScreen (stack depth unchanged)
+sidebar session status       -> converges after start and after end
+campaign-state.* from session-> INAPPLICABLE (not offered)
+untrusted model markup        -> rendered literally, no markup interpretation
+```
+
+### Production module map (physical lines, `read_bytes().splitlines()`)
+
+```text
+tui/commands.py 447  app.py 389  session.py 283  services.py 252
+tui/assistant.py 226  view.py 196  styles.py 181  campaign_state.py 142
+tui/sidebar.py 144  dispatch.py 125  transcript.py 114  bindings.py 84
+tui/screens.py 83  inflight.py 75  inputs.py 67  errors.py 64  launcher.py 31
+tui/__init__.py 23
+```
+
+All ≤ 700; test modules ≤ 1000 (largest changed test `test_tui_shell.py` at
+637); no ratchet exception changed.
+
+### Gates
+
+```text
+focused TUI + contract selection       1166 passed
+canonical full `uv run pytest`          8001 passed, 147 skipped, 0 failed
+`uv run ruff check .` / `ruff format`  clean
+`uv run pyright`                        0 errors
+```
+
+### Platform evidence classification
+
+```text
+Windows local headless TUI tests             LOCAL_VERIFIED
+Textual 8.2.8 Ctrl+Enter app dispatch        LOCAL_VERIFIED (headless)
+Textual 8.2.8 Kitty-protocol request (src)   LOCAL_VERIFIED (source inspection)
+Windows Terminal real-terminal Ctrl+Enter    SKIPPED_CAPABILITY (non-interactive agent host)
+macOS real-terminal smoke                    SKIPPED_CAPABILITY (no host)
+```
+
+### Ctrl+Enter limitation (honest)
+
+Pinned Textual 8.2.8 requests the Kitty keyboard-protocol disambiguation flag on
+start on **both** the Windows driver (`\x1b[>1u`) and the POSIX/linux driver
+(`\x1b[>{...}u`), so a terminal that honors the protocol delivers `ctrl+enter`
+distinctly; the headless binding proof shows the app dispatches
+`assistant.submit` exactly once with no newline. Terminal **delivery** was not
+executed by a human in this environment (`stdout` is not a TTY), so it remains
+`SKIPPED_CAPABILITY` and is not claimed `PASS`. F5 and the Send button remain the
+portable routes, and the button/palette are authoritative.
+
+### Limitations
+
+- Real-terminal Windows/macOS smoke remains `SKIPPED_CAPABILITY`.
+- The transcript is bounded only by process lifetime; there is no durability by
+  design and no persistence.

@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-09-21 (RM-06 DONE)
+**Last updated:** 2026-09-21 (RM-06 DONE; TUI-UX-01 DONE)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (`DONE / CLOSED`; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `DONE` — measured candidate `PASS` (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE, quality 0/3 PASS), candidate consumed; `RM-06` accepted-baseline decision/closure `DONE` — accepted canonical live baseline: `deepseek` / `deepseek-flash` / role `agent` / thinking=true / `reasoning_effort=high`, frozen RM-05 artifact)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
@@ -473,6 +473,22 @@ evidence, not a perpetual routing guarantee. Adopting the baseline did not chang
 CLI/TUI defaults, machine-local configuration, Ollama support or cloud fallback.
 RM-06 performed no model/network request and changed no runtime code; see
 `docs/milestones/V0_5_ACCEPTED_LIVE_MODEL_BASELINE.md` §8.
+
+## Non-stage presentation work
+
+`TUI-UX-01 — Agent-style workspace redesign` is `DONE`. It is a presentation-only
+redesign of the production Textual TUI: a persistent assistant transcript +
+composer workspace with a persistent PLAYER-safe campaign sidebar and a
+secondary session screen. It migrates the semantic command inventory
+(`view.campaign-state` removed; `campaign-state.*` rescoped to the main
+workspace; `assistant.submit` gains the `ctrl+enter` primary alias with `f5`
+retained as the portable fallback), fixes the accepted-submission composer
+lifecycle, and adds an ephemeral plain-text transcript. No domain/storage/tools/
+models/application/composition change, no dependency change (`Textual` `8.2.8`).
+Durable record: `docs/stages/TUI_TEXTUAL_PRESENTATION_TRACK.md` (TUI-UX-01).
+`Ctrl+Enter` app dispatch is `LOCAL_VERIFIED` (headless); real-terminal key
+delivery remains `SKIPPED_CAPABILITY` (non-interactive agent host) and is not
+claimed `PASS`. Canonical full suite green: `8001 passed, 147 skipped`.
 
 ## Current blockers, deferrals and prerequisites
 

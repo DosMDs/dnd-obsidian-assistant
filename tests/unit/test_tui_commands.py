@@ -112,6 +112,10 @@ def _dispatcher(
     return SemanticDispatcher(registry, host or FakeHost(), lambda: CommandContext(context_id))
 
 
+def _default_dispatcher(context: CommandContext) -> SemanticDispatcher:
+    return SemanticDispatcher(DEFAULT_REGISTRY, FakeHost(), lambda: context)
+
+
 # ── Stable ID grammar ────────────────────────────────────────────────────────
 
 
@@ -373,7 +377,6 @@ class TestDefaultInventory:
         "app.help",
         "view.assistant",
         "view.session",
-        "view.campaign-state",
         "assistant.submit",
         "assistant.toggle-write",
         "session.refresh",
@@ -391,21 +394,23 @@ class TestDefaultInventory:
         assert inventory["app.command-palette"].default_keys == ("ctrl+p",)
         assert inventory["app.command-palette"].palette is False
         assert inventory["app.help"].default_keys == ("?", "f1")
-        assert inventory["view.assistant"].default_keys == ("f2",)
+        assert inventory["view.assistant"].default_keys == ("f2", "escape")
         assert inventory["view.session"].default_keys == ("f3",)
-        assert inventory["view.campaign-state"].default_keys == ("f4",)
-        assert inventory["assistant.submit"].default_keys == ("f5",)
+        assert inventory["assistant.submit"].default_keys == ("ctrl+enter", "f5")
+        assert "view.campaign-state" not in inventory
         assert DEFAULT_REGISTRY.get("app.help") is inventory["app.help"]
 
     def test_view_commands_are_scoped(self) -> None:
         inventory = {command.id: command for command in DEFAULT_COMMANDS}
+        assert inventory["view.assistant"].scope.context_id is None
+        assert inventory["view.session"].scope.context_id == "assistant"
         assert inventory["assistant.submit"].scope.context_id == "assistant"
         assert inventory["assistant.toggle-write"].scope.context_id == "assistant"
         assert inventory["session.start"].scope.context_id == "session"
         assert inventory["session.note"].scope.context_id == "session"
         assert inventory["session.end"].scope.context_id == "session"
-        assert inventory["campaign-state.reload"].scope.context_id == "campaign-state"
-        assert inventory["campaign-state.rebuild"].scope.context_id == "campaign-state"
+        assert inventory["campaign-state.reload"].scope.context_id == "assistant"
+        assert inventory["campaign-state.rebuild"].scope.context_id == "assistant"
 
     def test_handlers_invoke_host_operations(self) -> None:
         host = FakeHost()
@@ -417,7 +422,6 @@ class TestDefaultInventory:
             "help",
             "navigate:assistant",
             "navigate:session",
-            "navigate:campaign-state",
             "assistant.submit",
             "assistant.toggle-write",
             "session.refresh",
@@ -457,7 +461,7 @@ class TestBusyPredicates:
 
         for command_id, context_id in (
             ("assistant.submit", "assistant"),
-            ("campaign-state.rebuild", "campaign-state"),
+            ("campaign-state.rebuild", "assistant"),
         ):
             context = CommandContext(context_id=context_id, busy_owner="assistant")
             dispatcher = self._dispatcher_for(command_id, context=context)
@@ -470,10 +474,38 @@ class TestBusyPredicates:
         assert dispatcher.evaluate("session.refresh") is CommandAvailability.ENABLED
 
     def test_campaign_state_reload_disabled_while_busy(self) -> None:
-        context = CommandContext(context_id="campaign-state", busy_owner="assistant")
+        context = CommandContext(context_id="assistant", busy_owner="assistant")
         dispatcher = self._dispatcher_for("campaign-state.reload", context=context)
         assert dispatcher.evaluate("campaign-state.reload") is CommandAvailability.DISABLED
         assert dispatcher.dispatch("campaign-state.reload") is DispatchResult.DISABLED
+
+    def test_campaign_state_commands_not_offered_from_session_context(self) -> None:
+        """Sidebar commands belong to the main workspace, not the session screen."""
+        context = CommandContext(context_id="session")
+        dispatcher = self._dispatcher_for(
+            "campaign-state.reload",
+            "campaign-state.rebuild",
+            "view.session",
+            "assistant.submit",
+            context=context,
+        )
+        for command_id in (
+            "campaign-state.reload",
+            "campaign-state.rebuild",
+            "view.session",
+            "assistant.submit",
+        ):
+            assert dispatcher.evaluate(command_id) is CommandAvailability.INAPPLICABLE
+            assert dispatcher.dispatch(command_id) is DispatchResult.INAPPLICABLE
+
+    def test_view_commands_are_idempotent_by_context(self) -> None:
+        """`view.assistant` is offered from the session context; `view.session` is not."""
+        session_dispatcher = _default_dispatcher(CommandContext(context_id="session"))
+        assert session_dispatcher.evaluate("view.assistant") is CommandAvailability.ENABLED
+        assert session_dispatcher.evaluate("view.session") is CommandAvailability.INAPPLICABLE
+        assistant_dispatcher = _default_dispatcher(CommandContext(context_id="assistant"))
+        assert assistant_dispatcher.evaluate("view.assistant") is CommandAvailability.ENABLED
+        assert assistant_dispatcher.evaluate("view.session") is CommandAvailability.ENABLED
 
     def test_session_mutation_in_flight_blocks_assistant(self) -> None:
         context = CommandContext(context_id="assistant", busy_owner="session")

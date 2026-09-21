@@ -108,7 +108,7 @@ def _launch(root: Path) -> TuiLaunchContext:
 
 
 def _body(app: DndTuiApp) -> str:
-    return str(app.query_one("#campaign-state-body", Static).content)
+    return str(app.screen.query_one("#campaign-state-body", Static).content)
 
 
 class TestCapabilityProjection:
@@ -279,11 +279,11 @@ async def _ready(pilot: Any, app: DndTuiApp) -> None:
 
 
 def _body_text(app: DndTuiApp) -> str:
-    return str(app.query_one("#campaign-state-body", Static).content)
+    return str(app.screen.query_one("#campaign-state-body", Static).content)
 
 
 def _error_text(app: DndTuiApp) -> str:
-    return str(app.query_one("#campaign-state-error", Static).content)
+    return str(app.screen.query_one("#campaign-state-error", Static).content)
 
 
 class TestCampaignStateConcurrency:
@@ -299,8 +299,6 @@ class TestCampaignStateConcurrency:
 
                 # Hold the gate with an assistant submission.
                 assert app.acquire_exclusive("assistant") is True
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 assert (
                     app.run_semantic_command("campaign-state.reload") is not DispatchResult.EXECUTED
                 )
@@ -320,26 +318,24 @@ class TestCampaignStateConcurrency:
                 campaign.inspect_calls = 0
 
                 campaign.block = True
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 assert app.run_semantic_command("campaign-state.reload") is DispatchResult.EXECUTED
                 await _drain(pilot, campaign.started.is_set)
 
-                app.run_semantic_command("view.assistant")
-                await pilot.pause()
+                # Assistant submission shares the gate and cannot execute.
                 assert app.run_semantic_command("assistant.submit") is not DispatchResult.EXECUTED
                 assert assistant.calls == []
 
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                # Navigation to the session screen is allowed, but session
+                # mutations share the gate and cannot execute.
+                assert app.run_semantic_command("view.session") is DispatchResult.EXECUTED
+                await _drain(pilot, lambda: app._current_context().context_id == "session")
                 assert app.run_semantic_command("session.start") is not DispatchResult.EXECUTED
                 assert session.start_calls == 0
 
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
+                # The sidebar command is not offered from the session context.
                 assert (
                     app.run_semantic_command("campaign-state.rebuild")
-                    is not DispatchResult.EXECUTED
+                    is DispatchResult.INAPPLICABLE
                 )
                 assert campaign.rebuild_calls == 0
 
@@ -357,8 +353,6 @@ class TestCampaignStateConcurrency:
                 campaign.inspect_calls = 0
 
                 campaign.block = True
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 assert app.run_semantic_command("campaign-state.rebuild") is DispatchResult.EXECUTED
                 await _drain(pilot, campaign.started.is_set)
 
@@ -381,8 +375,6 @@ class TestCampaignStateConcurrency:
                 campaign.inspect_calls = 0
 
                 campaign.block = True
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 app.run_semantic_command("campaign-state.reload")
                 await _drain(pilot, campaign.started.is_set)
                 app.run_semantic_command("campaign-state.reload")
@@ -402,23 +394,17 @@ class TestCampaignStateConcurrency:
             app = DndTuiApp(_fake_services(assistant, _RecordingSession(), campaign))
             async with app.run_test(size=(100, 30)) as pilot:
                 await _ready(pilot, app)
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 assert app.run_semantic_command("campaign-state.reload") is DispatchResult.EXECUTED
                 await _ready(pilot, app)
                 assert app._gate.is_busy is False
                 assert "актуально" in _body_text(app)
 
                 # Later exclusive operations may execute.
-                app.run_semantic_command("view.assistant")
-                await pilot.pause()
                 app.query_one("#assistant-query", TextArea).text = "q"
                 assert app.run_semantic_command("assistant.submit") is DispatchResult.EXECUTED
                 await _ready(pilot, app)
                 assert assistant.calls == [("q", False)]
 
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 assert app.run_semantic_command("campaign-state.rebuild") is DispatchResult.EXECUTED
                 await _ready(pilot, app)
                 assert campaign.rebuild_calls == 1
@@ -432,8 +418,6 @@ class TestCampaignStateConcurrency:
             async with app.run_test(size=(100, 30)) as pilot:
                 await _ready(pilot, app)
                 campaign.inspect_error = DndAssistantError("сбой состояния")
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 assert app.run_semantic_command("campaign-state.reload") is DispatchResult.EXECUTED
                 await _ready(pilot, app)
                 assert app._gate.is_busy is False
@@ -453,8 +437,6 @@ class TestCampaignStateConcurrency:
             async with app.run_test(size=(100, 30)) as pilot:
                 await _ready(pilot, app)
                 campaign.inspect_error = RuntimeError("inspect-boom")
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
                 app.run_semantic_command("campaign-state.reload")
                 await _drain(pilot, lambda: not app._gate.is_busy)
 

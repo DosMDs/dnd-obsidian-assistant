@@ -53,13 +53,25 @@ Environment
   Textual version
 
 Startup / shutdown
-  app starts, header/tabs/footer render
+  app starts, header/sidebar/footer render
   idle quit via ctrl+q exits cleanly, terminal restored
+
+Layout
+  assistant transcript + composer on the left, campaign sidebar on the right
+  composer sits at the bottom of the assistant pane (not under the sidebar)
+
+Ctrl+Enter (critical)
+  Enter inserts a newline (does not submit)
+  Ctrl+Enter submits assistant.submit exactly once and leaves no newline
+  Send button submits assistant.submit exactly once
+  f5 submits assistant.submit exactly once (portable fallback)
+  record explicitly whether the terminal delivers ctrl+enter distinctly from enter;
+  if not, this is a terminal capability limitation, not an app defect
 
 Unicode / Cyrillic
   type Cyrillic into the assistant composer
-  type Cyrillic into the session note field
-  Cyrillic renders in Campaign-State content
+  type Cyrillic into the session note field (session screen)
+  Cyrillic renders in the sidebar Campaign-State content
 
 Paste
   paste a single-line Cyrillic string into the session note (accepted)
@@ -69,23 +81,27 @@ Paste
   paste a string containing "?" into the assistant composer (no help dispatch)
 
 Assistant
-  Enter inserts a newline (does not submit)
-  explicit submit via the button, the command palette, and the f5 alias (each exactly once)
+  explicit submit via the button, the command palette, Ctrl+Enter and the f5 alias (each exactly once)
   Tab moves focus out of the composer
+  a draft typed while a submission is running survives completion
 
 Navigation / focus
-  F2/F3/F4 switch tabs and focus the primary control
+  F3 opens the session screen; F2 (or Escape) returns to the assistant workspace
+  the sidebar "Открыть сессию…" button opens the session screen
+  repeated F3 does not stack duplicate session screens
   ctrl+p opens the command palette; closing it restores the previous focus
   ? opens help; closing it restores the previous focus
 
 Resize
   wide -> narrow -> wide; no crash
-  active tab retained, content retained, focus retained
+  transcript content retained, focus retained, active screen retained
+  sidebar stays visible down to the 60x20 minimum, hidden below it (degraded)
   action rows stack at narrow widths; all controls reachable
 
 Deterministic write path (on the disposable copy)
-  session start, note, end
-  Campaign-State inspect/rebuild
+  session start, note, end (session screen)
+  sidebar session summary converges after start/end
+  Campaign-State reload/rebuild (sidebar)
 
 Error presentation (without a real model where practical)
   expected error shows a Russian categorized message; input retained
@@ -108,4 +124,12 @@ notes:             <terminal-specific caveats, e.g. f5 interception>
   SIGKILL-equivalent termination or machine shutdown; only normal in-app
   shutdown paths are hardened.
 - `f5` submission is a convenience alias, not a cross-platform guarantee; the
-  authoritative submit surfaces are the button and the command palette.
+  authoritative submit surfaces are Ctrl+Enter, the button and the command
+  palette, with F5 as the portable fallback.
+- `Ctrl+Enter` is a hard product requirement. Pinned Textual 8.2.8 requests the
+  Kitty keyboard-protocol disambiguation flag on start on both the Windows
+  driver (`\x1b[>1u`) and the POSIX/linux driver, so a protocol-honoring
+  terminal delivers it distinctly. Headless tests prove the app dispatch; the
+  terminal **delivery** must be observed here and is never inferred from
+  headless tests. If a terminal cannot distinguish it, report the limitation
+  explicitly instead of claiming the criterion PASS via F5/the button.

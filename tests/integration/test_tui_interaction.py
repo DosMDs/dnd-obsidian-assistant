@@ -13,6 +13,7 @@ from collections.abc import Coroutine, Sequence
 from pathlib import Path
 from typing import Any
 
+from textual.css.query import NoMatches
 from textual.widgets import Button, TextArea
 from textual.worker import WorkerState
 
@@ -70,9 +71,16 @@ async def _settle_view(app: Any, pilot: Any, view_id: str, selector: str) -> Non
     id and exact focused widget is deterministic and independent of a fixed
     ``pilot.pause()`` count.
     """
-    target = app.query_one(selector)
     for _ in range(300):
-        if app.focused is target and app._current_context().context_id == view_id:
+        if app._current_context().context_id != view_id:
+            await pilot.pause()
+            continue
+        try:
+            target = app.screen.query_one(selector)
+        except NoMatches:
+            await pilot.pause()
+            continue
+        if app.focused is target:
             return
         await pilot.pause()
     raise AssertionError(f"view {view_id!r} did not settle on {selector}")
@@ -159,11 +167,7 @@ class TestFocusPolicy:
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 await pilot.press("f3")
                 await _settle_view(app, pilot, "session", "#session-note-input")
-                assert app.focused is app.query_one("#session-note-input")
-
-                await pilot.press("f4")
-                await _settle_view(app, pilot, "campaign-state", "#campaign-state-reload")
-                assert app.focused is app.query_one("#campaign-state-reload")
+                assert app.focused is app.screen.query_one("#session-note-input")
 
                 await pilot.press("f2")
                 await _settle_view(app, pilot, "assistant", "#assistant-query")
@@ -178,7 +182,7 @@ class TestFocusPolicy:
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 app.run_semantic_command("view.session")
                 await _settle_view(app, pilot, "session", "#session-note-input")
-                assert app.focused is app.query_one("#session-note-input")
+                assert app.focused is app.screen.query_one("#session-note-input")
 
         _run(scenario())
 
@@ -203,6 +207,24 @@ class TestFocusPolicy:
 
 
 class TestSubmitAlias:
+    def test_ctrl_enter_dispatches_assistant_submit_exactly_once(self) -> None:
+        async def scenario() -> None:
+            assistant = RecordingAssistant()
+            app = DndTuiApp(_services(assistant, RecordingSession()))
+            async with app.run_test(size=(100, 30)) as pilot:
+                await pilot.pause()
+                editor = app.query_one("#assistant-query", TextArea)
+                editor.focus()
+                editor.text = "вопрос"
+                await pilot.pause()
+                await pilot.press("ctrl+enter")
+                await _drain(pilot, lambda: not app._gate.is_busy)
+                assert assistant.calls == [("вопрос", False)]
+                # Ctrl+Enter must not leave a newline in the composer.
+                assert editor.text == ""
+
+        _run(scenario())
+
     def test_f5_dispatches_assistant_submit_exactly_once(self) -> None:
         async def scenario() -> None:
             assistant = RecordingAssistant()

@@ -245,6 +245,9 @@ def test_capability_views_do_not_import_cli() -> None:
         "inputs.py",
         "errors.py",
         "styles.py",
+        "screens.py",
+        "sidebar.py",
+        "transcript.py",
     ):
         path = TUI_ROOT / name
         if not path.is_file():
@@ -253,6 +256,28 @@ def test_capability_views_do_not_import_cli() -> None:
         assert not any(_is_or_under(target, CLI_PACKAGE) for target in targets), (
             f"tui/{name} imports CLI"
         )
+
+
+def test_sidebar_and_transcript_have_no_persistence_or_internal_imports() -> None:
+    """The new presentation modules must not reach Vault/internal state directly."""
+    forbidden_roots = {"pathlib", "os", "json", "hashlib", "shutil"}
+    forbidden_modules = (
+        "dnd_assistant.storage",
+        "dnd_assistant.application.campaign_state_materialization",
+        "dnd_assistant.application.campaign_state_projection",
+        "dnd_assistant.application.campaign_state_source",
+    )
+    for name in ("sidebar.py", "transcript.py"):
+        path = TUI_ROOT / name
+        assert path.is_file(), f"missing presentation module: {path}"
+        for target in _imports(path):
+            assert target.split(".")[0] not in forbidden_roots, (
+                f"tui/{name} imports persistence/IO module: {target}"
+            )
+            for prefix in forbidden_modules:
+                assert not _is_or_under(target, prefix), (
+                    f"tui/{name} imports internal implementation: {target}"
+                )
 
 
 def test_textual_free_tui_modules_stay_framework_free() -> None:

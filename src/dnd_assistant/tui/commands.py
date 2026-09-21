@@ -285,10 +285,6 @@ def _view_session(host: CommandHost) -> None:
     host.navigate_to("session")
 
 
-def _view_campaign_state(host: CommandHost) -> None:
-    host.navigate_to("campaign-state")
-
-
 def _assistant_submit(host: CommandHost) -> None:
     host.assistant_submit()
 
@@ -363,23 +359,18 @@ def default_commands() -> tuple[SemanticCommand, ...]:
         SemanticCommand(
             id="view.assistant",
             title="Ассистент",
-            description="Переключиться на вкладку ассистента",
+            description="Вернуться в рабочее пространство ассистента",
             handler=_view_assistant,
-            default_keys=("f2",),
+            default_keys=("f2", "escape"),
+            enabled=_idle,
         ),
         SemanticCommand(
             id="view.session",
             title="Сессия",
-            description="Переключиться на вкладку сессии",
+            description="Открыть панель сессии",
             handler=_view_session,
+            scope=CommandScope.screen("assistant"),
             default_keys=("f3",),
-        ),
-        SemanticCommand(
-            id="view.campaign-state",
-            title="Состояние кампании",
-            description="Переключиться на вкладку состояния кампании",
-            handler=_view_campaign_state,
-            default_keys=("f4",),
         ),
         SemanticCommand(
             id="assistant.submit",
@@ -387,7 +378,7 @@ def default_commands() -> tuple[SemanticCommand, ...]:
             description="Отправить текущий запрос ассистенту",
             handler=_assistant_submit,
             scope=CommandScope.screen("assistant"),
-            default_keys=("f5",),
+            default_keys=("ctrl+enter", "f5"),
             enabled=_idle,
         ),
         SemanticCommand(
@@ -435,18 +426,18 @@ def default_commands() -> tuple[SemanticCommand, ...]:
         ),
         SemanticCommand(
             id="campaign-state.reload",
-            title="Обновить отображение",
-            description="Повторно проверить состояние кампании",
+            title="Обновить состояние кампании",
+            description="Повторно проверить состояние кампании в боковой панели",
             handler=_campaign_state_reload,
-            scope=CommandScope.screen("campaign-state"),
+            scope=CommandScope.screen("assistant"),
             enabled=_idle,
         ),
         SemanticCommand(
             id="campaign-state.rebuild",
-            title="Перестроить состояние",
-            description="Перестроить производное состояние кампании",
+            title="Перестроить состояние кампании",
+            description="Перестроить производное состояние кампании в боковой панели",
             handler=_campaign_state_rebuild,
-            scope=CommandScope.screen("campaign-state"),
+            scope=CommandScope.screen("assistant"),
             enabled=_idle,
         ),
     )

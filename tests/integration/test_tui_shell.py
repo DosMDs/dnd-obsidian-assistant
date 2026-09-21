@@ -19,6 +19,7 @@ from typing import Any, ClassVar
 
 import pytest
 from textual.binding import Binding, BindingType
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, Header, Input, Static, TextArea
 
@@ -43,9 +44,10 @@ from dnd_assistant.tui.commands import (
     SemanticCommand,
 )
 from dnd_assistant.tui.dispatch import CommandAvailability, DispatchResult
-from dnd_assistant.tui.screens import MainScreen
+from dnd_assistant.tui.screens import MainScreen, SessionScreen
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
 from dnd_assistant.tui.session import SessionView
+from dnd_assistant.tui.sidebar import SidebarView
 
 _CYRILLIC = "Привет"
 _LAUNCH = TuiLaunchContext(
@@ -126,17 +128,23 @@ async def _settle_view(app: Any, pilot: Any, view_id: str, selector: str) -> Non
     exact focused widget converges only after that chain completes, so the
     assertion is not sensitive to a fixed number of message-pump iterations.
     """
-    target = app.query_one(selector)
     for _ in range(300):
-        if app.focused is target and app._current_context().context_id == view_id:
+        if app._current_context().context_id != view_id:
+            await pilot.pause()
+            continue
+        try:
+            target = app.screen.query_one(selector)
+        except NoMatches:
+            await pilot.pause()
+            continue
+        if app.focused is target:
             return
         await pilot.pause()
     focused = app.focused
     raise AssertionError(
         f"view {view_id!r} did not settle on {selector}; "
         f"context={app._current_context().context_id!r} "
-        f"focused={type(focused).__name__}/{getattr(focused, 'id', None)!r} "
-        f"target_display={target.display!r} target_focusable={target.focusable!r}"
+        f"focused={type(focused).__name__}/{getattr(focused, 'id', None)!r}"
     )
 
 
@@ -285,8 +293,10 @@ class TestProductionShell:
                 assert app.query_one(Header) is not None
                 assert app.query_one(Footer) is not None
                 assert app.query_one(AssistantView) is not None
-                assert app.query_one(SessionView) is not None
+                assert app.query_one(SidebarView) is not None
                 assert app.query_one(CampaignStateView) is not None
+                # Session lifecycle lives on the secondary screen, not the workspace.
+                assert not app.query(SessionView)
             assert not app.is_running
             assert list(app.workers) == []
 
@@ -300,10 +310,10 @@ class TestProductionShell:
                 assert app._current_context().context_id == "assistant"
                 app.run_semantic_command("view.session")
                 await _settle_view(app, pilot, "session", "#session-note-input")
-                app.run_semantic_command("view.campaign-state")
-                await _settle_view(app, pilot, "campaign-state", "#campaign-state-reload")
+                assert isinstance(app.screen, SessionScreen)
                 app.run_semantic_command("view.assistant")
                 await _settle_view(app, pilot, "assistant", "#assistant-query")
+                assert isinstance(app.screen, MainScreen)
 
         _run(scenario())
 

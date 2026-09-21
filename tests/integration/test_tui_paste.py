@@ -29,6 +29,7 @@ from dnd_assistant.domain.types import EntityId
 from dnd_assistant.storage.session_events import RawSessionEvent
 from dnd_assistant.tui.app import DndTuiApp
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
+from dnd_assistant.tui.session import SessionView
 
 _LAUNCH = TuiLaunchContext(
     vault_root=Path("vault"),
@@ -70,6 +71,19 @@ async def _paste(pilot: Any, app: Any, text: str) -> None:
     """
     app.post_message(events.Paste(text))
     await pilot.pause()
+
+
+def _session_wired(app: DndTuiApp) -> bool:
+    view = app._first(SessionView)
+    return view is not None and view.is_configured
+
+
+async def _open_session(app: DndTuiApp, pilot: Any) -> None:
+    app.run_semantic_command("view.session")
+    await _drain(
+        pilot,
+        lambda: app._current_context().context_id == "session" and _session_wired(app),
+    )
 
 
 class RecordingAssistant:
@@ -200,7 +214,8 @@ class TestSessionNotePaste:
             app = DndTuiApp(_services(RecordingAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                note = app.query_one("#session-note-input", Input)
+                await _open_session(app, pilot)
+                note = app.screen.query_one("#session-note-input", Input)
                 note.focus()
                 await pilot.pause()
                 await _paste(pilot, app, "Варос найден")
@@ -216,8 +231,9 @@ class TestSessionNotePaste:
             notifications: list[str] = []
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
+                await _open_session(app, pilot)
                 app.notify = lambda message, **kwargs: notifications.append(message)  # type: ignore[method-assign]
-                note = app.query_one("#session-note-input", Input)
+                note = app.screen.query_one("#session-note-input", Input)
                 note.focus()
                 await pilot.pause()
                 await _paste(pilot, app, "первая\nвторая")
@@ -239,10 +255,9 @@ class TestTouchedIdsPaste:
             app = DndTuiApp(_services(RecordingAssistant(), session))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _open_session(app, pilot)
                 app.set_active_session(True)
-                touched = app.query_one("#session-touched", Input)
+                touched = app.screen.query_one("#session-touched", Input)
                 touched.focus()
                 await pilot.pause()
                 await _paste(pilot, app, "npc-varos\r\nitem-001\nloc-grayford")
@@ -261,7 +276,8 @@ class TestTouchedIdsPaste:
             app = DndTuiApp(_services(RecordingAssistant(), RecordingSession()))
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
-                touched = app.query_one("#session-touched", Input)
+                await _open_session(app, pilot)
+                touched = app.screen.query_one("#session-touched", Input)
                 touched.focus()
                 await pilot.pause()
                 await _paste(pilot, app, "npc-varos, item-001")

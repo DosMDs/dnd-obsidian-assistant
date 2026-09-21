@@ -1,13 +1,12 @@
-"""S14-08 primary-view render-geometry regression (Textual 8.2.8).
+"""Primary-workspace render-geometry regression (Textual 8.2.8; TUI-UX-01).
 
-Proves that after navigation each primary capability view and its primary
-input / control / action are actually laid out with a positive visible region.
+Proves that the persistent agent workspace (transcript + composer), the
+persistent campaign sidebar and the secondary session screen are actually laid
+out with a positive visible region at the accepted terminal sizes.
 
-DOM presence or ``display`` alone is not render evidence: Textual 8.2.8
-defaults ``TabbedContent`` / ``ContentSwitcher`` / ``TabPane`` to
-``height: auto``, which collapsed the active pane body to zero height.  The
-children then reported non-zero regions but were clipped, so a real terminal
-showed an empty body.  These assertions therefore require positive width and
+DOM presence or ``display`` alone is not render evidence: Textual auto-height
+containers can collapse a body to zero height while children still report
+non-zero regions.  These assertions therefore require positive width and
 height on the laid-out widgets.  No screenshots are used.
 """
 
@@ -20,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from textual.widgets import Button, Input, Static, TextArea
+from textual.widgets import Button, Input, TextArea
 
 from dnd_assistant.application.agent_contracts import AgentTextOutcome
 from dnd_assistant.application.session_recovery import RecoveryPartition
@@ -33,6 +32,7 @@ from dnd_assistant.domain.types import EntityId
 from dnd_assistant.storage.session_events import RawSessionEvent
 from dnd_assistant.tui.app import DndTuiApp
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
+from dnd_assistant.tui.session import SessionView
 
 _LAUNCH = TuiLaunchContext(
     vault_root=Path("vault"),
@@ -42,17 +42,6 @@ _LAUNCH = TuiLaunchContext(
 )
 
 SIZES: list[tuple[int, int]] = [(100, 30), (80, 24), (60, 20)]
-
-# Primary control (settle target) is the second selector in each list.
-VIEW_CHECKS: dict[str, list[str]] = {
-    "assistant": ["#assistant-view", "#assistant-query", "#assistant-submit"],
-    "session": ["#session-view", "#session-note-input", "#session-start"],
-    "campaign-state": [
-        "#campaign-state-view",
-        "#campaign-state-body",
-        "#campaign-state-reload",
-    ],
-}
 
 
 def _run(coro: Coroutine[Any, Any, None]) -> None:
@@ -121,82 +110,72 @@ def _assert_visible(widget: Any, label: str) -> None:
     assert region.height > 0, f"{label} has zero height (clipped body): {region}"
 
 
-class TestPrimaryViewGeometry:
+def _session_wired(app: DndTuiApp) -> bool:
+    view = app._first(SessionView)
+    return view is not None and view.is_configured
+
+
+class TestWorkspaceGeometry:
     @pytest.mark.parametrize(("width", "height"), SIZES)
-    def test_all_primary_views_have_visible_geometry(self, width: int, height: int) -> None:
+    def test_assistant_workspace_has_visible_geometry(self, width: int, height: int) -> None:
         async def scenario() -> None:
             app = DndTuiApp(_services())
             async with app.run_test(size=(width, height)) as pilot:
                 await _drain(pilot, lambda: not app._gate.is_busy)
-                for view_id, selectors in VIEW_CHECKS.items():
-                    primary = selectors[1]
-                    app.run_semantic_command(f"view.{view_id}")
-                    await _drain(
-                        pilot,
-                        lambda v=view_id, s=primary: (
-                            app._current_context().context_id == v
-                            and app.query_one(s).region.height > 0
-                        ),
+                for selector in (
+                    "#assistant-view",
+                    "#assistant-transcript",
+                    "#assistant-query",
+                    "#assistant-submit",
+                ):
+                    _assert_visible(
+                        app.screen.query_one(selector),
+                        f"assistant {selector} at {width}x{height}",
                     )
-                    assert app._current_context().context_id == view_id
-                    for selector in selectors:
-                        _assert_visible(
-                            app.query_one(selector),
-                            f"{view_id} {selector} at {width}x{height}",
-                        )
+                query = app.screen.query_one("#assistant-query", TextArea)
+                composer = app.screen.query_one("#assistant-composer")
+                assert composer.region.height > 0
+                assert query.region.height > 0
 
         _run(scenario())
 
     @pytest.mark.parametrize(("width", "height"), SIZES)
-    def test_assistant_composer_and_submit_geometry(self, width: int, height: int) -> None:
+    def test_campaign_sidebar_has_visible_geometry(self, width: int, height: int) -> None:
         async def scenario() -> None:
             app = DndTuiApp(_services())
             async with app.run_test(size=(width, height)) as pilot:
                 await _drain(pilot, lambda: not app._gate.is_busy)
-                app.run_semantic_command("view.assistant")
-                await _drain(pilot, lambda: app._current_context().context_id == "assistant")
-                view = app.query_one("#assistant-view")
-                query = app.query_one("#assistant-query", TextArea)
-                submit = app.query_one("#assistant-submit", Button)
-                await _drain(pilot, lambda: query.region.height > 0)
-                _assert_visible(view, "assistant view")
-                assert query.region.height > 0
-                assert submit.region.width > 0 and submit.region.height > 0
+                for selector in (
+                    "#campaign-sidebar",
+                    "#sidebar-session-status",
+                    "#sidebar-open-session",
+                    "#campaign-state-body",
+                    "#campaign-state-reload",
+                ):
+                    _assert_visible(
+                        app.screen.query_one(selector),
+                        f"sidebar {selector} at {width}x{height}",
+                    )
 
         _run(scenario())
 
     @pytest.mark.parametrize(("width", "height"), SIZES)
-    def test_session_note_and_start_geometry(self, width: int, height: int) -> None:
+    def test_session_screen_has_visible_geometry(self, width: int, height: int) -> None:
         async def scenario() -> None:
             app = DndTuiApp(_services())
             async with app.run_test(size=(width, height)) as pilot:
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 app.run_semantic_command("view.session")
-                await _drain(pilot, lambda: app._current_context().context_id == "session")
-                view = app.query_one("#session-view")
-                note = app.query_one("#session-note-input", Input)
-                start = app.query_one("#session-start", Button)
-                await _drain(pilot, lambda: note.region.height > 0)
-                _assert_visible(view, "session view")
-                _assert_visible(note, "session note input")
-                _assert_visible(start, "session start button")
-
-        _run(scenario())
-
-    @pytest.mark.parametrize(("width", "height"), SIZES)
-    def test_campaign_state_body_and_reload_geometry(self, width: int, height: int) -> None:
-        async def scenario() -> None:
-            app = DndTuiApp(_services())
-            async with app.run_test(size=(width, height)) as pilot:
-                await _drain(pilot, lambda: not app._gate.is_busy)
-                app.run_semantic_command("view.campaign-state")
-                await _drain(pilot, lambda: app._current_context().context_id == "campaign-state")
-                view = app.query_one("#campaign-state-view")
-                body = app.query_one("#campaign-state-body", Static)
-                reload_button = app.query_one("#campaign-state-reload", Button)
-                await _drain(pilot, lambda: body.region.height > 0)
-                _assert_visible(view, "campaign-state view")
-                _assert_visible(body, "campaign-state body")
-                _assert_visible(reload_button, "campaign-state reload button")
+                await _drain(
+                    pilot,
+                    lambda: app._current_context().context_id == "session" and _session_wired(app),
+                )
+                for selector in ("#session-view", "#session-note-input", "#session-start"):
+                    _assert_visible(
+                        app.screen.query_one(selector),
+                        f"session {selector} at {width}x{height}",
+                    )
+                assert app.screen.query_one("#session-note-input", Input) is not None
+                assert app.screen.query_one("#session-start", Button) is not None
 
         _run(scenario())

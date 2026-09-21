@@ -1,13 +1,25 @@
-"""Assistant capability view (TUI-04).
+"""Assistant capability view (TUI-04; workspace redesign TUI-UX-01).
 
-Presentation only.  The view captures one immutable per-submission WRITE intent
-snapshot and delegates all trusted work to the injected assistant/session
+Presentation only.  The workspace owns the ephemeral transcript and the
+multiline prompt composer.  One immutable per-submission WRITE intent snapshot
+is captured and all trusted work is delegated to the injected assistant/session
 capabilities.  Before the agent is composed or run it performs the trusted
 recovery partition preflight; a blocking partition returns a Russian error
 outcome without any model composition or run.
 
+Submission lifecycle (accepted-plan contract):
+
+    validate (strip) -> acquire exclusive path -> append user entry
+    -> clear composer -> run worker
+
+The composer is cleared **only** when the submission was actually accepted for
+execution, immediately before the worker starts.  It is never cleared again
+when the asynchronous result arrives, so a new draft typed while the worker
+runs survives completion.  A rejected (busy) or empty submission produces zero
+assistant invocation and zero transcript entries.
+
 Ephemeral prompt/response text is UI-only; it is never written to the Vault as
-canonical data.
+canonical data, and hidden reasoning is never rendered.
 """
 
 from __future__ import annotations
@@ -16,7 +28,7 @@ from functools import partial
 from typing import cast
 
 from textual.app import ComposeResult
-from textual.containers import Horizontal
+from textual.containers import Horizontal, Vertical
 from textual.widgets import Button, Static, TextArea
 
 from dnd_assistant.errors import DndAssistantError
@@ -28,6 +40,7 @@ from dnd_assistant.tui.services import (
     AssistantOutcomeKind,
     SessionCapability,
 )
+from dnd_assistant.tui.transcript import TranscriptRole, TranscriptView
 from dnd_assistant.tui.view import CapabilityView
 
 __all__ = ["AssistantView", "render_blocking_recovery"]
@@ -40,6 +53,12 @@ _EXTERNALLY_OWNED_HINT = (
     "Примечание: незавершённые операции ChangeSet не блокируют работу; "
     "проверьте `dnd changeset status`."
 )
+
+_RESULT_ROLE: dict[AssistantOutcomeKind, TranscriptRole] = {
+    AssistantOutcomeKind.RESPOND: TranscriptRole.ASSISTANT,
+    AssistantOutcomeKind.CLARIFY: TranscriptRole.CLARIFY,
+    AssistantOutcomeKind.ERROR: TranscriptRole.ERROR,
+}
 
 
 def render_blocking_recovery(partition: object) -> str:
@@ -57,7 +76,7 @@ def render_blocking_recovery(partition: object) -> str:
 
 
 class AssistantView(CapabilityView):
-    """Player-facing assistant submission view."""
+    """Player-facing assistant workspace: transcript plus prompt composer."""
 
     WORKER_OWNER = EXCLUSIVE_ASSISTANT
 
@@ -70,14 +89,14 @@ class AssistantView(CapabilityView):
     # ── Composition / wiring ────────────────────────────────────────────────
 
     def compose(self) -> ComposeResult:
-        yield Static("Ассистент", id="assistant-title")
-        yield Static("Режим: только чтение", id="assistant-mode")
-        yield TextArea(id="assistant-query", soft_wrap=True, tab_behavior="focus")
-        yield Static("", id="assistant-output")
-        yield Static("", id="assistant-hint")
-        with Horizontal(id="assistant-actions"):
-            yield Button("Отправить", id="assistant-submit", variant="primary")
-            yield Button("Запись: выкл", id="assistant-toggle-write")
+        yield TranscriptView(id="assistant-transcript")
+        with Vertical(id="assistant-composer"):
+            yield TextArea(id="assistant-query", soft_wrap=True, tab_behavior="focus")
+            yield Static("", id="assistant-status")
+            with Horizontal(id="assistant-actions"):
+                yield Button("Отправить", id="assistant-submit", variant="primary")
+                yield Button("Запись: выкл", id="assistant-toggle-write")
+            yield Static("Режим: только чтение", id="assistant-mode")
 
     def set_capabilities(
         self,
@@ -113,10 +132,11 @@ class AssistantView(CapabilityView):
         self._sync_mode()
 
     def submit_request(self) -> None:
-        """Capture one immutable submission snapshot and start one worker.
+        """Accept, capture, clear and run exactly one submission.
 
         Emptiness is checked with ``strip()``; the value passed to the trusted
-        capability is the original ``TextArea`` text, never a stripped copy.
+        capability and shown as the user turn is the original ``TextArea`` text
+        captured before clearing, never a stripped copy.
         """
         if self._assistant is None or self._session is None:
             return
@@ -125,10 +145,14 @@ class AssistantView(CapabilityView):
             self.host.notify_user("Введите запрос.")
             return
         allow_agent_write = self._write_intent
-        self.query_one("#assistant-output", Static).update("Выполняется…")
-        self.query_one("#assistant-hint", Static).update("")
+        if not self._acquire_exclusive():
+            return
+        # The submission is accepted: record it and clear the composer now.
+        self.query_one(TranscriptView).append(TranscriptRole.USER, query)
+        self.query_one("#assistant-query", TextArea).clear()
+        self.query_one("#assistant-status", Static).update("Выполняется…")
         self._sync_controls()
-        self._start_exclusive(
+        self._start_worker(
             name="assistant.submit",
             work=partial(self._run_submission, query, allow_agent_write),
         )
@@ -174,11 +198,11 @@ class AssistantView(CapabilityView):
 
     def _handle_result(self, result: object) -> None:
         outcome = cast(AssistantOutcome, result)
-        prefix = "Уточнение: " if outcome.kind is AssistantOutcomeKind.CLARIFY else ""
-        self.query_one("#assistant-output", Static).update(prefix + outcome.message)
-        self.query_one("#assistant-hint", Static).update(outcome.hint or "")
-        if outcome.kind is AssistantOutcomeKind.RESPOND:
-            self.query_one("#assistant-query", TextArea).clear()
+        transcript = self.query_one(TranscriptView)
+        transcript.append(_RESULT_ROLE[outcome.kind], outcome.message)
+        if outcome.hint:
+            transcript.append(TranscriptRole.HINT, outcome.hint)
+        self.query_one("#assistant-status", Static).update("")
         self._sync_controls()
 
     # ── Presentation sync ───────────────────────────────────────────────────

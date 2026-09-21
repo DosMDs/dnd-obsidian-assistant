@@ -1,10 +1,22 @@
-"""Production Textual app (TUI-03 shell, extended in TUI-04).
+"""Production Textual app (TUI-03 shell, agent-workspace redesign TUI-UX-01).
 
 Presentation-only: the app owns no canonical semantics and no write policy.
 It owns the immutable launch context, the shared in-flight gate and one
 semantic dispatcher.  Domain-facing command handlers are thin delegations to
 the capability views; capability work, worker hosting and UI updates stay in
 those views.
+
+Navigation model
+----------------
+
+There is one persistent main workspace (:class:`MainScreen`,
+``CONTEXT_ID="assistant"``) and one secondary :class:`SessionScreen`
+(``CONTEXT_ID="session"``).  ``view.session`` opens the session screen and
+``view.assistant`` returns to the main workspace; both are idempotent and
+cannot stack duplicate screens.  Screen-scoped commands resolve against the
+active screen's context, so commands that belong to the main workspace (the
+assistant composer and the visible campaign sidebar) are never offered from
+the session screen.
 
 Command palette ownership
 -------------------------
@@ -27,7 +39,7 @@ from textual.binding import BindingType
 from textual.command import CommandPalette
 from textual.css.query import NoMatches
 from textual.screen import Screen
-from textual.widgets import TabbedContent
+from textual.widgets import TextArea
 
 from dnd_assistant.tui.assistant import AssistantView
 from dnd_assistant.tui.bindings import build_bindings
@@ -43,9 +55,10 @@ from dnd_assistant.tui.dispatch import (
     SemanticDispatcher,
 )
 from dnd_assistant.tui.inflight import InFlightGate
-from dnd_assistant.tui.screens import MainScreen
+from dnd_assistant.tui.screens import MainScreen, SessionScreen
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
 from dnd_assistant.tui.session import SessionView
+from dnd_assistant.tui.sidebar import SidebarView
 from dnd_assistant.tui.styles import RESPONSIVE_CSS
 from dnd_assistant.tui.view import CapabilityView
 
@@ -56,15 +69,8 @@ DEFAULT_BINDINGS: list[BindingType] = list(build_bindings(DEFAULT_REGISTRY))
 
 _ViewT = TypeVar("_ViewT", bound=CapabilityView)
 
-_PRIMARY_FOCUS: dict[str, str] = {
-    "assistant": "#assistant-query",
-    "session": "#session-note-input",
-    "campaign-state": "#campaign-state-reload",
-}
-"""Post-navigation focus target per primary view context id."""
-
 _MAX_FOCUS_ATTEMPTS = 10
-"""Bounded refresh retries while a requested pane becomes displayable."""
+"""Bounded refresh retries while a requested screen becomes displayable."""
 
 
 class DndTuiApp(App[None]):
@@ -112,8 +118,7 @@ class DndTuiApp(App[None]):
         self._services = services
         self._gate = InFlightGate()
         self._has_active_session = False
-        self._wired = False
-        self._nav_generation = 0
+        self._startup_refreshed = False
         self._dispatcher = SemanticDispatcher(self.SEMANTIC_REGISTRY, self, self._current_context)
 
     # ── Lifecycle / wiring ──────────────────────────────────────────────────
@@ -123,31 +128,62 @@ class DndTuiApp(App[None]):
         return self.DEFAULT_SCREEN(id="shell")
 
     def on_mount(self) -> None:
-        """Wire capability views after the initial screen is mounted."""
+        """Wire capability views and perform the one-time startup refresh."""
         self._wire_capability_views()
+        self._startup_refresh()
+
+    def _startup_refresh(self) -> None:
+        """Perform the one-time sidebar/campaign refresh once mounted.
+
+        The real terminal/screen subtree may not be queryable during
+        ``App.on_mount`` on every Textual build, so the main screen also calls
+        this after its own mount; the guard keeps it exactly-once.
+        """
+        if self._startup_refreshed:
+            return
+        if not self._query_all(CampaignStateView):
+            return
+        self._startup_refreshed = True
+        self._refresh_sidebar()
+
+    def _query_all(self, view_type: type[_ViewT]) -> list[_ViewT]:
+        """Query every mounted screen for a view type.
+
+        ``App.query`` only walks the default screen's DOM, so pushed screens
+        (the session screen) are queried through ``screen_stack`` explicitly.
+        """
+        found: list[_ViewT] = []
+        for screen in self.screen_stack:
+            found.extend(screen.query(view_type))
+        return found
 
     def _wire_capability_views(self) -> None:
-        if self._wired:
-            return
-        views = list(self.query(CapabilityView))
-        if not views:
-            return
-        self._wired = True
-        for view in views:
-            view.configure(host=self, gate=self._gate)
-        for assistant_view in self.query(AssistantView):
+        """Idempotently wire every currently mounted capability view.
+
+        Called for the main workspace and again when the session screen mounts;
+        already-configured views are left untouched.
+        """
+        for view in self._query_all(CapabilityView):
+            if not view.is_configured:
+                view.configure(host=self, gate=self._gate)
+        for assistant_view in self._query_all(AssistantView):
             assistant_view.set_capabilities(
                 assistant=self._services.assistant,
                 session=self._services.session,
             )
-        for session_view in self.query(SessionView):
+        for session_view in self._query_all(SessionView):
             session_view.set_capabilities(session=self._services.session)
-        for campaign_view in self.query(CampaignStateView):
+        for sidebar_view in self._query_all(SidebarView):
+            sidebar_view.set_capabilities(session=self._services.session)
+        for campaign_view in self._query_all(CampaignStateView):
             campaign_view.set_capabilities(campaign_state=self._services.campaign_state)
         self.refresh_command_state()
-        for session_view in self.query(SessionView):
-            session_view.refresh_status()
-        for campaign_view in self.query(CampaignStateView):
+
+    def _refresh_sidebar(self) -> None:
+        """Re-read the trusted session status and campaign state for the sidebar."""
+        for sidebar_view in self._query_all(SidebarView):
+            sidebar_view.refresh_session()
+        for campaign_view in self._query_all(CampaignStateView):
             campaign_view.reload()
 
     # ── TuiHost surface ─────────────────────────────────────────────────────
@@ -182,11 +218,7 @@ class DndTuiApp(App[None]):
     def _context_for(self, screen: Screen[Any] | None) -> CommandContext:
         context_id = ""
         if screen is not None:
-            resolver = getattr(screen, "current_context_id", None)
-            if callable(resolver):
-                context_id = str(resolver())
-            else:
-                context_id = str(getattr(screen, "CONTEXT_ID", ""))
+            context_id = str(getattr(screen, "CONTEXT_ID", ""))
         return CommandContext(
             context_id=context_id,
             busy_owner=self._gate.owner,
@@ -221,53 +253,40 @@ class DndTuiApp(App[None]):
             self.action_show_help_panel()
 
     def navigate_to(self, view_id: str) -> None:
-        """Switch the primary view by stable id and focus its primary control.
+        """Navigate by stable semantic view id (idempotent, context-safe)."""
+        if view_id == "session":
+            self._open_session()
+        elif view_id == "assistant":
+            self._return_to_assistant()
+        # Unknown/removed ids are ignored (no dead navigation).
 
-        Focus is scheduled after the next refresh because Textual may defer the
-        active-pane display change; the target is then proven by headless tests.
-        """
-        tabs = next(iter(self.query(TabbedContent)), None)
-        if tabs is None:
+    def _open_session(self) -> None:
+        """Push the session screen once; repeated dispatch is a no-op."""
+        if isinstance(self.screen, SessionScreen):
             return
-        self._nav_generation += 1
-        generation = self._nav_generation
-        tabs.active = view_id
+        self.push_screen(SessionScreen(id="session-screen"))
         self.refresh_command_state()
-        self.call_after_refresh(self._focus_primary_view, view_id, generation)
 
-    def _focus_primary_view(self, view_id: str, generation: int, attempt: int = 0) -> None:
-        """Focus the primary control of the latest requested view.
+    def _return_to_assistant(self) -> None:
+        """Return to the main workspace, converged and focused.
 
-        Navigation schedules this through ``call_after_refresh``.  Textual may
-        deliver a late ``TabPane.Focused`` message for an earlier pane, which
-        re-activates that stale pane and can hide the requested pane before its
-        control is displayed.  A monotonically increasing generation makes the
-        last navigation authoritative: stale callbacks cannot re-activate an
-        abandoned pane and the requested pane is re-asserted.
-
-        Focus ownership is separate from pane convergence.  A deferred retry
-        only establishes focus while focus is still outside the requested pane.
-        Once focus has moved to a control *inside* that pane (the configured
-        primary control or any other control), navigation no longer owns focus
-        and must not steal it back.  No sleeps or timers are used; convergence
-        is bounded and driven by the refresh cycle.
+        The sidebar is re-read only when a secondary screen was actually
+        popped; focusing the composer on the already-active workspace (for
+        example the global ``escape``/``f2`` alias) must not trigger a campaign
+        reload.
         """
-        if generation != self._nav_generation:
-            return
-        tabs = next(iter(self.query(TabbedContent)), None)
-        if tabs is None:
-            return
-        if tabs.active != view_id:
-            # Re-assert against a stale pane activation event.
-            tabs.active = view_id
-        # Focus ownership: yield if focus already moved inside the requested pane.
-        if self._focus_within_active_pane(tabs):
-            return
-        selector = _PRIMARY_FOCUS.get(view_id)
-        if selector is None:
-            return
+        popped = isinstance(self.screen, SessionScreen)
+        if popped:
+            self.pop_screen()
+        self.refresh_command_state()
+        self.call_after_refresh(self._focus_assistant, 0)
+        if popped:
+            self.call_after_refresh(self._converge_sidebar)
+
+    def _focus_assistant(self, attempt: int) -> None:
+        """Focus the composer once the main workspace is displayable."""
         try:
-            target = self.query_one(selector)
+            target = self.screen.query_one("#assistant-query", TextArea)
         except NoMatches:
             return
         if getattr(target, "focusable", False) and target.display:
@@ -275,23 +294,11 @@ class DndTuiApp(App[None]):
             if self.focused is target:
                 return
         if attempt < _MAX_FOCUS_ATTEMPTS:
-            self.call_after_refresh(self._focus_primary_view, view_id, generation, attempt + 1)
+            self.call_after_refresh(self._focus_assistant, attempt + 1)
 
-    def _focus_within_active_pane(self, tabs: TabbedContent) -> bool:
-        """Whether focus is already on a control inside the active pane.
-
-        Pane convergence stays authoritative for the current navigation
-        generation, but focus ownership does not.  Once focus has moved to a
-        focusable control inside the active pane, a pending navigation focus
-        must not steal it back to the pane's primary control.  The pane
-        container itself does not count: Textual may focus an activated pane
-        before its controls are displayable, which is not a user focus choice.
-        """
-        focused = self.focused
-        pane = tabs.active_pane
-        if focused is None or pane is None or focused is pane:
-            return False
-        return any(ancestor is pane for ancestor in focused.ancestors)
+    def _converge_sidebar(self) -> None:
+        """Re-read sidebar data after returning from the session screen."""
+        self._refresh_sidebar()
 
     def assistant_submit(self) -> None:
         view = self._first(AssistantView)
@@ -334,7 +341,7 @@ class DndTuiApp(App[None]):
             view.rebuild()
 
     def _first(self, view_type: type[_ViewT]) -> _ViewT | None:
-        matches = list(self.query(view_type))
+        matches = self._query_all(view_type)
         return matches[0] if matches else None
 
     # ── Semantic dispatch integration ───────────────────────────────────────

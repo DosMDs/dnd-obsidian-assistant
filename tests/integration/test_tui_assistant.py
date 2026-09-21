@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any, ClassVar
 
 import pytest
-from textual.widgets import Static, TextArea
+from textual.widgets import TextArea
 
 from dnd_assistant.application.agent_contracts import AgentOutcomeKind, AgentTextOutcome
 from dnd_assistant.application.session_recovery import RecoveryPartition
@@ -36,6 +36,8 @@ from dnd_assistant.tui.app import DndTuiApp
 from dnd_assistant.tui.assistant import AssistantView
 from dnd_assistant.tui.dispatch import DispatchResult
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices
+from dnd_assistant.tui.session import SessionView
+from dnd_assistant.tui.transcript import TranscriptRole, TranscriptView
 
 _WAIT = 10.0
 
@@ -157,8 +159,17 @@ def _services(
     )
 
 
-def _output(app: DndTuiApp, widget_id: str) -> str:
-    return str(app.query_one(f"#{widget_id}", Static).content)
+def _session_wired(app: DndTuiApp) -> bool:
+    view = app._first(SessionView)
+    return view is not None and view.is_configured
+
+
+def _entries(app: DndTuiApp) -> tuple[Any, ...]:
+    return app.query_one(TranscriptView).entries
+
+
+def _transcript_text(app: DndTuiApp) -> str:
+    return "\n".join(entry.text for entry in _entries(app))
 
 
 async def _submit(app: DndTuiApp, pilot: Any, query: str = "Кто такой Варос?") -> None:
@@ -177,7 +188,11 @@ class TestReadSubmission:
                 await pilot.pause()
                 await _submit(app, pilot)
                 assert assistant.calls == [("Кто такой Варос?", False)]
-                assert _output(app, "assistant-output") == "Ответ"
+                entries = _entries(app)
+                assert [(entry.role, entry.text) for entry in entries] == [
+                    (TranscriptRole.USER, "Кто такой Варос?"),
+                    (TranscriptRole.ASSISTANT, "Ответ"),
+                ]
                 assert app._gate.is_busy is False
             assert list(app.workers) == []
 
@@ -192,7 +207,9 @@ class TestReadSubmission:
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
                 await _submit(app, pilot)
-                assert _output(app, "assistant-output") == "Уточнение: Какого Вароса?"
+                entries = _entries(app)
+                assert entries[1].role is TranscriptRole.CLARIFY
+                assert entries[1].text == "Какого Вароса?"
 
         _run(scenario())
 
@@ -240,7 +257,7 @@ class TestRecoveryPreflight:
                 await _submit(app, pilot)
                 assert assistant.calls == []
                 assert session.recovery_calls >= 1
-                assert "повреждённое" in _output(app, "assistant-output")
+                assert "повреждённое" in _transcript_text(app)
 
         _run(scenario())
 
@@ -259,7 +276,9 @@ class TestRecoveryPreflight:
                 await pilot.pause()
                 await _submit(app, pilot)
                 assert len(assistant.calls) == 1
-                assert "ChangeSet" in _output(app, "assistant-hint")
+                entries = _entries(app)
+                assert entries[-1].role is TranscriptRole.HINT
+                assert "ChangeSet" in entries[-1].text
 
         _run(scenario())
 
@@ -272,7 +291,7 @@ class TestErrorRecovery:
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
                 await _submit(app, pilot)
-                assert "Ошибка модели: сбой модели" in _output(app, "assistant-output")
+                assert "Ошибка модели: сбой модели" in _transcript_text(app)
                 assert app._gate.is_busy is False
                 # App remains usable: a second submission is accepted.
                 await _submit(app, pilot)
@@ -360,17 +379,19 @@ class TestCrossCapabilityExclusion:
                 app.run_semantic_command("assistant.submit")
                 await _drain(pilot, started.is_set)
 
-                app.run_semantic_command("view.session")
-                await pilot.pause()
-                assert app.run_semantic_command("session.start") is not DispatchResult.EXECUTED
-                app.run_semantic_command("view.campaign-state")
-                await pilot.pause()
+                # The sidebar campaign action is gated while the assistant runs.
                 assert (
                     app.run_semantic_command("campaign-state.rebuild")
                     is not DispatchResult.EXECUTED
                 )
-                assert session.start_calls == 0
                 assert campaign.rebuild_calls == 0
+
+                # Navigation to the session screen is allowed, but session
+                # mutations share the exclusive gate and cannot execute.
+                assert app.run_semantic_command("view.session") is DispatchResult.EXECUTED
+                await pilot.pause()
+                assert app.run_semantic_command("session.start") is not DispatchResult.EXECUTED
+                assert session.start_calls == 0
 
                 release.set()
                 await _drain(pilot, lambda: not app._gate.is_busy)
@@ -411,13 +432,17 @@ class TestCrossCapabilityExclusion:
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
                 app.run_semantic_command("view.session")
-                await pilot.pause()
+                await _drain(
+                    pilot,
+                    lambda: app._current_context().context_id == "session" and _session_wired(app),
+                )
                 assert app.run_semantic_command("session.start") is DispatchResult.EXECUTED
                 await _drain(pilot, started.is_set)
 
-                app.run_semantic_command("view.assistant")
-                await pilot.pause()
-                app.query_one("#assistant-query", TextArea).text = "q"
+                # Navigation back is refused while the session mutation is in
+                # flight, and no assistant submission can slip through.
+                assert app._gate.owner == "session"
+                assert app.run_semantic_command("view.assistant") is not DispatchResult.EXECUTED
                 assert app.run_semantic_command("assistant.submit") is not DispatchResult.EXECUTED
                 assert assistant.calls == []
 

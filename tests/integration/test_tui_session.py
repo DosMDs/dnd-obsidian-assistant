@@ -28,6 +28,7 @@ from dnd_assistant.storage.session_metadata import ObsidianSessionMetadataReposi
 from dnd_assistant.storage.world_time import ObsidianWorldTimeRepository
 from dnd_assistant.tui.app import DndTuiApp
 from dnd_assistant.tui.services import TuiLaunchContext, TuiServices, build_tui_services
+from dnd_assistant.tui.session import SessionView
 
 
 def _run(coro: Coroutine[Any, Any, None]) -> None:
@@ -85,12 +86,21 @@ def _launch(vault: Path, *, allow_agent_write: bool = False) -> TuiLaunchContext
 
 
 def _output(app: DndTuiApp, widget_id: str) -> str:
-    return str(app.query_one(f"#{widget_id}", Static).content)
+    return str(app.screen.query_one(f"#{widget_id}", Static).content)
+
+
+def _session_wired(app: DndTuiApp) -> bool:
+    view = app._first(SessionView)
+    return view is not None and view.is_configured
 
 
 async def _switch(app: DndTuiApp, pilot: Any, view_id: str) -> None:
     app.run_semantic_command(f"view.{view_id}")
-    await pilot.pause()
+    for _ in range(300):
+        if app._current_context().context_id == view_id and _session_wired(app):
+            return
+        await pilot.pause()
+    raise AssertionError(f"view {view_id!r} did not settle")
 
 
 class TestRealSessionWritePath:
@@ -108,11 +118,11 @@ class TestRealSessionWritePath:
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 assert "S001" in _output(app, "session-output")
 
-                app.query_one("#session-note-input", Input).value = "Варос найден"
+                app.screen.query_one("#session-note-input", Input).value = "Варос найден"
                 assert app.run_semantic_command("session.note").name == "EXECUTED"
                 await _drain(pilot, lambda: not app._gate.is_busy)
 
-                app.query_one("#session-touched", Input).value = "npc-varos, item-001"
+                app.screen.query_one("#session-touched", Input).value = "npc-varos, item-001"
                 assert app.run_semantic_command("session.end").name == "EXECUTED"
                 await _drain(pilot, lambda: not app._gate.is_busy)
                 assert "завершена" in _output(app, "session-output")
@@ -147,8 +157,10 @@ class TestRealSessionWritePath:
             async with app.run_test(size=(100, 30)) as pilot:
                 await pilot.pause()
                 await _switch(app, pilot, "session")
-                await _drain(pilot, lambda: not app._gate.is_busy)
-                assert "Активной сессии нет" in _output(app, "session-status")
+                await _drain(
+                    pilot,
+                    lambda: "Активной сессии нет" in _output(app, "session-status"),
+                )
 
         _run(scenario())
 

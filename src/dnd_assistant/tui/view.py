@@ -93,6 +93,11 @@ class CapabilityView(Widget):
         """Hook for capability-specific initialisation after wiring."""
 
     @property
+    def is_configured(self) -> bool:
+        """Whether this view has been wired to a host."""
+        return self._host is not None
+
+    @property
     def host(self) -> TuiHost:
         """The wired host (programming error if accessed before configure)."""
         if self._host is None:
@@ -103,6 +108,38 @@ class CapabilityView(Widget):
     def busy(self) -> bool:
         """Whether this view currently owns an exclusive operation."""
         return self._busy
+
+    def _acquire_exclusive(self) -> bool:
+        """Claim the shared exclusive gate for this view.
+
+        Returns ``False`` (with a Russian notice) when another exclusive
+        operation is already in flight.  Splitting acquisition from worker
+        start lets the assistant record an accepted submission before the
+        asynchronous run begins.
+        """
+        if self._gate is None or self._host is None:
+            raise RuntimeError("capability view used before configure()")
+        if not self._gate.acquire(self.WORKER_OWNER):
+            self.host.notify_user("Дождитесь завершения текущей операции.")
+            return False
+        self._busy = True
+        self.host.refresh_command_state()
+        return True
+
+    def _start_worker(
+        self,
+        *,
+        name: str,
+        work: Callable[[], object],
+    ) -> None:
+        """Host exactly one synchronous capability call in a thread worker."""
+        self.run_worker(
+            work,
+            name=name,
+            group=self.WORKER_OWNER,
+            thread=True,
+            exit_on_error=False,
+        )
 
     def _start_exclusive(
         self,
@@ -115,21 +152,9 @@ class CapabilityView(Widget):
         Returns ``False`` (without starting work) when another exclusive
         operation is already in flight.
         """
-        if self._gate is None or self._host is None:
-            raise RuntimeError("capability view used before configure()")
-        owner = self.WORKER_OWNER
-        if not self._gate.acquire(owner):
-            self.host.notify_user("Дождитесь завершения текущей операции.")
+        if not self._acquire_exclusive():
             return False
-        self._busy = True
-        self.host.refresh_command_state()
-        self.run_worker(
-            work,
-            name=name,
-            group=owner,
-            thread=True,
-            exit_on_error=False,
-        )
+        self._start_worker(name=name, work=work)
         return True
 
     def on_worker_state_changed(self, event: Worker.StateChanged) -> None:
