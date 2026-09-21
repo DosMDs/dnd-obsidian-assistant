@@ -26,9 +26,20 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 
 from dnd_assistant.errors import NotFoundError, StorageError, ValidationError
+
+# ── Canonical provider identifiers ────────────────────────────────────────
+#
+# Provider identity remains an open string so configuration representability
+# stays independent of production provider support.  ``_DEEPSEEK_PROVIDER``
+# names the only provider for which provider-specific reasoning settings are
+# currently validated; unsupported providers still fail closed at the
+# model-construction boundary.
+
+_DEEPSEEK_PROVIDER = "deepseek"
+
 
 # ── Role enum ─────────────────────────────────────────────────────────────
 
@@ -45,6 +56,22 @@ class ModelProfileRole(StrEnum):
     EMBEDDING = "embedding"
     POST_SESSION = "post_session"
     BOOTSTRAP = "bootstrap"
+
+
+# ── Reasoning effort enum ─────────────────────────────────────────────────
+
+
+class ReasoningEffort(StrEnum):
+    """Canonical project reasoning-effort vocabulary.
+
+    Only ``low``, ``high`` and ``max`` are canonical project values.  Provider
+    compatibility aliases (for example ``medium``) are deliberately not
+    members; they must not become implicit project values.
+    """
+
+    LOW = "low"
+    HIGH = "high"
+    MAX = "max"
 
 
 # ── HTTP/HTTPS URL validation ─────────────────────────────────────────────
@@ -101,6 +128,8 @@ class ModelProfile(BaseModel):
     temperature: float | None = None
     keep_alive: str | None = None
     role: ModelProfileRole
+    thinking: bool | None = None
+    reasoning_effort: ReasoningEffort | None = None
 
     model_config = {"extra": "forbid", "frozen": True}
 
@@ -156,6 +185,51 @@ class ModelProfile(BaseModel):
                 raise ValueError("keep_alive must not be empty or whitespace-only")
             return stripped
         return None
+
+    # ── thinking / reasoning_effort (provider- and role-gated) ─────────
+
+    @model_validator(mode="after")
+    def _validate_reasoning_settings(self) -> ModelProfile:
+        """Enforce the accepted DeepSeek AGENT reasoning contract.
+
+        Reasoning settings are representable only for the canonical DeepSeek
+        provider and, in this release, only for the ``agent`` role.  For a
+        DeepSeek agent profile ``thinking`` must be explicit: no profile may
+        fall through to implicit provider/framework thinking defaults.
+        """
+        has_reasoning = self.thinking is not None or self.reasoning_effort is not None
+
+        if self.provider != _DEEPSEEK_PROVIDER:
+            if has_reasoning:
+                raise ValueError(
+                    "thinking/reasoning_effort are only supported for provider "
+                    f"{_DEEPSEEK_PROVIDER!r}, got provider {self.provider!r}"
+                )
+            return self
+
+        if self.role is not ModelProfileRole.AGENT:
+            if has_reasoning:
+                raise ValueError(
+                    "thinking/reasoning_effort are only supported for role "
+                    f"{ModelProfileRole.AGENT.value!r} in this release, "
+                    f"got role {self.role.value!r}"
+                )
+            return self
+
+        if self.thinking is None:
+            raise ValueError(
+                "provider 'deepseek' agent profile must set thinking explicitly "
+                "(true or false); implicit provider thinking defaults are not allowed"
+            )
+        if self.thinking and self.reasoning_effort is None:
+            effort_values = "|".join(effort.value for effort in ReasoningEffort)
+            raise ValueError(
+                "thinking=true requires an explicit reasoning_effort "
+                f"({effort_values})"
+            )
+        if not self.thinking and self.reasoning_effort is not None:
+            raise ValueError("thinking=false must not set reasoning_effort")
+        return self
 
 
 # ── Profile collection ────────────────────────────────────────────────────

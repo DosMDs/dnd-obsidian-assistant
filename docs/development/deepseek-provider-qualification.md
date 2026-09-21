@@ -42,15 +42,55 @@ DeepSeek-V4.1-Flash at the decision date). Do not substitute the retired
 `deepseek-v4-flash` name as the project identifier; its compatibility routing is
 diagnostic-only evidence for RM-02.
 
-Canonical project reasoning-effort values are `low`, `high` and `max`. `medium`
-is a provider compatibility alias and is not a canonical project value. Thinking
+Accepted profile schema (RM-01, `src/dnd_assistant/models/profiles.py`):
+
+```text
+thinking          : bool | None          (flat, optional, provider-gated)
+reasoning_effort  : low | high | max     (flat, optional, provider-gated)
+```
+
+Canonical project reasoning-effort values are `low`, `high` and `max`
+(`ReasoningEffort`). `medium` is a provider compatibility alias and is not a
+canonical project value; it is not an enum member and is rejected. Thinking
 disabled is represented separately, not as an effort value.
 
-Exact profile schema is finalized by RM-01; this sample is normative intent, not
-permission to bypass current `extra="forbid"` validation. RM-01 owns the
-provider/profile/credential contract and is independently acceptable: RM-02
-follows RM-01 and decides the concrete DeepSeek Pydantic-AI construction
-strategy (public built-in path vs narrow public adapter).
+DeepSeek AGENT reasoning contract (fail-closed):
+
+```text
+provider=deepseek, role=agent:
+  thinking=true  + effort low|high|max   PASS
+  thinking=false + effort absent         PASS
+  thinking omitted                       FAIL
+  thinking=true  + effort omitted        FAIL
+  thinking=false + effort present        FAIL
+  effort present + thinking omitted      FAIL
+  medium / unknown effort                FAIL
+```
+
+An AGENT DeepSeek profile must set `thinking` explicitly; it must not fall
+through to implicit provider/framework thinking defaults. In RM-01 the
+reasoning fields are valid only for `provider="deepseek"` with `role="agent"`;
+they are rejected for other providers and other roles (POST_SESSION, BOOTSTRAP,
+SUMMARIZER, EMBEDDING). Runtime support for a provider is still established at
+the model-construction boundary: profile representability is not provider
+support, and unsupported providers continue to fail closed there.
+
+Credential contract (RM-01, `src/dnd_assistant/models/credentials.py`):
+
+```text
+provider → environment variable : deepseek -> DEEPSEEK_API_KEY
+```
+
+Profile loading performs no environment access. Credential resolution is a
+separate machine-local boundary invoked only when a provider transport is
+constructed; it returns `pydantic.SecretStr` and fails closed (missing, empty or
+whitespace-only) with `CredentialError`, whose text names the environment
+variable and never the value. An unknown provider performs no environment
+lookup.
+
+RM-01 owns the provider/profile/credential contract and is independently
+acceptable: RM-02 follows RM-01 and decides the concrete DeepSeek Pydantic-AI
+construction strategy (public built-in path vs narrow public adapter).
 
 ## 3. Mandatory pre-product blocker gate
 

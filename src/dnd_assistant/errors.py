@@ -38,5 +38,12 @@ class ModelError(DndAssistantError):
     """Raised when a model/LLM interaction fails."""
 
 
+class CredentialError(DndAssistantError):
+    """Raised when a required machine-local provider credential is missing or unusable.
+
+    Error text must never contain the secret value itself.
+    """
+
+
 class LockError(DndAssistantError):
     """Raised when a lock cannot be acquired or released."""

@@ -89,19 +89,29 @@ dependency, credential, network/model or live-eval change.
 
 ### RM-01 — Provider/profile/credential contract
 
-Implement the minimum provider-neutral configuration changes needed for
+Status: `DONE` (typed contract only; no provider runtime).
+
+Implemented the minimum provider-neutral configuration changes needed for
 DeepSeek:
 
-- typed provider discrimination;
-- reasoning/thinking settings only where supported;
-- machine-local credential lookup contract;
-- secret-safe errors/metadata;
+- flat typed `thinking: bool | None` and `reasoning_effort: low|high|max`
+  (`ReasoningEffort`) on `ModelProfile`, preserving `extra="forbid"` and
+  `frozen=True`; `provider` remains an open string so representability stays
+  independent of production support;
+- provider/role-gated validation: reasoning fields are DeepSeek-AGENT-only, and
+  an AGENT DeepSeek profile must set `thinking` explicitly (no implicit
+  provider/framework thinking defaults);
+- machine-local credential lookup contract (`models/credentials.py`;
+  `deepseek -> DEEPSEEK_API_KEY`) returning `SecretStr`, fail-closed on
+  missing/empty/whitespace, with no environment access during profile loading;
+- secret-safe errors (`CredentialError`) that never contain the value;
 - no Vault configuration coupling.
 
-RM-01 must be independently implementable and acceptable as the typed
-provider/profile/credential contract. Its acceptance must **not** depend on a
+RM-01 is independently implementable and acceptable as the typed
+provider/profile/credential contract. Its acceptance does **not** depend on a
 future RM-02 result: it defines the contract, not the concrete DeepSeek
-construction strategy.
+construction strategy. RM-02 remains `NOT STARTED`, and no accepted live
+baseline is claimed.
 
 No product live run.
 
