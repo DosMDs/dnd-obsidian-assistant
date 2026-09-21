@@ -91,9 +91,9 @@ agent runtime
 Проект распространяется как исходный код; пакет не публикуется в PyPI, готового
 бинарника нет. Установка одинакова на Windows и macOS:
 
-```text
-git clone <repository-url>
-cd dnd-session-assistant
+```bash
+git clone https://github.com/DosMDs/dnd-obsidian-assistant.git
+cd dnd-obsidian-assistant
 uv sync
 ```
 
@@ -292,8 +292,17 @@ uv run dnd bootstrap apply   <changeset-id> --vault <vault-path> [--acknowledge-
 uv run dnd bootstrap finalize --vault <vault-path> --config models.toml --profile bootstrap
 ```
 
-`dnd bootstrap finalize` не изменяет канонические данные кампании; единственная
-каноническая запись — отдельная команда `dnd time init`.
+`dnd bootstrap finalize` сам по себе не применяет предложенные канонические
+изменения сущностей. Канонические данные кампании меняются только при явном
+применении проверенного bootstrap-ChangeSet:
+
+```text
+dnd bootstrap review → approve → apply
+  → явное применение проверенного bootstrap-предложения к каноническим данным
+```
+
+Структурные записи инициализации выполняются отдельными командами `dnd init` и
+`dnd time init`.
 
 ## TUI
 
@@ -475,21 +484,34 @@ uv run ruff check .
 uv run ruff format --check .
 ```
 
-Опциональные live-проверки провайдеров выполняются только явно и требуют
-настроенных профилей/сети:
+Опциональные live-проверки провайдеров выполняются только явно. Указанные ниже
+команды — это лишь **выбор тестов pytest**, а не достаточная активация live-
+режима: сначала нужно задать требуемую machine-local конфигурацию и явный opt-in.
+Без явного селектора/конфигурации live-тесты могут быть `SKIP`, а не реально
+обратиться к провайдеру. Порядок и детали: `docs/development/provider-runtime-upgrade.md`.
 
 ```bash
-# офлайн-выборка provider_upgrade
+# офлайн-выборка provider_upgrade (без live-провайдеров)
 uv run pytest -m "provider_upgrade and not ollama and not deepseek"
 
-# live Ollama
+# live Ollama (требует настроенного локального сервера/профиля)
 uv run pytest -m "provider_upgrade and ollama"
 
-# live DeepSeek (требует DEEPSEEK_API_KEY и явного opt-in)
+# live DeepSeek (требует явного opt-in; сам селектор не активирует live-режим)
 uv run pytest -m "provider_upgrade and deepseek"
 ```
 
-Обычный `uv run pytest` не зависит от сети и секретов.
+Для DeepSeek перед запуском задайте machine-local окружение:
+
+```text
+DND_ASSISTANT_DEEPSEEK_LIVE=1
+DND_ASSISTANT_DEEPSEEK_CONFIG=<path-to-models.toml>
+DND_ASSISTANT_DEEPSEEK_AGENT_PROFILE=<profile-name>
+DEEPSEEK_API_KEY=<secret>
+```
+
+Используйте собственный ключ; никогда не коммитьте его. Обычный `uv run pytest`
+не зависит от сети и секретов.
 
 ## Live-оценка и канонический baseline
 
