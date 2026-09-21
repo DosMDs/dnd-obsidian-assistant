@@ -58,10 +58,63 @@ def test_unknown_runtime_is_usage_error(tmp_path: Path) -> None:
     assert result.exit_code == 2
 
 
+def test_unknown_runtime_lists_deepseek(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--runtime", "bogus")
+    assert result.exit_code == 2
+    assert "deepseek" in result.output
+
+
+def test_run_help_mentions_deepseek() -> None:
+    result = runner.invoke(app, ["eval", "run", "--help"])
+    assert result.exit_code == 0
+    assert "deepseek" in result.output
+
+
 def test_ollama_requires_config_and_profile(tmp_path: Path) -> None:
     result = _run(tmp_path, "--runtime", "ollama")
     assert result.exit_code == 2
     assert "config" in result.output.lower() or "--config" in result.output
+
+
+def test_deepseek_requires_config_and_profile(tmp_path: Path) -> None:
+    result = _run(tmp_path, "--runtime", "deepseek")
+    assert result.exit_code == 2
+    assert "--config" in result.output or "config" in result.output.lower()
+
+
+def test_output_preflight_missing_parent_prevents_runtime_invocation(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    calls: list[Any] = []
+
+    def _spy(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append(_args)
+        raise AssertionError("runtime must not run when output preflight fails")
+
+    monkeypatch.setattr("dnd_assistant.cli.eval._run_selected_runtime", _spy)
+    missing = tmp_path / "missing" / "report.json"
+    result = runner.invoke(app, ["eval", "run", "--output", str(missing)])
+    assert result.exit_code == 1
+    assert calls == []
+    assert "Ошибка записи отчёта" in result.output
+
+
+def test_output_preflight_existing_target_prevents_runtime_invocation(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    existing = tmp_path / "report.json"
+    existing.write_text("{}", encoding="utf-8")
+    calls: list[Any] = []
+
+    def _spy(*_args: Any, **_kwargs: Any) -> Any:
+        calls.append(_args)
+        raise AssertionError("runtime must not run when output preflight fails")
+
+    monkeypatch.setattr("dnd_assistant.cli.eval._run_selected_runtime", _spy)
+    result = runner.invoke(app, ["eval", "run", "--output", str(existing)])
+    assert result.exit_code == 1
+    assert calls == []
+    assert existing.read_text(encoding="utf-8") == "{}"
 
 
 def test_scripted_rejects_live_only_options(tmp_path: Path) -> None:

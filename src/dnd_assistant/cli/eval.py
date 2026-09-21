@@ -15,9 +15,10 @@ from pathlib import Path
 
 import typer
 
-from dnd_assistant.composition import eval_ollama
+from dnd_assistant.composition import eval_deepseek, eval_ollama
 from dnd_assistant.composition.eval_artifacts import (
     EvalArtifactError,
+    preflight_report_target,
     read_report_text,
     write_report_atomic,
 )
@@ -60,10 +61,11 @@ def _resolve_dataset(alias: str) -> EvalDataset:
 
 
 def _resolve_runtime(runtime: str) -> str:
-    if runtime not in (SCRIPTED_RUNTIME, eval_ollama.LIVE_RUNTIME):
+    if runtime not in (SCRIPTED_RUNTIME, eval_ollama.LIVE_RUNTIME, eval_deepseek.LIVE_RUNTIME):
         raise typer.BadParameter(
             f"Неизвестный режим выполнения: {runtime!r}. "
-            f"Доступны: {SCRIPTED_RUNTIME!r}, {eval_ollama.LIVE_RUNTIME!r}"
+            f"Доступны: {SCRIPTED_RUNTIME!r}, {eval_ollama.LIVE_RUNTIME!r}, "
+            f"{eval_deepseek.LIVE_RUNTIME!r}"
         )
     return runtime
 
@@ -120,7 +122,7 @@ def _eval_run(
     runtime: str = typer.Option(
         SCRIPTED_RUNTIME,
         "--runtime",
-        help="Режим выполнения: 'scripted' (офлайн) или 'ollama' (явный live).",
+        help="Режим выполнения: 'scripted' (офлайн), 'ollama' или 'deepseek' (явный live).",
     ),
     dataset: str = typer.Option(
         "product-v1",
@@ -130,13 +132,13 @@ def _eval_run(
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
-        help="Путь к machine-local TOML конфигурации (только для --runtime ollama).",
+        help="Путь к machine-local TOML конфигурации (для live-режимов ollama/deepseek).",
         resolve_path=True,
     ),
     profile: str | None = typer.Option(
         None,
         "--profile",
-        help="Имя AGENT-профиля модели (только для --runtime ollama).",
+        help="Имя AGENT-профиля модели (для live-режимов ollama/deepseek).",
     ),
     output: Path = typer.Option(  # noqa: B008
         ...,
@@ -159,6 +161,15 @@ def _eval_run(
     """Запустить eval и записать отчёт."""
     resolved_runtime = _resolve_runtime(runtime)
     resolved_dataset = _resolve_dataset(dataset)
+
+    # Preflight the output target BEFORE any trace open, runtime selection,
+    # credential resolution or model request.  A consumed live measurement must
+    # never be lost to a foreseeable output-target failure.
+    try:
+        preflight_report_target(output, overwrite=overwrite)
+    except EvalArtifactError as exc:
+        typer.echo(f"Ошибка записи отчёта: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     # Open/validate the diagnostic trace BEFORE any warm-up or model request.
     try:
@@ -223,8 +234,20 @@ def _run_selected_runtime(
             trace=trace,
         )
 
+    if runtime == eval_deepseek.LIVE_RUNTIME:
+        if config is None or profile is None:
+            raise typer.BadParameter("Для --runtime deepseek требуются --config и --profile.")
+        return eval_deepseek.run_live_eval(
+            dataset,
+            config_path=config,
+            profile_name=profile,
+            trace=trace,
+        )
+
     if config is not None or profile is not None:
-        raise typer.BadParameter("Опции --config/--profile допустимы только для --runtime ollama.")
+        raise typer.BadParameter(
+            "Опции --config/--profile допустимы только для live-режимов (ollama, deepseek)."
+        )
     return run_eval(dataset, runtime=runtime, trace=trace)
 
 

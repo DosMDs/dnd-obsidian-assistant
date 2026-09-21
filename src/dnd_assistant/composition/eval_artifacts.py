@@ -17,13 +17,19 @@ class EvalArtifactError(Exception):
     """Raised when a derived eval artifact cannot be safely written."""
 
 
-def write_report_atomic(path: Path, text: str, *, overwrite: bool) -> None:
-    """Write ``text`` to ``path`` atomically (UTF-8, LF).
+def preflight_report_target(path: Path, *, overwrite: bool) -> None:
+    """Validate that a derived eval artifact can be written to ``path``.
+
+    This is a pre-request safety gate: it is intended to run *before* any
+    model/runtime execution so a successfully consumed measurement can never be
+    lost to a foreseeable output-target failure.  It never creates, truncates or
+    replaces the final target.  Directory writability is probed with a temporary
+    sibling file that is always removed, including on the failure path.
 
     Raises:
         EvalArtifactError: The parent directory is missing, the target is a
             directory, the target exists and ``overwrite`` is ``False``, or the
-            write/replace fails.
+            destination directory is not writable.
     """
     parent = path.parent
     if not parent.is_dir():
@@ -33,6 +39,36 @@ def write_report_atomic(path: Path, text: str, *, overwrite: bool) -> None:
     if path.exists() and not overwrite:
         raise EvalArtifactError(f"output file already exists (use --overwrite): {path}")
 
+    try:
+        descriptor, probe_name = tempfile.mkstemp(
+            dir=str(parent), prefix=".eval-preflight-", suffix=".tmp"
+        )
+    except OSError as exc:
+        raise EvalArtifactError(f"failed to write report artifact: {exc}") from exc
+    try:
+        os.close(descriptor)
+    except OSError:
+        pass
+    try:
+        os.unlink(probe_name)
+    except OSError:
+        pass
+
+
+def write_report_atomic(path: Path, text: str, *, overwrite: bool) -> None:
+    """Write ``text`` to ``path`` atomically (UTF-8, LF).
+
+    Re-validates the output target (see :func:`preflight_report_target`) before
+    the atomic write so a late race still fails closed with the same messages.
+
+    Raises:
+        EvalArtifactError: The parent directory is missing, the target is a
+            directory, the target exists and ``overwrite`` is ``False``, or the
+            write/replace fails.
+    """
+    preflight_report_target(path, overwrite=overwrite)
+
+    parent = path.parent
     descriptor, temp_name = tempfile.mkstemp(dir=str(parent), prefix=".eval-", suffix=".tmp")
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:

@@ -361,6 +361,60 @@ Record at least:
 Do not record credentials, full endpoint URLs containing secrets, request bodies
 or provider reasoning text.
 
+### 7a. RM-05 explicit live DeepSeek eval path
+
+The explicit live DeepSeek product path is `dnd eval run --runtime deepseek`
+(`src/dnd_assistant/composition/eval_deepseek.py`). It reuses the accepted
+provider-neutral runner/report machinery unchanged and only swaps the model
+operator: the production dispatch `_load_profile -> _build_agent_model ->
+build_pydantic_ai_deepseek_model`. The measured candidate is the canonical AGENT
+identity only (`provider=deepseek`, `model=deepseek-flash`, `role=agent`,
+`thinking=true`, `reasoning_effort=high`, base URL `https://api.deepseek.com`);
+any other identity fails closed before credential/network access.
+
+Deterministic ownership is preserved:
+
+```text
+warm-up            1 discarded EVAL-P1-001 (policy one-discarded-eval-p1-001)
+measured passes    exactly 1 run_dataset(product-v1)
+measured samples   13 (13 scenarios x 1 repetition)
+requests / turn    at most 2 (DndAgentPolicy allows one deferred batch)
+absolute ceiling   14 x 2 = 28 model requests; no retry budget
+```
+
+`response_model` reports the public provider-reported `ModelResponse.model_name`
+verbatim (an API alias, not a claim about an exact underlying release). If the
+identifier is absent it is `not-reported`; if identifiers differ across the run
+it is `multiple`. Official DeepSeek documentation is the authority for
+`documented_route` (`DeepSeek-V4.1-Flash`); `model` remains `deepseek-flash`.
+
+Output-target preflight runs before any trace open, runtime selection, credential
+resolution or model request (`preflight_report_target`). It rejects a missing
+parent, a directory target and an existing target when `--overwrite` is absent,
+probes destination-directory writability without touching the final target and
+always removes its probe. The measured command must **not** pass `--overwrite`.
+
+Trace freshness (append-only trace): the measurement trace path is
+measurement-SHA-specific and must **not** already exist, e.g.
+
+```text
+$env:TEMP\rm-05-deepseek-<MEASUREMENT-SHA>.jsonl
+```
+
+If it exists, stop before measurement rather than append and corrupt request-count
+evidence. The generic append-only trace semantics are unchanged.
+
+```powershell
+uv run dnd eval run --runtime deepseek --dataset product-v1 `
+  --config <machine-local-models.toml> `
+  --profile <canonical-deepseek-profile> `
+  --output docs/evidence/evals/rm-05-product-v1-deepseek-flash-high-candidate.json `
+  --trace "$env:TEMP\rm-05-deepseek-<MEASUREMENT-SHA>.jsonl"
+```
+
+A completed measurement is consumed: no model/profile/prompt/dataset/threshold
+change and no second measured pass, whether `accepted=true` or `accepted=false`.
+
 ## 8. External references
 
 - https://api-docs.deepseek.com/guides/thinking_mode/
