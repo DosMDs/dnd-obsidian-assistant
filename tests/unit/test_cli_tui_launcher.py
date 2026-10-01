@@ -45,6 +45,7 @@ def test_dnd_tui_invokes_launcher_once(monkeypatch, tmp_path: Path) -> None:
         config_path: Path,
         profile_name: str,
         allow_agent_write: bool = False,
+        deepseek_api_key: object = None,
     ) -> None:
         calls.append((vault_root, profile_name, allow_agent_write))
 
@@ -78,6 +79,7 @@ def test_dnd_tui_allow_write_is_agent_ceiling(monkeypatch, tmp_path: Path) -> No
         config_path: Path,
         profile_name: str,
         allow_agent_write: bool = False,
+        deepseek_api_key: object = None,
     ) -> None:
         assert profile_name == "test-agent"
         calls.append(allow_agent_write)
@@ -130,6 +132,7 @@ def test_dnd_tui_expected_launch_error_maps_to_russian_exit_one(
         config_path: Path,
         profile_name: str,
         allow_agent_write: bool = False,
+        deepseek_api_key: object = None,
     ) -> None:
         raise StorageError("vault недоступен")
 
@@ -160,6 +163,7 @@ def test_dnd_tui_unexpected_launch_error_propagates(monkeypatch, tmp_path: Path)
         config_path: Path,
         profile_name: str,
         allow_agent_write: bool = False,
+        deepseek_api_key: object = None,
     ) -> None:
         raise RuntimeError("launch-boom")
 

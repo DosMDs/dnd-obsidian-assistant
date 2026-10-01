@@ -30,6 +30,11 @@ from dnd_assistant.composition.eval_trace import (
     EvalTraceWriter,
     open_eval_trace,
 )
+from dnd_assistant.config.settings import (
+    load_machine_settings,
+    load_model_config_path,
+    resolve_model_config_path,
+)
 from dnd_assistant.errors import DndAssistantError
 from dnd_assistant.evals import (
     EvalReport,
@@ -132,7 +137,10 @@ def _eval_run(
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
-        help="Путь к machine-local TOML конфигурации (для live-режимов ollama/deepseek).",
+        help=(
+            "Путь к machine-local TOML конфигурации (для live-режимов ollama/deepseek). "
+            "Если не указан, используется DND_MODEL_CONFIG_PATH из machine-local настроек."
+        ),
         resolve_path=True,
     ),
     profile: str | None = typer.Option(
@@ -223,25 +231,34 @@ def _run_selected_runtime(
     profile: str | None,
     trace: EvalTraceWriter | None = None,
 ) -> EvalReport:
-    """Dispatch scripted vs explicit live runtime; validate option presence."""
+    """Dispatch scripted vs explicit live runtime; validate option presence.
+
+    Live configuration is resolved here, after the output-target preflight and
+    trace open owned by the caller, so a foreseeable output failure is never
+    masked by machine-settings or credential resolution.
+    """
     if runtime == eval_ollama.LIVE_RUNTIME:
-        if config is None or profile is None:
+        if profile is None:
             raise typer.BadParameter("Для --runtime ollama требуются --config и --profile.")
+        config_path = config if config is not None else load_model_config_path(None)
         return eval_ollama.run_live_eval(
             dataset,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
             trace=trace,
         )
 
     if runtime == eval_deepseek.LIVE_RUNTIME:
-        if config is None or profile is None:
+        if profile is None:
             raise typer.BadParameter("Для --runtime deepseek требуются --config и --profile.")
+        settings = load_machine_settings()
+        config_path = resolve_model_config_path(config, settings)
         return eval_deepseek.run_live_eval(
             dataset,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
             trace=trace,
+            deepseek_api_key=settings.deepseek_api_key,
         )
 
     if config is not None or profile is not None:

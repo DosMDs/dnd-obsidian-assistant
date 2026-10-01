@@ -24,6 +24,7 @@ import typer
 
 from dnd_assistant.cli.agent_runtime import AskRuntime, compose_ask_runtime
 from dnd_assistant.cli.session import _recovery_preflight
+from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.errors import DndAssistantError
 
 # ── Ask command ────────────────────────────────────────────────────────────
@@ -44,10 +45,13 @@ def _ask_command(
         readable=True,
         resolve_path=True,
     ),
-    config: Path = typer.Option(  # noqa: B008
-        ...,
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
         "--config",
-        help="Путь к machine-local TOML файлу конфигурации модели.",
+        help=(
+            "Путь к machine-local TOML файлу конфигурации модели. "
+            "Если не указан, используется DND_MODEL_CONFIG_PATH из machine-local настроек."
+        ),
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -83,6 +87,11 @@ def _ask_command(
     runtime: AskRuntime | None = None
 
     try:
+        # Resolve machine-local settings once: explicit --config wins over
+        # DND_MODEL_CONFIG_PATH / machine-local dotenv.
+        settings = load_machine_settings()
+        config_path = resolve_model_config_path(config, settings)
+
         # Perform recovery preflight inside the error boundary so that
         # project errors from recovery inspection are caught by the CLI
         # DndAssistantError handler.
@@ -91,9 +100,10 @@ def _ask_command(
         # Compose runtime
         runtime = compose_ask_runtime(
             vault_root=vault_root,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
             allow_write=allow_write,
+            deepseek_api_key=settings.deepseek_api_key,
         )
 
         # Execute the Pydantic AI agent runtime

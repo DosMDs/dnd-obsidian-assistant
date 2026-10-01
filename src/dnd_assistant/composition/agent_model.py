@@ -17,8 +17,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
+from pydantic import SecretStr
 from pydantic_ai.models import Model
 
+from dnd_assistant.config.settings import require_provider_api_key
 from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, load_model_profiles
 from dnd_assistant.models.pydantic_ai_deepseek import build_pydantic_ai_deepseek_model
@@ -41,21 +43,33 @@ def _new_operation_id() -> str:
 # ── Model factory seam (testable) ──────────────────────────────────────────
 
 
-def _build_agent_model(profile: ModelProfile) -> Model:
+def _build_agent_model(
+    profile: ModelProfile,
+    *,
+    deepseek_api_key: SecretStr | None = None,
+) -> Model:
     """Construct a Pydantic AI ``Model`` from a profile.
 
     This is the shared, presentation-neutral provider-dispatch seam.  Provider
     selection comes exclusively from the named model profile; the concrete
     provider factory owns provider-specific validation.
 
+    This seam is the single fail-closed AGENT credential boundary: a DeepSeek
+    profile without a resolved machine-local credential raises
+    ``CredentialError`` before any transport is constructed.  Ollama profiles
+    never require a credential.
+
     Args:
         profile: A validated ``ModelProfile`` with ``provider`` ``"ollama"``
             or ``"deepseek"``, both with ``role == AGENT``.
+        deepseek_api_key: Machine-local DeepSeek credential resolved by the
+            entry point from the typed settings boundary.  Ignored for Ollama.
 
     Returns:
         A configured Pydantic AI ``OllamaModel`` or ``OpenAIChatModel`` instance.
 
     Raises:
+        CredentialError: A DeepSeek profile has no usable credential.
         ValidationError: If the profile's provider is not supported, or the
             selected provider factory rejects the profile.
     """
@@ -63,7 +77,8 @@ def _build_agent_model(profile: ModelProfile) -> Model:
         return build_pydantic_ai_ollama_model(profile)
 
     if profile.provider == "deepseek":
-        return build_pydantic_ai_deepseek_model(profile)
+        api_key = require_provider_api_key("deepseek", deepseek_api_key)
+        return build_pydantic_ai_deepseek_model(profile, api_key=api_key)
 
     raise ValidationError(
         f"Unsupported model provider {profile.provider!r} for the AGENT role. "

@@ -33,6 +33,7 @@ from dnd_assistant.composition.bootstrap import (
     compose_bootstrap_discovery,
     compose_bootstrap_runtime,
 )
+from dnd_assistant.config.settings import load_model_config_path
 from dnd_assistant.errors import ConflictError, DndAssistantError, StorageError, ValidationError
 
 __all__ = ["bootstrap_app"]
@@ -233,10 +234,13 @@ def _bootstrap_map(
         readable=True,
         resolve_path=True,
     ),
-    config: Path = typer.Option(  # noqa: B008
-        ...,
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
         "--config",
-        help="Путь к machine-local TOML файлу конфигурации модели.",
+        help=(
+            "Путь к machine-local TOML файлу конфигурации модели. "
+            "Если не указан, используется DND_MODEL_CONFIG_PATH из machine-local настроек."
+        ),
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -269,13 +273,14 @@ def _bootstrap_map(
 
     runtime: BootstrapRuntime | None = None
     try:
+        config_path = load_model_config_path(config)
         report = compose_bootstrap_discovery(vault_root)
         if not dry_run:
             _recovery_preflight(vault_root)
 
         runtime = compose_bootstrap_runtime(
             vault_root=vault_root,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
         )
         result = runtime.run(report, persist=not dry_run)

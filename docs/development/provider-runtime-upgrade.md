@@ -232,6 +232,11 @@ DND_ASSISTANT_DEEPSEEK_AGENT_PROFILE=<profile-name>
 DEEPSEEK_API_KEY=<secret>
 ```
 
+`DEEPSEEK_API_KEY` above is the test-local selector for the live gate; the
+production credential boundary reads the same provider-standard name from the
+typed machine-local settings (process environment or machine dotenv). See
+`docs/adr/0011-machine-local-configuration.md`.
+
 The selected profile must be the canonical AGENT identity
 (`provider=deepseek`, `model=deepseek-flash`, `thinking=true`,
 `reasoning_effort=high`, canonical base URL). The gate exercises the real

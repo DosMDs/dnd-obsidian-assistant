@@ -22,6 +22,10 @@ Thumbs.db
 # Local machine secrets/config
 .env
 .env.*
+!.env.example
+
+# Machine-local model configuration (repository root only)
+/models.toml
 
 # Local GigaCode context
 .gigacode/GIGACODE.local.md

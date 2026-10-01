@@ -83,7 +83,7 @@ class _Delegate(FunctionModel):
 def no_build(monkeypatch: pytest.MonkeyPatch) -> None:
     """Fail loudly if the candidate identity check does not fail first."""
 
-    def _boom(_profile: ModelProfile) -> Any:
+    def _boom(_profile: ModelProfile, **_kwargs: Any) -> Any:
         raise AssertionError("model construction must not be reached")
 
     monkeypatch.setattr(eval_deepseek, "_build_agent_model", _boom)
@@ -97,7 +97,7 @@ def _run_with_delegate(
 ) -> tuple[Any, _Delegate]:
     config = _write_config(tmp_path / "models.toml")
     resolved = delegate if delegate is not None else _Delegate()
-    monkeypatch.setattr(eval_deepseek, "_build_agent_model", lambda _profile: resolved)
+    monkeypatch.setattr(eval_deepseek, "_build_agent_model", lambda _profile, **_kwargs: resolved)
     report = run_live_eval(
         build_product_v1_dataset(),
         config_path=config,
@@ -221,7 +221,7 @@ def test_production_dispatch_invoked_once(tmp_path: Path, monkeypatch: pytest.Mo
     delegate = _Delegate()
     calls: list[ModelProfile] = []
 
-    def _dispatch(profile: ModelProfile) -> Any:
+    def _dispatch(profile: ModelProfile, **_kwargs: Any) -> Any:
         calls.append(profile)
         return delegate
 
@@ -241,7 +241,9 @@ def test_warmup_failure_fails_closed(tmp_path: Path, monkeypatch: pytest.MonkeyP
     def _boom(_messages: list[ModelMessage], _info: AgentInfo) -> ModelResponse:
         raise RuntimeError("warmup exploded")
 
-    monkeypatch.setattr(eval_deepseek, "_build_agent_model", lambda _profile: FunctionModel(_boom))
+    monkeypatch.setattr(
+        eval_deepseek, "_build_agent_model", lambda _profile, **_kwargs: FunctionModel(_boom)
+    )
     with pytest.raises(EvalDeepSeekError, match="warm-up failed"):
         run_live_eval(build_product_v1_dataset(), config_path=config, profile_name="agent-deepseek")
 

@@ -84,7 +84,7 @@ from typing import Any
 
 import httpx2
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
 from dnd_assistant.application.agent_contracts import AgentOutcomeKind
@@ -92,9 +92,9 @@ from dnd_assistant.application.pydantic_ai_agent_runtime import PydanticAIAgentR
 from dnd_assistant.application.pydantic_ai_run_deps import DndAgentRunPreparer
 from dnd_assistant.application.pydantic_ai_tool_bridge import PydanticAIToolBridge
 from dnd_assistant.cli.agent_runtime import _build_agent_model, _load_profile
+from dnd_assistant.config.settings import load_machine_settings, require_provider_api_key
 from dnd_assistant.errors import CredentialError, DndAssistantError
 from dnd_assistant.models import pydantic_ai_deepseek as deepseek_module
-from dnd_assistant.models.credentials import resolve_provider_api_key
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, ReasoningEffort
 from dnd_assistant.tools.catalog import build_tool_registry_schema
 from dnd_assistant.tools.registry import ToolRegistry
@@ -141,6 +141,7 @@ class DeepSeekProbeOutput(BaseModel):
 class LiveContext:
     profile: ModelProfile
     profile_name: str
+    deepseek_api_key: SecretStr
 
 
 def _record_client(recorder: LiveRequestRecorder) -> httpx2.AsyncClient:
@@ -225,11 +226,12 @@ def live_context() -> LiveContext:
     _validate_canonical_profile(profile, profile_name)
 
     try:
-        resolve_provider_api_key("deepseek")
+        settings = load_machine_settings()
+        api_key = require_provider_api_key("deepseek", settings.deepseek_api_key)
     except CredentialError as exc:  # text names the env var, never the value
         pytest.fail(f"DeepSeek live gate credential unavailable: {exc}")
 
-    return LiveContext(profile=profile, profile_name=profile_name)
+    return LiveContext(profile=profile, profile_name=profile_name, deepseek_api_key=api_key)
 
 
 def _build_registry(counter: list[str]) -> ToolRegistry:
@@ -287,7 +289,7 @@ def _run_live_case(
     try:
         with pytest.MonkeyPatch.context() as monkeypatch:
             monkeypatch.setattr(deepseek_module, "DeepSeekProvider", _observing_provider)
-            model = _build_agent_model(context.profile)
+            model = _build_agent_model(context.profile, deepseek_api_key=context.deepseek_api_key)
         runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=model)
         try:
             return runtime.run(prompt, execution_context=make_read_context())

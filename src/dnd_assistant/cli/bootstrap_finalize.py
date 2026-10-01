@@ -19,6 +19,7 @@ from dnd_assistant.application.bootstrap_completion import (
     BootstrapCompletionStatus,
 )
 from dnd_assistant.composition.bootstrap_completion import finalize_bootstrap
+from dnd_assistant.config.settings import load_model_config_path
 from dnd_assistant.errors import DndAssistantError
 
 __all__ = ["register_bootstrap_finalize_command"]
@@ -142,10 +143,13 @@ def _bootstrap_finalize(
         readable=True,
         resolve_path=True,
     ),
-    config: Path = typer.Option(  # noqa: B008
-        ...,
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
         "--config",
-        help="Путь к machine-local TOML файлу конфигурации модели.",
+        help=(
+            "Путь к machine-local TOML файлу конфигурации модели. "
+            "Если не указан, используется DND_MODEL_CONFIG_PATH из machine-local настроек."
+        ),
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -173,9 +177,10 @@ def _bootstrap_finalize(
         raise typer.Exit(code=1)
 
     try:
+        config_path = load_model_config_path(config)
         result = finalize_bootstrap(
             vault_root=vault_root,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
             acknowledge_unresolved=acknowledge_unresolved,
         )

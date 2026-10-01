@@ -52,13 +52,14 @@ from typing import Any
 
 import httpx2
 import pytest
+from pydantic import SecretStr
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.messages import ThinkingPart
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
+from dnd_assistant.config.settings import load_machine_settings, require_provider_api_key
 from dnd_assistant.errors import CredentialError
-from dnd_assistant.models.credentials import resolve_provider_api_key
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, ReasoningEffort
 from dnd_assistant.models.pydantic_ai_deepseek import build_pydantic_ai_deepseek_model
 from tests.support.deepseek_transport import LiveRequestRecorder
@@ -79,7 +80,8 @@ def deepseek_api_key() -> str:
     if not _selected():
         pytest.skip(f"set {_SELECTOR_ENV}=1 to run the opt-in DeepSeek live spike")
     try:
-        return resolve_provider_api_key("deepseek").get_secret_value()
+        settings = load_machine_settings()
+        return require_provider_api_key("deepseek", settings.deepseek_api_key).get_secret_value()
     except CredentialError as exc:  # text never contains the secret value
         pytest.fail(
             f"DeepSeek live spike explicitly requested but credential is unavailable: {exc}"
@@ -240,5 +242,8 @@ def test_factory_credential_resolution_succeeds(deepseek_api_key: str) -> None:
     No agent is run here, so this test makes **zero** model HTTP requests; it
     only exercises the credential-construction boundary.
     """
-    model = build_pydantic_ai_deepseek_model(_profile(thinking=True, effort=ReasoningEffort.HIGH))
+    model = build_pydantic_ai_deepseek_model(
+        _profile(thinking=True, effort=ReasoningEffort.HIGH),
+        api_key=SecretStr(deepseek_api_key),
+    )
     assert model.model_name == "deepseek-flash"

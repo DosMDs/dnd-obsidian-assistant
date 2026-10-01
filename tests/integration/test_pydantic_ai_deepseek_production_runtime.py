@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, SecretStr
 from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
@@ -115,7 +115,6 @@ def _build_production_runtime(
     are exercised; only the HTTP transport is replaced with a recording mock
     that stores allowlisted projections (never bodies/headers/reasoning text).
     """
-    monkeypatch.setenv("DEEPSEEK_API_KEY", _OFFLINE_DUMMY_KEY)
     capture = DeepSeekTransportCapture(responses)
     real_provider = DeepSeekProvider
 
@@ -132,7 +131,7 @@ def _build_production_runtime(
         tool_catalog=catalog,
         tool_bridge=bridge,
     )
-    model = _build_agent_model(profile)
+    model = _build_agent_model(profile, deepseek_api_key=SecretStr(_OFFLINE_DUMMY_KEY))
     runtime = PydanticAIAgentRuntime(run_preparer=preparer, model=model)
     return runtime, capture
 
@@ -140,13 +139,10 @@ def _build_production_runtime(
 # ── Production credential boundary (pre-request) ───────────────────────────
 
 
-def test_production_dispatch_requires_credential(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-) -> None:
-    """The real dispatch/factory fails closed when the credential is absent."""
+def test_production_dispatch_requires_credential(tmp_path: Path) -> None:
+    """The real dispatch fails closed when no credential is supplied."""
     from dnd_assistant.errors import CredentialError
 
-    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
     profile = _load_canonical_profile(tmp_path)
     with pytest.raises(CredentialError, match="DEEPSEEK_API_KEY"):
         _build_agent_model(profile)

@@ -24,6 +24,8 @@ from enum import StrEnum
 from pathlib import Path
 from typing import Protocol
 
+from pydantic import SecretStr
+
 from dnd_assistant.application.agent_contracts import AgentTextOutcome
 from dnd_assistant.application.session_recovery import RecoveryPartition
 from dnd_assistant.composition.agent_runtime import compose_ask_runtime
@@ -73,6 +75,7 @@ class TuiLaunchContext:
     config_path: Path
     profile_name: str
     allow_agent_write: bool = False
+    deepseek_api_key: SecretStr | None = None
 
 
 # ── Capability protocols ───────────────────────────────────────────────────
@@ -182,6 +185,7 @@ class ComposedAssistant:
                 config_path=self._launch.config_path,
                 profile_name=self._launch.profile_name,
                 allow_write=allow_agent_write,
+                deepseek_api_key=self._launch.deepseek_api_key,
             )
             return runtime.agent_runtime.run(
                 query,

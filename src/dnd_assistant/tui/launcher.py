@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import SecretStr
+
 from dnd_assistant.tui.app import DndTuiApp
 from dnd_assistant.tui.services import TuiLaunchContext, build_tui_services
 
@@ -20,6 +22,7 @@ def run(
     config_path: Path,
     profile_name: str,
     allow_agent_write: bool = False,
+    deepseek_api_key: SecretStr | None = None,
 ) -> None:
     """Run the production TUI with an immutable launch context."""
     launch = TuiLaunchContext(
@@ -27,5 +30,6 @@ def run(
         config_path=config_path,
         profile_name=profile_name,
         allow_agent_write=allow_agent_write,
+        deepseek_api_key=deepseek_api_key,
     )
     DndTuiApp(build_tui_services(launch)).run()

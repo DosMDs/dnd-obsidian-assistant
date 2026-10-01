@@ -11,11 +11,12 @@ No real HTTP request and no DeepSeek credential are used.
 from __future__ import annotations
 
 import pytest
+from pydantic import SecretStr
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.profiles.deepseek import deepseek_model_profile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 
-from dnd_assistant.errors import CredentialError, ValidationError
+from dnd_assistant.errors import ValidationError
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole, ReasoningEffort
 from dnd_assistant.models.pydantic_ai_deepseek import (
     CANONICAL_DEEPSEEK_MODEL,
@@ -192,9 +193,16 @@ class TestFactoryValidation:
         with pytest.raises(ValidationError, match="requires role=AGENT"):
             build_pydantic_ai_deepseek_model(profile, provider=_stub_provider())
 
-    def test_missing_credential_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
-        with pytest.raises(CredentialError, match="DEEPSEEK_API_KEY"):
+    def test_builds_from_injected_api_key(self) -> None:
+        """The factory builds the provider from an injected machine credential."""
+        model = build_pydantic_ai_deepseek_model(
+            _deepseek_agent(), api_key=SecretStr("offline-dummy-key")
+        )
+        assert model.model_name == CANONICAL_DEEPSEEK_MODEL
+
+    def test_missing_credential_source_fails_closed(self) -> None:
+        """The credential-source-neutral factory refuses to build without a source."""
+        with pytest.raises(ValidationError, match="api_key"):
             build_pydantic_ai_deepseek_model(_deepseek_agent())
 
     def test_canonical_base_url_trailing_slash_is_accepted(self) -> None:

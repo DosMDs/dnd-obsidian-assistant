@@ -42,6 +42,7 @@ from dnd_assistant.cli.post_session_runtime import (
     select_latest_completed_session,
 )
 from dnd_assistant.cli.session import _recovery_preflight
+from dnd_assistant.config.settings import load_model_config_path
 from dnd_assistant.domain.post_session import (
     FailureCategory,
     ProcessingOutcome,
@@ -336,10 +337,13 @@ def _session_process(
         readable=True,
         resolve_path=True,
     ),
-    config: Path = typer.Option(  # noqa: B008
-        ...,
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
         "--config",
-        help="Путь к machine-local TOML файлу конфигурации модели.",
+        help=(
+            "Путь к machine-local TOML файлу конфигурации модели. "
+            "Если не указан, используется DND_MODEL_CONFIG_PATH из machine-local настроек."
+        ),
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -382,9 +386,10 @@ def _session_process(
 
         _recovery_preflight(vault_root)
 
+        config_path = load_model_config_path(config)
         runtime = compose_post_session_runtime(
             vault_root=vault_root,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
         )
 

@@ -49,7 +49,7 @@ EXPECTED_OFFLINE_MODULES: frozenset[str] = frozenset(
         "unit/test_bootstrap_pydantic_ai.py",
         "unit/test_cli_agent_runtime.py",
         "unit/test_dnd_agent_policy.py",
-        "unit/test_model_credentials.py",
+        "unit/test_machine_settings.py",
         "unit/test_model_profiles_reasoning.py",
         "unit/test_pydantic_ai_agent_runtime_lifecycle.py",
         "unit/test_pydantic_ai_deepseek_factory.py",
@@ -165,7 +165,7 @@ SEMANTIC_FAMILIES: dict[str, frozenset[str]] = {
             "integration/test_pydantic_ai_deepseek_production_runtime.py",
         }
     ),
-    "provider_credential_boundary": frozenset({"unit/test_model_credentials.py"}),
+    "provider_credential_boundary": frozenset({"unit/test_machine_settings.py"}),
     "provider_reasoning_profile_contract": frozenset({"unit/test_model_profiles_reasoning.py"}),
 }
 

@@ -21,6 +21,7 @@ from dnd_assistant.cli.post_session import register_session_process_commands
 from dnd_assistant.cli.session import _note_command, session_app
 from dnd_assistant.cli.time import time_app
 from dnd_assistant.composition.index_rebuild import rebuild_fts_index
+from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.errors import DndAssistantError, StorageError
 
 app = typer.Typer(
@@ -78,10 +79,13 @@ def _tui(
         readable=True,
         resolve_path=True,
     ),
-    config: Path = typer.Option(  # noqa: B008
-        ...,
+    config: Path | None = typer.Option(  # noqa: B008
+        None,
         "--config",
-        help="Путь к machine-local TOML файлу конфигурации модели.",
+        help=(
+            "Путь к machine-local TOML файлу конфигурации модели. "
+            "Если не указан, используется DND_MODEL_CONFIG_PATH из machine-local настроек."
+        ),
         exists=True,
         file_okay=True,
         dir_okay=False,
@@ -116,11 +120,14 @@ def _tui(
     from dnd_assistant.tui.launcher import run
 
     try:
+        settings = load_machine_settings()
+        config_path = resolve_model_config_path(config, settings)
         run(
             vault_root=vault_root,
-            config_path=config,
+            config_path=config_path,
             profile_name=profile,
             allow_agent_write=allow_write,
+            deepseek_api_key=settings.deepseek_api_key,
         )
     except DndAssistantError as exc:
         typer.echo(f"Ошибка запуска TUI: {exc}", err=True)

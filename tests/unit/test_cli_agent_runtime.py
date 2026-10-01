@@ -22,6 +22,7 @@ from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
+from pydantic import SecretStr
 from pydantic_ai.models.test import TestModel
 from pydantic_ai.models.wrapper import WrapperModel
 
@@ -202,7 +203,7 @@ class TestProviderDispatch:
             calls["ollama"] += 1
             return sentinel
 
-        def fake_deepseek(profile: ModelProfile) -> object:
+        def fake_deepseek(profile: ModelProfile, **_kwargs: object) -> object:
             calls["deepseek"] += 1
             return sentinel
 
@@ -221,7 +222,12 @@ class TestProviderDispatch:
     def test_deepseek_profile_calls_only_deepseek_factory(self, monkeypatch: Any) -> None:
         calls, sentinel = self._patch_factories(monkeypatch)
 
-        assert _build_agent_model(_deepseek_agent_profile()) is sentinel
+        assert (
+            _build_agent_model(
+                _deepseek_agent_profile(), deepseek_api_key=SecretStr("offline-dummy-key")
+            )
+            is sentinel
+        )
         assert calls == {"ollama": 0, "deepseek": 1}
 
     def test_unsupported_provider_calls_no_factory(
@@ -844,13 +850,9 @@ class TestProviderNeutralComposition:
         finally:
             runtime.close()
 
-    def test_deepseek_missing_credential_fails_closed(
-        self, tmp_path: Path, monkeypatch: Any
-    ) -> None:
-        """A DeepSeek profile fails closed when DEEPSEEK_API_KEY is absent."""
+    def test_deepseek_missing_credential_fails_closed(self, tmp_path: Path) -> None:
+        """A DeepSeek profile fails closed when no machine credential is supplied."""
         from dnd_assistant.cli.agent_runtime import compose_ask_runtime
-
-        monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
 
         with pytest.raises(CredentialError, match="DEEPSEEK_API_KEY"):
             compose_ask_runtime(

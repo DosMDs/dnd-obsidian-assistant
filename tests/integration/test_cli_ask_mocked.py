@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
+import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart, ToolCallPart
 from pydantic_ai.models import Model
 from pydantic_ai.models.function import AgentInfo, FunctionModel
@@ -213,7 +214,7 @@ def _write_test_config(tmp_path: Path, profile_name: str = "test-agent") -> Path
 def _fake_model_factory(scripted: ScriptedPydanticModel) -> Any:
     """Return a ``_build_agent_model`` replacement returning a scripted model."""
 
-    def factory(profile: Any) -> Model:
+    def factory(profile: Any, **_kwargs: Any) -> Model:
         return scripted.build()
 
     return factory
@@ -485,8 +486,19 @@ class TestAskCliRunnerIntegration:
         assert result.exit_code == 2
         assert "Missing option" in result.stderr
 
-    def test_missing_config_option_via_cli_runner(self, tmp_path: Path) -> None:
-        """Missing --config is caught by Typer parser, exit 2."""
+    def test_missing_config_option_falls_back_to_machine_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Omitting --config now resolves from machine settings, then fails closed.
+
+        The former required-option Typer parser error (exit 2) is intentionally
+        replaced by one deterministic project error (exit 1) when neither
+        ``--config`` nor ``DND_MODEL_CONFIG_PATH`` is available.
+        """
+        empty = tmp_path / "empty.env"
+        empty.write_text("", encoding="utf-8")
+        monkeypatch.setenv("DND_ENV_FILE", str(empty))
+        monkeypatch.delenv("DND_MODEL_CONFIG_PATH", raising=False)
         vault_root = _build_minimal_vault(tmp_path)
 
         runner = CliRunner()
@@ -501,8 +513,8 @@ class TestAskCliRunnerIntegration:
                 "test-agent",
             ],
         )
-        assert result.exit_code == 2
-        assert "Missing option" in result.stderr
+        assert result.exit_code == 1
+        assert "not set" in result.stderr
 
     def test_missing_profile_option_via_cli_runner(self, tmp_path: Path) -> None:
         """Missing --profile is caught by Typer parser, exit 2."""

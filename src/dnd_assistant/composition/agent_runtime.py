@@ -29,6 +29,7 @@ from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
+from pydantic import SecretStr
 from pydantic_ai.models import Model
 
 from dnd_assistant.application.agent_context import AgentContextBuilder
@@ -218,6 +219,7 @@ def compose_ask_runtime(
     profile_name: str,
     allow_write: bool = False,
     model_factory: Any = None,
+    deepseek_api_key: SecretStr | None = None,
 ) -> AskRuntime:
     """Compose the full ``AskRuntime`` for one assistant invocation.
 
@@ -230,6 +232,9 @@ def compose_ask_runtime(
         model_factory: Optional override for the agent model factory (used
             in tests to inject a deterministic Pydantic AI ``Model``).
             Defaults to ``_build_agent_model``.
+        deepseek_api_key: Machine-local DeepSeek credential resolved by the
+            entry point from the typed settings boundary.  Ignored for Ollama
+            profiles; a DeepSeek profile without it fails closed.
 
     Returns:
         A fully wired ``AskRuntime``.  Caller must call ``.close()`` after
@@ -243,9 +248,13 @@ def compose_ask_runtime(
     profile = _load_profile(config_path, profile_name)
 
     # 2. Build the Pydantic AI model with ExitStack for deterministic
-    #    cleanup before AskRuntime is returned.
-    factory = model_factory or _build_agent_model
-    model = factory(profile)
+    #    cleanup before AskRuntime is returned.  The real factory receives the
+    #    resolved machine credential; an injected test factory is called with
+    #    the profile only.
+    if model_factory is not None:
+        model = model_factory(profile)
+    else:
+        model = _build_agent_model(profile, deepseek_api_key=deepseek_api_key)
 
     with ExitStack() as stack:
         stack.callback(_close_model, model)

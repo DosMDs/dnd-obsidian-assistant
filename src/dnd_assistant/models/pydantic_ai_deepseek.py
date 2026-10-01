@@ -15,7 +15,14 @@ Owned here:
 Owned elsewhere (unchanged):
     ``ModelProfile`` — project model profile schema.
     ``DeepSeekProvider`` / ``OpenAIChatModel`` — Pydantic AI public classes.
-    ``resolve_provider_api_key()`` — machine-local credential boundary.
+    ``dnd_assistant.config.settings`` — machine-local credential boundary.
+
+This factory is credential-source-neutral: it never reads the environment.
+Production composition resolves the machine-local secret from the typed
+settings boundary and injects it as ``api_key`` (or injects a pre-built
+provider).  Missing-credential fail-closed semantics belong to
+``dnd_assistant.config.settings.require_provider_api_key`` and the AGENT
+model-construction seam (``composition.agent_model._build_agent_model``).
 
 Why the profile correction exists (RM-02 evidence)
 ──────────────────────────────────────────────────
@@ -63,13 +70,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from pydantic import SecretStr
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.profiles.openai import OpenAIModelProfile
 from pydantic_ai.providers.deepseek import DeepSeekProvider
 from pydantic_ai.settings import ModelSettings
 
 from dnd_assistant.errors import ValidationError
-from dnd_assistant.models.credentials import resolve_provider_api_key
 from dnd_assistant.models.profiles import ModelProfile, ModelProfileRole
 
 __all__ = [
@@ -93,6 +100,7 @@ DEEPSEEK_FLASH_TRUTHFUL_PROFILE = OpenAIModelProfile(
 def build_pydantic_ai_deepseek_model(
     profile: ModelProfile,
     *,
+    api_key: SecretStr | None = None,
     provider: DeepSeekProvider | None = None,
 ) -> OpenAIChatModel:
     """Construct a Pydantic AI ``OpenAIChatModel`` for the DeepSeek AGENT role.
@@ -100,10 +108,13 @@ def build_pydantic_ai_deepseek_model(
     Args:
         profile: A project ``ModelProfile`` with ``provider="deepseek"``,
             ``role`` AGENT and model ``deepseek-flash``.
+        api_key: Machine-local DeepSeek credential resolved from the typed
+            settings boundary.  Used to build the public ``DeepSeekProvider``
+            when ``provider`` is not supplied.  This factory never reads the
+            environment.
         provider: Optional pre-constructed public ``DeepSeekProvider``.  This is
-            a transport-injection seam used by tests and does not change the
-            production credential path; when omitted the factory resolves the
-            machine-local ``DEEPSEEK_API_KEY`` at construction time.
+            a transport-injection seam used by tests; it takes precedence over
+            ``api_key``.
 
     Returns:
         A configured ``OpenAIChatModel`` with the truthful DeepSeek profile
@@ -111,14 +122,18 @@ def build_pydantic_ai_deepseek_model(
 
     Raises:
         ValidationError: If ``profile`` is not a valid canonical DeepSeek AGENT
-            profile, or if it carries settings the DeepSeek transport cannot
-            honor.
+            profile, it carries settings the DeepSeek transport cannot honor, or
+            neither ``api_key`` nor ``provider`` was supplied.
     """
     _validate_profile(profile)
 
     if provider is None:
-        secret = resolve_provider_api_key(_DEEPSEEK_PROVIDER)
-        provider = DeepSeekProvider(api_key=secret.get_secret_value())
+        if api_key is None:
+            raise ValidationError(
+                "Pydantic AI DeepSeek model requires a machine-local api_key "
+                "or a pre-constructed provider"
+            )
+        provider = DeepSeekProvider(api_key=api_key.get_secret_value())
 
     return OpenAIChatModel(
         profile.model,

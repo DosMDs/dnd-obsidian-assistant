@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_ai.messages import ModelMessage, ModelResponse
 from pydantic_ai.models import Model, ModelRequestParameters
 from pydantic_ai.settings import ModelSettings
@@ -304,6 +305,7 @@ def run_live_eval(
     profile_name: str,
     trace: EvalTraceWriter | None = None,
     qualification_date: str | None = None,
+    deepseek_api_key: SecretStr | None = None,
 ) -> EvalReport:
     """Run one explicit live DeepSeek measured pass over ``dataset``.
 
@@ -312,6 +314,10 @@ def run_live_eval(
     Pydantic AI DeepSeek model through ``_build_agent_model``, run one discarded
     warm-up, then execute the measured dataset exactly once with the shared
     delegate.
+
+    ``deepseek_api_key`` is the machine-local credential resolved by the entry
+    point from the typed settings boundary; a missing credential fails closed
+    at ``_build_agent_model`` before any network access.
 
     ``trace``, when supplied, is an opt-in local diagnostic side channel.  It
     observes the one existing execution only and never issues an extra model
@@ -326,7 +332,7 @@ def run_live_eval(
 
     # Construct the exact production candidate BEFORE any HTTP request so that
     # wrong provider/model/thinking/effort/base URL fail before network.
-    delegate = _build_agent_model(profile)
+    delegate = _build_agent_model(profile, deepseek_api_key=deepseek_api_key)
     try:
         metadata = build_runtime_metadata(
             dataset,
