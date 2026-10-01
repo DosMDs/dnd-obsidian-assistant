@@ -19,12 +19,13 @@ from pathlib import Path
 import pytest
 from pydantic import SecretStr
 
-from dnd_assistant.config import settings as settings_module
 from dnd_assistant.config.settings import (
     DEEPSEEK_API_KEY_ENV,
     MACHINE_ENV_FILE_ENV,
     MODEL_CONFIG_PATH_ENV,
     MachineSettings,
+    _find_project_root,
+    _project_root,
     load_machine_settings,
     load_model_config_path,
     machine_env_file,
@@ -56,32 +57,99 @@ def _write_env(tmp_path: Path, body: str, name: str = "machine.env") -> Path:
     return path
 
 
-# ── Dotenv discovery / bootstrap selector ───────────────────────────────────
+# ── Project-root discovery (invocation context) ─────────────────────────────
+
+
+def _write_project_marker(root: Path, name: str = "dnd-assistant") -> Path:
+    """Create ``root/pyproject.toml`` declaring ``[project].name``."""
+    root.mkdir(parents=True, exist_ok=True)
+    marker = root / "pyproject.toml"
+    marker.write_text(f'[project]\nname = "{name}"\n', encoding="utf-8")
+    return marker
+
+
+class TestFindProjectRoot:
+    def test_finds_nearest_enclosing_matching_root(self, tmp_path: Path) -> None:
+        project = tmp_path / "checkout"
+        _write_project_marker(project)
+        nested = project / "a" / "b"
+        nested.mkdir(parents=True)
+        assert _find_project_root(nested) == project
+
+    def test_nonmatching_closer_marker_is_skipped(self, tmp_path: Path) -> None:
+        """A closer unrelated project must not become the root or select its .env."""
+        outer = tmp_path / "outer"
+        _write_project_marker(outer)
+        inner = outer / "inner"
+        _write_project_marker(inner, name="some-other-project")
+        nested = inner / "src" / "deep"
+        nested.mkdir(parents=True)
+        assert _find_project_root(nested) == outer
+
+    def test_malformed_closer_marker_is_skipped(self, tmp_path: Path) -> None:
+        outer = tmp_path / "outer"
+        _write_project_marker(outer)
+        inner = outer / "inner"
+        inner.mkdir(parents=True)
+        (inner / "pyproject.toml").write_text("this is not = valid toml [", encoding="utf-8")
+        assert _find_project_root(inner) == outer
+
+    def test_no_matching_ancestor_returns_none(self, tmp_path: Path) -> None:
+        lonely = tmp_path / "no-project" / "deep"
+        lonely.mkdir(parents=True)
+        assert _find_project_root(lonely) is None
 
 
 class TestMachineEnvFileDiscovery:
-    def test_default_is_under_user_config_dir(
+    def test_cwd_at_repository_root_selects_root_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        monkeypatch.setattr(settings_module, "user_config_dir", lambda _app: str(tmp_path))
-        assert machine_env_file() == tmp_path / ".env"
+        project = tmp_path / "checkout"
+        _write_project_marker(project)
+        monkeypatch.chdir(project)
+        assert _project_root() == project
+        assert machine_env_file() == project / ".env"
 
-    def test_default_is_independent_of_cwd(
+    def test_cwd_in_nested_directory_selects_same_root_env(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        config_dir = tmp_path / "config"
-        config_dir.mkdir()
-        monkeypatch.setattr(settings_module, "user_config_dir", lambda _app: str(config_dir))
-        before = machine_env_file()
-        other = tmp_path / "elsewhere"
-        other.mkdir()
-        monkeypatch.chdir(other)
-        assert machine_env_file() == before
+        project = tmp_path / "checkout"
+        _write_project_marker(project)
+        nested = project / "src" / "dnd_assistant" / "config"
+        nested.mkdir(parents=True)
+        monkeypatch.chdir(nested)
+        assert machine_env_file() == project / ".env"
 
-    def test_absolute_selector_is_used(
+    def test_missing_default_env_file_yields_defaults_without_real_dotenv(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        selected = tmp_path / "custom.env"
+        """A project root without `.env` must not consume the developer's real file."""
+        project = tmp_path / "checkout"
+        _write_project_marker(project)
+        monkeypatch.chdir(project)
+        settings = load_machine_settings()
+        assert settings.model_config_path is None
+        assert settings.deepseek_api_key is None
+
+    def test_absent_project_root_without_selector_raises(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lonely = tmp_path / "not-a-checkout"
+        lonely.mkdir()
+        monkeypatch.chdir(lonely)
+        with pytest.raises(DndValidationError) as excinfo:
+            machine_env_file()
+        message = str(excinfo.value)
+        assert MACHINE_ENV_FILE_ENV in message
+        assert "project root" in message
+
+    def test_absolute_selector_works_outside_project(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lonely = tmp_path / "not-a-checkout"
+        lonely.mkdir()
+        monkeypatch.chdir(lonely)
+        selected = tmp_path / "explicit.env"
         monkeypatch.setenv(MACHINE_ENV_FILE_ENV, str(selected))
         assert machine_env_file() == selected
 

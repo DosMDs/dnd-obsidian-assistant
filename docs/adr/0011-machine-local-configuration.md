@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-01
-- **Task:** `CFG-00`
+- **Task:** `CFG-00` (dotenv default discovery corrected by `CFG-01`)
 
 This ADR records the accepted machine-local configuration architecture. It is the
 durable decision/official context for the `DND_MODEL_CONFIG_PATH` / dotenv
@@ -62,15 +62,25 @@ environment value.
 
 ### Dotenv discovery
 
-- Default path (when `DND_ENV_FILE` is unset) is the `platformdirs`
-  user-config directory: `<user_config_dir>/dnd-assistant/.env`.
-  - Windows: `%APPDATA%\dnd-assistant\.env`
-  - macOS: `~/Library/Application Support/dnd-assistant/.env`
-  - Linux: `${XDG_CONFIG_HOME:-~/.config}/dnd-assistant/.env`
-- It never depends on the current working directory.
-- `DND_ENV_FILE` is a **bootstrap selector**: read only from the real process
-  environment, must be an absolute path when provided, and cannot redirect
-  itself (it is not a settings field and is rejected as an unknown key).
+- `DND_ENV_FILE` is a **bootstrap selector** and has highest discovery
+  precedence: read only from the real process environment, must be an absolute
+  path when provided, and cannot redirect itself (it is not a settings field and
+  is rejected as an unknown key). When set, it is the selected dotenv regardless
+  of the invocation directory.
+- Default path (when `DND_ENV_FILE` is unset): the `.env` at the nearest
+  enclosing **D&D Assistant project root** — the first directory at or above the
+  current working directory whose `pyproject.toml` parses and declares
+  `[project].name = "dnd-assistant"`.
+  - Running from the repository root or from any nested subdirectory selects the
+    same `<project_root>/.env`.
+  - An installed invocation outside a project checkout has no default dotenv;
+    it must set `DND_ENV_FILE` to load a dotenv.
+  - If no qualifying project root is found, discovery fails with a deterministic
+    project `ValidationError` that points at `DND_ENV_FILE`.
+- Resolution never falls back to the installed package location, the user home
+  directory, a `platformdirs` user-config directory, or an unrelated parent
+  `.env`. Malformed, unreadable or non-matching `pyproject.toml` markers are
+  skipped rather than accepted.
 
 ### Dedicated-dotenv strictness
 
@@ -99,13 +109,15 @@ The dedicated dotenv uses `extra="forbid"` with `hide_input_in_errors=True`:
 - **`pydantic-settings`** (with `python-dotenv`) is adopted for typed parsing,
   `SecretStr` redaction, explicit source precedence, case-insensitivity,
   isolated test injection (`_env_file`) and no `os.environ` mutation.
-- **`platformdirs`** is adopted directly (it was already a transitive dependency)
-  for deterministic Windows/macOS/Linux user-config paths.
+- Project-root discovery for the default dotenv uses the standard-library
+  `tomllib` only; it introduces **no additional dependency**. `platformdirs` is
+  no longer a direct project dependency (it remains transitively required by
+  `Textual`).
 
 ### Ownership and dependency direction
 
-`config/` depends only on the standard library, `pydantic`, `pydantic-settings`,
-`platformdirs` and neutral `errors.py`. Domain and storage never import it.
+`config/` depends only on the standard library, `pydantic`, `pydantic-settings`
+and neutral `errors.py`. Domain and storage never import it.
 `models/` providers remain credential-source-neutral: the DeepSeek factory
 receives an explicit secret/provider and never reads the environment.
 Composition resolves machine configuration at the composition boundary and
@@ -125,12 +137,15 @@ Positive:
 - credentials and the model-config path can be configured once per machine;
 - `--config` remains supported and keeps highest precedence;
 - secrets are typed, redacted and kept out of campaign data and evidence;
-- deterministic cross-platform configuration location.
+- deterministic project-root configuration location derived from the invocation
+  context (repository root or any nested directory).
 
 Costs/risks:
 
-- new direct dependencies (`pydantic-settings`, `platformdirs`);
+- new direct dependency (`pydantic-settings`);
 - the dedicated dotenv is strict, so unknown keys fail fast (intended);
+- the default dotenv requires an enclosing `dnd-assistant` project; an installed
+  invocation outside a checkout must set `DND_ENV_FILE`;
 - machine configuration can affect command behavior, so config tests use
   explicit isolated dotenv sources rather than the developer's real file.
 

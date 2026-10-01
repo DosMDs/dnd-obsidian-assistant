@@ -43,11 +43,11 @@ declared fields are read from the environment.
 from __future__ import annotations
 
 import os
+import tomllib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Final
 
-from platformdirs import user_config_dir
 from pydantic import Field, SecretStr, field_validator
 from pydantic import ValidationError as PydanticValidationError
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -68,11 +68,68 @@ PROVIDER_API_KEY_ENV: Final[Mapping[str, str]] = {
 }
 
 _ENV_PREFIX: Final[str] = "DND_"
-_APP_CONFIG_DIR_NAME: Final[str] = "dnd-assistant"
 _DOTENV_FILENAME: Final[str] = ".env"
+_PROJECT_MARKER: Final[str] = "pyproject.toml"
+_PROJECT_NAME: Final[str] = "dnd-assistant"
 
 
 # ── Dotenv discovery / bootstrap selector ─────────────────────────────────
+
+
+def _find_project_root(start: Path) -> Path | None:
+    """Return the nearest enclosing D&D Assistant project root at/above ``start``.
+
+    A directory qualifies as the project root only when it contains a
+    ``pyproject.toml`` that parses and declares ``[project].name ==
+    "dnd-assistant"``.  Malformed, unreadable or non-matching markers are
+    skipped, so an unrelated parent ``pyproject.toml``/``.env`` is never
+    selected.
+
+    Returns:
+        The qualifying project root, or ``None`` when none is found.
+    """
+    for candidate in (start, *start.parents):
+        marker = candidate / _PROJECT_MARKER
+        if not marker.is_file():
+            continue
+        try:
+            data = tomllib.loads(marker.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError):
+            continue
+        project = data.get("project")
+        if isinstance(project, dict) and project.get("name") == _PROJECT_NAME:
+            return candidate
+    return None
+
+
+def _project_root() -> Path:
+    """Resolve the D&D Assistant project root from the invocation context.
+
+    Resolution starts at the current working directory and walks upward; see
+    :func:`_find_project_root`.  It never falls back to the installed package
+    location, the user home directory, a user configuration directory or an
+    unrelated parent directory.
+
+    Raises:
+        ValidationError: No enclosing D&D Assistant project root was found.
+    """
+    try:
+        start = Path.cwd().resolve()
+    except OSError as exc:  # pragma: no cover - deleted/inaccessible CWD
+        raise ValidationError(
+            "Could not determine the current working directory to locate the "
+            f"D&D Assistant project root: {exc}. Set {MACHINE_ENV_FILE_ENV} to an "
+            "absolute dotenv path to bypass project-root discovery."
+        ) from None
+    root = _find_project_root(start)
+    if root is None:
+        raise ValidationError(
+            "No D&D Assistant project root could be found from the current working "
+            f"directory ({start}); no enclosing {_PROJECT_MARKER} declares "
+            f"[project].name = {_PROJECT_NAME!r}. Run from inside the project or set "
+            f"{MACHINE_ENV_FILE_ENV} to an absolute dotenv path."
+        )
+    return root
 
 
 def machine_env_file() -> Path:
@@ -80,16 +137,18 @@ def machine_env_file() -> Path:
 
     ``DND_ENV_FILE`` is a bootstrap selector: it is read only from the real
     process environment (never from the dotenv file), must be an absolute path
-    when provided, and cannot redirect itself.  When it is unset the
-    deterministic per-user configuration directory from ``platformdirs`` is
-    used (``<user_config_dir>/dnd-assistant/.env``); this never depends on the
-    current working directory.
+    when provided, and cannot redirect itself.  When it is unset, the default is
+    the ``.env`` at the nearest enclosing D&D Assistant project root discovered
+    from the current working directory (see :func:`_project_root`); an invocation
+    outside a project checkout must set ``DND_ENV_FILE`` to opt into dotenv
+    loading.
 
     Returns:
         The selected dotenv path.
 
     Raises:
-        ValidationError: ``DND_ENV_FILE`` is set but not an absolute path.
+        ValidationError: ``DND_ENV_FILE`` is set but not an absolute path, or no
+            enclosing project root can be found.
     """
     raw = os.environ.get(MACHINE_ENV_FILE_ENV)
     if raw is not None and raw.strip():
@@ -97,7 +156,7 @@ def machine_env_file() -> Path:
         if not selected.is_absolute():
             raise ValidationError(f"{MACHINE_ENV_FILE_ENV} must be an absolute path, got {raw!r}")
         return selected
-    return Path(user_config_dir(_APP_CONFIG_DIR_NAME)) / _DOTENV_FILENAME
+    return _project_root() / _DOTENV_FILENAME
 
 
 # ── Credential mapping / fail-closed resolution ───────────────────────────

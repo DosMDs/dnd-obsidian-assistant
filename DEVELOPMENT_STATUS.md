@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-10-01 (CFG-00 DONE)
+**Last updated:** 2026-10-01 (CFG-01 DONE — corrected dotenv discovery)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (`DONE / CLOSED`; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `DONE` — measured candidate `PASS` (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE, quality 0/3 PASS), candidate consumed; `RM-06` accepted-baseline decision/closure `DONE` — accepted canonical live baseline: `deepseek` / `deepseek-flash` / role `agent` / thinking=true / `reasoning_effort=high`, frozen RM-05 artifact)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
@@ -493,22 +493,27 @@ claimed `PASS`. Canonical full suite green: `8001 passed, 147 skipped`.
 ## Non-stage configuration work
 
 `CFG-00 — Machine-local settings / .env + model.toml configuration architecture`
-is `DONE`. It adds one typed machine-local settings boundary
+is `DONE`, with its default dotenv discovery corrected by `CFG-01`. It adds one
+typed machine-local settings boundary
 (`src/dnd_assistant/config/settings.py`, `pydantic-settings.BaseSettings`):
 `model_config_path` (`DND_MODEL_CONFIG_PATH`, absolute) and the provider-standard
 `deepseek_api_key` (`DEEPSEEK_API_KEY`, `SecretStr`). Source precedence is
 explicit `--config` > process environment > machine-local dotenv > defaults;
 `DND_ENV_FILE` is a process-environment-only bootstrap selector requiring an
-absolute path. The dotenv is discovered at the `platformdirs` user-config
-directory (`dnd-assistant/.env`) and uses `extra="forbid"` with
+absolute path. When `DND_ENV_FILE` is unset the dotenv defaults to the `.env` at
+the nearest enclosing `dnd-assistant` project root (the first ancestor of the
+invocation working directory whose `pyproject.toml` declares
+`[project].name = "dnd-assistant"`); running outside a project checkout requires
+`DND_ENV_FILE`. The dedicated dotenv uses `extra="forbid"` with
 `hide_input_in_errors=True` so unknown keys fail fast without echoing values.
 `models/profiles.py::load_model_profiles` remains the sole owner of TOML/profile
 validation; the retired `models/credentials.py` credential boundary moved into
 the settings layer. `--config` remains supported with highest precedence and
 became optional on `ask`/`tui`/`session process`/`bootstrap map`/`bootstrap
-finalize`. Dependencies: `pydantic-settings`/`python-dotenv` added,
-`platformdirs` promoted to a direct dependency (no domain/storage/Vault
-changes). Durable record: `docs/adr/0011-machine-local-configuration.md`.
+finalize`. Dependencies: `pydantic-settings`/`python-dotenv` added;
+`platformdirs` was removed as a direct dependency by `CFG-01` (project-root
+discovery uses stdlib `tomllib`; `platformdirs` remains transitive via
+`Textual`). Durable record: `docs/adr/0011-machine-local-configuration.md`.
 
 ## Current blockers, deferrals and prerequisites
 
@@ -573,7 +578,7 @@ Known carried-forward limitations (non-blocking for Stage 14):
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/adr/0009-release-scope-defers-live-model-qualification.md` | Current-MVP release scope defers accepted live-model qualification |
 | `docs/adr/0010-remote-deepseek-provider-architecture.md` | Accepted remote DeepSeek provider architecture (`v0.5.0`) |
-| `docs/adr/0011-machine-local-configuration.md` | Accepted machine-local configuration boundary (CFG-00) |
+| `docs/adr/0011-machine-local-configuration.md` | Accepted machine-local configuration boundary (CFG-00; default dotenv discovery corrected by CFG-01) |
 | `docs/milestones/V0_5_ACCEPTED_LIVE_MODEL_BASELINE.md` | Closed post-MVP milestone workstream, RM task contract and canonical baseline closure |
 | `docs/development/deepseek-provider-qualification.md` | DeepSeek provider qualification runbook |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |
