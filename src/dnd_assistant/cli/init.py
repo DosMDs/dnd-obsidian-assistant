@@ -17,6 +17,7 @@ from dnd_assistant.application.vault_initialization import (
     VaultInitializationResult,
     VaultInitializationStatus,
 )
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.audit_context import build_audit_context
 from dnd_assistant.composition.vault_initialization import (
     compose_vault_initialization_service,
@@ -54,23 +55,15 @@ def _render_result(result: VaultInitializationResult) -> str:
 
 
 def _init_command(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-    ),
+    vault: Path | None = vault_option(require_existing_directory=False),  # noqa: B008
 ) -> None:
     """Инициализировать структуру D&D Session Assistant в выбранном Obsidian Vault."""
-    vault_root = vault.expanduser()
-
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
     try:
+        # ``dnd init`` only requires an existing target directory; it must not
+        # require an already initialized Vault.  The shared helper preserves the
+        # previous directory check (and its Russian error) for both explicit and
+        # machine-local paths.
+        vault_root = resolve_vault_root(vault)
         service = compose_vault_initialization_service(vault_root)
         audit = build_audit_context(source="cli", prefix="cli-init")
         result = service.initialize(audit=audit)

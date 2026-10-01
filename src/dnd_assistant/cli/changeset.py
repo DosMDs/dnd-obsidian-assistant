@@ -56,6 +56,7 @@ from dnd_assistant.application.changeset_store import (
     persist_proposal,
 )
 from dnd_assistant.cli.session import _now_utc, _recovery_preflight
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.domain.changeset import (
     AppendFactOperation,
     ChangeSet,
@@ -392,21 +393,11 @@ def _changeset_save(
         readable=True,
         resolve_path=True,
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Сохранить предложение ChangeSet в Vault."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         changeset = parse_changeset_document(file.read_text(encoding="utf-8"))
         store = _compose_store(vault_root)
@@ -430,21 +421,11 @@ def _changeset_review(
         ...,
         help="Идентификатор предложения ChangeSet.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Показать предложение ChangeSet для проверки человеком."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         store = _compose_store(vault_root)
         repository = _compose_repository(vault_root)
@@ -462,16 +443,7 @@ def _changeset_approve(
         ...,
         help="Идентификатор предложения ChangeSet.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     reviewer: str = typer.Option(  # noqa: B008
         ...,
         "--reviewer",
@@ -484,9 +456,8 @@ def _changeset_approve(
     ),
 ) -> None:
     """Одобрить предложение ChangeSet."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         store = _compose_store(vault_root)
         repository = _compose_repository(vault_root)
@@ -512,16 +483,7 @@ def _changeset_reject(
         ...,
         help="Идентификатор предложения ChangeSet.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     reviewer: str = typer.Option(  # noqa: B008
         ...,
         "--reviewer",
@@ -534,9 +496,8 @@ def _changeset_reject(
     ),
 ) -> None:
     """Отклонить предложение ChangeSet."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         store = _compose_store(vault_root)
         repository = _compose_repository(vault_root)
@@ -562,21 +523,11 @@ def _changeset_apply(
         ...,
         help="Идентификатор предложения ChangeSet.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Применить одобренное предложение ChangeSet к Vault."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         store = _compose_store(vault_root)
         repository = _compose_repository(vault_root)
@@ -645,16 +596,7 @@ def _changeset_status(
         ...,
         help="Идентификатор предложения ChangeSet.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Показать durable-состояние workflow ChangeSet (только чтение).
 
@@ -662,9 +604,8 @@ def _changeset_status(
     оставаться доступной для диагностики незавершённого состояния ChangeSet
     даже тогда, когда recovery preflight блокирует изменяющие команды.
     """
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         store = _compose_store(vault_root)
         changeset = load_proposal(store, changeset_id)
         if changeset.provenance.provenance is Provenance.BOOTSTRAP:

@@ -12,6 +12,7 @@ from dnd_assistant.config.settings import (
     MACHINE_ENV_FILE_ENV,
     MODEL_CONFIG_PATH_ENV,
     PROVIDER_API_KEY_ENV,
+    VAULT_PATH_ENV,
     MachineSettings,
     load_machine_settings,
     load_model_config_path,
@@ -19,6 +20,7 @@ from dnd_assistant.config.settings import (
     provider_credential_env_var,
     require_provider_api_key,
     resolve_model_config_path,
+    resolve_vault_path,
 )
 
 __all__ = [
@@ -26,6 +28,7 @@ __all__ = [
     "MACHINE_ENV_FILE_ENV",
     "MODEL_CONFIG_PATH_ENV",
     "PROVIDER_API_KEY_ENV",
+    "VAULT_PATH_ENV",
     "MachineSettings",
     "load_machine_settings",
     "load_model_config_path",
@@ -33,4 +36,5 @@ __all__ = [
     "provider_credential_env_var",
     "require_provider_api_key",
     "resolve_model_config_path",
+    "resolve_vault_path",
 ]

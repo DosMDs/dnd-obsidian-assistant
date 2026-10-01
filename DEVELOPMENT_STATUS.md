@@ -1,6 +1,6 @@
 # D&D Session Assistant — Development Status
 
-**Last updated:** 2026-10-01 (CFG-01 DONE — corrected dotenv discovery)
+**Last updated:** 2026-10-01 (CFG-02 DONE — machine-local Vault-path default)
 **Current milestone:** `v0.4.5-dev — Interactive TUI`
 **Post-MVP workstream:** `v0.5.0 — Accepted Live Model Baseline` (`DONE / CLOSED`; `RM-00` architecture/docs `DONE`; `RM-01` provider/profile/credential contract `DONE`; `RM-02` protocol compatibility spike `DONE` — Option B, live protocol compatibility `PASS`; `RM-03` production AGENT composition `DONE`; `RM-04` durable DeepSeek provider/runtime live gate `DONE` — `PASS`; `RM-05` product-v1 DeepSeek candidate qualification `DONE` — measured candidate `PASS` (`accepted=true`, 13/13, 0 runtime errors, 0 unauthorized WRITE, quality 0/3 PASS), candidate consumed; `RM-06` accepted-baseline decision/closure `DONE` — accepted canonical live baseline: `deepseek` / `deepseek-flash` / role `agent` / thinking=true / `reasoning_effort=high`, frozen RM-05 artifact)
 **Roadmap position:** Stage 12 `DONE`; Textual TUI Architecture Track `DONE` (integrated); Stage 13 `DONE` (integrated); Stage 14 `DONE` (integrated into `main`; accepted live-model baseline deferred — ADR-0009)
@@ -515,6 +515,25 @@ finalize`. Dependencies: `pydantic-settings`/`python-dotenv` added;
 discovery uses stdlib `tomllib`; `platformdirs` remains transitive via
 `Textual`). Durable record: `docs/adr/0011-machine-local-configuration.md`.
 
+`CFG-02 — Machine-local Vault-path default` is `DONE`. It adds one typed
+machine-local Vault pointer `vault_path` (`DND_VAULT_PATH`, absolute) to
+`MachineSettings` and a shared presentation resolver
+(`src/dnd_assistant/cli/vault_path.py::resolve_vault_root`) used by all 23
+Vault-using CLI/TUI surfaces. Precedence is explicit `--vault` > process
+environment `DND_VAULT_PATH` > selected dotenv `DND_VAULT_PATH` > deterministic
+project error. `--vault` stays available everywhere and became optional; an
+explicit invalid `--vault` keeps its Typer usage error (exit 2), while an
+env/dotenv-provided invalid path fails with the existing project validation
+error (exit 1). `MachineSettings` enforces only absolute-path syntax and never
+checks Vault existence/layout/structure; `dnd init` keeps its existing
+target-directory semantics (no Typer existence check; project error on a bad
+target). No Vault/profile/safety semantics changed: model-profile defaults
+(`DND_MODEL_PROFILE[_<ROLE>]`) were deliberately **deferred** because profile
+selection is role-specific (`AGENT`/`POST_SESSION`/`BOOTSTRAP`), and
+`--allow-write`, `--reviewer`, `--acknowledge-unresolved`, `--runtime`,
+`--overwrite` and write/approval decisions are never machine defaults. No
+dependency change. Durable record: `docs/adr/0011-machine-local-configuration.md`.
+
 ## Current blockers, deferrals and prerequisites
 
 ```text
@@ -578,7 +597,7 @@ Known carried-forward limitations (non-blocking for Stage 14):
 | `docs/adr/0008-textual-tui-presentation-architecture.md` | Textual TUI presentation architecture decision |
 | `docs/adr/0009-release-scope-defers-live-model-qualification.md` | Current-MVP release scope defers accepted live-model qualification |
 | `docs/adr/0010-remote-deepseek-provider-architecture.md` | Accepted remote DeepSeek provider architecture (`v0.5.0`) |
-| `docs/adr/0011-machine-local-configuration.md` | Accepted machine-local configuration boundary (CFG-00; default dotenv discovery corrected by CFG-01) |
+| `docs/adr/0011-machine-local-configuration.md` | Accepted machine-local configuration boundary (CFG-00; dotenv discovery CFG-01; Vault-path default CFG-02) |
 | `docs/milestones/V0_5_ACCEPTED_LIVE_MODEL_BASELINE.md` | Closed post-MVP milestone workstream, RM task contract and canonical baseline closure |
 | `docs/development/deepseek-provider-qualification.md` | DeepSeek provider qualification runbook |
 | `docs/stages/12_CAMPAIGN_STATE.md` | Stage-12 architecture, task map, acceptance evidence |

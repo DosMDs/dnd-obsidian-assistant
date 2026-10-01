@@ -467,8 +467,19 @@ class TestAskCliRunnerIntegration:
         assert "--profile" in result.stdout
         assert "--allow-write" in result.stdout
 
-    def test_missing_vault_option_via_cli_runner(self, tmp_path: Path) -> None:
-        """Missing --vault is caught by Typer parser, exit 2."""
+    def test_missing_vault_option_falls_back_to_machine_settings(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Omitting --vault now resolves from machine settings, then fails closed.
+
+        The former required-option Typer parser error (exit 2) is intentionally
+        replaced by one deterministic project error (exit 1) when neither
+        ``--vault`` nor ``DND_VAULT_PATH`` is available.
+        """
+        empty = tmp_path / "empty.env"
+        empty.write_text("", encoding="utf-8")
+        monkeypatch.setenv("DND_ENV_FILE", str(empty))
+        monkeypatch.delenv("DND_VAULT_PATH", raising=False)
         config_path = _write_test_config(tmp_path)
 
         runner = CliRunner()
@@ -483,8 +494,9 @@ class TestAskCliRunnerIntegration:
                 "test-agent",
             ],
         )
-        assert result.exit_code == 2
-        assert "Missing option" in result.stderr
+        assert result.exit_code == 1
+        assert "not set" in result.stderr
+        assert "DND_VAULT_PATH" in result.stderr
 
     def test_missing_config_option_falls_back_to_machine_settings(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch

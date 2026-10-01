@@ -7,7 +7,8 @@ settings:
 
 - the project-owned ``.env`` discovery/``DND_ENV_FILE`` bootstrap selector;
 - the typed machine-settings schema (:class:`MachineSettings`);
-- the absolute-path semantics for the machine-local model-config path;
+- the absolute-path semantics for the machine-local model-config path and the
+  machine-local Vault path;
 - the machine-local provider-credential mapping and fail-closed resolution.
 
 It deliberately does **not**:
@@ -16,6 +17,11 @@ It deliberately does **not**:
   ``load_model_profiles`` remains the sole owner of file existence/read/TOML/
   profile validation errors; the settings layer never checks file existence,
   reads the file or inspects its ``[profiles.*]`` content;
+- validate the Vault itself — ``vault_path`` is only a machine-local **pointer**
+  to the campaign Vault.  Existence, directory layout, campaign structure and
+  storage validity remain owned by the Vault/application/storage boundaries
+  (for example ``storage.paths._resolve_vault_root``); the settings layer never
+  checks Vault existence or contents;
 - read campaign/Vault configuration;
 - import any concrete model provider or presentation framework.
 
@@ -61,6 +67,7 @@ from dnd_assistant.errors import CredentialError, ValidationError
 
 MACHINE_ENV_FILE_ENV: Final[str] = "DND_ENV_FILE"
 MODEL_CONFIG_PATH_ENV: Final[str] = "DND_MODEL_CONFIG_PATH"
+VAULT_PATH_ENV: Final[str] = "DND_VAULT_PATH"
 DEEPSEEK_API_KEY_ENV: Final[str] = "DEEPSEEK_API_KEY"
 
 PROVIDER_API_KEY_ENV: Final[Mapping[str, str]] = {
@@ -209,8 +216,10 @@ class MachineSettings(BaseSettings):
     object through :func:`load_machine_settings`, which additionally selects
     the machine-local dotenv file.
 
-    ``model_config_path`` carries absolute-path semantics only; the model-profile
-    TOML file's existence/content is owned by ``load_model_profiles``.
+    ``model_config_path`` and ``vault_path`` carry absolute-path semantics only;
+    the model-profile TOML file's existence/content is owned by
+    ``load_model_profiles`` and the Vault's existence/layout is owned by the
+    Vault/application/storage boundaries.
     """
 
     model_config = SettingsConfigDict(
@@ -225,6 +234,7 @@ class MachineSettings(BaseSettings):
     )
 
     model_config_path: Path | None = None
+    vault_path: Path | None = None
     deepseek_api_key: SecretStr | None = Field(
         default=None,
         validation_alias=DEEPSEEK_API_KEY_ENV,
@@ -235,6 +245,13 @@ class MachineSettings(BaseSettings):
     def _require_absolute_model_config_path(cls, value: Path | None) -> Path | None:
         if value is not None and not value.is_absolute():
             raise ValueError("model_config_path must be an absolute path")
+        return value
+
+    @field_validator("vault_path")
+    @classmethod
+    def _require_absolute_vault_path(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("vault_path must be an absolute path")
         return value
 
     def provider_api_key(self, provider: str) -> SecretStr:
@@ -312,3 +329,22 @@ def load_model_config_path(explicit: Path | None) -> Path:
     credential).
     """
     return resolve_model_config_path(explicit, load_machine_settings())
+
+
+def resolve_vault_path(explicit: Path | None, settings: MachineSettings) -> Path:
+    """Resolve the Vault path: explicit ``--vault`` > machine-local setting.
+
+    ``vault_path`` is only a machine-local pointer to the campaign Vault.  This
+    performs no Vault existence/directory/layout validation; that remains owned
+    by the Vault/application/storage boundaries.
+
+    Raises:
+        ValidationError: Neither an explicit path nor a machine-local
+            ``vault_path`` is available.
+    """
+    path = explicit if explicit is not None else settings.vault_path
+    if path is None:
+        raise ValidationError(
+            f"Machine-local Vault path is not set. Pass --vault or set {VAULT_PATH_ENV}."
+        )
+    return path

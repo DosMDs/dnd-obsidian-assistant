@@ -42,7 +42,8 @@ from dnd_assistant.cli.post_session_runtime import (
     select_latest_completed_session,
 )
 from dnd_assistant.cli.session import _recovery_preflight
-from dnd_assistant.config.settings import load_model_config_path
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
+from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.domain.post_session import (
     FailureCategory,
     ProcessingOutcome,
@@ -327,16 +328,7 @@ def _session_process(
         None,
         help="Идентификатор сессии. Взаимоисключающе с --latest.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -374,19 +366,22 @@ def _session_process(
         )
         raise typer.Exit(code=1)
 
-    vault_root = vault.resolve(strict=False)
-
     runtime = None
     resolved_id: str | None = None
     attempt_id: str | None = None
 
     try:
+        # Resolve machine-local settings once: explicit --config > DND_MODEL_CONFIG_PATH
+        # and explicit --vault > DND_VAULT_PATH.
+        settings = load_machine_settings()
+        config_path = resolve_model_config_path(config, settings)
+        vault_root = resolve_vault_root(vault, settings)
+
         metadata_repo = compose_metadata_repository(vault_root)
         resolved_id = _resolve_session_id(metadata_repo, session_id, latest)
 
         _recovery_preflight(vault_root)
 
-        config_path = load_model_config_path(config)
         runtime = compose_post_session_runtime(
             vault_root=vault_root,
             config_path=config_path,
@@ -418,16 +413,7 @@ def _session_outputs(
         ...,
         help="Идентификатор сессии.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Показать результаты обработки сессии (только чтение).
 
@@ -435,9 +421,9 @@ def _session_outputs(
     терминальные доказательства проверяются повторно; при несоответствии
     команда завершается с ошибкой и не выдаёт тела артефактов.
     """
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
+
         metadata_repo = compose_metadata_repository(vault_root)
         try:
             metadata_repo.get_session_metadata(session_id)

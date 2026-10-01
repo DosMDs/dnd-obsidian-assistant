@@ -23,6 +23,7 @@ from dnd_assistant.config.settings import (
     DEEPSEEK_API_KEY_ENV,
     MACHINE_ENV_FILE_ENV,
     MODEL_CONFIG_PATH_ENV,
+    VAULT_PATH_ENV,
     MachineSettings,
     _find_project_root,
     _project_root,
@@ -32,6 +33,7 @@ from dnd_assistant.config.settings import (
     provider_credential_env_var,
     require_provider_api_key,
     resolve_model_config_path,
+    resolve_vault_path,
 )
 from dnd_assistant.errors import CredentialError
 from dnd_assistant.errors import ValidationError as DndValidationError
@@ -47,7 +49,7 @@ _SECRET = "sk-test-secret-value-1234567890"
 @pytest.fixture(autouse=True)
 def _clean_machine_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Each test starts with no ambient machine-local env or dotenv selector."""
-    for name in (MACHINE_ENV_FILE_ENV, MODEL_CONFIG_PATH_ENV, DEEPSEEK_API_KEY_ENV):
+    for name in (MACHINE_ENV_FILE_ENV, MODEL_CONFIG_PATH_ENV, VAULT_PATH_ENV, DEEPSEEK_API_KEY_ENV):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -265,6 +267,90 @@ class TestModelConfigPath:
         monkeypatch.setenv(MACHINE_ENV_FILE_ENV, str(tmp_path / "absent.env"))
         monkeypatch.setenv(MODEL_CONFIG_PATH_ENV, str(tmp_path / "models.toml"))
         assert load_model_config_path(None) == tmp_path / "models.toml"
+
+
+# ── Vault-path semantics ────────────────────────────────────────────────────
+
+
+class TestVaultPath:
+    def test_absolute_path_accepted(self, tmp_path: Path) -> None:
+        absolute = tmp_path / "vault"
+        assert MachineSettings(vault_path=absolute).vault_path == absolute
+
+    def test_dotenv_value_loaded(self, tmp_path: Path) -> None:
+        env_file = _write_env(tmp_path, f"{VAULT_PATH_ENV}={tmp_path / 'vault'}\n")
+        assert load_machine_settings(env_file=env_file).vault_path == tmp_path / "vault"
+
+    def test_process_env_overrides_dotenv(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        env_file = _write_env(tmp_path, f"{VAULT_PATH_ENV}={tmp_path / 'from-file'}\n")
+        monkeypatch.setenv(VAULT_PATH_ENV, str(tmp_path / "from-env"))
+        assert load_machine_settings(env_file=env_file).vault_path == tmp_path / "from-env"
+
+    def test_explicit_argument_overrides_process_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(VAULT_PATH_ENV, str(tmp_path / "from-env"))
+        explicit = tmp_path / "explicit"
+        assert MachineSettings(vault_path=explicit).vault_path == explicit
+
+    def test_relative_path_rejected_from_dotenv(self, tmp_path: Path) -> None:
+        env_file = _write_env(tmp_path, f"{VAULT_PATH_ENV}=relative/vault\n")
+        with pytest.raises(DndValidationError, match="absolute"):
+            load_machine_settings(env_file=env_file)
+
+    def test_relative_path_rejected_from_process_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(VAULT_PATH_ENV, "relative/vault")
+        with pytest.raises(DndValidationError, match="absolute"):
+            load_machine_settings(env_file=tmp_path / "absent.env")
+
+    def test_resolve_prefers_explicit(self, tmp_path: Path) -> None:
+        settings = MachineSettings(vault_path=tmp_path / "from-settings")
+        explicit = tmp_path / "explicit"
+        assert resolve_vault_path(explicit, settings) == explicit
+
+    def test_resolve_uses_settings(self, tmp_path: Path) -> None:
+        settings = MachineSettings(vault_path=tmp_path / "from-settings")
+        assert resolve_vault_path(None, settings) == tmp_path / "from-settings"
+
+    def test_resolve_missing_raises(self) -> None:
+        with pytest.raises(DndValidationError, match="not set"):
+            resolve_vault_path(None, MachineSettings())
+
+    def test_resolve_missing_names_env_var(self) -> None:
+        with pytest.raises(DndValidationError, match=VAULT_PATH_ENV):
+            resolve_vault_path(None, MachineSettings())
+
+    def test_settings_does_not_check_existence(self, tmp_path: Path) -> None:
+        """``MachineSettings`` owns only syntax/type, never Vault existence."""
+        missing = tmp_path / "no-such-vault"
+        settings = MachineSettings(vault_path=missing)
+        assert settings.vault_path == missing
+        assert resolve_vault_path(None, settings) == missing
+
+
+# ── Unsupported safety/profile defaults never enter settings ────────────────
+
+
+class TestUnsupportedMachineDefaults:
+    def test_unknown_safety_dotenv_key_fails(self, tmp_path: Path) -> None:
+        for key in ("DND_ALLOW_WRITE", "DND_MODEL_PROFILE", "DND_RUNTIME", "DND_OVERWRITE"):
+            env_file = _write_env(tmp_path, f"{key}=true\n", name=f"{key}.env")
+            with pytest.raises(DndValidationError):
+                load_machine_settings(env_file=env_file)
+
+    def test_unrelated_safety_process_env_is_ignored(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Unrelated process env must not fail construction nor become a field."""
+        monkeypatch.setenv("DND_ALLOW_WRITE", "true")
+        monkeypatch.setenv("DND_MODEL_PROFILE", "agent")
+        monkeypatch.setenv("DND_RUNTIME", "deepseek")
+        monkeypatch.setenv("DND_OVERWRITE", "true")
+        settings = MachineSettings()
+        for attr in ("allow_write", "profile", "runtime", "overwrite", "reviewer"):
+            assert not hasattr(settings, attr)
 
 
 # ── Credential mapping / fail-closed / redaction ────────────────────────────

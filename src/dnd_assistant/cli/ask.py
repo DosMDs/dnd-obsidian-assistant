@@ -24,6 +24,7 @@ import typer
 
 from dnd_assistant.cli.agent_runtime import AskRuntime, compose_ask_runtime
 from dnd_assistant.cli.session import _recovery_preflight
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.errors import DndAssistantError
 
@@ -35,16 +36,7 @@ def _ask_command(
         ...,
         help="Текст запроса к ассистенту кампании.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -74,23 +66,15 @@ def _ask_command(
     По умолчанию работает в режиме только для чтения.
     Используйте --allow-write для разрешения записи.
     """
-    vault_root = vault.resolve(strict=False)
-
-    # Validate Vault root
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
     runtime: AskRuntime | None = None
 
     try:
         # Resolve machine-local settings once: explicit --config wins over
-        # DND_MODEL_CONFIG_PATH / machine-local dotenv.
+        # DND_MODEL_CONFIG_PATH / machine-local dotenv, and explicit --vault
+        # wins over DND_VAULT_PATH.
         settings = load_machine_settings()
         config_path = resolve_model_config_path(config, settings)
+        vault_root = resolve_vault_root(vault, settings)
 
         # Perform recovery preflight inside the error boundary so that
         # project errors from recovery inspection are caught by the CLI

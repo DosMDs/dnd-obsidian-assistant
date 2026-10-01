@@ -42,6 +42,7 @@ from dnd_assistant.application.changeset_review import (
 )
 from dnd_assistant.application.changeset_store import persist_approval
 from dnd_assistant.cli.session import _recovery_preflight
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.bootstrap_review_apply import (
     BootstrapApprovalRun,
     BootstrapReviewRun,
@@ -62,7 +63,6 @@ from dnd_assistant.errors import (
 
 __all__ = ["register_bootstrap_review_apply_commands"]
 
-_VAULT_HELP = "Путь к корню Obsidian Vault."
 _CHANGESET_HELP = "Идентификатор bootstrap-предложения ChangeSet."
 
 _REVIEW_STATE_LABELS: dict[BootstrapReviewState, str] = {
@@ -294,20 +294,11 @@ def _render_apply_result(result: ChangeSetApplyResult) -> str:
 
 def _bootstrap_review(
     changeset_id: str = typer.Argument(..., help=_CHANGESET_HELP),  # noqa: B008
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help=_VAULT_HELP,
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Показать bootstrap-предложение и его доказательства для проверки человеком."""
-    vault_root = vault.resolve(strict=False)
     try:
+        vault_root = resolve_vault_root(vault)
         run = compose_bootstrap_review(vault_root, changeset_id)
         typer.echo(_render_review(run))
         if run.bundle.review_state is BootstrapReviewState.NOT_REVIEWABLE:
@@ -323,16 +314,7 @@ def _bootstrap_review(
 
 def _bootstrap_approve(
     changeset_id: str = typer.Argument(..., help=_CHANGESET_HELP),  # noqa: B008
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help=_VAULT_HELP,
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     reviewer: str = typer.Option(  # noqa: B008
         ...,
         "--reviewer",
@@ -350,8 +332,8 @@ def _bootstrap_approve(
     ),
 ) -> None:
     """Одобрить bootstrap-предложение при прохождении bootstrap-проверок."""
-    vault_root = vault.resolve(strict=False)
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         run: BootstrapApprovalRun = compose_bootstrap_approval(
             vault_root, changeset_id, acknowledge_unresolved=acknowledge_unresolved
@@ -384,16 +366,7 @@ def _bootstrap_approve(
 
 def _bootstrap_reject(
     changeset_id: str = typer.Argument(..., help=_CHANGESET_HELP),  # noqa: B008
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help=_VAULT_HELP,
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     reviewer: str = typer.Option(  # noqa: B008
         ...,
         "--reviewer",
@@ -410,8 +383,8 @@ def _bootstrap_reject(
     Отклонение не требует готовности к применению: достаточно существующего
     BOOTSTRAP-предложения, точное содержимое которого фиксируется отпечатком.
     """
-    vault_root = vault.resolve(strict=False)
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         changeset = compose_bootstrap_proposal(vault_root, changeset_id)
         if changeset.provenance.provenance is not Provenance.BOOTSTRAP:
@@ -447,16 +420,7 @@ def _fingerprint_digest(changeset: ChangeSet) -> str:
 
 def _bootstrap_apply(
     changeset_id: str = typer.Argument(..., help=_CHANGESET_HELP),  # noqa: B008
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help=_VAULT_HELP,
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     acknowledge_unresolved: bool = typer.Option(  # noqa: B008
         False,
         "--acknowledge-unresolved",
@@ -464,8 +428,8 @@ def _bootstrap_apply(
     ),
 ) -> None:
     """Применить bootstrap-предложение через существующий Stage-10 applier."""
-    vault_root = vault.resolve(strict=False)
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
         result = compose_bootstrap_apply(
             vault_root, changeset_id, acknowledge_unresolved=acknowledge_unresolved

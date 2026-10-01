@@ -20,6 +20,7 @@ from dnd_assistant.cli.init import _init_command
 from dnd_assistant.cli.post_session import register_session_process_commands
 from dnd_assistant.cli.session import _note_command, session_app
 from dnd_assistant.cli.time import time_app
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.index_rebuild import rebuild_fts_index
 from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.errors import DndAssistantError, StorageError
@@ -69,16 +70,7 @@ app.command(name="init")(_init_command)
 
 @app.command(name="tui")
 def _tui(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -107,21 +99,13 @@ def _tui(
     ),
 ) -> None:
     """Запустить интерактивный текстовый интерфейс (Textual TUI)."""
-    vault_root = vault.resolve(strict=False)
-
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
     # Deferred import: a normal CLI import must not load the TUI/Textual.
     from dnd_assistant.tui.launcher import run
 
     try:
         settings = load_machine_settings()
         config_path = resolve_model_config_path(config, settings)
+        vault_root = resolve_vault_root(vault, settings)
         run(
             vault_root=vault_root,
             config_path=config_path,
@@ -145,28 +129,15 @@ app.add_typer(index_app)
 
 @index_app.command("rebuild")
 def _rebuild_index(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Перестроить производный индекс FTS из текущих данных Vault."""
 
-    vault_root = vault.resolve(strict=False)
-
-    # Validate Vault root
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+    try:
+        vault_root = resolve_vault_root(vault)
+    except DndAssistantError as exc:
+        typer.echo(f"Ошибка: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     audit_log_path = vault_root / "_system" / "audit" / "audit.jsonl"
     if not audit_log_path.parent.is_dir():

@@ -18,13 +18,13 @@ from dnd_assistant.application.bootstrap_completion import (
     BootstrapCompletionResult,
     BootstrapCompletionStatus,
 )
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.bootstrap_completion import finalize_bootstrap
-from dnd_assistant.config.settings import load_model_config_path
+from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.errors import DndAssistantError
 
 __all__ = ["register_bootstrap_finalize_command"]
 
-_VAULT_HELP = "Путь к корню Obsidian Vault."
 _MAX_ISSUE_LINES = 20
 
 _STATUS_LABELS: dict[BootstrapCompletionStatus, str] = {
@@ -133,16 +133,7 @@ def render_completion(result: BootstrapCompletionResult, *, vault: str) -> str:
 
 
 def _bootstrap_finalize(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help=_VAULT_HELP,
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -168,16 +159,13 @@ def _bootstrap_finalize(
     ),
 ) -> None:
     """Проверить полноту bootstrap, пересобрать производные данные и подтвердить готовность."""
-    vault_root = vault.resolve(strict=False)
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
     try:
-        config_path = load_model_config_path(config)
+        # Resolve machine-local settings once: explicit --config > DND_MODEL_CONFIG_PATH
+        # and explicit --vault > DND_VAULT_PATH.
+        settings = load_machine_settings()
+        config_path = resolve_model_config_path(config, settings)
+        vault_root = resolve_vault_root(vault, settings)
+
         result = finalize_bootstrap(
             vault_root=vault_root,
             config_path=config_path,

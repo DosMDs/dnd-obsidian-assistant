@@ -14,6 +14,7 @@ from pathlib import Path
 
 import typer
 
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.audit_context import (
     build_audit_context,
     new_operation_id,
@@ -119,21 +120,11 @@ session_app = typer.Typer(
 
 @session_app.command("start")
 def _session_start(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Начать новую игровую сессию."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
 
         audit = _build_audit_context("cli", "cli-session-start")
@@ -153,21 +144,11 @@ def _session_start(
 
 @session_app.command("status")
 def _session_status(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Показать статус текущей активной сессии."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
 
         runtime = compose_session_runtime(vault_root)
@@ -191,16 +172,7 @@ def _session_status(
 
 @session_app.command("end")
 def _session_end(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     touched_id: list[str] = typer.Option(  # noqa: B008
         [],
         "--touched-id",
@@ -208,9 +180,8 @@ def _session_end(
     ),
 ) -> None:
     """Завершить текущую активную сессию."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
 
         audit = _build_audit_context("cli", "cli-session-end")
@@ -247,21 +218,11 @@ def _note_command(
         ...,
         help="Текст заметки.",
     ),
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
 ) -> None:
     """Добавить заметку в текущую активную сессию."""
-    vault_root = vault.resolve(strict=False)
-
     try:
+        vault_root = resolve_vault_root(vault)
         _recovery_preflight(vault_root)
 
         audit = _build_audit_context("cli", "cli-note")

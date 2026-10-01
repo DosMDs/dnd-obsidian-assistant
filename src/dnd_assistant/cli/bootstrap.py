@@ -27,13 +27,14 @@ from dnd_assistant.application.bootstrap_result import (
 )
 from dnd_assistant.application.vault_discovery import SourceClass
 from dnd_assistant.cli.session import _recovery_preflight
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.bootstrap import (
     BootstrapRuntime,
     BootstrapRuntimeResult,
     compose_bootstrap_discovery,
     compose_bootstrap_runtime,
 )
-from dnd_assistant.config.settings import load_model_config_path
+from dnd_assistant.config.settings import load_machine_settings, resolve_model_config_path
 from dnd_assistant.errors import ConflictError, DndAssistantError, StorageError, ValidationError
 
 __all__ = ["bootstrap_app"]
@@ -224,16 +225,7 @@ def _bootstrap_callback() -> None:
 
 @bootstrap_app.command("map")
 def _bootstrap_map(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help="Путь к корню Obsidian Vault.",
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     config: Path | None = typer.Option(  # noqa: B008
         None,
         "--config",
@@ -263,17 +255,14 @@ def _bootstrap_map(
     Команда только СОЗДАЁТ предложение ChangeSet; обзор и применение выполняются
     bootstrap-процедурой Stage 13 (S13-04).  Канонические данные не изменяются.
     """
-    vault_root = vault.resolve(strict=False)
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
-
+    # Resolve machine-local settings once: explicit --config > DND_MODEL_CONFIG_PATH
+    # and explicit --vault > DND_VAULT_PATH.
     runtime: BootstrapRuntime | None = None
     try:
-        config_path = load_model_config_path(config)
+        settings = load_machine_settings()
+        config_path = resolve_model_config_path(config, settings)
+        vault_root = resolve_vault_root(vault, settings)
+
         report = compose_bootstrap_discovery(vault_root)
         if not dry_run:
             _recovery_preflight(vault_root)

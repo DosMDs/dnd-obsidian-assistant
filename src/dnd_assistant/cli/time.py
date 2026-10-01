@@ -20,6 +20,7 @@ from pathlib import Path
 import typer
 
 from dnd_assistant.cli.session import _recovery_preflight
+from dnd_assistant.cli.vault_path import resolve_vault_root, vault_option
 from dnd_assistant.composition.audit_context import build_audit_context
 from dnd_assistant.composition.world_time import (
     WorldTimeInitStatus,
@@ -30,8 +31,6 @@ from dnd_assistant.errors import ConflictError, DndAssistantError
 
 __all__ = ["time_app"]
 
-_VAULT_HELP = "Путь к корню Obsidian Vault."
-
 time_app = typer.Typer(
     name="time",
     help="Управление каноническим игровым временем.",
@@ -40,16 +39,7 @@ time_app = typer.Typer(
 
 @time_app.command("init")
 def _time_init(
-    vault: Path = typer.Option(  # noqa: B008
-        ...,
-        "--vault",
-        help=_VAULT_HELP,
-        exists=True,
-        file_okay=False,
-        dir_okay=True,
-        readable=True,
-        resolve_path=True,
-    ),
+    vault: Path | None = vault_option(),  # noqa: B008
     world_tick: int = typer.Option(  # noqa: B008
         ...,
         "--world-tick",
@@ -57,13 +47,11 @@ def _time_init(
     ),
 ) -> None:
     """Инициализировать начальное мировое время (однократно, без модели)."""
-    vault_root = vault.resolve(strict=False)
-    if not vault_root.is_dir():
-        typer.echo(
-            f"Ошибка: корень Vault должен быть существующей директорией: {vault_root}",
-            err=True,
-        )
-        raise typer.Exit(code=1)
+    try:
+        vault_root = resolve_vault_root(vault)
+    except DndAssistantError as exc:
+        typer.echo(f"Ошибка: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
 
     precondition = inspect_world_time_init_precondition(vault_root)
     if precondition.status is WorldTimeInitStatus.UNINITIALIZED_VAULT:

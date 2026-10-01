@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-10-01
-- **Task:** `CFG-00` (dotenv default discovery corrected by `CFG-01`)
+- **Task:** `CFG-00` (dotenv default discovery corrected by `CFG-01`; Vault-path default added by `CFG-02`)
 
 This ADR records the accepted machine-local configuration architecture. It is the
 durable decision/official context for the `DND_MODEL_CONFIG_PATH` / dotenv
@@ -36,29 +36,46 @@ Introduce one typed machine-local settings boundary in
 ```text
 MachineSettings
     model_config_path: Path | None      # DND_MODEL_CONFIG_PATH (absolute)
+    vault_path:        Path | None      # DND_VAULT_PATH (absolute)
     deepseek_api_key:  SecretStr | None # DEEPSEEK_API_KEY (provider-standard)
 ```
 
 `MachineSettings` owns only machine-setting parsing/typing and the absolute-path
-semantics of `model_config_path`. It does **not** validate or parse the
-model-profile TOML file: `models/profiles.py::load_model_profiles` remains the
-sole owner of file existence/read/TOML/profile validation errors. The
-provider → external credential name mapping and the fail-closed credential
-check live here (`require_provider_api_key`, `provider_credential_env_var`).
+semantics of `model_config_path` and `vault_path`. It does **not** validate or
+parse the model-profile TOML file: `models/profiles.py::load_model_profiles`
+remains the sole owner of file existence/read/TOML/profile validation errors.
+It likewise does **not** validate the Vault: `vault_path` is only a machine-local
+**pointer** to the campaign Vault, and Vault existence, directory layout,
+campaign structure and storage validity remain owned by the existing
+Vault/application/storage boundaries. The provider → external credential name
+mapping and the fail-closed credential check live here
+(`require_provider_api_key`, `provider_credential_env_var`).
+
+### Vault path
+
+`DND_VAULT_PATH` provides the default Vault root for every Vault-using CLI/TUI
+command (`--vault`). It is a pointer only: campaign data never enters the
+dotenv. The presentation-layer helper `cli/vault_path.py::resolve_vault_root`
+merges the explicit option with the setting and applies the same
+directory-existence check the CLI previously relied on for explicit
+(Typer-validated) paths. The setting is consulted lazily, so an explicit
+`--vault` never depends on dotenv/project-root discovery. Invalidation of an
+env/dotenv-provided path does not bypass validation: a nonexistent or non-
+directory path fails with the existing project error.
 
 ### Source precedence
 
 ```text
-explicit construction argument / explicit --config
+explicit construction argument / explicit --vault / explicit --config
   > real process environment
   > selected machine-local dotenv file
   > safe defaults
 ```
 
 Pydantic-Settings supplies environment > dotenv > default natively; the entry
-points merge the explicit `--config` above the settings value. An explicit
-`None` is never injected into the settings constructor, so it cannot shadow an
-environment value.
+points merge the explicit `--vault`/`--config` above the settings value. An
+explicit `None` is never injected into the settings constructor, so it cannot
+shadow an environment value.
 
 ### Dotenv discovery
 
@@ -134,8 +151,9 @@ The dotenv does not become a second serialization format for model profiles.
 Positive:
 
 - one typed, testable machine-settings boundary;
-- credentials and the model-config path can be configured once per machine;
-- `--config` remains supported and keeps highest precedence;
+- credentials, the model-config path and the Vault path can be configured once
+  per machine;
+- `--config` and `--vault` remain supported and keep highest precedence;
 - secrets are typed, redacted and kept out of campaign data and evidence;
 - deterministic project-root configuration location derived from the invocation
   context (repository root or any nested directory).
@@ -149,18 +167,37 @@ Costs/risks:
 - machine configuration can affect command behavior, so config tests use
   explicit isolated dotenv sources rather than the developer's real file.
 
+### Model-profile defaults are deferred
+
+`DND_MODEL_PROFILE` (and role-specific variants) are deliberately **not**
+machine defaults. Profile selection is role-specific (`AGENT`, `POST_SESSION`,
+`BOOTSTRAP`) and current consumers reject a profile whose role does not match
+the command, so a single generic key is not semantically valid across roles.
+This is deferred to a separate task; `--profile` keeps its current
+required/default behavior.
+
 ## Compatibility
 
 - `--config` remains on every command and keeps highest precedence; it becomes
   optional on `ask`/`tui`/`session process`/`bootstrap map`/`bootstrap finalize`.
-- When neither `--config` nor a machine-local path resolves, the command fails
-  with one deterministic project error (not a Typer missing-option crash).
+- `--vault` remains available on every Vault-using command and keeps highest
+  precedence; it becomes optional and falls back to `DND_VAULT_PATH`. An
+  explicit invalid `--vault` keeps its Typer usage error (exit 2); an
+  env/dotenv-provided invalid path fails with one deterministic project error
+  (exit 1).
+- When neither `--vault`/`--config` nor a machine-local path resolves, the
+  command fails with one deterministic project error (not a Typer
+  missing-option crash).
 - `DEEPSEEK_API_KEY` keeps its external name and fail-closed semantics.
+- Safety/behavioral invocation options (`--allow-write`, `--acknowledge-unresolved`,
+  `--reviewer`, `--runtime`, `--overwrite`, TUI write toggles, apply/approve/reject
+  decisions, session/entity/operation IDs) are never machine defaults.
 - Historical stage/migration evidence and ADR-0010 are not rewritten.
 
 ## References
 
 - `src/dnd_assistant/config/settings.py`
+- `src/dnd_assistant/cli/vault_path.py`
 - `src/dnd_assistant/models/profiles.py`
 - `src/dnd_assistant/models/pydantic_ai_deepseek.py`
 - `src/dnd_assistant/composition/agent_model.py`
